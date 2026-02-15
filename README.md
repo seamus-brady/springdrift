@@ -1,5 +1,8 @@
 # springdrift
 
+Autonomous agent for extended, independent operation
+
+
 [![Package Version](https://img.shields.io/hexpm/v/springdrift)](https://hex.pm/packages/springdrift)
 [![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/springdrift/)
 
