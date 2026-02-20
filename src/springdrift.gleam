@@ -1,5 +1,169 @@
+import config.{type AppConfig}
 import gleam/io
+import gleam/list
+import gleam/option
+import llm/adapters/anthropic as anthropic_adapter
+import llm/adapters/mock
+import llm/adapters/openai as openai_adapter
+import llm/provider.{type Provider}
+import tui
+
+/// Exit the process with the given status code.
+@external(erlang, "erlang", "halt")
+fn do_halt(code: Int) -> Nil
 
 pub fn main() -> Nil {
-  io.println("Hello from springdrift!")
+  case list.contains(get_startup_args(), "--help")
+    || list.contains(get_startup_args(), "-h")
+  {
+    True -> {
+      print_help()
+      do_halt(0)
+    }
+    False -> {
+      let cfg = config.resolve()
+      run(cfg)
+    }
+  }
 }
+
+fn get_startup_args() -> List(String) {
+  get_args_ffi()
+}
+
+@external(erlang, "springdrift_ffi", "get_args")
+fn get_args_ffi() -> List(String)
+
+fn print_help() -> Nil {
+  io.println("Usage: gleam run [-- OPTIONS]")
+  io.println("")
+  io.println("Options:")
+  io.println(
+    "  --provider <name>    Provider: anthropic, openrouter, openai (default: auto-detect)",
+  )
+  io.println("  --model <name>       Model name (default: provider default)")
+  io.println("  --system <prompt>    System prompt")
+  io.println("  --max-tokens <n>     Max output tokens (default: 1024)")
+  io.println("  --help, -h           Show this help")
+  io.println("")
+  io.println("Config files (checked in priority order, local overrides user):")
+  io.println("  .springdrift.json")
+  io.println("  ~/.config/springdrift/config.json")
+  io.println("")
+  io.println("Example config file (.springdrift.json):")
+  io.println("  {")
+  io.println("    \"provider\": \"anthropic\",")
+  io.println("    \"model\": \"claude-sonnet-4-20250514\",")
+  io.println("    \"system_prompt\": \"You are a helpful assistant.\",")
+  io.println("    \"max_tokens\": 2048")
+  io.println("  }")
+}
+
+fn run(cfg: AppConfig) -> Nil {
+  let system =
+    option.unwrap(cfg.system_prompt, "You are a helpful assistant.")
+  let max_tokens = option.unwrap(cfg.max_tokens, 1024)
+
+  let #(p, model) = select_provider(cfg)
+
+  tui.start(p, model, system, max_tokens)
+}
+
+fn select_provider(cfg: AppConfig) -> #(Provider, String) {
+  case cfg.provider {
+    option.Some("anthropic") -> {
+      case anthropic_adapter.provider() {
+        Ok(p) -> {
+          let m =
+            option.unwrap(cfg.model, anthropic_adapter.claude_sonnet_4)
+          io.println(
+            "Provider : Anthropic (" <> m <> ")",
+          )
+          #(p, m)
+        }
+        Error(_) -> {
+          io.println("Error: ANTHROPIC_API_KEY not set. Falling back to mock.")
+          #(mock_provider(), "mock-model")
+        }
+      }
+    }
+    option.Some("openrouter") -> {
+      case openai_adapter.provider_from_openrouter_env() {
+        Ok(p) -> {
+          let m = option.unwrap(cfg.model, openai_adapter.gpt_4o)
+          io.println("Provider : OpenRouter (" <> m <> ")")
+          #(p, m)
+        }
+        Error(_) -> {
+          io.println(
+            "Error: OPENROUTER_API_KEY not set. Falling back to mock.",
+          )
+          #(mock_provider(), "mock-model")
+        }
+      }
+    }
+    option.Some("openai") -> {
+      case openai_adapter.provider_from_env() {
+        Ok(p) -> {
+          let m = option.unwrap(cfg.model, openai_adapter.gpt_4o)
+          io.println("Provider : OpenAI (" <> m <> ")")
+          #(p, m)
+        }
+        Error(_) -> {
+          io.println("Error: OPENAI_API_KEY not set. Falling back to mock.")
+          #(mock_provider(), "mock-model")
+        }
+      }
+    }
+    option.Some("mock") -> #(mock_provider(), "mock-model")
+    option.Some(unknown) -> {
+      io.println(
+        "Unknown provider \""
+        <> unknown
+        <> "\". Using auto-detect.",
+      )
+      auto_detect(cfg.model)
+    }
+    option.None -> auto_detect(cfg.model)
+  }
+}
+
+fn auto_detect(model_override: option.Option(String)) -> #(Provider, String) {
+  case anthropic_adapter.provider() {
+    Ok(ap) -> {
+      let m = option.unwrap(model_override, anthropic_adapter.claude_sonnet_4)
+      io.println("Provider : Anthropic (" <> m <> ")")
+      #(ap, m)
+    }
+    Error(_) ->
+      case openai_adapter.provider_from_openrouter_env() {
+        Ok(op) -> {
+          let m = option.unwrap(model_override, openai_adapter.gpt_4o)
+          io.println("Provider : OpenRouter (" <> m <> ")")
+          #(op, m)
+        }
+        Error(_) ->
+          case openai_adapter.provider_from_env() {
+            Ok(op) -> {
+              let m = option.unwrap(model_override, openai_adapter.gpt_4o)
+              io.println("Provider : OpenAI (" <> m <> ")")
+              #(op, m)
+            }
+            Error(_) -> {
+              io.println("Provider : mock")
+              io.println(
+                "           (set ANTHROPIC_API_KEY or OPENROUTER_API_KEY to use a real LLM)",
+              )
+              #(mock_provider(), "mock-model")
+            }
+          }
+      }
+  }
+}
+
+fn mock_provider() -> Provider {
+  mock.provider_with_text(
+    "I'm a mock assistant. Set ANTHROPIC_API_KEY or OPENROUTER_API_KEY to use a real LLM.",
+  )
+}
+
