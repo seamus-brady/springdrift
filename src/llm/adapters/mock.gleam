@@ -38,10 +38,7 @@ pub fn provider_with_text(text: String) -> Provider {
 
 /// Provider that always returns an error
 pub fn provider_with_error(reason: String) -> Provider {
-  Provider(
-    name: "mock",
-    chat: fn(_req) { Error(UnknownError(reason: reason)) },
-  )
+  Provider(name: "mock", chat: fn(_req) { Error(UnknownError(reason: reason)) })
 }
 
 /// Provider that delegates to a custom handler function.

@@ -38,7 +38,10 @@ pub fn with_user_message(req: LlmRequest, text: String) -> LlmRequest {
 
 /// Append an assistant text message (useful for few-shot prompting)
 pub fn with_assistant_message(req: LlmRequest, text: String) -> LlmRequest {
-  with_message(req, Message(role: Assistant, content: [TextContent(text: text)]))
+  with_message(
+    req,
+    Message(role: Assistant, content: [TextContent(text: text)]),
+  )
 }
 
 /// Add an assistant turn (with tool-use content) and a user turn (with tool results).

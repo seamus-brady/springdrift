@@ -94,7 +94,8 @@ pub fn total_tokens_sums_usage_test() {
 
 pub fn error_message_api_error_test() {
   let err = ApiError(status_code: 429, message: "Too many requests")
-  response.error_message(err) |> should.equal("API error (429): Too many requests")
+  response.error_message(err)
+  |> should.equal("API error (429): Too many requests")
 }
 
 pub fn error_message_timeout_test() {

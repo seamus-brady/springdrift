@@ -56,8 +56,7 @@ pub fn from_args_unknown_flags_ignored_test() {
 pub fn from_args_multiple_flags_test() {
   let cfg =
     config.from_args([
-      "--provider", "anthropic",
-      "--model", "claude-sonnet-4-20250514",
+      "--provider", "anthropic", "--model", "claude-sonnet-4-20250514",
       "--max-tokens", "1024",
     ])
   cfg.provider |> should.equal(Some("anthropic"))

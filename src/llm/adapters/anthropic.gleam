@@ -22,14 +22,11 @@ pub fn provider() -> Result(Provider, types.LlmError) {
   aclient.init()
   |> result.map_error(translate_error)
   |> result.map(fn(c) {
-    Provider(
-      name: "anthropic",
-      chat: fn(req) {
-        aapi.chat(c, translate_request(req))
-        |> result.map(translate_response)
-        |> result.map_error(translate_error)
-      },
-    )
+    Provider(name: "anthropic", chat: fn(req) {
+      aapi.chat(c, translate_request(req))
+      |> result.map(translate_response)
+      |> result.map_error(translate_error)
+    })
   })
 }
 
@@ -38,14 +35,11 @@ pub fn provider_with_key(api_key: String) -> Result(Provider, types.LlmError) {
   aclient.init_with_key(api_key)
   |> result.map_error(translate_error)
   |> result.map(fn(c) {
-    Provider(
-      name: "anthropic",
-      chat: fn(req) {
-        aapi.chat(c, translate_request(req))
-        |> result.map(translate_response)
-        |> result.map_error(translate_error)
-      },
-    )
+    Provider(name: "anthropic", chat: fn(req) {
+      aapi.chat(c, translate_request(req))
+      |> result.map(translate_response)
+      |> result.map_error(translate_error)
+    })
   })
 }
 
@@ -106,13 +100,11 @@ fn translate_content_block(block: types.ContentBlock) -> amsg.ContentBlock {
   case block {
     types.TextContent(text: text) -> amsg.TextBlock(text: text)
     types.ImageContent(media_type: mt, data: data) ->
-      amsg.ImageBlock(
-        source: amsg.ImageSource(
-          source_type: amsg.Base64,
-          media_type: mt,
-          data: data,
-        ),
-      )
+      amsg.ImageBlock(source: amsg.ImageSource(
+        source_type: amsg.Base64,
+        media_type: mt,
+        data: data,
+      ))
     types.ToolUseContent(id: id, name: name, input_json: input) ->
       amsg.ToolUseBlock(id: id, name: name, input: input)
     types.ToolResultContent(
@@ -230,8 +222,7 @@ fn translate_error(error: aerr.AnthropicError) -> types.LlmError {
   case error {
     aerr.ApiError(status_code: code, details: details) ->
       case details.error_type {
-        aerr.RateLimitError ->
-          types.RateLimitError(message: details.message)
+        aerr.RateLimitError -> types.RateLimitError(message: details.message)
         _ -> types.ApiError(status_code: code, message: details.message)
       }
     aerr.HttpError(reason: reason) -> types.NetworkError(reason: reason)

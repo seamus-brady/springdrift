@@ -3,9 +3,7 @@ import gleam/option.{Some}
 import gleeunit
 import gleeunit/should
 import llm/request
-import llm/types.{
-  Message, TextContent, ToolSuccess, ToolUseContent, User,
-}
+import llm/types.{Message, TextContent, ToolSuccess, ToolUseContent, User}
 
 pub fn main() -> Nil {
   gleeunit.main()

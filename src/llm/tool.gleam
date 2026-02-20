@@ -21,7 +21,10 @@ pub fn new(name: String) -> ToolBuilder {
 }
 
 /// Set a human-readable description for the tool
-pub fn with_description(builder: ToolBuilder, description: String) -> ToolBuilder {
+pub fn with_description(
+  builder: ToolBuilder,
+  description: String,
+) -> ToolBuilder {
   ToolBuilder(..builder, description: Some(description))
 }
 

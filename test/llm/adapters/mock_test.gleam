@@ -29,8 +29,7 @@ pub fn error_provider_returns_error_test() {
 pub fn handler_receives_request_model_test() {
   let p =
     mock.provider_with_handler(fn(req) { Ok(mock.text_response(req.model)) })
-  let req =
-    request.new("my-model", 100) |> request.with_user_message("Hi")
+  let req = request.new("my-model", 100) |> request.with_user_message("Hi")
   let assert Ok(resp) = p.chat(req)
   response.text(resp) |> should.equal("my-model")
 }
@@ -44,8 +43,7 @@ pub fn handler_sequential_responses_test() {
       }
     })
 
-  let req1 =
-    request.new("test", 100) |> request.with_user_message("First call")
+  let req1 = request.new("test", 100) |> request.with_user_message("First call")
   let assert Ok(resp1) = p.chat(req1)
   response.text(resp1) |> should.equal("first response")
 

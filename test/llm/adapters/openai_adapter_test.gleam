@@ -25,7 +25,8 @@ pub fn provider_from_env_missing_key_test() {
     Ok(p) -> p.name |> should.equal("openai")
     // Key not set — confirm we get a ConfigError
     Error(err) ->
-      err |> should.equal(types.ConfigError(reason: "OPENAI_API_KEY is not set"))
+      err
+      |> should.equal(types.ConfigError(reason: "OPENAI_API_KEY is not set"))
   }
 }
 
@@ -35,9 +36,7 @@ pub fn provider_from_openrouter_env_missing_key_test() {
     Ok(p) -> p.name |> should.equal("openai")
     Error(err) ->
       err
-      |> should.equal(
-        types.ConfigError(reason: "OPENROUTER_API_KEY is not set"),
-      )
+      |> should.equal(types.ConfigError(reason: "OPENROUTER_API_KEY is not set"))
   }
 }
 

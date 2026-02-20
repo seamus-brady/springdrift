@@ -51,12 +51,7 @@ fn stop_spinner() -> Nil
 // Entry point
 // ---------------------------------------------------------------------------
 
-pub fn start(
-  p: Provider,
-  model: String,
-  system: String,
-  max_tokens: Int,
-) -> Nil {
+pub fn start(p: Provider, model: String, system: String, max_tokens: Int) -> Nil {
   let size = terminal.window_size()
   let #(w, h) = result.unwrap(size, #(80, 24))
   let _ = terminal.enter_raw()
@@ -105,10 +100,9 @@ fn event_loop(state: TuiState) -> Nil {
         _ ->
           case is_printable(byte) {
             True ->
-              continue_loop(TuiState(
-                ..state,
-                input_buf: state.input_buf <> byte,
-              ))
+              continue_loop(
+                TuiState(..state, input_buf: state.input_buf <> byte),
+              )
             False -> event_loop(state)
           }
       }
@@ -163,44 +157,54 @@ fn handle_enter(state: TuiState) -> Nil {
       case string.starts_with(input_text, "/") {
         True -> handle_command(state, input_text)
         False -> {
-      let user_msg = Message(role: User, content: [TextContent(text: input_text)])
-      let msgs = list.append(state.messages, [user_msg])
-      let s1 =
-        TuiState(
-          ..state,
-          messages: msgs,
-          input_buf: "",
-          waiting: True,
-          scroll_offset: 0,
-        )
-      render(s1)
-      // Compute the screen row where "Thinking…" landed.
-      // scroll_offset is 0 here, so the last line in all_lines is always visible
-      // and sits at row 2 + window_size - 1.
-      let all_lines = build_message_lines(s1)
-      let available = s1.height - 5
-      let thinking_row = 1 + int.min(list.length(all_lines), available)
-      start_spinner([#(thinking_row, 4)])
-      let req =
-        request.new(s1.model, s1.max_tokens)
-        |> request.with_system(s1.system)
-        |> request.with_messages(s1.messages)
-      let api_result = provider.chat_with(req, s1.provider)
-      stop_spinner()
-      let s2 = case api_result {
-        Ok(resp) -> {
-          let reply = response.text(resp)
-          let asst = Message(role: Assistant, content: [TextContent(text: reply)])
-          TuiState(..s1, messages: list.append(msgs, [asst]), waiting: False)
-        }
-        Error(err) -> {
-          let err_text = "[Error: " <> response.error_message(err) <> "]"
-          let asst =
-            Message(role: Assistant, content: [TextContent(text: err_text)])
-          TuiState(..s1, messages: list.append(msgs, [asst]), waiting: False)
-        }
-      }
-      continue_loop(s2)
+          let user_msg =
+            Message(role: User, content: [TextContent(text: input_text)])
+          let msgs = list.append(state.messages, [user_msg])
+          let s1 =
+            TuiState(
+              ..state,
+              messages: msgs,
+              input_buf: "",
+              waiting: True,
+              scroll_offset: 0,
+            )
+          render(s1)
+          // Compute the screen row where "Thinking…" landed.
+          // scroll_offset is 0 here, so the last line in all_lines is always visible
+          // and sits at row 2 + window_size - 1.
+          let all_lines = build_message_lines(s1)
+          let available = s1.height - 5
+          let thinking_row = 1 + int.min(list.length(all_lines), available)
+          start_spinner([#(thinking_row, 4)])
+          let req =
+            request.new(s1.model, s1.max_tokens)
+            |> request.with_system(s1.system)
+            |> request.with_messages(s1.messages)
+          let api_result = provider.chat_with(req, s1.provider)
+          stop_spinner()
+          let s2 = case api_result {
+            Ok(resp) -> {
+              let reply = response.text(resp)
+              let asst =
+                Message(role: Assistant, content: [TextContent(text: reply)])
+              TuiState(
+                ..s1,
+                messages: list.append(msgs, [asst]),
+                waiting: False,
+              )
+            }
+            Error(err) -> {
+              let err_text = "[Error: " <> response.error_message(err) <> "]"
+              let asst =
+                Message(role: Assistant, content: [TextContent(text: err_text)])
+              TuiState(
+                ..s1,
+                messages: list.append(msgs, [asst]),
+                waiting: False,
+              )
+            }
+          }
+          continue_loop(s2)
         }
       }
   }
@@ -308,8 +312,7 @@ fn render_input(state: TuiState) -> Nil {
   let max_display = int.max(1, state.width - 6)
   let buf_len = string.length(state.input_buf)
   let display_input = case buf_len > max_display {
-    True ->
-      string.slice(state.input_buf, buf_len - max_display, max_display)
+    True -> string.slice(state.input_buf, buf_len - max_display, max_display)
     False -> state.input_buf
   }
   let line =
@@ -401,10 +404,10 @@ fn process_md_lines(
           case string.starts_with(t, "```") || string.starts_with(t, "~~~") {
             True -> process_md_lines(rest, False, max_width, acc)
             False ->
-              process_md_lines(
-                rest, True, max_width,
-                ["    " <> style.cyan(line), ..acc],
-              )
+              process_md_lines(rest, True, max_width, [
+                "    " <> style.cyan(line),
+                ..acc
+              ])
           }
         }
         False ->
@@ -413,7 +416,9 @@ fn process_md_lines(
             _ -> {
               let #(next_in_code, rendered) = render_md_line(line, max_width)
               process_md_lines(
-                rest, next_in_code, max_width,
+                rest,
+                next_in_code,
+                max_width,
                 list.append(list.reverse(rendered), acc),
               )
             }
@@ -432,16 +437,19 @@ fn render_md_line(line: String, max_width: Int) -> #(Bool, List(String)) {
 
 fn render_md_block(line: String, max_width: Int) -> #(Bool, List(String)) {
   case string.starts_with(line, "### ") {
-    True ->
-      #(False, ["    " <> style.bold(apply_inline(string.drop_start(line, 4)))])
+    True -> #(False, [
+      "    " <> style.bold(apply_inline(string.drop_start(line, 4))),
+    ])
     False ->
       case string.starts_with(line, "## ") {
-        True ->
-          #(False, ["    " <> style.bold(apply_inline(string.drop_start(line, 3)))])
+        True -> #(False, [
+          "    " <> style.bold(apply_inline(string.drop_start(line, 3))),
+        ])
         False ->
           case string.starts_with(line, "# ") {
-            True ->
-              #(False, ["    " <> style.bold(apply_inline(string.drop_start(line, 2)))])
+            True -> #(False, [
+              "    " <> style.bold(apply_inline(string.drop_start(line, 2))),
+            ])
             False -> render_md_leaf(line, max_width)
           }
       }
@@ -450,18 +458,19 @@ fn render_md_block(line: String, max_width: Int) -> #(Bool, List(String)) {
 
 fn render_md_leaf(line: String, max_width: Int) -> #(Bool, List(String)) {
   case string.starts_with(line, "> ") {
-    True ->
-      #(False, [
-        "    " <> style.dim("│ ") <> apply_inline(string.drop_start(line, 2)),
-      ])
+    True -> #(False, [
+      "    " <> style.dim("│ ") <> apply_inline(string.drop_start(line, 2)),
+    ])
     False ->
       case
         string.starts_with(line, "- ")
         || string.starts_with(line, "* ")
         || string.starts_with(line, "+ ")
       {
-        True ->
-          #(False, render_list_item(string.drop_start(line, 2), max_width))
+        True -> #(
+          False,
+          render_list_item(string.drop_start(line, 2), max_width),
+        )
         False ->
           case is_hr(string.trim(line)) {
             True -> #(False, ["    " <> string.repeat("─", max_width)])
@@ -509,8 +518,7 @@ fn scan_inline(rest: String, acc: String) -> String {
           case str_split_once(after, "**") {
             Ok(#(inner, tail)) ->
               scan_inline(tail, acc <> style.bold(scan_inline(inner, "")))
-            Error(_) ->
-              scan_inline(string.drop_start(rest, 2), acc <> "**")
+            Error(_) -> scan_inline(string.drop_start(rest, 2), acc <> "**")
           }
         }
         False ->
@@ -520,8 +528,7 @@ fn scan_inline(rest: String, acc: String) -> String {
               case str_split_once(after, "*") {
                 Ok(#(inner, tail)) ->
                   scan_inline(tail, acc <> style.italic(scan_inline(inner, "")))
-                Error(_) ->
-                  scan_inline(string.drop_start(rest, 1), acc <> "*")
+                Error(_) -> scan_inline(string.drop_start(rest, 1), acc <> "*")
               }
             }
             False ->

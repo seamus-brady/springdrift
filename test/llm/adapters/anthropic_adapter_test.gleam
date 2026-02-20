@@ -31,8 +31,7 @@ pub fn stop_reason_end_turn_test() {
 }
 
 pub fn stop_reason_tool_use_test() {
-  let resp =
-    mock.tool_call_response("search", "{\"query\":\"test\"}", "call_1")
+  let resp = mock.tool_call_response("search", "{\"query\":\"test\"}", "call_1")
   resp.stop_reason |> should.equal(Some(ToolUseRequested))
 }
 

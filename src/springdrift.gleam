@@ -13,7 +13,8 @@ import tui
 fn do_halt(code: Int) -> Nil
 
 pub fn main() -> Nil {
-  case list.contains(get_startup_args(), "--help")
+  case
+    list.contains(get_startup_args(), "--help")
     || list.contains(get_startup_args(), "-h")
   {
     True -> {
@@ -60,8 +61,7 @@ fn print_help() -> Nil {
 }
 
 fn run(cfg: AppConfig) -> Nil {
-  let system =
-    option.unwrap(cfg.system_prompt, "You are a helpful assistant.")
+  let system = option.unwrap(cfg.system_prompt, "You are a helpful assistant.")
   let max_tokens = option.unwrap(cfg.max_tokens, 1024)
 
   let #(p, model) = select_provider(cfg)
@@ -74,11 +74,8 @@ fn select_provider(cfg: AppConfig) -> #(Provider, String) {
     option.Some("anthropic") -> {
       case anthropic_adapter.provider() {
         Ok(p) -> {
-          let m =
-            option.unwrap(cfg.model, anthropic_adapter.claude_sonnet_4)
-          io.println(
-            "Provider : Anthropic (" <> m <> ")",
-          )
+          let m = option.unwrap(cfg.model, anthropic_adapter.claude_sonnet_4)
+          io.println("Provider : Anthropic (" <> m <> ")")
           #(p, m)
         }
         Error(_) -> {
@@ -95,9 +92,7 @@ fn select_provider(cfg: AppConfig) -> #(Provider, String) {
           #(p, m)
         }
         Error(_) -> {
-          io.println(
-            "Error: OPENROUTER_API_KEY not set. Falling back to mock.",
-          )
+          io.println("Error: OPENROUTER_API_KEY not set. Falling back to mock.")
           #(mock_provider(), "mock-model")
         }
       }
@@ -117,11 +112,7 @@ fn select_provider(cfg: AppConfig) -> #(Provider, String) {
     }
     option.Some("mock") -> #(mock_provider(), "mock-model")
     option.Some(unknown) -> {
-      io.println(
-        "Unknown provider \""
-        <> unknown
-        <> "\". Using auto-detect.",
-      )
+      io.println("Unknown provider \"" <> unknown <> "\". Using auto-detect.")
       auto_detect(cfg.model)
     }
     option.None -> auto_detect(cfg.model)
@@ -166,4 +157,3 @@ fn mock_provider() -> Provider {
     "I'm a mock assistant. Set ANTHROPIC_API_KEY or OPENROUTER_API_KEY to use a real LLM.",
   )
 }
-

@@ -4,8 +4,8 @@ import gleam/option.{Some}
 import gleam/string
 import llm/types.{
   type LlmError, type LlmResponse, type ToolCall, ApiError, ConfigError,
-  DecodeError, MaxTokens, NetworkError, RateLimitError, TextContent, TimeoutError,
-  ToolCall, ToolUseContent, ToolUseRequested, UnknownError,
+  DecodeError, MaxTokens, NetworkError, RateLimitError, TextContent,
+  TimeoutError, ToolCall, ToolUseContent, ToolUseRequested, UnknownError,
 }
 
 /// Join all TextContent blocks into a single string

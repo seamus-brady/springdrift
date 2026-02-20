@@ -2,10 +2,7 @@ import llm/types.{type LlmError, type LlmRequest, type LlmResponse}
 
 /// A provider is a record of functions — Gleam's capability/record-of-functions pattern.
 pub type Provider {
-  Provider(
-    name: String,
-    chat: fn(LlmRequest) -> Result(LlmResponse, LlmError),
-  )
+  Provider(name: String, chat: fn(LlmRequest) -> Result(LlmResponse, LlmError))
 }
 
 /// Pipeline-friendly helper: pipe a request into a provider

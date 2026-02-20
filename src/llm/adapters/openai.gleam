@@ -63,8 +63,7 @@ pub fn provider_with_base_url(api_key: String, base_url: String) -> Provider {
 /// Create a provider by reading OPENAI_API_KEY from the environment.
 pub fn provider_from_env() -> Result(Provider, types.LlmError) {
   case get_env("OPENAI_API_KEY") {
-    Error(Nil) ->
-      Error(types.ConfigError(reason: "OPENAI_API_KEY is not set"))
+    Error(Nil) -> Error(types.ConfigError(reason: "OPENAI_API_KEY is not set"))
     Ok(key) -> Ok(provider(key))
   }
 }
@@ -75,8 +74,7 @@ pub fn provider_from_openrouter_env() -> Result(Provider, types.LlmError) {
   case get_env("OPENROUTER_API_KEY") {
     Error(Nil) ->
       Error(types.ConfigError(reason: "OPENROUTER_API_KEY is not set"))
-    Ok(key) ->
-      Ok(provider_with_base_url(key, openrouter_base_url))
+    Ok(key) -> Ok(provider_with_base_url(key, openrouter_base_url))
   }
 }
 
@@ -85,16 +83,13 @@ pub fn provider_from_openrouter_env() -> Result(Provider, types.LlmError) {
 // ---------------------------------------------------------------------------
 
 fn build_provider(client: gllm.Client) -> Provider {
-  Provider(
-    name: "openai",
-    chat: fn(req) {
-      let messages = translate_messages(req)
-      let temperature = option.unwrap(req.temperature, 1.0)
-      gllm.completion(client, req.model, messages, temperature)
-      |> result.map(translate_response)
-      |> result.map_error(translate_error)
-    },
-  )
+  Provider(name: "openai", chat: fn(req) {
+    let messages = translate_messages(req)
+    let temperature = option.unwrap(req.temperature, 1.0)
+    gllm.completion(client, req.model, messages, temperature)
+    |> result.map(translate_response)
+    |> result.map_error(translate_error)
+  })
 }
 
 // ---------------------------------------------------------------------------
