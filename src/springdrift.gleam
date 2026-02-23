@@ -1,3 +1,4 @@
+import chat/service
 import config.{type AppConfig}
 import gleam/io
 import gleam/list
@@ -6,6 +7,7 @@ import llm/adapters/anthropic as anthropic_adapter
 import llm/adapters/mock
 import llm/adapters/openai as openai_adapter
 import llm/provider.{type Provider}
+import tools/builtin
 import tui
 
 /// Exit the process with the given status code.
@@ -66,7 +68,8 @@ fn run(cfg: AppConfig) -> Nil {
 
   let #(p, model) = select_provider(cfg)
 
-  tui.start(p, model, system, max_tokens)
+  let chat = service.start(p, model, system, max_tokens, builtin.all())
+  tui.start(chat, p.name, model)
 }
 
 fn select_provider(cfg: AppConfig) -> #(Provider, String) {
