@@ -8,8 +8,9 @@ import llm/response
 import llm/types.{
   type LlmError, type LlmRequest, type LlmResponse, type Message, type Tool,
   type ToolCall, type ToolResult, Assistant, Message, TextContent, ToolFailure,
-  ToolSuccess, User,
+  ToolSuccess, UnknownError, User,
 }
+import storage
 import tools/builtin
 
 // ---------------------------------------------------------------------------
@@ -31,11 +32,16 @@ pub type AgentQuestion {
   AgentQuestion(question: String, reply_to: Subject(String))
 }
 
+pub type ToolEvent {
+  ToolCalling(name: String)
+}
+
 pub type ChatMessage {
   SendMessage(
     text: String,
     reply_to: Subject(Result(LlmResponse, LlmError)),
     question_channel: Subject(AgentQuestion),
+    tool_channel: Subject(ToolEvent),
   )
   GetHistory(reply_to: Subject(List(Message)))
   ClearHistory
@@ -56,6 +62,7 @@ pub fn start(
   system: String,
   max_tokens: Int,
   tools: List(Tool),
+  initial_messages: List(Message),
 ) -> Subject(ChatMessage) {
   let setup = process.new_subject()
   process.spawn_unlinked(fn() {
@@ -63,7 +70,14 @@ pub fn start(
     process.send(setup, self)
     service_loop(
       self,
-      ChatState(provider:, model:, system:, max_tokens:, messages: [], tools:),
+      ChatState(
+        provider:,
+        model:,
+        system:,
+        max_tokens:,
+        messages: initial_messages,
+        tools:,
+      ),
     )
   })
   let assert Ok(subj) = process.receive(setup, 1000)
@@ -76,17 +90,19 @@ pub fn start(
 
 fn service_loop(self: Subject(ChatMessage), state: ChatState) -> Nil {
   case process.receive_forever(self) {
-    SendMessage(text:, reply_to:, question_channel:) -> {
+    SendMessage(text:, reply_to:, question_channel:, tool_channel:) -> {
       let new_state = append_user_message(state, text)
       let req = build_request(new_state)
       process.spawn_unlinked(fn() {
-        let result = react_loop(req, new_state.provider, 5, question_channel)
+        let result =
+          react_loop(req, new_state.provider, 5, question_channel, tool_channel)
         process.send(self, LlmComplete(result:, reply_to:))
       })
       service_loop(self, new_state)
     }
     LlmComplete(result:, reply_to:) -> {
       let new_state = append_assistant_message(state, result)
+      storage.save(new_state.messages)
       process.send(reply_to, result)
       service_loop(self, new_state)
     }
@@ -94,7 +110,10 @@ fn service_loop(self: Subject(ChatMessage), state: ChatState) -> Nil {
       process.send(reply_to, state.messages)
       service_loop(self, state)
     }
-    ClearHistory -> service_loop(self, ChatState(..state, messages: []))
+    ClearHistory -> {
+      storage.clear()
+      service_loop(self, ChatState(..state, messages: []))
+    }
   }
 }
 
@@ -103,25 +122,31 @@ fn react_loop(
   p: Provider,
   max_turns: Int,
   question_channel: Subject(AgentQuestion),
+  tool_channel: Subject(ToolEvent),
 ) -> Result(LlmResponse, LlmError) {
   case provider.chat_with(req, p) {
     Error(e) -> Error(e)
     Ok(resp) ->
-      case response.needs_tool_execution(resp) && max_turns > 0 {
+      case response.needs_tool_execution(resp) {
         False -> Ok(resp)
-        True -> {
-          let calls = response.tool_calls(resp)
-          let results =
-            list.map(calls, fn(call) {
-              case call.name {
-                "request_human_input" ->
-                  execute_human_input(call, question_channel)
-                _ -> builtin.execute(call)
-              }
-            })
-          let next = request.with_tool_results(req, resp.content, results)
-          react_loop(next, p, max_turns - 1, question_channel)
-        }
+        True ->
+          case max_turns {
+            0 -> Error(UnknownError("Agent loop: maximum turns reached"))
+            _ -> {
+              let calls = response.tool_calls(resp)
+              let results =
+                list.map(calls, fn(call) {
+                  process.send(tool_channel, ToolCalling(name: call.name))
+                  case call.name {
+                    "request_human_input" ->
+                      execute_human_input(call, question_channel)
+                    _ -> builtin.execute(call)
+                  }
+                })
+              let next = request.with_tool_results(req, resp.content, results)
+              react_loop(next, p, max_turns - 1, question_channel, tool_channel)
+            }
+          }
       }
   }
 }
