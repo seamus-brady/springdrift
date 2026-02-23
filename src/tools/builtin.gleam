@@ -11,7 +11,16 @@ import llm/types.{type Tool, type ToolCall, type ToolResult, ToolFailure, ToolSu
 // ---------------------------------------------------------------------------
 
 pub fn all() -> List(Tool) {
-  [calculator_tool(), date_tool()]
+  [calculator_tool(), date_tool(), human_input_tool()]
+}
+
+pub fn human_input_tool() -> Tool {
+  tool.new("request_human_input")
+  |> tool.with_description(
+    "Ask the human a clarifying question and wait for their response before continuing",
+  )
+  |> tool.add_string_param("question", "The question to ask the human", True)
+  |> tool.build()
 }
 
 pub fn calculator_tool() -> Tool {

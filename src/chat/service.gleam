@@ -1,11 +1,14 @@
+import gleam/dynamic/decode
 import gleam/erlang/process.{type Subject}
+import gleam/json
 import gleam/list
 import llm/provider.{type Provider}
 import llm/request
 import llm/response
 import llm/types.{
   type LlmError, type LlmRequest, type LlmResponse, type Message, type Tool,
-  Assistant, Message, TextContent, User,
+  type ToolCall, type ToolResult, Assistant, Message, TextContent, ToolFailure,
+  ToolSuccess, User,
 }
 import tools/builtin
 
@@ -24,8 +27,16 @@ pub type ChatState {
   )
 }
 
+pub type AgentQuestion {
+  AgentQuestion(question: String, reply_to: Subject(String))
+}
+
 pub type ChatMessage {
-  SendMessage(text: String, reply_to: Subject(Result(LlmResponse, LlmError)))
+  SendMessage(
+    text: String,
+    reply_to: Subject(Result(LlmResponse, LlmError)),
+    question_channel: Subject(AgentQuestion),
+  )
   GetHistory(reply_to: Subject(List(Message)))
   ClearHistory
   // Internal — sent back from the spawned HTTP worker
@@ -65,11 +76,11 @@ pub fn start(
 
 fn service_loop(self: Subject(ChatMessage), state: ChatState) -> Nil {
   case process.receive_forever(self) {
-    SendMessage(text:, reply_to:) -> {
+    SendMessage(text:, reply_to:, question_channel:) -> {
       let new_state = append_user_message(state, text)
       let req = build_request(new_state)
       process.spawn_unlinked(fn() {
-        let result = react_loop(req, new_state.provider, 5)
+        let result = react_loop(req, new_state.provider, 5, question_channel)
         process.send(self, LlmComplete(result:, reply_to:))
       })
       service_loop(self, new_state)
@@ -91,6 +102,7 @@ fn react_loop(
   req: LlmRequest,
   p: Provider,
   max_turns: Int,
+  question_channel: Subject(AgentQuestion),
 ) -> Result(LlmResponse, LlmError) {
   case provider.chat_with(req, p) {
     Error(e) -> Error(e)
@@ -99,11 +111,44 @@ fn react_loop(
         False -> Ok(resp)
         True -> {
           let calls = response.tool_calls(resp)
-          let results = list.map(calls, builtin.execute)
+          let results =
+            list.map(calls, fn(call) {
+              case call.name {
+                "request_human_input" ->
+                  execute_human_input(call, question_channel)
+                _ -> builtin.execute(call)
+              }
+            })
           let next = request.with_tool_results(req, resp.content, results)
-          react_loop(next, p, max_turns - 1)
+          react_loop(next, p, max_turns - 1, question_channel)
         }
       }
+  }
+}
+
+fn execute_human_input(
+  call: ToolCall,
+  question_channel: Subject(AgentQuestion),
+) -> ToolResult {
+  let decoder = {
+    use question <- decode.field("question", decode.string)
+    decode.success(question)
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "Invalid request_human_input arguments",
+      )
+    Ok(question) -> {
+      let reply_subj = process.new_subject()
+      process.send(
+        question_channel,
+        AgentQuestion(question:, reply_to: reply_subj),
+      )
+      let answer = process.receive_forever(reply_subj)
+      ToolSuccess(tool_use_id: call.id, content: answer)
+    }
   }
 }
 
