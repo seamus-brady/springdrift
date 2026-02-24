@@ -1,3 +1,4 @@
+import chat/service
 import config.{type AppConfig}
 import gleam/io
 import gleam/list
@@ -6,6 +7,8 @@ import llm/adapters/anthropic as anthropic_adapter
 import llm/adapters/mock
 import llm/adapters/openai as openai_adapter
 import llm/provider.{type Provider}
+import storage
+import tools/builtin
 import tui
 
 /// Exit the process with the given status code.
@@ -45,6 +48,7 @@ fn print_help() -> Nil {
   io.println("  --model <name>       Model name (default: provider default)")
   io.println("  --system <prompt>    System prompt")
   io.println("  --max-tokens <n>     Max output tokens (default: 1024)")
+  io.println("  --resume             Resume previous session")
   io.println("  --help, -h           Show this help")
   io.println("")
   io.println("Config files (checked in priority order, local overrides user):")
@@ -66,7 +70,14 @@ fn run(cfg: AppConfig) -> Nil {
 
   let #(p, model) = select_provider(cfg)
 
-  tui.start(p, model, system, max_tokens)
+  let initial_messages = case list.contains(get_startup_args(), "--resume") {
+    True -> storage.load()
+    False -> []
+  }
+
+  let chat =
+    service.start(p, model, system, max_tokens, builtin.all(), initial_messages)
+  tui.start(chat, p.name, model, initial_messages)
 }
 
 fn select_provider(cfg: AppConfig) -> #(Provider, String) {

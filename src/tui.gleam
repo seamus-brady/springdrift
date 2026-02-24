@@ -1,33 +1,52 @@
+import chat/service.{type AgentQuestion, type ChatMessage, type ToolEvent, ToolCalling}
 import etch/command
 import etch/stdout
 import etch/style
 import etch/terminal
+import gleam/erlang/process.{type Selector, type Subject}
 import gleam/int
 import gleam/list
 import gleam/result
 import gleam/string
-import llm/provider.{type Provider}
-import llm/request
 import llm/response
-import llm/types.{type Message, Assistant, Message, TextContent, User}
+import llm/types.{type LlmError, type LlmResponse, type Message, Assistant, Message, TextContent, User}
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
+type AgentStatus {
+  Idle
+  WaitingForLlm
+  WaitingForInput(question: String, reply_to: Subject(String))
+}
+
+type TuiMessage {
+  StdinByte(byte: String)
+  ChatResponse(result: Result(LlmResponse, LlmError))
+  AgentQuestionReceived(question: String, reply_to: Subject(String))
+  ToolEventReceived(name: String)
+}
+
 type TuiState {
   TuiState(
-    provider: Provider,
+    chat: Subject(ChatMessage),
+    chat_reply: Subject(Result(LlmResponse, LlmError)),
+    stdin_subj: Subject(TuiMessage),
+    selector: Selector(TuiMessage),
+    question_channel: Subject(AgentQuestion),
+    tool_channel: Subject(ToolEvent),
+    provider_name: String,
     model: String,
-    system: String,
-    max_tokens: Int,
     messages: List(Message),
     input_buf: String,
     scroll_offset: Int,
     width: Int,
     height: Int,
-    waiting: Bool,
+    status: AgentStatus,
     notice: String,
+    spinner_frame: Int,
+    spinner_label: String,
   )
 }
 
@@ -41,17 +60,16 @@ fn read_char() -> Result(String, Nil)
 @external(erlang, "erlang", "halt")
 fn do_halt(code: Int) -> Nil
 
-@external(erlang, "springdrift_ffi", "start_spinner")
-fn start_spinner(positions: List(#(Int, Int))) -> Nil
-
-@external(erlang, "springdrift_ffi", "stop_spinner")
-fn stop_spinner() -> Nil
-
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
-pub fn start(p: Provider, model: String, system: String, max_tokens: Int) -> Nil {
+pub fn start(
+  chat: Subject(ChatMessage),
+  provider_name: String,
+  model: String,
+  initial_messages: List(Message),
+) -> Nil {
   let size = terminal.window_size()
   let #(w, h) = result.unwrap(size, #(80, 24))
   let _ = terminal.enter_raw()
@@ -60,19 +78,47 @@ pub fn start(p: Provider, model: String, system: String, max_tokens: Int) -> Nil
     command.HideCursor,
     command.Clear(terminal.All),
   ])
+  let stdin_subj = process.new_subject()
+  let chat_reply = process.new_subject()
+  let question_channel = process.new_subject()
+  let tool_channel = process.new_subject()
+  let selector =
+    process.new_selector()
+    |> process.select(stdin_subj)
+    |> process.select_map(chat_reply, ChatResponse)
+    |> process.select_map(question_channel, fn(aq: AgentQuestion) {
+      AgentQuestionReceived(question: aq.question, reply_to: aq.reply_to)
+    })
+    |> process.select_map(tool_channel, fn(te: ToolEvent) {
+      case te {
+        ToolCalling(name:) -> ToolEventReceived(name:)
+      }
+    })
+  process.spawn_unlinked(fn() { stdin_loop(stdin_subj) })
+  let resume_notice = case initial_messages {
+    [] -> ""
+    msgs ->
+      "  Resumed: " <> int.to_string(list.length(msgs)) <> " messages loaded"
+  }
   let state =
     TuiState(
-      provider: p,
+      chat:,
+      chat_reply:,
+      stdin_subj:,
+      selector:,
+      question_channel:,
+      tool_channel:,
+      provider_name:,
       model:,
-      system:,
-      max_tokens:,
-      messages: [],
+      messages: initial_messages,
       input_buf: "",
       scroll_offset: 0,
       width: w,
       height: h,
-      waiting: False,
-      notice: "",
+      status: Idle,
+      notice: resume_notice,
+      spinner_frame: 0,
+      spinner_label: "",
     )
   render(state)
   event_loop(state)
@@ -85,27 +131,46 @@ fn cleanup() -> Nil {
 }
 
 // ---------------------------------------------------------------------------
+// Stdin reader
+// ---------------------------------------------------------------------------
+
+fn stdin_loop(subj: Subject(TuiMessage)) -> Nil {
+  case read_char() {
+    Ok(byte) -> {
+      process.send(subj, StdinByte(byte))
+      stdin_loop(subj)
+    }
+    Error(_) -> Nil
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Event loop
 // ---------------------------------------------------------------------------
 
 fn event_loop(state: TuiState) -> Nil {
-  case read_char() {
-    Error(_) -> do_exit(state)
-    Ok(byte) ->
-      case byte {
-        "\u{03}" | "\u{04}" -> do_exit(state)
-        "\r" | "\n" -> handle_enter(state)
-        "\u{7F}" | "\u{08}" -> continue_loop(handle_backspace(state))
-        "\u{1B}" -> handle_escape(state)
-        _ ->
-          case is_printable(byte) {
-            True ->
-              continue_loop(
-                TuiState(..state, input_buf: state.input_buf <> byte),
-              )
-            False -> event_loop(state)
-          }
+  case state.status {
+    WaitingForLlm ->
+      case process.selector_receive(state.selector, 100) {
+        Error(Nil) -> {
+          let next =
+            TuiState(..state, spinner_frame: state.spinner_frame + 1)
+          render(next)
+          event_loop(next)
+        }
+        Ok(msg) -> dispatch(state, msg)
       }
+    _ -> dispatch(state, process.selector_receive_forever(state.selector))
+  }
+}
+
+fn dispatch(state: TuiState, msg: TuiMessage) -> Nil {
+  case msg {
+    StdinByte(byte:) -> handle_stdin_byte(state, byte)
+    ChatResponse(result:) -> handle_chat_response(state, result)
+    AgentQuestionReceived(question:, reply_to:) ->
+      handle_agent_question(state, question, reply_to)
+    ToolEventReceived(name:) -> handle_tool_event(state, name)
   }
 }
 
@@ -119,20 +184,52 @@ fn do_exit(_state: TuiState) -> Nil {
   do_halt(0)
 }
 
+fn handle_agent_question(
+  state: TuiState,
+  question: String,
+  reply_to: Subject(String),
+) -> Nil {
+  continue_loop(TuiState(..state, status: WaitingForInput(question:, reply_to:)))
+}
+
+fn handle_tool_event(state: TuiState, name: String) -> Nil {
+  continue_loop(TuiState(..state, spinner_label: name))
+}
+
+fn handle_stdin_byte(state: TuiState, byte: String) -> Nil {
+  case byte {
+    "\u{03}" | "\u{04}" -> do_exit(state)
+    "\r" | "\n" -> handle_enter(state)
+    "\u{7F}" | "\u{08}" -> continue_loop(handle_backspace(state))
+    "\u{1B}" -> handle_escape(state)
+    _ ->
+      case is_printable(byte) {
+        True ->
+          continue_loop(
+            TuiState(..state, input_buf: state.input_buf <> byte),
+          )
+        False -> event_loop(state)
+      }
+  }
+}
+
 fn handle_backspace(state: TuiState) -> TuiState {
   TuiState(..state, input_buf: string.drop_end(state.input_buf, 1))
 }
 
 fn handle_escape(state: TuiState) -> Nil {
-  case read_char(), read_char() {
-    Ok("["), Ok("A") -> continue_loop(scroll_up(state, 3))
-    Ok("["), Ok("B") -> continue_loop(scroll_down(state, 3))
-    Ok("["), Ok("5") -> {
-      let _ = read_char()
+  let first = process.receive(state.stdin_subj, 50)
+  let second = process.receive(state.stdin_subj, 50)
+  case first, second {
+    Ok(StdinByte("[")), Ok(StdinByte("A")) -> continue_loop(scroll_up(state, 3))
+    Ok(StdinByte("[")), Ok(StdinByte("B")) ->
+      continue_loop(scroll_down(state, 3))
+    Ok(StdinByte("[")), Ok(StdinByte("5")) -> {
+      let _ = process.receive(state.stdin_subj, 50)
       continue_loop(scroll_up(state, 10))
     }
-    Ok("["), Ok("6") -> {
-      let _ = read_char()
+    Ok(StdinByte("[")), Ok(StdinByte("6")) -> {
+      let _ = process.receive(state.stdin_subj, 50)
       continue_loop(scroll_down(state, 10))
     }
     _, _ -> event_loop(state)
@@ -143,6 +240,11 @@ fn handle_command(state: TuiState, cmd: String) -> Nil {
   let state = TuiState(..state, input_buf: "")
   case cmd {
     "/exit" | "/quit" -> do_exit(state)
+    "/clear" -> {
+      process.send(state.chat, service.ClearHistory)
+      let notice = style.dim("  Conversation cleared")
+      continue_loop(TuiState(..state, messages: [], scroll_offset: 0, notice:))
+    }
     _ -> {
       let notice = style.dim("  Unknown command: " <> cmd)
       continue_loop(TuiState(..state, notice:))
@@ -156,58 +258,78 @@ fn handle_enter(state: TuiState) -> Nil {
     input_text ->
       case string.starts_with(input_text, "/") {
         True -> handle_command(state, input_text)
-        False -> {
-          let user_msg =
-            Message(role: User, content: [TextContent(text: input_text)])
-          let msgs = list.append(state.messages, [user_msg])
-          let s1 =
-            TuiState(
-              ..state,
-              messages: msgs,
-              input_buf: "",
-              waiting: True,
-              scroll_offset: 0,
-            )
-          render(s1)
-          // Compute the screen row where "Thinking…" landed.
-          // scroll_offset is 0 here, so the last line in all_lines is always visible
-          // and sits at row 2 + window_size - 1.
-          let all_lines = build_message_lines(s1)
-          let available = s1.height - 5
-          let thinking_row = 1 + int.min(list.length(all_lines), available)
-          start_spinner([#(thinking_row, 4)])
-          let req =
-            request.new(s1.model, s1.max_tokens)
-            |> request.with_system(s1.system)
-            |> request.with_messages(s1.messages)
-          let api_result = provider.chat_with(req, s1.provider)
-          stop_spinner()
-          let s2 = case api_result {
-            Ok(resp) -> {
-              let reply = response.text(resp)
-              let asst =
-                Message(role: Assistant, content: [TextContent(text: reply)])
-              TuiState(
-                ..s1,
-                messages: list.append(msgs, [asst]),
-                waiting: False,
+        False ->
+          case state.status {
+            WaitingForLlm ->
+              continue_loop(
+                TuiState(
+                  ..state,
+                  notice: style.dim("  Still waiting for response\u{2026}"),
+                ),
+              )
+            WaitingForInput(question:, reply_to:) -> {
+              let q_msg =
+                Message(role: Assistant, content: [TextContent(text: question)])
+              let a_msg =
+                Message(role: User, content: [TextContent(text: input_text)])
+              let msgs = list.append(state.messages, [q_msg, a_msg])
+              process.send(reply_to, input_text)
+              continue_loop(
+                TuiState(
+                  ..state,
+                  messages: msgs,
+                  input_buf: "",
+                  status: WaitingForLlm,
+                  scroll_offset: 0,
+                ),
               )
             }
-            Error(err) -> {
-              let err_text = "[Error: " <> response.error_message(err) <> "]"
-              let asst =
-                Message(role: Assistant, content: [TextContent(text: err_text)])
-              TuiState(
-                ..s1,
-                messages: list.append(msgs, [asst]),
-                waiting: False,
+            Idle -> {
+              let user_msg =
+                Message(role: User, content: [TextContent(text: input_text)])
+              let msgs = list.append(state.messages, [user_msg])
+              let s1 =
+                TuiState(
+                  ..state,
+                  messages: msgs,
+                  input_buf: "",
+                  status: WaitingForLlm,
+                  scroll_offset: 0,
+                )
+              render(s1)
+              process.send(
+                state.chat,
+                service.SendMessage(
+                  text: input_text,
+                  reply_to: state.chat_reply,
+                  question_channel: state.question_channel,
+                  tool_channel: state.tool_channel,
+                ),
               )
+              event_loop(s1)
             }
           }
-          continue_loop(s2)
-        }
       }
   }
+}
+
+fn handle_chat_response(
+  state: TuiState,
+  result: Result(LlmResponse, LlmError),
+) -> Nil {
+  let reply_text = case result {
+    Ok(resp) -> response.text(resp)
+    Error(err) -> "[Error: " <> response.error_message(err) <> "]"
+  }
+  let asst = Message(role: Assistant, content: [TextContent(text: reply_text)])
+  let new_state =
+    TuiState(
+      ..state,
+      messages: list.append(state.messages, [asst]),
+      status: Idle,
+      spinner_label: "",
+    )
+  continue_loop(new_state)
 }
 
 fn scroll_up(state: TuiState, amount: Int) -> TuiState {
@@ -240,11 +362,10 @@ fn render(state: TuiState) -> Nil {
 }
 
 fn render_header(state: TuiState) -> Nil {
-  let p_name = state.provider.name
   let header =
     style.bold(" Springdrift ")
     <> style.dim("── ")
-    <> p_name
+    <> state.provider_name
     <> " │ "
     <> state.model
   stdout.execute([command.MoveTo(0, 0), command.Print(header)])
@@ -286,15 +407,37 @@ fn build_message_lines(state: TuiState) -> List(String) {
         Assistant -> style.bold(style.green("  Assistant"))
       }
       let text = extract_text(msg)
-      let content_lines = render_markdown(text, state.width - 4)
-      list.flatten([[""], [label], content_lines])
+      case text {
+        "" -> []
+        _ -> {
+          let content_lines = render_markdown(text, state.width - 4)
+          list.flatten([[""], [label], content_lines])
+        }
+      }
     })
-  case state.waiting {
-    True -> {
+  case state.status {
+    WaitingForLlm -> {
       let label = style.bold(style.green("  Assistant"))
-      list.append(msg_lines, ["", label, style.dim("     Thinking\u{2026}")])
+      let frames = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"]
+      let frame =
+        list.drop(frames, state.spinner_frame % 8)
+        |> list.first()
+        |> result.unwrap("⣾")
+      let action = case state.spinner_label {
+        "" -> "Thinking\u{2026}"
+        name -> "Using: " <> name
+      }
+      list.append(msg_lines, ["", label, style.dim("    " <> frame <> " " <> action)])
     }
-    False -> msg_lines
+    WaitingForInput(question:, ..) -> {
+      let label = style.bold(style.green("  Assistant"))
+      list.append(msg_lines, [
+        "",
+        label,
+        style.bold(style.yellow("    ? " <> question)),
+      ])
+    }
+    Idle -> msg_lines
   }
 }
 
@@ -323,10 +466,11 @@ fn render_input(state: TuiState) -> Nil {
 fn render_footer(state: TuiState) -> Nil {
   let footer = case state.notice {
     "" ->
-      case state.waiting {
-        // Col 2 is left as a space — the spinner process overwrites it
-        True -> style.dim("  Waiting for response\u{2026}   Ctrl-C: quit")
-        False -> style.dim("  Enter: send   PgUp/PgDn: scroll   /exit: quit")
+      case state.status {
+        Idle -> style.dim("  Enter: send   PgUp/PgDn: scroll   /exit: quit   /clear: new session")
+        WaitingForLlm -> style.dim("  Waiting for response\u{2026}   Ctrl-C: quit")
+        WaitingForInput(..) ->
+          style.dim("  Enter: answer question   Ctrl-C: quit")
       }
     msg -> style.yellow(msg)
   }
