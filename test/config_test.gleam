@@ -86,6 +86,7 @@ pub fn merge_override_wins_test() {
       max_turns: None,
       max_consecutive_errors: None,
       max_context_messages: None,
+      data_dir: None,
     )
   let override =
     AppConfig(
@@ -96,6 +97,7 @@ pub fn merge_override_wins_test() {
       max_turns: None,
       max_consecutive_errors: None,
       max_context_messages: None,
+      data_dir: None,
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("openai"))
@@ -111,6 +113,7 @@ pub fn merge_base_preserved_when_override_none_test() {
       max_turns: None,
       max_consecutive_errors: None,
       max_context_messages: None,
+      data_dir: None,
     )
   let override =
     AppConfig(
@@ -121,6 +124,7 @@ pub fn merge_base_preserved_when_override_none_test() {
       max_turns: None,
       max_consecutive_errors: None,
       max_context_messages: None,
+      data_dir: None,
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("anthropic"))
@@ -137,6 +141,7 @@ pub fn merge_combines_different_fields_test() {
       max_turns: None,
       max_consecutive_errors: None,
       max_context_messages: None,
+      data_dir: None,
     )
   let override =
     AppConfig(
@@ -147,6 +152,7 @@ pub fn merge_combines_different_fields_test() {
       max_turns: None,
       max_consecutive_errors: None,
       max_context_messages: None,
+      data_dir: None,
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("anthropic"))
@@ -244,6 +250,7 @@ pub fn merge_new_fields_test() {
       max_turns: Some(5),
       max_consecutive_errors: None,
       max_context_messages: None,
+      data_dir: None,
     )
   let override =
     AppConfig(
@@ -254,9 +261,83 @@ pub fn merge_new_fields_test() {
       max_turns: Some(10),
       max_consecutive_errors: Some(2),
       max_context_messages: None,
+      data_dir: None,
     )
   let merged = config.merge(base, override:)
   merged.max_turns |> should.equal(Some(10))
   merged.max_consecutive_errors |> should.equal(Some(2))
   merged.max_context_messages |> should.equal(None)
+}
+
+// ---------------------------------------------------------------------------
+// data_dir
+// ---------------------------------------------------------------------------
+
+pub fn from_args_data_dir_test() {
+  let cfg = config.from_args(["--data-dir", "/tmp/myproject/.springdrift"])
+  cfg.data_dir |> should.equal(Some("/tmp/myproject/.springdrift"))
+}
+
+pub fn from_args_data_dir_relative_test() {
+  let cfg = config.from_args(["--data-dir", ".springdrift"])
+  cfg.data_dir |> should.equal(Some(".springdrift"))
+}
+
+pub fn default_data_dir_is_none_test() {
+  let cfg = config.default()
+  cfg.data_dir |> should.equal(None)
+}
+
+pub fn merge_data_dir_override_wins_test() {
+  let base =
+    AppConfig(
+      provider: None,
+      model: None,
+      system_prompt: None,
+      max_tokens: None,
+      max_turns: None,
+      max_consecutive_errors: None,
+      max_context_messages: None,
+      data_dir: Some("/base/dir"),
+    )
+  let override =
+    AppConfig(
+      provider: None,
+      model: None,
+      system_prompt: None,
+      max_tokens: None,
+      max_turns: None,
+      max_consecutive_errors: None,
+      max_context_messages: None,
+      data_dir: Some("/override/dir"),
+    )
+  let merged = config.merge(base, override:)
+  merged.data_dir |> should.equal(Some("/override/dir"))
+}
+
+pub fn merge_data_dir_base_preserved_when_override_none_test() {
+  let base =
+    AppConfig(
+      provider: None,
+      model: None,
+      system_prompt: None,
+      max_tokens: None,
+      max_turns: None,
+      max_consecutive_errors: None,
+      max_context_messages: None,
+      data_dir: Some("/base/dir"),
+    )
+  let override =
+    AppConfig(
+      provider: None,
+      model: None,
+      system_prompt: None,
+      max_tokens: None,
+      max_turns: None,
+      max_consecutive_errors: None,
+      max_context_messages: None,
+      data_dir: None,
+    )
+  let merged = config.merge(base, override:)
+  merged.data_dir |> should.equal(Some("/base/dir"))
 }

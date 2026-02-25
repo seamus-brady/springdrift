@@ -1,5 +1,5 @@
 -module(springdrift_ffi).
--export([read_line/0, get_env/1, get_args/0, read_char/0,
+-export([read_line/0, get_env/1, set_env/2, get_args/0, read_char/0,
          start_spinner/1, stop_spinner/0,
          generate_uuid/0, get_datetime/0, get_date/0]).
 
@@ -20,6 +20,11 @@ get_env(Name) ->
         false -> {error, nil};
         Value -> {ok, list_to_binary(Value)}
     end.
+
+%% Set an environment variable.
+set_env(Name, Value) ->
+    os:putenv(binary_to_list(Name), binary_to_list(Value)),
+    nil.
 
 %% Return command-line arguments passed to the application (after -- in gleam run).
 %% Returns a list of binaries.

@@ -36,6 +36,7 @@ pub type AppConfig {
     max_turns: Option(Int),
     max_consecutive_errors: Option(Int),
     max_context_messages: Option(Int),
+    data_dir: Option(String),
   )
 }
 
@@ -63,6 +64,7 @@ pub fn default() -> AppConfig {
     max_turns: None,
     max_consecutive_errors: None,
     max_context_messages: None,
+    data_dir: None,
   )
 }
 
@@ -82,6 +84,7 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       override_cfg.max_context_messages,
       base.max_context_messages,
     ),
+    data_dir: option.or(override_cfg.data_dir, base.data_dir),
   )
 }
 
@@ -95,6 +98,7 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
 ///   --max-turns <n>        integer — max react-loop turns per user message (default 5)
 ///   --max-errors <n>       integer — max consecutive tool failures before abort (default 3)
 ///   --max-context <n>      integer — max messages kept in context window (default unlimited)
+///   --data-dir <path>      directory for session and cycle-log files (default: ~/.config/springdrift)
 pub fn from_args(args: List(String)) -> AppConfig {
   do_parse_args(args, default())
 }
@@ -157,6 +161,8 @@ fn do_parse_args(args: List(String), acc: AppConfig) -> AppConfig {
           do_parse_args(rest, AppConfig(..acc, max_context_messages: Some(n)))
         Error(_) -> do_parse_args(rest, acc)
       }
+    ["--data-dir", value, ..rest] ->
+      do_parse_args(rest, AppConfig(..acc, data_dir: Some(value)))
     [_, ..rest] -> do_parse_args(rest, acc)
   }
 }
@@ -197,6 +203,11 @@ fn config_decoder() -> decode.Decoder(AppConfig) {
     None,
     decode.int |> decode.map(Some),
   )
+  use data_dir <- decode.optional_field(
+    "data_dir",
+    None,
+    decode.string |> decode.map(Some),
+  )
   decode.success(AppConfig(
     provider:,
     model:,
@@ -205,6 +216,7 @@ fn config_decoder() -> decode.Decoder(AppConfig) {
     max_turns:,
     max_consecutive_errors:,
     max_context_messages:,
+    data_dir:,
   ))
 }
 

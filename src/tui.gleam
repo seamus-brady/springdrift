@@ -38,6 +38,7 @@ type TuiMessage {
   ChatResponse(result: Result(LlmResponse, LlmError))
   AgentQuestionReceived(question: String, reply_to: Subject(String))
   ToolEventReceived(name: String)
+  ServiceNotice(msg: String)
 }
 
 type TuiState {
@@ -82,6 +83,7 @@ fn do_halt(code: Int) -> Nil
 
 pub fn start(
   chat: Subject(ChatMessage),
+  notice_channel: Subject(String),
   provider_name: String,
   model: String,
   initial_messages: List(Message),
@@ -110,6 +112,7 @@ pub fn start(
         ToolCalling(name:) -> ToolEventReceived(name:)
       }
     })
+    |> process.select_map(notice_channel, ServiceNotice)
   process.spawn_unlinked(fn() { stdin_loop(stdin_subj) })
   let resume_notice = case initial_messages {
     [] -> ""
@@ -190,6 +193,8 @@ fn dispatch(state: TuiState, msg: TuiMessage) -> Nil {
     AgentQuestionReceived(question:, reply_to:) ->
       handle_agent_question(state, question, reply_to)
     ToolEventReceived(name:) -> handle_tool_event(state, name)
+    ServiceNotice(msg:) ->
+      continue_loop(TuiState(..state, notice: style.yellow(msg)))
   }
 }
 

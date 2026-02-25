@@ -22,8 +22,22 @@ fn get_datetime() -> String
 @external(erlang, "springdrift_ffi", "get_date")
 fn get_date() -> String
 
+@external(erlang, "springdrift_ffi", "get_env")
+fn get_env(name: String) -> Result(String, Nil)
+
+fn data_dir() -> String {
+  case get_env("SPRINGDRIFT_DATA_DIR") {
+    Ok(dir) -> dir
+    Error(_) ->
+      case get_env("HOME") {
+        Ok(home) -> home <> "/.config/springdrift"
+        Error(_) -> ".springdrift"
+      }
+  }
+}
+
 fn cycle_log_dir() -> String {
-  "cycle-log"
+  data_dir() <> "/cycle-log"
 }
 
 fn log_path() -> String {

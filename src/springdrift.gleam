@@ -15,6 +15,9 @@ import tui
 @external(erlang, "erlang", "halt")
 fn do_halt(code: Int) -> Nil
 
+@external(erlang, "springdrift_ffi", "set_env")
+fn set_env(name: String, value: String) -> Nil
+
 pub fn main() -> Nil {
   case
     list.contains(get_startup_args(), "--help")
@@ -58,11 +61,23 @@ fn print_help() -> Nil {
     "  --max-context <n>    Max messages kept in context window (default: unlimited)",
   )
   io.println("  --resume             Resume previous session")
+  io.println(
+    "  --data-dir <path>    Directory for session and cycle-log files",
+  )
+  io.println("                       (default: ~/.config/springdrift)")
+  io.println("                       Override with SPRINGDRIFT_DATA_DIR env var")
+  io.println("                       Use a local path (e.g. .springdrift) for dev")
   io.println("  --help, -h           Show this help")
   io.println("")
   io.println("Config files (checked in priority order, local overrides user):")
   io.println("  .springdrift.json")
   io.println("  ~/.config/springdrift/config.json")
+  io.println("")
+  io.println("Data files (session and cycle logs):")
+  io.println("  Default: ~/.config/springdrift/session.json")
+  io.println("           ~/.config/springdrift/cycle-log/<date>.jsonl")
+  io.println("  Dev:     gleam run -- --data-dir .springdrift")
+  io.println("           SPRINGDRIFT_DATA_DIR=.springdrift gleam run")
   io.println("")
   io.println("Example config file (.springdrift.json):")
   io.println("  {")
@@ -77,6 +92,12 @@ fn print_help() -> Nil {
 }
 
 fn run(cfg: AppConfig) -> Nil {
+  // Apply data dir override before any storage/log operations
+  case cfg.data_dir {
+    option.Some(dir) -> set_env("SPRINGDRIFT_DATA_DIR", dir)
+    option.None -> Nil
+  }
+
   let system = option.unwrap(cfg.system_prompt, "You are a helpful assistant.")
   let max_tokens = option.unwrap(cfg.max_tokens, 1024)
   let max_turns = option.unwrap(cfg.max_turns, 5)
@@ -90,7 +111,7 @@ fn run(cfg: AppConfig) -> Nil {
     False -> []
   }
 
-  let chat =
+  let #(chat, notice_channel) =
     service.start(
       p,
       model,
@@ -102,7 +123,7 @@ fn run(cfg: AppConfig) -> Nil {
       builtin.all(),
       initial_messages,
     )
-  tui.start(chat, p.name, model, initial_messages)
+  tui.start(chat, notice_channel, p.name, model, initial_messages)
 }
 
 fn select_provider(cfg: AppConfig) -> #(Provider, String) {

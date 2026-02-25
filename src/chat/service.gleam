@@ -32,6 +32,7 @@ pub type ChatState {
     messages: List(Message),
     tools: List(Tool),
     last_cycle_id: Option(String),
+    notice_channel: Subject(String),
   )
 }
 
@@ -75,8 +76,9 @@ pub fn start(
   max_context_messages: Option(Int),
   tools: List(Tool),
   initial_messages: List(Message),
-) -> Subject(ChatMessage) {
+) -> #(Subject(ChatMessage), Subject(String)) {
   let setup = process.new_subject()
+  let notice_channel = process.new_subject()
   process.spawn_unlinked(fn() {
     let self = process.new_subject()
     process.send(setup, self)
@@ -93,11 +95,12 @@ pub fn start(
         messages: initial_messages,
         tools:,
         last_cycle_id: None,
+        notice_channel:,
       ),
     )
   })
   let assert Ok(subj) = process.receive(setup, 1000)
-  subj
+  #(subj, notice_channel)
 }
 
 // ---------------------------------------------------------------------------
@@ -143,7 +146,10 @@ fn service_loop(self: Subject(ChatMessage), state: ChatState) -> Nil {
     }
     LlmComplete(result:, final_messages:, reply_to:) -> {
       let new_state = ChatState(..state, messages: final_messages)
-      storage.save(new_state.messages)
+      case storage.save(new_state.messages) {
+        Ok(_) -> Nil
+        Error(msg) -> process.send(state.notice_channel, "  ⚠ " <> msg)
+      }
       process.send(reply_to, result)
       service_loop(self, new_state)
     }
@@ -156,7 +162,10 @@ fn service_loop(self: Subject(ChatMessage), state: ChatState) -> Nil {
       service_loop(self, ChatState(..state, messages: [], last_cycle_id: None))
     }
     RestoreMessages(messages:) -> {
-      storage.save(messages)
+      case storage.save(messages) {
+        Ok(_) -> Nil
+        Error(msg) -> process.send(state.notice_channel, "  ⚠ " <> msg)
+      }
       service_loop(self, ChatState(..state, messages:))
     }
   }

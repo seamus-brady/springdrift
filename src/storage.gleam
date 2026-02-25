@@ -9,26 +9,35 @@ import simplifile
 @external(erlang, "springdrift_ffi", "get_env")
 fn get_env(name: String) -> Result(String, Nil)
 
-fn config_dir() -> String {
-  case get_env("HOME") {
-    Ok(home) -> home <> "/.config/springdrift"
-    Error(_) -> "."
+fn data_dir() -> String {
+  case get_env("SPRINGDRIFT_DATA_DIR") {
+    Ok(dir) -> dir
+    Error(_) ->
+      case get_env("HOME") {
+        Ok(home) -> home <> "/.config/springdrift"
+        Error(_) -> "."
+      }
   }
 }
 
 fn session_path() -> String {
-  case get_env("HOME") {
-    Ok(home) -> home <> "/.config/springdrift/session.json"
-    Error(_) -> ".springdrift_session.json"
-  }
+  data_dir() <> "/session.json"
 }
 
-pub fn save(messages: List(Message)) -> Nil {
-  let dir = config_dir()
-  let _ = simplifile.create_directory_all(dir)
-  let json_str = json.to_string(encode_messages(messages))
-  let _ = simplifile.write(session_path(), json_str)
-  Nil
+pub fn save(messages: List(Message)) -> Result(Nil, String) {
+  let dir = data_dir()
+  case simplifile.create_directory_all(dir) {
+    Error(e) ->
+      Error("Failed to create directory: " <> simplifile.describe_error(e))
+    Ok(_) -> {
+      let json_str = json.to_string(encode_messages(messages))
+      case simplifile.write(session_path(), json_str) {
+        Error(e) ->
+          Error("Failed to write session: " <> simplifile.describe_error(e))
+        Ok(_) -> Ok(Nil)
+      }
+    }
+  }
 }
 
 pub fn load() -> List(Message) {
