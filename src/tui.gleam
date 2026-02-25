@@ -1,5 +1,6 @@
 import chat/service.{
-  type AgentQuestion, type ChatMessage, type ToolEvent, ToolCalling,
+  type AgentQuestion, type ChatMessage, type ModelSwitchQuestion, type ToolEvent,
+  ToolCalling,
 }
 import cycle_log.{type CycleData}
 import etch/command
@@ -31,25 +32,36 @@ type AgentStatus {
   Idle
   WaitingForLlm
   WaitingForInput(question: String, reply_to: Subject(String))
+  WaitingForModelSwitch(
+    suggested_model: String,
+    reply_to: Subject(service.ModelSwitchAnswer),
+  )
 }
 
 type TuiMessage {
   StdinByte(byte: String)
-  ChatResponse(result: Result(LlmResponse, LlmError))
+  ChatResponse(result: Result(LlmResponse, LlmError), final_model: String)
   AgentQuestionReceived(question: String, reply_to: Subject(String))
   ToolEventReceived(name: String)
+  ModelSwitchReceived(
+    suggested_model: String,
+    reply_to: Subject(service.ModelSwitchAnswer),
+  )
 }
 
 type TuiState {
   TuiState(
     chat: Subject(ChatMessage),
-    chat_reply: Subject(Result(LlmResponse, LlmError)),
+    chat_reply: Subject(#(Result(LlmResponse, LlmError), String)),
     stdin_subj: Subject(TuiMessage),
     selector: Selector(TuiMessage),
     question_channel: Subject(AgentQuestion),
     tool_channel: Subject(ToolEvent),
+    model_question_channel: Subject(ModelSwitchQuestion),
     provider_name: String,
     model: String,
+    task_model: String,
+    reasoning_model: String,
     messages: List(Message),
     input_buf: String,
     scroll_offset: Int,
@@ -84,6 +96,8 @@ pub fn start(
   chat: Subject(ChatMessage),
   provider_name: String,
   model: String,
+  task_model: String,
+  reasoning_model: String,
   initial_messages: List(Message),
 ) -> Nil {
   let size = terminal.window_size()
@@ -98,10 +112,14 @@ pub fn start(
   let chat_reply = process.new_subject()
   let question_channel = process.new_subject()
   let tool_channel = process.new_subject()
+  let model_question_channel = process.new_subject()
   let selector =
     process.new_selector()
     |> process.select(stdin_subj)
-    |> process.select_map(chat_reply, ChatResponse)
+    |> process.select_map(chat_reply, fn(pair) {
+      let #(result, final_model) = pair
+      ChatResponse(result:, final_model:)
+    })
     |> process.select_map(question_channel, fn(aq: AgentQuestion) {
       AgentQuestionReceived(question: aq.question, reply_to: aq.reply_to)
     })
@@ -110,6 +128,15 @@ pub fn start(
         ToolCalling(name:) -> ToolEventReceived(name:)
       }
     })
+    |> process.select_map(
+      model_question_channel,
+      fn(mq: service.ModelSwitchQuestion) {
+        ModelSwitchReceived(
+          suggested_model: mq.suggested_model,
+          reply_to: mq.reply_to,
+        )
+      },
+    )
   process.spawn_unlinked(fn() { stdin_loop(stdin_subj) })
   let resume_notice = case initial_messages {
     [] -> ""
@@ -124,8 +151,11 @@ pub fn start(
       selector:,
       question_channel:,
       tool_channel:,
+      model_question_channel:,
       provider_name:,
       model:,
+      task_model:,
+      reasoning_model:,
       messages: initial_messages,
       input_buf: "",
       scroll_offset: 0,
@@ -186,10 +216,18 @@ fn event_loop(state: TuiState) -> Nil {
 fn dispatch(state: TuiState, msg: TuiMessage) -> Nil {
   case msg {
     StdinByte(byte:) -> handle_stdin_byte(state, byte)
-    ChatResponse(result:) -> handle_chat_response(state, result)
+    ChatResponse(result:, final_model:) ->
+      handle_chat_response(state, result, final_model)
     AgentQuestionReceived(question:, reply_to:) ->
       handle_agent_question(state, question, reply_to)
     ToolEventReceived(name:) -> handle_tool_event(state, name)
+    ModelSwitchReceived(suggested_model:, reply_to:) ->
+      continue_loop(
+        TuiState(
+          ..state,
+          status: WaitingForModelSwitch(suggested_model:, reply_to:),
+        ),
+      )
   }
 }
 
@@ -282,6 +320,19 @@ fn handle_command(state: TuiState, cmd: String) -> Nil {
       let notice = style.dim("  Conversation cleared")
       continue_loop(TuiState(..state, messages: [], scroll_offset: 0, notice:))
     }
+    "/model" -> {
+      let new_model = case state.model == state.task_model {
+        True -> state.reasoning_model
+        False -> state.task_model
+      }
+      process.send(state.chat, service.SetModel(model: new_model))
+      let label = case new_model == state.task_model {
+        True -> "task"
+        False -> "reasoning"
+      }
+      let notice = style.dim("  Model: " <> new_model <> " (" <> label <> ")")
+      continue_loop(TuiState(..state, model: new_model, notice:))
+    }
     _ -> {
       let notice = style.dim("  Unknown command: " <> cmd)
       continue_loop(TuiState(..state, notice:))
@@ -297,61 +348,97 @@ fn handle_enter(state: TuiState) -> Nil {
 }
 
 fn handle_chat_enter(state: TuiState) -> Nil {
-  case string.trim(state.input_buf) {
-    "" -> event_loop(state)
-    input_text ->
-      case string.starts_with(input_text, "/") {
-        True -> handle_command(state, input_text)
-        False ->
-          case state.status {
-            WaitingForLlm ->
-              continue_loop(
-                TuiState(
-                  ..state,
-                  notice: style.dim("  Still waiting for response\u{2026}"),
-                ),
-              )
-            WaitingForInput(question:, reply_to:) -> {
-              let q_msg =
-                Message(role: Assistant, content: [TextContent(text: question)])
-              let a_msg =
-                Message(role: User, content: [TextContent(text: input_text)])
-              let msgs = list.append(state.messages, [q_msg, a_msg])
-              process.send(reply_to, input_text)
-              continue_loop(
-                TuiState(
-                  ..state,
-                  messages: msgs,
-                  input_buf: "",
-                  status: WaitingForLlm,
-                  scroll_offset: 0,
-                ),
-              )
-            }
-            Idle -> {
-              let user_msg =
-                Message(role: User, content: [TextContent(text: input_text)])
-              let msgs = list.append(state.messages, [user_msg])
-              let s1 =
-                TuiState(
-                  ..state,
-                  messages: msgs,
-                  input_buf: "",
-                  status: WaitingForLlm,
-                  scroll_offset: 0,
-                )
-              render(s1)
-              process.send(
-                state.chat,
-                service.SendMessage(
-                  text: input_text,
-                  reply_to: state.chat_reply,
-                  question_channel: state.question_channel,
-                  tool_channel: state.tool_channel,
-                ),
-              )
-              event_loop(s1)
-            }
+  case state.status {
+    WaitingForModelSwitch(suggested_model:, reply_to:) -> {
+      let input = string.lowercase(string.trim(state.input_buf))
+      let accept = case input {
+        "n" | "no" -> False
+        _ -> True
+      }
+      let answer = case accept {
+        True -> service.AcceptModelSwitch
+        False -> service.DeclineModelSwitch
+      }
+      process.send(reply_to, answer)
+      let new_model = case accept {
+        True -> suggested_model
+        False -> state.model
+      }
+      let notice = case accept {
+        True -> style.dim("  Switched to: " <> suggested_model)
+        False -> style.dim("  Kept: " <> state.model)
+      }
+      continue_loop(
+        TuiState(
+          ..state,
+          input_buf: "",
+          status: WaitingForLlm,
+          model: new_model,
+          notice:,
+        ),
+      )
+    }
+    _ ->
+      case string.trim(state.input_buf) {
+        "" -> event_loop(state)
+        input_text ->
+          case string.starts_with(input_text, "/") {
+            True -> handle_command(state, input_text)
+            False ->
+              case state.status {
+                WaitingForLlm ->
+                  continue_loop(
+                    TuiState(
+                      ..state,
+                      notice: style.dim("  Still waiting for response\u{2026}"),
+                    ),
+                  )
+                WaitingForInput(question:, reply_to:) -> {
+                  let q_msg =
+                    Message(role: Assistant, content: [
+                      TextContent(text: question),
+                    ])
+                  let a_msg =
+                    Message(role: User, content: [TextContent(text: input_text)])
+                  let msgs = list.append(state.messages, [q_msg, a_msg])
+                  process.send(reply_to, input_text)
+                  continue_loop(
+                    TuiState(
+                      ..state,
+                      messages: msgs,
+                      input_buf: "",
+                      status: WaitingForLlm,
+                      scroll_offset: 0,
+                    ),
+                  )
+                }
+                Idle -> {
+                  let user_msg =
+                    Message(role: User, content: [TextContent(text: input_text)])
+                  let msgs = list.append(state.messages, [user_msg])
+                  let s1 =
+                    TuiState(
+                      ..state,
+                      messages: msgs,
+                      input_buf: "",
+                      status: WaitingForLlm,
+                      scroll_offset: 0,
+                    )
+                  render(s1)
+                  process.send(
+                    state.chat,
+                    service.SendMessage(
+                      text: input_text,
+                      reply_to: state.chat_reply,
+                      question_channel: state.question_channel,
+                      tool_channel: state.tool_channel,
+                      model_question_channel: state.model_question_channel,
+                    ),
+                  )
+                  event_loop(s1)
+                }
+                WaitingForModelSwitch(..) -> event_loop(state)
+              }
           }
       }
   }
@@ -360,6 +447,7 @@ fn handle_chat_enter(state: TuiState) -> Nil {
 fn handle_chat_response(
   state: TuiState,
   result: Result(LlmResponse, LlmError),
+  final_model: String,
 ) -> Nil {
   let #(reply_text, usage) = case result {
     Ok(resp) -> #(response.text(resp), Some(resp.usage))
@@ -372,6 +460,7 @@ fn handle_chat_response(
       messages: list.append(state.messages, [asst]),
       status: Idle,
       spinner_label: "",
+      model: final_model,
       last_usage: usage,
     )
   continue_loop(new_state)
@@ -497,6 +586,18 @@ fn build_message_lines(state: TuiState) -> List(String) {
         style.bold(style.yellow("    ? " <> question)),
       ])
     }
+    WaitingForModelSwitch(suggested_model:, ..) -> {
+      let label = style.bold(style.green("  Assistant"))
+      let msg =
+        "Complex query — switch to reasoning model? ("
+        <> suggested_model
+        <> ")  y/Enter=yes  n=no"
+      list.append(msg_lines, [
+        "",
+        label,
+        style.bold(style.yellow("    \u{2699} " <> msg)),
+      ])
+    }
     Idle -> msg_lines
   }
 }
@@ -545,13 +646,17 @@ fn render_footer(state: TuiState) -> Nil {
               }
               token_info
               <> style.dim(
-                "Enter: send   PgUp/PgDn: scroll   /exit: quit   /clear: new session   Tab: log",
+                "Enter: send   PgUp/PgDn: scroll   /exit: quit   /clear: new session   /model: toggle model   Tab: log",
               )
             }
             WaitingForLlm ->
               style.dim("  Waiting for response\u{2026}   Ctrl-C: quit")
             WaitingForInput(..) ->
               style.dim("  Enter: answer question   Ctrl-C: quit")
+            WaitingForModelSwitch(..) ->
+              style.dim(
+                "  y/Enter: switch to reasoning model   n: keep current   Ctrl-C: quit",
+              )
           }
       }
     msg -> style.yellow(msg)
@@ -903,6 +1008,12 @@ fn print_log_cycles(
             <> "t",
           )
       }
+      let complexity_part = case c.complexity {
+        None -> ""
+        Some("complex") -> style.dim("  \u{26A1}complex")
+        Some("simple") -> style.dim("  \u{00B7}simple")
+        Some(other) -> style.dim("  " <> other)
+      }
       let hdr_text =
         indicator
         <> "#"
@@ -911,6 +1022,7 @@ fn print_log_cycles(
         <> time
         <> tools_part
         <> token_part
+        <> complexity_part
       let hdr_line = case sel {
         True -> style.bold(hdr_text)
         False -> style.dim(hdr_text)
