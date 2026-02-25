@@ -1,7 +1,10 @@
+import context
+import cycle_log
 import gleam/dynamic/decode
 import gleam/erlang/process.{type Subject}
 import gleam/json
 import gleam/list
+import gleam/option.{type Option, None, Some}
 import llm/provider.{type Provider}
 import llm/request
 import llm/response
@@ -23,8 +26,12 @@ pub type ChatState {
     model: String,
     system: String,
     max_tokens: Int,
+    max_turns: Int,
+    max_consecutive_errors: Int,
+    max_context_messages: Option(Int),
     messages: List(Message),
     tools: List(Tool),
+    last_cycle_id: Option(String),
   )
 }
 
@@ -45,9 +52,11 @@ pub type ChatMessage {
   )
   GetHistory(reply_to: Subject(List(Message)))
   ClearHistory
+  RestoreMessages(messages: List(Message))
   // Internal — sent back from the spawned HTTP worker
   LlmComplete(
     result: Result(LlmResponse, LlmError),
+    final_messages: List(Message),
     reply_to: Subject(Result(LlmResponse, LlmError)),
   )
 }
@@ -61,6 +70,9 @@ pub fn start(
   model: String,
   system: String,
   max_tokens: Int,
+  max_turns: Int,
+  max_consecutive_errors: Int,
+  max_context_messages: Option(Int),
   tools: List(Tool),
   initial_messages: List(Message),
 ) -> Subject(ChatMessage) {
@@ -75,8 +87,12 @@ pub fn start(
         model:,
         system:,
         max_tokens:,
+        max_turns:,
+        max_consecutive_errors:,
+        max_context_messages:,
         messages: initial_messages,
         tools:,
+        last_cycle_id: None,
       ),
     )
   })
@@ -91,17 +107,42 @@ pub fn start(
 fn service_loop(self: Subject(ChatMessage), state: ChatState) -> Nil {
   case process.receive_forever(self) {
     SendMessage(text:, reply_to:, question_channel:, tool_channel:) -> {
-      let new_state = append_user_message(state, text)
+      let cycle_id = cycle_log.generate_uuid()
+      let parent_id = state.last_cycle_id
+      cycle_log.log_human_input(cycle_id, parent_id, text)
+      let new_state =
+        ChatState(
+          ..append_user_message(state, text),
+          last_cycle_id: Some(cycle_id),
+        )
       let req = build_request(new_state)
       process.spawn_unlinked(fn() {
-        let result =
-          react_loop(req, new_state.provider, 5, question_channel, tool_channel)
-        process.send(self, LlmComplete(result:, reply_to:))
+        let react_result =
+          react_loop(
+            req,
+            new_state.provider,
+            new_state.max_turns,
+            0,
+            new_state.max_consecutive_errors,
+            question_channel,
+            tool_channel,
+            cycle_id,
+          )
+        let #(result, final_messages) = case react_result {
+          Ok(#(resp, msgs)) -> #(Ok(resp), msgs)
+          Error(err) -> {
+            let err_text = "[Error: " <> response.error_message(err) <> "]"
+            let err_msg =
+              Message(role: Assistant, content: [TextContent(text: err_text)])
+            #(Error(err), list.append(new_state.messages, [err_msg]))
+          }
+        }
+        process.send(self, LlmComplete(result:, final_messages:, reply_to:))
       })
       service_loop(self, new_state)
     }
-    LlmComplete(result:, reply_to:) -> {
-      let new_state = append_assistant_message(state, result)
+    LlmComplete(result:, final_messages:, reply_to:) -> {
+      let new_state = ChatState(..state, messages: final_messages)
       storage.save(new_state.messages)
       process.send(reply_to, result)
       service_loop(self, new_state)
@@ -112,7 +153,11 @@ fn service_loop(self: Subject(ChatMessage), state: ChatState) -> Nil {
     }
     ClearHistory -> {
       storage.clear()
-      service_loop(self, ChatState(..state, messages: []))
+      service_loop(self, ChatState(..state, messages: [], last_cycle_id: None))
+    }
+    RestoreMessages(messages:) -> {
+      storage.save(messages)
+      service_loop(self, ChatState(..state, messages:))
     }
   }
 }
@@ -121,14 +166,22 @@ fn react_loop(
   req: LlmRequest,
   p: Provider,
   max_turns: Int,
+  consecutive_errors: Int,
+  max_consecutive_errors: Int,
   question_channel: Subject(AgentQuestion),
   tool_channel: Subject(ToolEvent),
-) -> Result(LlmResponse, LlmError) {
+  cycle_id: String,
+) -> Result(#(LlmResponse, List(Message)), LlmError) {
+  cycle_log.log_llm_request(cycle_id, req)
   case provider.chat_with(req, p) {
     Error(e) -> Error(e)
-    Ok(resp) ->
+    Ok(resp) -> {
+      cycle_log.log_llm_response(cycle_id, resp)
       case response.needs_tool_execution(resp) {
-        False -> Ok(resp)
+        False -> {
+          let final_msg = Message(role: Assistant, content: resp.content)
+          Ok(#(resp, list.append(req.messages, [final_msg])))
+        }
         True ->
           case max_turns {
             0 -> Error(UnknownError("Agent loop: maximum turns reached"))
@@ -137,17 +190,50 @@ fn react_loop(
               let results =
                 list.map(calls, fn(call) {
                   process.send(tool_channel, ToolCalling(name: call.name))
-                  case call.name {
+                  cycle_log.log_tool_call(cycle_id, call)
+                  let result = case call.name {
                     "request_human_input" ->
                       execute_human_input(call, question_channel)
                     _ -> builtin.execute(call)
                   }
+                  cycle_log.log_tool_result(cycle_id, result)
+                  result
                 })
-              let next = request.with_tool_results(req, resp.content, results)
-              react_loop(next, p, max_turns - 1, question_channel, tool_channel)
+              let has_any_failure =
+                list.any(results, fn(r) {
+                  case r {
+                    ToolFailure(..) -> True
+                    _ -> False
+                  }
+                })
+              let new_consecutive = case has_any_failure {
+                True -> consecutive_errors + 1
+                False -> 0
+              }
+              case new_consecutive >= max_consecutive_errors {
+                True ->
+                  Error(UnknownError(
+                    "Agent loop: too many consecutive tool errors",
+                  ))
+                False -> {
+                  let next =
+                    request.with_tool_results(req, resp.content, results)
+                  react_loop(
+                    next,
+                    p,
+                    max_turns - 1,
+                    new_consecutive,
+                    max_consecutive_errors,
+                    question_channel,
+                    tool_channel,
+                    cycle_id,
+                  )
+                }
+              }
             }
           }
       }
+    }
   }
 }
 
@@ -182,23 +268,15 @@ fn append_user_message(state: ChatState, text: String) -> ChatState {
   ChatState(..state, messages: list.append(state.messages, [msg]))
 }
 
-fn append_assistant_message(
-  state: ChatState,
-  result: Result(LlmResponse, LlmError),
-) -> ChatState {
-  let text = case result {
-    Ok(resp) -> response.text(resp)
-    Error(err) -> "[Error: " <> response.error_message(err) <> "]"
-  }
-  let msg = Message(role: Assistant, content: [TextContent(text:)])
-  ChatState(..state, messages: list.append(state.messages, [msg]))
-}
-
 fn build_request(state: ChatState) -> LlmRequest {
+  let messages = case state.max_context_messages {
+    None -> state.messages
+    Some(max) -> context.trim(state.messages, max)
+  }
   let base =
     request.new(state.model, state.max_tokens)
     |> request.with_system(state.system)
-    |> request.with_messages(state.messages)
+    |> request.with_messages(messages)
   case state.tools {
     [] -> base
     tools -> request.with_tools(base, tools)

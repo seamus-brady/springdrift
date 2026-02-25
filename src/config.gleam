@@ -1,7 +1,7 @@
 //// Application configuration loaded from CLI flags and JSON config files.
 ////
 //// Priority (highest to lowest):
-////   1. CLI flags       (--provider, --model, --system, --max-tokens)
+////   1. CLI flags       (--provider, --model, --system, --max-tokens, etc.)
 ////   2. Local config    (.springdrift.json in current directory)
 ////   3. User config     (~/.config/springdrift/config.json)
 ////
@@ -10,7 +10,10 @@
 ////     "provider": "anthropic",
 ////     "model": "claude-sonnet-4-20250514",
 ////     "system_prompt": "You are a helpful assistant.",
-////     "max_tokens": 2048
+////     "max_tokens": 2048,
+////     "max_turns": 5,
+////     "max_consecutive_errors": 3,
+////     "max_context_messages": 50
 ////   }
 
 import gleam/dynamic/decode
@@ -30,6 +33,9 @@ pub type AppConfig {
     model: Option(String),
     system_prompt: Option(String),
     max_tokens: Option(Int),
+    max_turns: Option(Int),
+    max_consecutive_errors: Option(Int),
+    max_context_messages: Option(Int),
   )
 }
 
@@ -49,7 +55,15 @@ fn get_env(name: String) -> Result(String, Nil)
 
 /// An AppConfig with all fields unset.
 pub fn default() -> AppConfig {
-  AppConfig(provider: None, model: None, system_prompt: None, max_tokens: None)
+  AppConfig(
+    provider: None,
+    model: None,
+    system_prompt: None,
+    max_tokens: None,
+    max_turns: None,
+    max_consecutive_errors: None,
+    max_context_messages: None,
+  )
 }
 
 /// Merge two configs. Fields set in `override` win; unset fields fall back to `base`.
@@ -59,6 +73,15 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     model: option.or(override_cfg.model, base.model),
     system_prompt: option.or(override_cfg.system_prompt, base.system_prompt),
     max_tokens: option.or(override_cfg.max_tokens, base.max_tokens),
+    max_turns: option.or(override_cfg.max_turns, base.max_turns),
+    max_consecutive_errors: option.or(
+      override_cfg.max_consecutive_errors,
+      base.max_consecutive_errors,
+    ),
+    max_context_messages: option.or(
+      override_cfg.max_context_messages,
+      base.max_context_messages,
+    ),
   )
 }
 
@@ -68,7 +91,10 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
 ///   --provider <name>      anthropic | openrouter | openai
 ///   --model    <name>      any model identifier
 ///   --system   <prompt>    system prompt string
-///   --max-tokens <n>       integer
+///   --max-tokens <n>       integer — max output tokens per LLM call
+///   --max-turns <n>        integer — max react-loop turns per user message (default 5)
+///   --max-errors <n>       integer — max consecutive tool failures before abort (default 3)
+///   --max-context <n>      integer — max messages kept in context window (default unlimited)
 pub fn from_args(args: List(String)) -> AppConfig {
   do_parse_args(args, default())
 }
@@ -114,6 +140,23 @@ fn do_parse_args(args: List(String), acc: AppConfig) -> AppConfig {
         Ok(n) -> do_parse_args(rest, AppConfig(..acc, max_tokens: Some(n)))
         Error(_) -> do_parse_args(rest, acc)
       }
+    ["--max-turns", value, ..rest] ->
+      case int.parse(value) {
+        Ok(n) -> do_parse_args(rest, AppConfig(..acc, max_turns: Some(n)))
+        Error(_) -> do_parse_args(rest, acc)
+      }
+    ["--max-errors", value, ..rest] ->
+      case int.parse(value) {
+        Ok(n) ->
+          do_parse_args(rest, AppConfig(..acc, max_consecutive_errors: Some(n)))
+        Error(_) -> do_parse_args(rest, acc)
+      }
+    ["--max-context", value, ..rest] ->
+      case int.parse(value) {
+        Ok(n) ->
+          do_parse_args(rest, AppConfig(..acc, max_context_messages: Some(n)))
+        Error(_) -> do_parse_args(rest, acc)
+      }
     [_, ..rest] -> do_parse_args(rest, acc)
   }
 }
@@ -139,7 +182,30 @@ fn config_decoder() -> decode.Decoder(AppConfig) {
     None,
     decode.int |> decode.map(Some),
   )
-  decode.success(AppConfig(provider:, model:, system_prompt:, max_tokens:))
+  use max_turns <- decode.optional_field(
+    "max_turns",
+    None,
+    decode.int |> decode.map(Some),
+  )
+  use max_consecutive_errors <- decode.optional_field(
+    "max_consecutive_errors",
+    None,
+    decode.int |> decode.map(Some),
+  )
+  use max_context_messages <- decode.optional_field(
+    "max_context_messages",
+    None,
+    decode.int |> decode.map(Some),
+  )
+  decode.success(AppConfig(
+    provider:,
+    model:,
+    system_prompt:,
+    max_tokens:,
+    max_turns:,
+    max_consecutive_errors:,
+    max_context_messages:,
+  ))
 }
 
 fn load_from_path(path: String) -> AppConfig {

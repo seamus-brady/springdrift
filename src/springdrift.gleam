@@ -48,6 +48,15 @@ fn print_help() -> Nil {
   io.println("  --model <name>       Model name (default: provider default)")
   io.println("  --system <prompt>    System prompt")
   io.println("  --max-tokens <n>     Max output tokens (default: 1024)")
+  io.println(
+    "  --max-turns <n>      Max react-loop turns per message (default: 5)",
+  )
+  io.println(
+    "  --max-errors <n>     Max consecutive tool failures before abort (default: 3)",
+  )
+  io.println(
+    "  --max-context <n>    Max messages kept in context window (default: unlimited)",
+  )
   io.println("  --resume             Resume previous session")
   io.println("  --help, -h           Show this help")
   io.println("")
@@ -60,13 +69,19 @@ fn print_help() -> Nil {
   io.println("    \"provider\": \"anthropic\",")
   io.println("    \"model\": \"claude-sonnet-4-20250514\",")
   io.println("    \"system_prompt\": \"You are a helpful assistant.\",")
-  io.println("    \"max_tokens\": 2048")
+  io.println("    \"max_tokens\": 2048,")
+  io.println("    \"max_turns\": 5,")
+  io.println("    \"max_consecutive_errors\": 3,")
+  io.println("    \"max_context_messages\": 50")
   io.println("  }")
 }
 
 fn run(cfg: AppConfig) -> Nil {
   let system = option.unwrap(cfg.system_prompt, "You are a helpful assistant.")
   let max_tokens = option.unwrap(cfg.max_tokens, 1024)
+  let max_turns = option.unwrap(cfg.max_turns, 5)
+  let max_consecutive_errors = option.unwrap(cfg.max_consecutive_errors, 3)
+  let max_context_messages = cfg.max_context_messages
 
   let #(p, model) = select_provider(cfg)
 
@@ -76,7 +91,17 @@ fn run(cfg: AppConfig) -> Nil {
   }
 
   let chat =
-    service.start(p, model, system, max_tokens, builtin.all(), initial_messages)
+    service.start(
+      p,
+      model,
+      system,
+      max_tokens,
+      max_turns,
+      max_consecutive_errors,
+      max_context_messages,
+      builtin.all(),
+      initial_messages,
+    )
   tui.start(chat, p.name, model, initial_messages)
 }
 

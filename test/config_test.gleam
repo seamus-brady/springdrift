@@ -17,6 +17,9 @@ pub fn default_has_all_none_test() {
   cfg.model |> should.equal(None)
   cfg.system_prompt |> should.equal(None)
   cfg.max_tokens |> should.equal(None)
+  cfg.max_turns |> should.equal(None)
+  cfg.max_consecutive_errors |> should.equal(None)
+  cfg.max_context_messages |> should.equal(None)
 }
 
 // ---------------------------------------------------------------------------
@@ -80,6 +83,9 @@ pub fn merge_override_wins_test() {
       model: None,
       system_prompt: None,
       max_tokens: None,
+      max_turns: None,
+      max_consecutive_errors: None,
+      max_context_messages: None,
     )
   let override =
     AppConfig(
@@ -87,6 +93,9 @@ pub fn merge_override_wins_test() {
       model: None,
       system_prompt: None,
       max_tokens: None,
+      max_turns: None,
+      max_consecutive_errors: None,
+      max_context_messages: None,
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("openai"))
@@ -99,6 +108,9 @@ pub fn merge_base_preserved_when_override_none_test() {
       model: Some("claude"),
       system_prompt: None,
       max_tokens: None,
+      max_turns: None,
+      max_consecutive_errors: None,
+      max_context_messages: None,
     )
   let override =
     AppConfig(
@@ -106,6 +118,9 @@ pub fn merge_base_preserved_when_override_none_test() {
       model: None,
       system_prompt: None,
       max_tokens: None,
+      max_turns: None,
+      max_consecutive_errors: None,
+      max_context_messages: None,
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("anthropic"))
@@ -119,6 +134,9 @@ pub fn merge_combines_different_fields_test() {
       model: None,
       system_prompt: None,
       max_tokens: None,
+      max_turns: None,
+      max_consecutive_errors: None,
+      max_context_messages: None,
     )
   let override =
     AppConfig(
@@ -126,6 +144,9 @@ pub fn merge_combines_different_fields_test() {
       model: Some("gpt-4o"),
       system_prompt: Some("Be concise."),
       max_tokens: None,
+      max_turns: None,
+      max_consecutive_errors: None,
+      max_context_messages: None,
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("anthropic"))
@@ -176,4 +197,66 @@ pub fn parse_config_json_model_only_test() {
   let assert Ok(cfg) = result
   cfg.model |> should.equal(Some("gpt-4o-mini"))
   cfg.provider |> should.equal(None)
+}
+
+// ---------------------------------------------------------------------------
+// New numeric config fields
+// ---------------------------------------------------------------------------
+
+pub fn from_args_max_turns_test() {
+  let cfg = config.from_args(["--max-turns", "10"])
+  cfg.max_turns |> should.equal(Some(10))
+}
+
+pub fn from_args_max_errors_test() {
+  let cfg = config.from_args(["--max-errors", "5"])
+  cfg.max_consecutive_errors |> should.equal(Some(5))
+}
+
+pub fn from_args_max_context_test() {
+  let cfg = config.from_args(["--max-context", "50"])
+  cfg.max_context_messages |> should.equal(Some(50))
+}
+
+pub fn from_args_invalid_max_turns_ignored_test() {
+  let cfg = config.from_args(["--max-turns", "nope"])
+  cfg.max_turns |> should.equal(None)
+}
+
+pub fn parse_config_json_new_fields_test() {
+  let json =
+    "{\"max_turns\":8,\"max_consecutive_errors\":4,\"max_context_messages\":100}"
+  let result = config.parse_config_json(json)
+  result |> should.be_ok
+  let assert Ok(cfg) = result
+  cfg.max_turns |> should.equal(Some(8))
+  cfg.max_consecutive_errors |> should.equal(Some(4))
+  cfg.max_context_messages |> should.equal(Some(100))
+}
+
+pub fn merge_new_fields_test() {
+  let base =
+    AppConfig(
+      provider: None,
+      model: None,
+      system_prompt: None,
+      max_tokens: None,
+      max_turns: Some(5),
+      max_consecutive_errors: None,
+      max_context_messages: None,
+    )
+  let override =
+    AppConfig(
+      provider: None,
+      model: None,
+      system_prompt: None,
+      max_tokens: None,
+      max_turns: Some(10),
+      max_consecutive_errors: Some(2),
+      max_context_messages: None,
+    )
+  let merged = config.merge(base, override:)
+  merged.max_turns |> should.equal(Some(10))
+  merged.max_consecutive_errors |> should.equal(Some(2))
+  merged.max_context_messages |> should.equal(None)
 }

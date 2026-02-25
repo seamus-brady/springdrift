@@ -1,4 +1,7 @@
-import chat/service.{type AgentQuestion, type ChatMessage, type ToolEvent, ToolCalling}
+import chat/service.{
+  type AgentQuestion, type ChatMessage, type ToolEvent, ToolCalling,
+}
+import cycle_log.{type CycleData}
 import etch/command
 import etch/stdout
 import etch/style
@@ -6,14 +9,23 @@ import etch/terminal
 import gleam/erlang/process.{type Selector, type Subject}
 import gleam/int
 import gleam/list
+import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import llm/response
-import llm/types.{type LlmError, type LlmResponse, type Message, Assistant, Message, TextContent, User}
+import llm/types.{
+  type LlmError, type LlmResponse, type Message, type Usage, Assistant, Message,
+  TextContent, User,
+}
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+type Tab {
+  ChatTab
+  LogTab
+}
 
 type AgentStatus {
   Idle
@@ -47,6 +59,10 @@ type TuiState {
     notice: String,
     spinner_frame: Int,
     spinner_label: String,
+    tab: Tab,
+    log_cycles: List(CycleData),
+    log_selected: Int,
+    last_usage: Option(Usage),
   )
 }
 
@@ -119,6 +135,10 @@ pub fn start(
       notice: resume_notice,
       spinner_frame: 0,
       spinner_label: "",
+      tab: ChatTab,
+      log_cycles: [],
+      log_selected: 0,
+      last_usage: None,
     )
   render(state)
   event_loop(state)
@@ -153,8 +173,7 @@ fn event_loop(state: TuiState) -> Nil {
     WaitingForLlm ->
       case process.selector_receive(state.selector, 100) {
         Error(Nil) -> {
-          let next =
-            TuiState(..state, spinner_frame: state.spinner_frame + 1)
+          let next = TuiState(..state, spinner_frame: state.spinner_frame + 1)
           render(next)
           event_loop(next)
         }
@@ -189,7 +208,9 @@ fn handle_agent_question(
   question: String,
   reply_to: Subject(String),
 ) -> Nil {
-  continue_loop(TuiState(..state, status: WaitingForInput(question:, reply_to:)))
+  continue_loop(
+    TuiState(..state, status: WaitingForInput(question:, reply_to:)),
+  )
 }
 
 fn handle_tool_event(state: TuiState, name: String) -> Nil {
@@ -199,16 +220,25 @@ fn handle_tool_event(state: TuiState, name: String) -> Nil {
 fn handle_stdin_byte(state: TuiState, byte: String) -> Nil {
   case byte {
     "\u{03}" | "\u{04}" -> do_exit(state)
+    "\u{09}" -> switch_tab(state)
     "\r" | "\n" -> handle_enter(state)
-    "\u{7F}" | "\u{08}" -> continue_loop(handle_backspace(state))
+    "\u{7F}" | "\u{08}" ->
+      case state.tab {
+        LogTab -> event_loop(state)
+        ChatTab -> continue_loop(handle_backspace(state))
+      }
     "\u{1B}" -> handle_escape(state)
     _ ->
-      case is_printable(byte) {
-        True ->
-          continue_loop(
-            TuiState(..state, input_buf: state.input_buf <> byte),
-          )
-        False -> event_loop(state)
+      case state.tab {
+        LogTab -> event_loop(state)
+        ChatTab ->
+          case is_printable(byte) {
+            True ->
+              continue_loop(
+                TuiState(..state, input_buf: state.input_buf <> byte),
+              )
+            False -> event_loop(state)
+          }
       }
   }
 }
@@ -221,9 +251,16 @@ fn handle_escape(state: TuiState) -> Nil {
   let first = process.receive(state.stdin_subj, 50)
   let second = process.receive(state.stdin_subj, 50)
   case first, second {
-    Ok(StdinByte("[")), Ok(StdinByte("A")) -> continue_loop(scroll_up(state, 3))
+    Ok(StdinByte("[")), Ok(StdinByte("A")) ->
+      case state.tab {
+        LogTab -> continue_loop(log_nav_up(state))
+        ChatTab -> continue_loop(scroll_up(state, 3))
+      }
     Ok(StdinByte("[")), Ok(StdinByte("B")) ->
-      continue_loop(scroll_down(state, 3))
+      case state.tab {
+        LogTab -> continue_loop(log_nav_down(state))
+        ChatTab -> continue_loop(scroll_down(state, 3))
+      }
     Ok(StdinByte("[")), Ok(StdinByte("5")) -> {
       let _ = process.receive(state.stdin_subj, 50)
       continue_loop(scroll_up(state, 10))
@@ -253,6 +290,13 @@ fn handle_command(state: TuiState, cmd: String) -> Nil {
 }
 
 fn handle_enter(state: TuiState) -> Nil {
+  case state.tab {
+    LogTab -> handle_log_rewind(state)
+    ChatTab -> handle_chat_enter(state)
+  }
+}
+
+fn handle_chat_enter(state: TuiState) -> Nil {
   case string.trim(state.input_buf) {
     "" -> event_loop(state)
     input_text ->
@@ -317,9 +361,9 @@ fn handle_chat_response(
   state: TuiState,
   result: Result(LlmResponse, LlmError),
 ) -> Nil {
-  let reply_text = case result {
-    Ok(resp) -> response.text(resp)
-    Error(err) -> "[Error: " <> response.error_message(err) <> "]"
+  let #(reply_text, usage) = case result {
+    Ok(resp) -> #(response.text(resp), Some(resp.usage))
+    Error(err) -> #("[Error: " <> response.error_message(err) <> "]", None)
   }
   let asst = Message(role: Assistant, content: [TextContent(text: reply_text)])
   let new_state =
@@ -328,6 +372,7 @@ fn handle_chat_response(
       messages: list.append(state.messages, [asst]),
       status: Idle,
       spinner_label: "",
+      last_usage: usage,
     )
   continue_loop(new_state)
 }
@@ -355,19 +400,30 @@ fn render(state: TuiState) -> Nil {
   stdout.execute([command.MoveTo(0, 0), command.Clear(terminal.All)])
   render_header(state)
   render_separator(state.width, 1)
-  render_messages(state)
-  render_separator(state.width, state.height - 3)
-  render_input(state)
+  case state.tab {
+    ChatTab -> {
+      render_messages(state)
+      render_separator(state.width, state.height - 3)
+      render_input(state)
+    }
+    LogTab -> render_log(state)
+  }
   render_footer(state)
 }
 
 fn render_header(state: TuiState) -> Nil {
+  let tab_bar = case state.tab {
+    ChatTab -> style.bold("[Chat]") <> "  " <> style.dim("[Log]")
+    LogTab -> style.dim("[Chat]") <> "  " <> style.bold("[Log]")
+  }
   let header =
     style.bold(" Springdrift ")
     <> style.dim("── ")
     <> state.provider_name
     <> " │ "
     <> state.model
+    <> "    "
+    <> tab_bar
   stdout.execute([command.MoveTo(0, 0), command.Print(header)])
 }
 
@@ -427,7 +483,11 @@ fn build_message_lines(state: TuiState) -> List(String) {
         "" -> "Thinking\u{2026}"
         name -> "Using: " <> name
       }
-      list.append(msg_lines, ["", label, style.dim("    " <> frame <> " " <> action)])
+      list.append(msg_lines, [
+        "",
+        label,
+        style.dim("    " <> frame <> " " <> action),
+      ])
     }
     WaitingForInput(question:, ..) -> {
       let label = style.bold(style.green("  Assistant"))
@@ -466,11 +526,33 @@ fn render_input(state: TuiState) -> Nil {
 fn render_footer(state: TuiState) -> Nil {
   let footer = case state.notice {
     "" ->
-      case state.status {
-        Idle -> style.dim("  Enter: send   PgUp/PgDn: scroll   /exit: quit   /clear: new session")
-        WaitingForLlm -> style.dim("  Waiting for response\u{2026}   Ctrl-C: quit")
-        WaitingForInput(..) ->
-          style.dim("  Enter: answer question   Ctrl-C: quit")
+      case state.tab {
+        LogTab ->
+          style.dim("  ↑↓: select   Enter: rewind to here   Tab: back to chat")
+        ChatTab ->
+          case state.status {
+            Idle -> {
+              let token_info = case state.last_usage {
+                None -> ""
+                Some(u) ->
+                  style.dim(
+                    "↑"
+                    <> int.to_string(u.input_tokens)
+                    <> "t ↓"
+                    <> int.to_string(u.output_tokens)
+                    <> "t   ",
+                  )
+              }
+              token_info
+              <> style.dim(
+                "Enter: send   PgUp/PgDn: scroll   /exit: quit   /clear: new session   Tab: log",
+              )
+            }
+            WaitingForLlm ->
+              style.dim("  Waiting for response\u{2026}   Ctrl-C: quit")
+            WaitingForInput(..) ->
+              style.dim("  Enter: answer question   Ctrl-C: quit")
+          }
       }
     msg -> style.yellow(msg)
   }
@@ -715,5 +797,145 @@ fn is_printable(byte: String) -> Bool {
       code >= 32 && code <= 126
     }
     _ -> False
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Log tab
+// ---------------------------------------------------------------------------
+
+fn switch_tab(state: TuiState) -> Nil {
+  case state.tab {
+    ChatTab -> {
+      let cycles = cycle_log.load_cycles()
+      let last = int.max(0, list.length(cycles) - 1)
+      continue_loop(
+        TuiState(..state, tab: LogTab, log_cycles: cycles, log_selected: last),
+      )
+    }
+    LogTab -> continue_loop(TuiState(..state, tab: ChatTab))
+  }
+}
+
+fn log_nav_up(state: TuiState) -> TuiState {
+  TuiState(..state, log_selected: int.max(0, state.log_selected - 1))
+}
+
+fn log_nav_down(state: TuiState) -> TuiState {
+  let max_idx = int.max(0, list.length(state.log_cycles) - 1)
+  TuiState(..state, log_selected: int.min(max_idx, state.log_selected + 1))
+}
+
+fn handle_log_rewind(state: TuiState) -> Nil {
+  case state.log_cycles {
+    [] ->
+      continue_loop(
+        TuiState(..state, notice: style.dim("  No cycles to rewind to")),
+      )
+    _ -> {
+      let msgs =
+        cycle_log.messages_for_rewind(state.log_cycles, state.log_selected)
+      process.send(state.chat, service.RestoreMessages(messages: msgs))
+      let num = int.to_string(state.log_selected + 1)
+      let notice = style.dim("  Rewound to cycle #" <> num)
+      continue_loop(
+        TuiState(
+          ..state,
+          tab: ChatTab,
+          messages: msgs,
+          scroll_offset: 0,
+          notice:,
+        ),
+      )
+    }
+  }
+}
+
+fn render_log(state: TuiState) -> Nil {
+  let cycles = state.log_cycles
+  // 3 lines per cycle: header + user + asst
+  let cycle_height = 3
+  let available = state.height - 3
+  let max_visible = int.max(1, available / cycle_height)
+  case list.length(cycles) {
+    0 ->
+      stdout.execute([
+        command.MoveTo(0, 2),
+        command.Print(style.dim("  No cycles logged today.")),
+      ])
+    _ -> {
+      let page = state.log_selected / max_visible
+      let top = page * max_visible
+      let visible = cycles |> list.drop(top) |> list.take(max_visible)
+      print_log_cycles(visible, top, state.log_selected, 2, state.width)
+    }
+  }
+}
+
+fn print_log_cycles(
+  cycles: List(CycleData),
+  base_idx: Int,
+  selected: Int,
+  row: Int,
+  width: Int,
+) -> Nil {
+  case cycles {
+    [] -> Nil
+    [c, ..rest] -> {
+      let sel = base_idx == selected
+      let indicator = case sel {
+        True -> "▶ "
+        False -> "  "
+      }
+      let time = string.slice(c.timestamp, 11, 8)
+      let tools_part = case c.tool_names {
+        [] -> ""
+        names -> style.dim("  [" <> string.join(names, ", ") <> "]")
+      }
+      let token_part = case c.input_tokens + c.output_tokens {
+        0 -> ""
+        _ ->
+          style.dim(
+            "  ↑"
+            <> int.to_string(c.input_tokens)
+            <> "t ↓"
+            <> int.to_string(c.output_tokens)
+            <> "t",
+          )
+      }
+      let hdr_text =
+        indicator
+        <> "#"
+        <> int.to_string(base_idx + 1)
+        <> "  "
+        <> time
+        <> tools_part
+        <> token_part
+      let hdr_line = case sel {
+        True -> style.bold(hdr_text)
+        False -> style.dim(hdr_text)
+      }
+      let user_text = truncate_text("    You: " <> c.human_input, width - 2)
+      let asst_text = case c.response_text {
+        "" -> style.dim("    Asst: \u{2026}")
+        t -> style.dim("    Asst: ") <> truncate_text(t, width - 11)
+      }
+      stdout.execute([
+        command.MoveTo(0, row),
+        command.Print(hdr_line),
+        command.MoveTo(0, row + 1),
+        command.Print(user_text),
+        command.MoveTo(0, row + 2),
+        command.Print(asst_text),
+      ])
+      print_log_cycles(rest, base_idx + 1, selected, row + 3, width)
+    }
+  }
+}
+
+fn truncate_text(text: String, max_width: Int) -> String {
+  case string.length(text) > max_width {
+    True -> string.slice(text, 0, int.max(0, max_width - 1)) <> "\u{2026}"
+    False -> text
   }
 }

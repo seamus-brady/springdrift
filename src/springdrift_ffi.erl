@@ -1,6 +1,7 @@
 -module(springdrift_ffi).
 -export([read_line/0, get_env/1, get_args/0, read_char/0,
-         start_spinner/1, stop_spinner/0]).
+         start_spinner/1, stop_spinner/0,
+         generate_uuid/0, get_datetime/0, get_date/0]).
 
 %% Read one line from stdin.
 %% Returns {ok, Binary} (including trailing newline) or {error, nil} on EOF.
@@ -65,6 +66,29 @@ stop_spinner() ->
                 nil
             end
     end.
+
+%% Generate a UUID v4 string, e.g. "550e8400-e29b-41d4-a716-446655440000".
+generate_uuid() ->
+    <<A:32, B:16, _:4, C:12, _:2, YBits:2, D:12, E:48>> = crypto:strong_rand_bytes(16),
+    Y = 8 + YBits,
+    Hex = fun(N, W) ->
+        S = string:to_lower(integer_to_list(N, 16)),
+        string:right(S, W, $0)
+    end,
+    iolist_to_binary([Hex(A,8), $-, Hex(B,4), $-, $4, Hex(C,3), $-, Hex(Y,1), Hex(D,3), $-, Hex(E,12)]).
+
+%% Return ISO 8601 local datetime, e.g. "2026-02-24T14:30:00".
+get_datetime() ->
+    {{Y, Mo, D}, {H, Mi, S}} = calendar:local_time(),
+    Pad = fun(N, W) -> string:right(integer_to_list(N), W, $0) end,
+    iolist_to_binary([Pad(Y,4), $-, Pad(Mo,2), $-, Pad(D,2), $T,
+                      Pad(H,2), $:, Pad(Mi,2), $:, Pad(S,2)]).
+
+%% Return the local date as a string, e.g. "2026-02-24".
+get_date() ->
+    {{Y, Mo, D}, _} = calendar:local_time(),
+    Pad = fun(N, W) -> string:right(integer_to_list(N), W, $0) end,
+    iolist_to_binary([Pad(Y,4), $-, Pad(Mo,2), $-, Pad(D,2)]).
 
 %% Read exactly one byte from stdin (blocking). Works after enter_raw().
 read_char() ->
