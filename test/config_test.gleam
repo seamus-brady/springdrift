@@ -20,6 +20,10 @@ pub fn default_has_all_none_test() {
   cfg.max_turns |> should.equal(None)
   cfg.max_consecutive_errors |> should.equal(None)
   cfg.max_context_messages |> should.equal(None)
+  cfg.task_model |> should.equal(None)
+  cfg.reasoning_model |> should.equal(None)
+  cfg.prompt_on_complex |> should.equal(None)
+  cfg.data_dir |> should.equal(None)
 }
 
 // ---------------------------------------------------------------------------
@@ -86,6 +90,9 @@ pub fn merge_override_wins_test() {
       max_turns: None,
       max_consecutive_errors: None,
       max_context_messages: None,
+      task_model: None,
+      reasoning_model: None,
+      prompt_on_complex: None,
       data_dir: None,
     )
   let override =
@@ -97,6 +104,9 @@ pub fn merge_override_wins_test() {
       max_turns: None,
       max_consecutive_errors: None,
       max_context_messages: None,
+      task_model: None,
+      reasoning_model: None,
+      prompt_on_complex: None,
       data_dir: None,
     )
   let merged = config.merge(base, override:)
@@ -113,6 +123,9 @@ pub fn merge_base_preserved_when_override_none_test() {
       max_turns: None,
       max_consecutive_errors: None,
       max_context_messages: None,
+      task_model: None,
+      reasoning_model: None,
+      prompt_on_complex: None,
       data_dir: None,
     )
   let override =
@@ -124,6 +137,9 @@ pub fn merge_base_preserved_when_override_none_test() {
       max_turns: None,
       max_consecutive_errors: None,
       max_context_messages: None,
+      task_model: None,
+      reasoning_model: None,
+      prompt_on_complex: None,
       data_dir: None,
     )
   let merged = config.merge(base, override:)
@@ -141,6 +157,9 @@ pub fn merge_combines_different_fields_test() {
       max_turns: None,
       max_consecutive_errors: None,
       max_context_messages: None,
+      task_model: None,
+      reasoning_model: None,
+      prompt_on_complex: None,
       data_dir: None,
     )
   let override =
@@ -152,6 +171,9 @@ pub fn merge_combines_different_fields_test() {
       max_turns: None,
       max_consecutive_errors: None,
       max_context_messages: None,
+      task_model: None,
+      reasoning_model: None,
+      prompt_on_complex: None,
       data_dir: None,
     )
   let merged = config.merge(base, override:)
@@ -250,6 +272,9 @@ pub fn merge_new_fields_test() {
       max_turns: Some(5),
       max_consecutive_errors: None,
       max_context_messages: None,
+      task_model: None,
+      reasoning_model: None,
+      prompt_on_complex: None,
       data_dir: None,
     )
   let override =
@@ -261,12 +286,151 @@ pub fn merge_new_fields_test() {
       max_turns: Some(10),
       max_consecutive_errors: Some(2),
       max_context_messages: None,
+      task_model: None,
+      reasoning_model: None,
+      prompt_on_complex: None,
       data_dir: None,
     )
   let merged = config.merge(base, override:)
   merged.max_turns |> should.equal(Some(10))
   merged.max_consecutive_errors |> should.equal(Some(2))
   merged.max_context_messages |> should.equal(None)
+}
+
+// ---------------------------------------------------------------------------
+// Model switching config fields
+// ---------------------------------------------------------------------------
+
+pub fn from_args_task_model_test() {
+  let cfg = config.from_args(["--task-model", "claude-haiku-4-5-20251001"])
+  cfg.task_model |> should.equal(Some("claude-haiku-4-5-20251001"))
+}
+
+pub fn from_args_reasoning_model_test() {
+  let cfg = config.from_args(["--reasoning-model", "claude-opus-4-6"])
+  cfg.reasoning_model |> should.equal(Some("claude-opus-4-6"))
+}
+
+pub fn from_args_no_model_prompt_test() {
+  let cfg = config.from_args(["--no-model-prompt"])
+  cfg.prompt_on_complex |> should.equal(Some(False))
+}
+
+pub fn from_args_no_model_prompt_does_not_set_task_model_test() {
+  let cfg = config.from_args(["--no-model-prompt"])
+  cfg.task_model |> should.equal(None)
+  cfg.reasoning_model |> should.equal(None)
+}
+
+pub fn parse_config_json_task_model_test() {
+  let result =
+    config.parse_config_json("{\"task_model\":\"claude-haiku-4-5-20251001\"}")
+  result |> should.be_ok
+  let assert Ok(cfg) = result
+  cfg.task_model |> should.equal(Some("claude-haiku-4-5-20251001"))
+}
+
+pub fn parse_config_json_reasoning_model_test() {
+  let result =
+    config.parse_config_json("{\"reasoning_model\":\"claude-opus-4-6\"}")
+  result |> should.be_ok
+  let assert Ok(cfg) = result
+  cfg.reasoning_model |> should.equal(Some("claude-opus-4-6"))
+}
+
+pub fn parse_config_json_prompt_on_complex_true_test() {
+  let result = config.parse_config_json("{\"prompt_on_complex\":true}")
+  result |> should.be_ok
+  let assert Ok(cfg) = result
+  cfg.prompt_on_complex |> should.equal(Some(True))
+}
+
+pub fn parse_config_json_prompt_on_complex_false_test() {
+  let result = config.parse_config_json("{\"prompt_on_complex\":false}")
+  result |> should.be_ok
+  let assert Ok(cfg) = result
+  cfg.prompt_on_complex |> should.equal(Some(False))
+}
+
+pub fn parse_config_json_all_model_fields_test() {
+  let json =
+    "{\"task_model\":\"gpt-4o-mini\",\"reasoning_model\":\"gpt-4o\",\"prompt_on_complex\":true}"
+  let result = config.parse_config_json(json)
+  result |> should.be_ok
+  let assert Ok(cfg) = result
+  cfg.task_model |> should.equal(Some("gpt-4o-mini"))
+  cfg.reasoning_model |> should.equal(Some("gpt-4o"))
+  cfg.prompt_on_complex |> should.equal(Some(True))
+}
+
+pub fn merge_model_fields_override_wins_test() {
+  let base =
+    AppConfig(
+      provider: None,
+      model: None,
+      system_prompt: None,
+      max_tokens: None,
+      max_turns: None,
+      max_consecutive_errors: None,
+      max_context_messages: None,
+      task_model: Some("base-task"),
+      reasoning_model: Some("base-reasoning"),
+      prompt_on_complex: Some(True),
+      data_dir: None,
+    )
+  let override =
+    AppConfig(
+      provider: None,
+      model: None,
+      system_prompt: None,
+      max_tokens: None,
+      max_turns: None,
+      max_consecutive_errors: None,
+      max_context_messages: None,
+      task_model: Some("override-task"),
+      reasoning_model: None,
+      prompt_on_complex: Some(False),
+      data_dir: None,
+    )
+  let merged = config.merge(base, override:)
+  merged.task_model |> should.equal(Some("override-task"))
+  merged.reasoning_model |> should.equal(Some("base-reasoning"))
+  merged.prompt_on_complex |> should.equal(Some(False))
+}
+
+pub fn merge_model_fields_base_preserved_test() {
+  let base =
+    AppConfig(
+      provider: None,
+      model: None,
+      system_prompt: None,
+      max_tokens: None,
+      max_turns: None,
+      max_consecutive_errors: None,
+      max_context_messages: None,
+      task_model: Some("haiku"),
+      reasoning_model: Some("opus"),
+      prompt_on_complex: Some(True),
+      data_dir: None,
+    )
+  let override =
+    AppConfig(
+      provider: None,
+      model: None,
+      system_prompt: None,
+      max_tokens: None,
+      max_turns: None,
+      max_consecutive_errors: None,
+      max_context_messages: None,
+      task_model: None,
+      reasoning_model: None,
+      prompt_on_complex: None,
+      data_dir: None,
+    )
+  let merged = config.merge(base, override:)
+  merged.task_model |> should.equal(Some("haiku"))
+  merged.reasoning_model |> should.equal(Some("opus"))
+  merged.prompt_on_complex |> should.equal(Some(True))
 }
 
 // ---------------------------------------------------------------------------
@@ -298,6 +462,9 @@ pub fn merge_data_dir_override_wins_test() {
       max_turns: None,
       max_consecutive_errors: None,
       max_context_messages: None,
+      task_model: None,
+      reasoning_model: None,
+      prompt_on_complex: None,
       data_dir: Some("/base/dir"),
     )
   let override =
@@ -309,6 +476,9 @@ pub fn merge_data_dir_override_wins_test() {
       max_turns: None,
       max_consecutive_errors: None,
       max_context_messages: None,
+      task_model: None,
+      reasoning_model: None,
+      prompt_on_complex: None,
       data_dir: Some("/override/dir"),
     )
   let merged = config.merge(base, override:)
@@ -325,6 +495,9 @@ pub fn merge_data_dir_base_preserved_when_override_none_test() {
       max_turns: None,
       max_consecutive_errors: None,
       max_context_messages: None,
+      task_model: None,
+      reasoning_model: None,
+      prompt_on_complex: None,
       data_dir: Some("/base/dir"),
     )
   let override =
@@ -336,6 +509,9 @@ pub fn merge_data_dir_base_preserved_when_override_none_test() {
       max_turns: None,
       max_consecutive_errors: None,
       max_context_messages: None,
+      task_model: None,
+      reasoning_model: None,
+      prompt_on_complex: None,
       data_dir: None,
     )
   let merged = config.merge(base, override:)

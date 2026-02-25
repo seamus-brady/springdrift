@@ -125,6 +125,30 @@ pub fn log_tool_call(cycle_id: String, call: ToolCall) -> Nil {
   )
 }
 
+pub fn log_classification(
+  cycle_id: String,
+  complexity: String,
+  suggested_model: String,
+  prompted_user: Bool,
+  user_confirmed: option.Option(Bool),
+) -> Nil {
+  let confirmed_val = case user_confirmed {
+    None -> json.null()
+    Some(b) -> json.bool(b)
+  }
+  append_entry(
+    json.object([
+      #("cycle_id", json.string(cycle_id)),
+      #("timestamp", json.string(get_datetime())),
+      #("type", json.string("classification")),
+      #("complexity", json.string(complexity)),
+      #("suggested_model", json.string(suggested_model)),
+      #("prompted_user", json.bool(prompted_user)),
+      #("user_confirmed", confirmed_val),
+    ]),
+  )
+}
+
 pub fn log_tool_result(cycle_id: String, result: ToolResult) -> Nil {
   let #(tool_use_id, success, content) = case result {
     ToolSuccess(tool_use_id:, content:) -> #(tool_use_id, True, content)
@@ -253,6 +277,7 @@ pub type CycleData {
     response_text: String,
     input_tokens: Int,
     output_tokens: Int,
+    complexity: Option(String),
   )
 }
 
@@ -266,6 +291,7 @@ type CycleAcc {
     response_text: String,
     input_tokens: Int,
     output_tokens: Int,
+    complexity: Option(String),
   )
 }
 
@@ -283,6 +309,7 @@ type RawEvent {
     output_tokens: Int,
   )
   ToolCallEvent(cycle_id: String, name: String)
+  ClassificationEvent(cycle_id: String, complexity: String)
   OtherEvent
 }
 
@@ -350,6 +377,7 @@ fn build_cycles(events: List(RawEvent)) -> List(CycleData) {
             response_text: "",
             input_tokens: 0,
             output_tokens: 0,
+            complexity: None,
           ),
         ])
       LlmResponseEvent(cycle_id:, content_text:, input_tokens:, output_tokens:) ->
@@ -372,6 +400,13 @@ fn build_cycles(events: List(RawEvent)) -> List(CycleData) {
             False -> c
           }
         })
+      ClassificationEvent(cycle_id:, complexity:) ->
+        list.map(acc, fn(c) {
+          case c.cycle_id == cycle_id {
+            True -> CycleAcc(..c, complexity: Some(complexity))
+            False -> c
+          }
+        })
       OtherEvent -> acc
     }
   })
@@ -385,6 +420,7 @@ fn build_cycles(events: List(RawEvent)) -> List(CycleData) {
       response_text: c.response_text,
       input_tokens: c.input_tokens,
       output_tokens: c.output_tokens,
+      complexity: c.complexity,
     )
   })
 }
@@ -422,6 +458,11 @@ fn event_decoder() -> decode.Decoder(RawEvent) {
       use cycle_id <- decode.field("cycle_id", decode.string)
       use name <- decode.field("name", decode.string)
       decode.success(ToolCallEvent(cycle_id:, name:))
+    }
+    "classification" -> {
+      use cycle_id <- decode.field("cycle_id", decode.string)
+      use complexity <- decode.field("complexity", decode.string)
+      decode.success(ClassificationEvent(cycle_id:, complexity:))
     }
     _ -> decode.success(OtherEvent)
   }

@@ -46,28 +46,43 @@ fn print_help() -> Nil {
   io.println("")
   io.println("Options:")
   io.println(
-    "  --provider <name>    Provider: anthropic, openrouter, openai (default: auto-detect)",
-  )
-  io.println("  --model <name>       Model name (default: provider default)")
-  io.println("  --system <prompt>    System prompt")
-  io.println("  --max-tokens <n>     Max output tokens (default: 1024)")
-  io.println(
-    "  --max-turns <n>      Max react-loop turns per message (default: 5)",
+    "  --provider <name>         Provider: anthropic, openrouter, openai (default: auto-detect)",
   )
   io.println(
-    "  --max-errors <n>     Max consecutive tool failures before abort (default: 3)",
+    "  --model <name>            Model name (default: provider default)",
+  )
+  io.println("  --system <prompt>         System prompt")
+  io.println("  --max-tokens <n>          Max output tokens (default: 1024)")
+  io.println(
+    "  --max-turns <n>           Max react-loop turns per message (default: 5)",
   )
   io.println(
-    "  --max-context <n>    Max messages kept in context window (default: unlimited)",
+    "  --max-errors <n>          Max consecutive tool failures before abort (default: 3)",
   )
-  io.println("  --resume             Resume previous session")
   io.println(
-    "  --data-dir <path>    Directory for session and cycle-log files",
+    "  --max-context <n>         Max messages kept in context window (default: unlimited)",
   )
-  io.println("                       (default: ~/.config/springdrift)")
-  io.println("                       Override with SPRINGDRIFT_DATA_DIR env var")
-  io.println("                       Use a local path (e.g. .springdrift) for dev")
-  io.println("  --help, -h           Show this help")
+  io.println(
+    "  --task-model <name>       Model for simple queries (default: provider-specific)",
+  )
+  io.println(
+    "  --reasoning-model <name>  Model for complex queries (default: provider-specific)",
+  )
+  io.println(
+    "  --no-model-prompt         Auto-switch to reasoning model without prompting",
+  )
+  io.println("  --resume                  Resume previous session")
+  io.println(
+    "  --data-dir <path>         Directory for session and cycle-log files",
+  )
+  io.println("                            (default: ~/.config/springdrift)")
+  io.println(
+    "                            Override with SPRINGDRIFT_DATA_DIR env var",
+  )
+  io.println(
+    "                            Use a local path (e.g. .springdrift) for dev",
+  )
+  io.println("  --help, -h                Show this help")
   io.println("")
   io.println("Config files (checked in priority order, local overrides user):")
   io.println("  .springdrift.json")
@@ -87,7 +102,10 @@ fn print_help() -> Nil {
   io.println("    \"max_tokens\": 2048,")
   io.println("    \"max_turns\": 5,")
   io.println("    \"max_consecutive_errors\": 3,")
-  io.println("    \"max_context_messages\": 50")
+  io.println("    \"max_context_messages\": 50,")
+  io.println("    \"task_model\": \"claude-haiku-4-5-20251001\",")
+  io.println("    \"reasoning_model\": \"claude-opus-4-6\",")
+  io.println("    \"prompt_on_complex\": true")
   io.println("  }")
 }
 
@@ -103,8 +121,14 @@ fn run(cfg: AppConfig) -> Nil {
   let max_turns = option.unwrap(cfg.max_turns, 5)
   let max_consecutive_errors = option.unwrap(cfg.max_consecutive_errors, 3)
   let max_context_messages = cfg.max_context_messages
+  let prompt_on_complex = option.unwrap(cfg.prompt_on_complex, True)
 
-  let #(p, model) = select_provider(cfg)
+  let #(p, model, default_task_model, default_reasoning_model) =
+    select_provider(cfg)
+
+  let task_model = option.unwrap(cfg.task_model, default_task_model)
+  let reasoning_model =
+    option.unwrap(cfg.reasoning_model, default_reasoning_model)
 
   let initial_messages = case list.contains(get_startup_args(), "--resume") {
     True -> storage.load()
@@ -122,22 +146,25 @@ fn run(cfg: AppConfig) -> Nil {
       max_context_messages,
       builtin.all(),
       initial_messages,
+      task_model,
+      reasoning_model,
+      prompt_on_complex,
     )
-  tui.start(chat, notice_channel, p.name, model, initial_messages)
+  tui.start(chat, notice_channel, p.name, model, task_model, reasoning_model, initial_messages)
 }
 
-fn select_provider(cfg: AppConfig) -> #(Provider, String) {
+fn select_provider(cfg: AppConfig) -> #(Provider, String, String, String) {
   case cfg.provider {
     option.Some("anthropic") -> {
       case anthropic_adapter.provider() {
         Ok(p) -> {
           let m = option.unwrap(cfg.model, anthropic_adapter.claude_sonnet_4)
           io.println("Provider : Anthropic (" <> m <> ")")
-          #(p, m)
+          #(p, m, "claude-haiku-4-5-20251001", "claude-opus-4-6")
         }
         Error(_) -> {
           io.println("Error: ANTHROPIC_API_KEY not set. Falling back to mock.")
-          #(mock_provider(), "mock-model")
+          #(mock_provider(), "mock-model", "mock-model", "mock-model")
         }
       }
     }
@@ -146,11 +173,11 @@ fn select_provider(cfg: AppConfig) -> #(Provider, String) {
         Ok(p) -> {
           let m = option.unwrap(cfg.model, openai_adapter.gpt_4o)
           io.println("Provider : OpenRouter (" <> m <> ")")
-          #(p, m)
+          #(p, m, openai_adapter.gpt_4o_mini, openai_adapter.gpt_4o)
         }
         Error(_) -> {
           io.println("Error: OPENROUTER_API_KEY not set. Falling back to mock.")
-          #(mock_provider(), "mock-model")
+          #(mock_provider(), "mock-model", "mock-model", "mock-model")
         }
       }
     }
@@ -159,15 +186,20 @@ fn select_provider(cfg: AppConfig) -> #(Provider, String) {
         Ok(p) -> {
           let m = option.unwrap(cfg.model, openai_adapter.gpt_4o)
           io.println("Provider : OpenAI (" <> m <> ")")
-          #(p, m)
+          #(p, m, openai_adapter.gpt_4o_mini, openai_adapter.gpt_4o)
         }
         Error(_) -> {
           io.println("Error: OPENAI_API_KEY not set. Falling back to mock.")
-          #(mock_provider(), "mock-model")
+          #(mock_provider(), "mock-model", "mock-model", "mock-model")
         }
       }
     }
-    option.Some("mock") -> #(mock_provider(), "mock-model")
+    option.Some("mock") -> #(
+      mock_provider(),
+      "mock-model",
+      "mock-model",
+      "mock-model",
+    )
     option.Some(unknown) -> {
       io.println("Unknown provider \"" <> unknown <> "\". Using auto-detect.")
       auto_detect(cfg.model)
@@ -176,33 +208,35 @@ fn select_provider(cfg: AppConfig) -> #(Provider, String) {
   }
 }
 
-fn auto_detect(model_override: option.Option(String)) -> #(Provider, String) {
+fn auto_detect(
+  model_override: option.Option(String),
+) -> #(Provider, String, String, String) {
   case anthropic_adapter.provider() {
     Ok(ap) -> {
       let m = option.unwrap(model_override, anthropic_adapter.claude_sonnet_4)
       io.println("Provider : Anthropic (" <> m <> ")")
-      #(ap, m)
+      #(ap, m, "claude-haiku-4-5-20251001", "claude-opus-4-6")
     }
     Error(_) ->
       case openai_adapter.provider_from_openrouter_env() {
         Ok(op) -> {
           let m = option.unwrap(model_override, openai_adapter.gpt_4o)
           io.println("Provider : OpenRouter (" <> m <> ")")
-          #(op, m)
+          #(op, m, openai_adapter.gpt_4o_mini, openai_adapter.gpt_4o)
         }
         Error(_) ->
           case openai_adapter.provider_from_env() {
             Ok(op) -> {
               let m = option.unwrap(model_override, openai_adapter.gpt_4o)
               io.println("Provider : OpenAI (" <> m <> ")")
-              #(op, m)
+              #(op, m, openai_adapter.gpt_4o_mini, openai_adapter.gpt_4o)
             }
             Error(_) -> {
               io.println("Provider : mock")
               io.println(
                 "           (set ANTHROPIC_API_KEY or OPENROUTER_API_KEY to use a real LLM)",
               )
-              #(mock_provider(), "mock-model")
+              #(mock_provider(), "mock-model", "mock-model", "mock-model")
             }
           }
       }

@@ -13,7 +13,10 @@
 ////     "max_tokens": 2048,
 ////     "max_turns": 5,
 ////     "max_consecutive_errors": 3,
-////     "max_context_messages": 50
+////     "max_context_messages": 50,
+////     "task_model": "claude-haiku-4-5-20251001",
+////     "reasoning_model": "claude-opus-4-6",
+////     "prompt_on_complex": true
 ////   }
 
 import gleam/dynamic/decode
@@ -36,6 +39,9 @@ pub type AppConfig {
     max_turns: Option(Int),
     max_consecutive_errors: Option(Int),
     max_context_messages: Option(Int),
+    task_model: Option(String),
+    reasoning_model: Option(String),
+    prompt_on_complex: Option(Bool),
     data_dir: Option(String),
   )
 }
@@ -64,6 +70,9 @@ pub fn default() -> AppConfig {
     max_turns: None,
     max_consecutive_errors: None,
     max_context_messages: None,
+    task_model: None,
+    reasoning_model: None,
+    prompt_on_complex: None,
     data_dir: None,
   )
 }
@@ -84,6 +93,15 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       override_cfg.max_context_messages,
       base.max_context_messages,
     ),
+    task_model: option.or(override_cfg.task_model, base.task_model),
+    reasoning_model: option.or(
+      override_cfg.reasoning_model,
+      base.reasoning_model,
+    ),
+    prompt_on_complex: option.or(
+      override_cfg.prompt_on_complex,
+      base.prompt_on_complex,
+    ),
     data_dir: option.or(override_cfg.data_dir, base.data_dir),
   )
 }
@@ -91,14 +109,17 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
 /// Parse CLI flags into an AppConfig. Unknown flags are silently ignored.
 ///
 /// Recognised flags:
-///   --provider <name>      anthropic | openrouter | openai
-///   --model    <name>      any model identifier
-///   --system   <prompt>    system prompt string
-///   --max-tokens <n>       integer — max output tokens per LLM call
-///   --max-turns <n>        integer — max react-loop turns per user message (default 5)
-///   --max-errors <n>       integer — max consecutive tool failures before abort (default 3)
-///   --max-context <n>      integer — max messages kept in context window (default unlimited)
-///   --data-dir <path>      directory for session and cycle-log files (default: ~/.config/springdrift)
+///   --provider <name>         anthropic | openrouter | openai
+///   --model    <name>         any model identifier
+///   --system   <prompt>       system prompt string
+///   --max-tokens <n>          integer — max output tokens per LLM call
+///   --max-turns <n>           integer — max react-loop turns per user message (default 5)
+///   --max-errors <n>          integer — max consecutive tool failures before abort (default 3)
+///   --max-context <n>         integer — max messages kept in context window (default unlimited)
+///   --task-model <name>       model to use for simple queries
+///   --reasoning-model <name>  model to use for complex queries
+///   --no-model-prompt         auto-switch to reasoning model without prompting
+///   --data-dir <path>         directory for session and cycle-log files (default: ~/.config/springdrift)
 pub fn from_args(args: List(String)) -> AppConfig {
   do_parse_args(args, default())
 }
@@ -161,6 +182,12 @@ fn do_parse_args(args: List(String), acc: AppConfig) -> AppConfig {
           do_parse_args(rest, AppConfig(..acc, max_context_messages: Some(n)))
         Error(_) -> do_parse_args(rest, acc)
       }
+    ["--task-model", value, ..rest] ->
+      do_parse_args(rest, AppConfig(..acc, task_model: Some(value)))
+    ["--reasoning-model", value, ..rest] ->
+      do_parse_args(rest, AppConfig(..acc, reasoning_model: Some(value)))
+    ["--no-model-prompt", ..rest] ->
+      do_parse_args(rest, AppConfig(..acc, prompt_on_complex: Some(False)))
     ["--data-dir", value, ..rest] ->
       do_parse_args(rest, AppConfig(..acc, data_dir: Some(value)))
     [_, ..rest] -> do_parse_args(rest, acc)
@@ -203,6 +230,21 @@ fn config_decoder() -> decode.Decoder(AppConfig) {
     None,
     decode.int |> decode.map(Some),
   )
+  use task_model <- decode.optional_field(
+    "task_model",
+    None,
+    decode.string |> decode.map(Some),
+  )
+  use reasoning_model <- decode.optional_field(
+    "reasoning_model",
+    None,
+    decode.string |> decode.map(Some),
+  )
+  use prompt_on_complex <- decode.optional_field(
+    "prompt_on_complex",
+    None,
+    decode.bool |> decode.map(Some),
+  )
   use data_dir <- decode.optional_field(
     "data_dir",
     None,
@@ -216,6 +258,9 @@ fn config_decoder() -> decode.Decoder(AppConfig) {
     max_turns:,
     max_consecutive_errors:,
     max_context_messages:,
+    task_model:,
+    reasoning_model:,
+    prompt_on_complex:,
     data_dir:,
   ))
 }
