@@ -150,7 +150,15 @@ fn run(cfg: AppConfig) -> Nil {
       reasoning_model,
       prompt_on_complex,
     )
-  tui.start(chat, notice_channel, p.name, model, task_model, reasoning_model, initial_messages)
+  tui.start(
+    chat,
+    notice_channel,
+    p.name,
+    model,
+    task_model,
+    reasoning_model,
+    initial_messages,
+  )
 }
 
 fn select_provider(cfg: AppConfig) -> #(Provider, String, String, String) {

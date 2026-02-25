@@ -112,9 +112,10 @@ pub fn calculator_invalid_input_test() {
   let result =
     builtin.execute(make_call("c7", "calculator", "{\"bad\":\"input\"}"))
   result
-  |> should.equal(
-    ToolFailure(tool_use_id: "c7", error: "Invalid calculator input"),
-  )
+  |> should.equal(ToolFailure(
+    tool_use_id: "c7",
+    error: "Invalid calculator input",
+  ))
 }
 
 // ---------------------------------------------------------------------------
@@ -124,7 +125,8 @@ pub fn calculator_invalid_input_test() {
 pub fn unknown_tool_test() {
   let result = builtin.execute(make_call("u1", "nonexistent_tool", "{}"))
   result
-  |> should.equal(
-    ToolFailure(tool_use_id: "u1", error: "Unknown tool: nonexistent_tool"),
-  )
+  |> should.equal(ToolFailure(
+    tool_use_id: "u1",
+    error: "Unknown tool: nonexistent_tool",
+  ))
 }
