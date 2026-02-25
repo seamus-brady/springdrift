@@ -4,7 +4,9 @@ import gleam/int
 import gleam/json
 import gleam/string
 import llm/tool
-import llm/types.{type Tool, type ToolCall, type ToolResult, ToolFailure, ToolSuccess}
+import llm/types.{
+  type Tool, type ToolCall, type ToolResult, ToolFailure, ToolSuccess,
+}
 
 // ---------------------------------------------------------------------------
 // Tool definitions
@@ -54,8 +56,7 @@ pub fn date_tool() -> Tool {
 pub fn execute(call: ToolCall) -> ToolResult {
   case call.name {
     "calculator" -> run_calculator(call)
-    "get_today_date" ->
-      ToolSuccess(tool_use_id: call.id, content: today_iso())
+    "get_today_date" -> ToolSuccess(tool_use_id: call.id, content: today_iso())
     _ -> ToolFailure(tool_use_id: call.id, error: "Unknown tool: " <> call.name)
   }
 }
@@ -85,15 +86,11 @@ fn run_calculator(call: ToolCall) -> ToolResult {
         "*" -> ok_result(call.id, a *. b)
         "/" ->
           case b == 0.0 {
-            True ->
-              ToolFailure(tool_use_id: call.id, error: "Division by zero")
+            True -> ToolFailure(tool_use_id: call.id, error: "Division by zero")
             False -> ok_result(call.id, a /. b)
           }
         _ ->
-          ToolFailure(
-            tool_use_id: call.id,
-            error: "Unknown operator: " <> op,
-          )
+          ToolFailure(tool_use_id: call.id, error: "Unknown operator: " <> op)
       }
   }
 }

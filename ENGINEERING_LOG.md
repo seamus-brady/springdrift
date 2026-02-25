@@ -465,11 +465,345 @@ state, no locks.
 
 ---
 
+### `immutable-log` branch — Cycle logging + Log tab (Feb 24)
+
+**Files changed:** `src/springdrift_ffi.erl`, `src/cycle_log.gleam` (new),
+`src/chat/service.gleam`, `src/tui.gleam`.
+
+---
+
+#### Cycle logging (`src/cycle_log.gleam`)
+
+Every conversation cycle (user message → react loop → final response) is assigned a
+UUID v4 and logged as JSON-L to `cycle-log/YYYY-MM-DD.jsonl` in the project root.
+The log is complete enough to replay any LLM call offline.
+
+**Five event types per cycle:**
+
+| Type | Payload |
+|---|---|
+| `human_input` | `text` |
+| `llm_request` | `model`, `system`, `max_tokens`, `messages[]`, `tools[]` |
+| `llm_response` | `response_id`, `model`, `stop_reason`, `content[]`, token counts |
+| `tool_call` | `tool_use_id`, `name`, `input` (raw JSON string) |
+| `tool_result` | `tool_use_id`, `success`, `content` |
+
+All entries share `cycle_id` (UUID v4) and `timestamp` (ISO 8601 local time).
+
+**Why JSON-L?** One JSON object per line means `tail -f` works, `grep` works, and
+partial writes from a crash leave all prior lines intact. A single JSON array would
+require reading the whole file to append.
+
+**`cycle_id` propagation path:**
+
+```
+SendMessage
+  → cycle_log.generate_uuid()          // new UUID per user message
+  → cycle_log.log_human_input(id, text)
+  → react_loop(..., cycle_id)           // threaded through all turns
+      → log_llm_request / log_llm_response  // around each LLM call
+      → log_tool_call / log_tool_result     // around each tool execution
+```
+
+**Log directory** is `cycle-log/` relative to CWD (project root), not buried in
+`~/.config`. This keeps logs inspectable alongside the source tree and avoids
+path-resolution complexity.
+
+**New Erlang FFI (`src/springdrift_ffi.erl`):**
+
+Three functions added to support logging:
+
+- `generate_uuid/0` — UUID v4 via `crypto:strong_rand_bytes(16)`. Bit extraction:
+  `<<A:32, B:16, _:4, C:12, _:2, YBits:2, D:12, E:48>>`. Version nibble hardcoded
+  as literal `"4"`; variant nibble = `8 + YBits` (gives `8`–`b`). Formatted with a
+  local `Hex/2` fun using `string:to_lower(integer_to_list(N, 16))` + `string:right`
+  for zero-padding.
+- `get_datetime/0` — ISO 8601 local datetime via `calendar:local_time/0`, zero-padded
+  with `string:right(integer_to_list(N), W, $0)`.
+- `get_date/0` — date-only string from the same call, used as the log filename.
+
+**Encoders in `cycle_log.gleam`** are self-contained (not imported from `storage.gleam`)
+so the logging module has no coupling to session-persistence internals. Encoders cover
+all `ContentBlock` variants, `Tool` schemas (with `ParameterSchema` and `PropertyType`),
+and `StopReason`.
+
+---
+
+#### Log tab + cycle rewind (`src/tui.gleam`)
+
+A second tab added to the TUI, switchable with the **Tab** key.
+
+**Tab type:**
+
+```gleam
+type Tab { ChatTab | LogTab }
+```
+
+Three new fields on `TuiState`: `tab`, `log_cycles: List(CycleData)`,
+`log_selected: Int`.
+
+**Log tab interaction:**
+
+| Key | Action |
+|---|---|
+| Tab | Switch between Chat and Log tabs |
+| ↑ / ↓ | Select previous / next cycle |
+| Enter | Rewind conversation to selected cycle |
+
+Switching to the Log tab calls `cycle_log.load_cycles()` to refresh from disk,
+and defaults selection to the most recent cycle.
+
+**Cycle list rendering** — 3 lines per cycle:
+1. `▶ #N  HH:MM:SS  [tool1, tool2]` (bold if selected, dimmed otherwise)
+2. `    You: <truncated input>`
+3. `    Asst: <truncated response>`
+
+The time is sliced from the ISO 8601 timestamp with `string.slice(ts, 11, 8)`.
+
+**Log reading pipeline (`cycle_log.load_cycles`):**
+
+```
+simplifile.read(log_path())
+  → string.split("\n")
+  → list.filter_map(json.parse(line, event_decoder()))
+  → build_cycles(events)   // fold over events, group by cycle_id
+```
+
+`event_decoder` uses `gleam/dynamic/decode` continuation chaining:
+```gleam
+use type_str <- decode.field("type", decode.string)
+case type_str {
+  "human_input"  -> { use cycle_id <- ...; use text <- ...; ... }
+  "llm_response" -> { use cycle_id <- ...; use parts <- decode.field("content", decode.list(content_block_text_decoder())); ... }
+  "tool_call"    -> { use cycle_id <- ...; use name <- ...; ... }
+  _              -> decode.success(OtherEvent)
+}
+```
+
+`content_block_text_decoder` extracts text from `{"type":"text","text":"..."}` blocks
+and returns `""` for all other block types. Joining the list concatenates multi-block
+responses.
+
+**Rewind mechanism:**
+
+`cycle_log.messages_for_rewind(cycles, up_to_index)` reconstructs a flat
+`List(Message)` by folding over cycles 0..N:
+
+```gleam
+[User(human_input_0), Assistant(response_text_0),
+ User(human_input_1), Assistant(response_text_1), ...]
+```
+
+This matches the format `append_user_message` / `append_assistant_message` produce,
+so the restored state is indistinguishable from a live session at that point.
+
+On rewind:
+1. `service.RestoreMessages(messages:)` is sent to the service actor, which calls
+   `storage.save(messages)` and replaces `ChatState.messages`.
+2. The TUI's own `state.messages` is updated to match (for immediate render).
+3. Tab switches back to Chat with a `"  Rewound to cycle #N"` notice.
+
+**`RestoreMessages` in `service.gleam`** — new `ChatMessage` variant alongside
+`ClearHistory`:
+
+```gleam
+RestoreMessages(messages:) -> {
+  storage.save(messages)
+  service_loop(self, ChatState(..state, messages:))
+}
+```
+
+---
+
+---
+
+### `immutable-log` branch (continued) — 12-Factor compliance pass (Feb 25)
+
+**Factors addressed:** 3 (Own Your Context Window), 9 (Compact Errors into Context
+Window), 12 (Make Your Agent a Stateless Reducer — full session fidelity).
+
+**Files changed:** `src/config.gleam`, `src/cycle_log.gleam`, `src/context.gleam`
+(new), `src/chat/service.gleam`, `src/springdrift.gleam`, `src/tui.gleam`.
+
+---
+
+#### Numeric constants promoted to config (all factors)
+
+Previously several operational limits were hard-coded magic numbers. All are now
+`Option(Int)` fields on `AppConfig` with CLI flags and JSON config keys, falling back
+to sensible defaults in `springdrift.gleam`:
+
+| Config key | CLI flag | Default | Purpose |
+|---|---|---|---|
+| `max_turns` | `--max-turns` | `5` | Maximum react-loop iterations per user message |
+| `max_consecutive_errors` | `--max-errors` | `3` | Consecutive tool-failure limit before aborting |
+| `max_context_messages` | `--max-context` | unlimited | Sliding-window message cap |
+
+The three config fields thread through `service.start()` and are stored in `ChatState`
+so the HTTP worker closure can access them without additional indirection.
+
+---
+
+#### Factor 9 — Consecutive error circuit breaker
+
+`react_loop` now tracks `consecutive_errors: Int` across tool-execution rounds:
+
+```gleam
+let has_any_failure = list.any(results, fn(r) { case r { ToolFailure(..) -> True _ -> False } })
+let new_consecutive = case has_any_failure { True -> consecutive_errors + 1  False -> 0 }
+case new_consecutive >= max_consecutive_errors {
+  True  -> Error(UnknownError("Agent loop: too many consecutive tool errors"))
+  False -> react_loop(next, p, max_turns - 1, new_consecutive, ...)
+}
+```
+
+Any turn where at least one tool returns `ToolFailure` increments the counter; a clean
+turn (all `ToolSuccess`) resets it to `0`. If the count reaches `max_consecutive_errors`
+(default 3), the loop aborts with a clear error rather than continuing to spin.
+
+This complements the existing `max_turns` cap: turns guards against infinite loops,
+errors guards against loops that technically progress (decrement turns) but keep
+failing the same way.
+
+---
+
+#### Factor 12 — Full tool-round fidelity in session persistence
+
+Previously `append_assistant_message` collapsed the entire react-loop output to a
+single `TextContent` message, discarding all `ToolUseContent` and `ToolResultContent`
+blocks. On `--resume`, the LLM could not see which tools it had invoked in prior
+sessions.
+
+**Fix:** `react_loop` now returns `Result(#(LlmResponse, List(Message)), LlmError)`
+where `List(Message)` is the **complete accumulated message history** including all
+intermediate tool-use and tool-result turns, plus the final assistant response:
+
+```gleam
+// Base case (no tools needed):
+False -> {
+  let final_msg = Message(role: Assistant, content: resp.content)
+  Ok(#(resp, list.append(req.messages, [final_msg])))
+}
+// Recursive case: thread through the accumulated req.messages
+react_loop(next, p, max_turns - 1, ...) // next.messages already has tool rounds
+```
+
+The HTTP worker unpacks this result and sends the pre-built `final_messages` list to
+the service actor via the updated `LlmComplete` variant:
+
+```gleam
+LlmComplete(
+  result: Result(LlmResponse, LlmError),
+  final_messages: List(Message),          // complete history
+  reply_to: Subject(Result(LlmResponse, LlmError)),
+)
+```
+
+`LlmComplete` handler replaces the old `append_assistant_message` call:
+
+```gleam
+LlmComplete(result:, final_messages:, reply_to:) -> {
+  let new_state = ChatState(..state, messages: final_messages)
+  storage.save(new_state.messages)
+  process.send(reply_to, result)
+  service_loop(self, new_state)
+}
+```
+
+`storage.gleam` already encoded/decoded all `ContentBlock` variants, so no changes
+were needed there.
+
+---
+
+#### Factor 3 — Context window management (`src/context.gleam`)
+
+New module with a single public function:
+
+```gleam
+pub fn trim(messages: List(Message), max_messages: Int) -> List(Message)
+```
+
+Implements a sliding window: `list.drop(messages, total - max_messages)` keeps the
+most recent `max_messages` entries. Called from `build_request` when
+`state.max_context_messages` is `Some(n)`:
+
+```gleam
+let messages = case state.max_context_messages {
+  None    -> state.messages
+  Some(n) -> context.trim(state.messages, n)
+}
+```
+
+Trimming happens only at request-build time; `ChatState.messages` always holds the
+full history for persistence and potential future use.
+
+---
+
+#### Cycle log enhancements
+
+Three additions to `cycle_log.gleam`:
+
+**1. `parent_id`** — `log_human_input` now accepts `parent_id: Option(String)`.
+The service actor stores the previous cycle's UUID in `ChatState.last_cycle_id` and
+passes it when logging each new cycle:
+
+```gleam
+// ChatState gains:
+last_cycle_id: Option(String)
+
+// SendMessage handler:
+let parent_id = state.last_cycle_id
+cycle_log.log_human_input(cycle_id, parent_id, text)
+let new_state = ChatState(..append_user_message(state, text), last_cycle_id: Some(cycle_id))
+```
+
+Each `human_input` entry now carries `"parent_id": "uuid-or-null"`, enabling cycle
+chains to be reconstructed from the log without relying on line order.
+
+**2. Token accumulation in `CycleData`** — `CycleData` gains `input_tokens: Int` and
+`output_tokens: Int`. The `event_decoder` reads these from each `llm_response` event,
+and `build_cycles` accumulates them across all LLM calls within a cycle (there can be
+multiple in tool-use rounds):
+
+```gleam
+LlmResponseEvent(cycle_id:, content_text:, input_tokens:, output_tokens:) ->
+  list.map(acc, fn(c) {
+    case c.cycle_id == cycle_id {
+      True -> CycleAcc(..c,
+        response_text: content_text,
+        input_tokens: c.input_tokens + input_tokens,
+        output_tokens: c.output_tokens + output_tokens)
+      False -> c
+    }
+  })
+```
+
+**3. Token display in TUI** — the Log tab cycle header shows per-cycle token counts:
+
+```
+▶ #3  14:23:45  [calculator]  ↑234t ↓89t
+```
+
+The Chat tab footer shows last-turn token usage when idle:
+
+```
+↑1204t ↓87t   Enter: send   PgUp/PgDn: scroll   ...
+```
+
+`TuiState` gains `last_usage: Option(Usage)`, populated from `resp.usage` in
+`handle_chat_response` on `Ok(resp)`.
+
+---
+
 ## Decisions Log
 
 | Decision | Rationale |
 |---|---|
-| `append_assistant_message` stores only `TextContent` | Keeps saved JSON human-readable; tool-use round-trips are reconstructed by the LLM from text context on resume. Full fidelity would require storing the entire `resp.content` block list. |
+| Full tool-block fidelity via `react_loop` return type | Cleanest way to preserve intermediate messages without changing `ChatState` mid-loop. The final `req.messages` already contains the complete chain; appending only the last assistant block is an O(1) operation. |
+| Context trim at request-build time, not at save time | `ChatState.messages` is the durable record; trimming it would make resume less complete. Trimming only when building the LLM request keeps the window small without information loss in storage. |
+| Consecutive error counter resets on *any* successful tool turn | A mixed turn (some succeed, some fail) indicates the LLM is making progress rather than stuck in a spin-out, so resetting is the right call. |
+| `parent_id: Option(String)` rather than always `String` | First cycle has no parent; `None`/`null` is more honest than a sentinel like `""` or `"root"`. |
+| Token counts accumulated across all LLM calls in a cycle | A cycle with tool use makes multiple LLM calls; showing only the last call's token count would undercount actual usage. |
 | Auto-save on every completed turn (not batched) | Simplest durability guarantee; a crash mid-turn loses at most one exchange. |
 | `ToolEvent` channel separate from `AgentQuestion` channel | Different consumers and semantics — questions block the worker, tool events are fire-and-forget notifications. Merging them would require a sum type and extra matching in both directions. |
 | `storage.save` is synchronous in the service actor | The actor is idle (between turns) when `LlmComplete` arrives, so there is no performance cost. Async save would add complexity with no benefit. |
