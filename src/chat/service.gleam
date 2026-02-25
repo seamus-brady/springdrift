@@ -1,3 +1,4 @@
+import classifier
 import context
 import cycle_log
 import gleam/dynamic/decode
@@ -20,6 +21,19 @@ import tools/builtin
 // Types
 // ---------------------------------------------------------------------------
 
+pub type ModelSwitchAnswer {
+  AcceptModelSwitch
+  DeclineModelSwitch
+}
+
+pub type ModelSwitchQuestion {
+  ModelSwitchQuestion(
+    current_model: String,
+    suggested_model: String,
+    reply_to: Subject(ModelSwitchAnswer),
+  )
+}
+
 pub type ChatState {
   ChatState(
     provider: Provider,
@@ -32,6 +46,9 @@ pub type ChatState {
     messages: List(Message),
     tools: List(Tool),
     last_cycle_id: Option(String),
+    task_model: String,
+    reasoning_model: String,
+    prompt_on_complex: Bool,
   )
 }
 
@@ -46,9 +63,10 @@ pub type ToolEvent {
 pub type ChatMessage {
   SendMessage(
     text: String,
-    reply_to: Subject(Result(LlmResponse, LlmError)),
+    reply_to: Subject(#(Result(LlmResponse, LlmError), String)),
     question_channel: Subject(AgentQuestion),
     tool_channel: Subject(ToolEvent),
+    model_question_channel: Subject(ModelSwitchQuestion),
   )
   GetHistory(reply_to: Subject(List(Message)))
   ClearHistory
@@ -57,8 +75,10 @@ pub type ChatMessage {
   LlmComplete(
     result: Result(LlmResponse, LlmError),
     final_messages: List(Message),
-    reply_to: Subject(Result(LlmResponse, LlmError)),
+    final_model: String,
+    reply_to: Subject(#(Result(LlmResponse, LlmError), String)),
   )
+  SetModel(model: String)
 }
 
 // ---------------------------------------------------------------------------
@@ -75,6 +95,9 @@ pub fn start(
   max_context_messages: Option(Int),
   tools: List(Tool),
   initial_messages: List(Message),
+  task_model: String,
+  reasoning_model: String,
+  prompt_on_complex: Bool,
 ) -> Subject(ChatMessage) {
   let setup = process.new_subject()
   process.spawn_unlinked(fn() {
@@ -93,6 +116,9 @@ pub fn start(
         messages: initial_messages,
         tools:,
         last_cycle_id: None,
+        task_model:,
+        reasoning_model:,
+        prompt_on_complex:,
       ),
     )
   })
@@ -106,14 +132,67 @@ pub fn start(
 
 fn service_loop(self: Subject(ChatMessage), state: ChatState) -> Nil {
   case process.receive_forever(self) {
-    SendMessage(text:, reply_to:, question_channel:, tool_channel:) -> {
+    SendMessage(
+      text:,
+      reply_to:,
+      question_channel:,
+      tool_channel:,
+      model_question_channel:,
+    ) -> {
       let cycle_id = cycle_log.generate_uuid()
       let parent_id = state.last_cycle_id
       cycle_log.log_human_input(cycle_id, parent_id, text)
+
+      // Classify complexity and determine the model to use for this cycle
+      let complexity = classifier.classify(text)
+      let complexity_str = case complexity {
+        classifier.Simple -> "simple"
+        classifier.Complex -> "complex"
+      }
+      let #(final_model, prompted, confirmed) = case complexity {
+        classifier.Simple -> #(state.model, False, None)
+        classifier.Complex ->
+          case state.model == state.reasoning_model {
+            True -> #(state.model, False, None)
+            False ->
+              case state.prompt_on_complex {
+                True -> {
+                  let reply_subj = process.new_subject()
+                  process.send(
+                    model_question_channel,
+                    ModelSwitchQuestion(
+                      current_model: state.model,
+                      suggested_model: state.reasoning_model,
+                      reply_to: reply_subj,
+                    ),
+                  )
+                  let answer = process.receive_forever(reply_subj)
+                  case answer {
+                    AcceptModelSwitch -> #(
+                      state.reasoning_model,
+                      True,
+                      Some(True),
+                    )
+                    DeclineModelSwitch -> #(state.model, True, Some(False))
+                  }
+                }
+                False -> #(state.reasoning_model, False, None)
+              }
+          }
+      }
+      cycle_log.log_classification(
+        cycle_id,
+        complexity_str,
+        state.reasoning_model,
+        prompted,
+        confirmed,
+      )
+
       let new_state =
         ChatState(
           ..append_user_message(state, text),
           last_cycle_id: Some(cycle_id),
+          model: final_model,
         )
       let req = build_request(new_state)
       process.spawn_unlinked(fn() {
@@ -137,14 +216,17 @@ fn service_loop(self: Subject(ChatMessage), state: ChatState) -> Nil {
             #(Error(err), list.append(new_state.messages, [err_msg]))
           }
         }
-        process.send(self, LlmComplete(result:, final_messages:, reply_to:))
+        process.send(
+          self,
+          LlmComplete(result:, final_messages:, final_model:, reply_to:),
+        )
       })
       service_loop(self, new_state)
     }
-    LlmComplete(result:, final_messages:, reply_to:) -> {
+    LlmComplete(result:, final_messages:, final_model:, reply_to:) -> {
       let new_state = ChatState(..state, messages: final_messages)
       storage.save(new_state.messages)
-      process.send(reply_to, result)
+      process.send(reply_to, #(result, final_model))
       service_loop(self, new_state)
     }
     GetHistory(reply_to:) -> {
@@ -158,6 +240,9 @@ fn service_loop(self: Subject(ChatMessage), state: ChatState) -> Nil {
     RestoreMessages(messages:) -> {
       storage.save(messages)
       service_loop(self, ChatState(..state, messages:))
+    }
+    SetModel(model:) -> {
+      service_loop(self, ChatState(..state, model:))
     }
   }
 }
