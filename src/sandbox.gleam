@@ -179,6 +179,46 @@ fn cleanup_old_container(name: String) -> Nil {
   app_log.info("sandbox_cleanup_done", [#("container_name", name)])
 }
 
+/// Returns True when a docker_exec error indicates the container is no longer
+/// running (stopped, removed, or never existed). These errors warrant an
+/// auto-restart attempt rather than surfacing raw Docker output to the user.
+fn is_container_gone(reason: String) -> Bool {
+  string.contains(reason, "No such container")
+  || string.contains(reason, "is not running")
+  || string.contains(reason, "container not found")
+  || string.contains(reason, "Cannot connect to the Docker daemon")
+}
+
+/// Attempt to restart the container using the stored project name and ports.
+/// Returns a SandboxState with the new container_id on success, or the
+/// original state (unchanged container_id) on failure.
+fn attempt_auto_restart(state: SandboxState) -> SandboxState {
+  let cwd = case simplifile.current_directory() {
+    Ok(dir) -> dir
+    Error(_) -> "."
+  }
+  case
+    docker_run_container(
+      "springdrift-sandbox:latest",
+      state.project_name,
+      cwd,
+      state.ports,
+    )
+  {
+    Error(reason) -> {
+      app_log.err("sandbox_auto_restart_failed", [#("reason", reason)])
+      state
+    }
+    Ok(new_id) -> {
+      app_log.info("sandbox_auto_restarted", [
+        #("container_id", new_id),
+        #("container_name", state.project_name),
+      ])
+      SandboxState(..state, container_id: new_id)
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Actor loop
 // ---------------------------------------------------------------------------
@@ -186,9 +226,42 @@ fn cleanup_old_container(name: String) -> Nil {
 fn sandbox_loop(self: Subject(SandboxMessage), state: SandboxState) -> Nil {
   case process.receive_forever(self) {
     RunCommand(cmd:, reply_to:) -> {
-      let result = docker_exec(state.container_id, cmd)
-      process.send(reply_to, result)
-      sandbox_loop(self, state)
+      case docker_exec(state.container_id, cmd) {
+        Ok(output) -> {
+          process.send(reply_to, Ok(output))
+          sandbox_loop(self, state)
+        }
+        Error(reason) -> {
+          case is_container_gone(reason) {
+            False -> {
+              process.send(reply_to, Error(reason))
+              sandbox_loop(self, state)
+            }
+            True -> {
+              app_log.warn("sandbox_container_gone", [#("reason", reason)])
+              let new_state = attempt_auto_restart(state)
+              case new_state.container_id == state.container_id {
+                True -> {
+                  // Restart failed — return descriptive error
+                  process.send(
+                    reply_to,
+                    Error(
+                      "Sandbox container stopped. Use restart_sandbox to restart it.",
+                    ),
+                  )
+                  sandbox_loop(self, new_state)
+                }
+                False -> {
+                  // Restart succeeded — retry command once
+                  let retry = docker_exec(new_state.container_id, cmd)
+                  process.send(reply_to, retry)
+                  sandbox_loop(self, new_state)
+                }
+              }
+            }
+          }
+        }
+      }
     }
     GetStatus(reply_to:) -> {
       process.send(
@@ -204,36 +277,16 @@ fn sandbox_loop(self: Subject(SandboxMessage), state: SandboxState) -> Nil {
     }
     Restart(reply_to:) -> {
       docker_stop(state.container_id)
-      let cwd = case simplifile.current_directory() {
-        Ok(dir) -> dir
-        Error(_) -> "."
-      }
-      case
-        docker_run_container(
-          "springdrift-sandbox:latest",
-          state.project_name,
-          cwd,
-          state.ports,
-        )
-      {
-        Error(reason) -> {
-          let msg = "docker run failed: " <> reason
-          app_log.err("sandbox_restart_failed", [#("reason", msg)])
-          process.send(reply_to, Error(msg))
-          sandbox_loop(self, state)
-        }
-        Ok(new_container_id) -> {
-          app_log.info("sandbox_restarted", [
-            #("container_id", new_container_id),
-            #("container_name", state.project_name),
-          ])
-          process.send(reply_to, Ok(Nil))
-          sandbox_loop(
-            self,
-            SandboxState(..state, container_id: new_container_id),
+      let new_state = attempt_auto_restart(state)
+      case new_state.container_id == state.container_id {
+        True ->
+          process.send(
+            reply_to,
+            Error("Restart failed — check springdrift.log for details"),
           )
-        }
+        False -> process.send(reply_to, Ok(Nil))
       }
+      sandbox_loop(self, new_state)
     }
     CopyFromSandbox(container_path:, reply_to:) -> {
       let short_id = string.slice(state.container_id, 0, 12)

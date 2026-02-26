@@ -4,6 +4,7 @@
 //// reasoning model or the standard model. Falls back to heuristic rules
 //// if the LLM call fails or returns an unrecognised response.
 
+import app_log
 import gleam/list
 import gleam/string
 import llm/provider.{type Provider}
@@ -38,12 +39,20 @@ pub fn classify(query: String, p: Provider, model: String) -> QueryComplexity {
     |> request.with_system(system_prompt)
     |> request.with_user_message(query)
   case provider.chat_with(req, p) {
-    Error(_) -> heuristic_classify(query)
+    Error(_) -> {
+      app_log.warn("classification_fallback", [#("reason", "llm_error")])
+      heuristic_classify(query)
+    }
     Ok(resp) ->
       case parse_llm_response(response.text(resp)) {
         LlmSimple -> Simple
         LlmComplex -> Complex
-        LlmUnrecognised -> heuristic_classify(query)
+        LlmUnrecognised -> {
+          app_log.warn("classification_fallback", [
+            #("reason", "unrecognised_response"),
+          ])
+          heuristic_classify(query)
+        }
       }
   }
 }

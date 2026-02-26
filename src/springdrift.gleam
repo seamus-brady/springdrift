@@ -64,13 +64,13 @@ fn resolve_config() -> config.AppConfig {
     option.Some(path) ->
       case simplifile.read(path) {
         Error(_) -> {
-          io.println("Warning: could not read config file: " <> path)
+          app_log.warn("config_read_failed", [#("path", path)])
           base_cfg
         }
         Ok(contents) ->
           case config.parse_config_toml(contents) {
             Error(_) -> {
-              io.println("Warning: could not parse config file: " <> path)
+              app_log.warn("config_parse_failed", [#("path", path)])
               base_cfg
             }
             Ok(file_cfg) -> config.merge(file_cfg, base_cfg)
