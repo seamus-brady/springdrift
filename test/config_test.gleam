@@ -1,5 +1,6 @@
 import config.{AppConfig}
 import gleam/option.{None, Some}
+import gleam/string
 import gleeunit
 import gleeunit/should
 
@@ -23,6 +24,8 @@ pub fn default_has_all_none_test() {
   cfg.task_model |> should.equal(None)
   cfg.reasoning_model |> should.equal(None)
   cfg.prompt_on_complex |> should.equal(None)
+  cfg.config_path |> should.equal(None)
+  cfg.log_verbose |> should.equal(None)
 }
 
 // ---------------------------------------------------------------------------
@@ -92,6 +95,8 @@ pub fn merge_override_wins_test() {
       task_model: None,
       reasoning_model: None,
       prompt_on_complex: None,
+      config_path: None,
+      log_verbose: None,
     )
   let override =
     AppConfig(
@@ -105,6 +110,8 @@ pub fn merge_override_wins_test() {
       task_model: None,
       reasoning_model: None,
       prompt_on_complex: None,
+      config_path: None,
+      log_verbose: None,
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("openai"))
@@ -123,6 +130,8 @@ pub fn merge_base_preserved_when_override_none_test() {
       task_model: None,
       reasoning_model: None,
       prompt_on_complex: None,
+      config_path: None,
+      log_verbose: None,
     )
   let override =
     AppConfig(
@@ -136,6 +145,8 @@ pub fn merge_base_preserved_when_override_none_test() {
       task_model: None,
       reasoning_model: None,
       prompt_on_complex: None,
+      config_path: None,
+      log_verbose: None,
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("anthropic"))
@@ -155,6 +166,8 @@ pub fn merge_combines_different_fields_test() {
       task_model: None,
       reasoning_model: None,
       prompt_on_complex: None,
+      config_path: None,
+      log_verbose: None,
     )
   let override =
     AppConfig(
@@ -168,6 +181,8 @@ pub fn merge_combines_different_fields_test() {
       task_model: None,
       reasoning_model: None,
       prompt_on_complex: None,
+      config_path: None,
+      log_verbose: None,
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("anthropic"))
@@ -268,6 +283,8 @@ pub fn merge_new_fields_test() {
       task_model: None,
       reasoning_model: None,
       prompt_on_complex: None,
+      config_path: None,
+      log_verbose: None,
     )
   let override =
     AppConfig(
@@ -281,6 +298,8 @@ pub fn merge_new_fields_test() {
       task_model: None,
       reasoning_model: None,
       prompt_on_complex: None,
+      config_path: None,
+      log_verbose: None,
     )
   let merged = config.merge(base, override:)
   merged.max_turns |> should.equal(Some(10))
@@ -367,6 +386,8 @@ pub fn merge_model_fields_override_wins_test() {
       task_model: Some("base-task"),
       reasoning_model: Some("base-reasoning"),
       prompt_on_complex: Some(True),
+      config_path: None,
+      log_verbose: None,
     )
   let override =
     AppConfig(
@@ -380,6 +401,8 @@ pub fn merge_model_fields_override_wins_test() {
       task_model: Some("override-task"),
       reasoning_model: None,
       prompt_on_complex: Some(False),
+      config_path: None,
+      log_verbose: None,
     )
   let merged = config.merge(base, override:)
   merged.task_model |> should.equal(Some("override-task"))
@@ -400,6 +423,8 @@ pub fn merge_model_fields_base_preserved_test() {
       task_model: Some("haiku"),
       reasoning_model: Some("opus"),
       prompt_on_complex: Some(True),
+      config_path: None,
+      log_verbose: None,
     )
   let override =
     AppConfig(
@@ -413,9 +438,86 @@ pub fn merge_model_fields_base_preserved_test() {
       task_model: None,
       reasoning_model: None,
       prompt_on_complex: None,
+      config_path: None,
+      log_verbose: None,
     )
   let merged = config.merge(base, override:)
   merged.task_model |> should.equal(Some("haiku"))
   merged.reasoning_model |> should.equal(Some("opus"))
   merged.prompt_on_complex |> should.equal(Some(True))
+}
+
+// ---------------------------------------------------------------------------
+// New flags: --config, --verbose
+// ---------------------------------------------------------------------------
+
+pub fn from_args_config_flag_test() {
+  let cfg = config.from_args(["--config", "/tmp/test.json"])
+  cfg.config_path |> should.equal(Some("/tmp/test.json"))
+}
+
+pub fn from_args_verbose_flag_test() {
+  let cfg = config.from_args(["--verbose"])
+  cfg.log_verbose |> should.equal(Some(True))
+}
+
+pub fn from_args_verbose_default_none_test() {
+  let cfg = config.from_args([])
+  cfg.log_verbose |> should.equal(None)
+}
+
+pub fn parse_config_json_log_verbose_false_test() {
+  let result = config.parse_config_json("{\"log_verbose\":false}")
+  result |> should.be_ok
+  let assert Ok(cfg) = result
+  cfg.log_verbose |> should.equal(Some(False))
+}
+
+pub fn parse_config_json_log_verbose_true_test() {
+  let result = config.parse_config_json("{\"log_verbose\":true}")
+  result |> should.be_ok
+  let assert Ok(cfg) = result
+  cfg.log_verbose |> should.equal(Some(True))
+}
+
+// ---------------------------------------------------------------------------
+// to_string
+// ---------------------------------------------------------------------------
+
+pub fn to_string_fully_set_test() {
+  let cfg =
+    AppConfig(
+      provider: Some("anthropic"),
+      model: Some("claude-sonnet-4-20250514"),
+      system_prompt: Some("You are helpful."),
+      max_tokens: Some(1024),
+      max_turns: Some(5),
+      max_consecutive_errors: Some(3),
+      max_context_messages: Some(50),
+      task_model: Some("claude-haiku-4-5-20251001"),
+      reasoning_model: Some("claude-opus-4-6"),
+      prompt_on_complex: Some(True),
+      config_path: Some("/tmp/cfg.json"),
+      log_verbose: Some(True),
+    )
+  let s = config.to_string(cfg)
+  string.contains(s, "provider") |> should.be_true
+  string.contains(s, "anthropic") |> should.be_true
+  string.contains(s, "model") |> should.be_true
+  string.contains(s, "max_tokens") |> should.be_true
+  string.contains(s, "log_verbose") |> should.be_true
+}
+
+pub fn to_string_all_none_is_empty_test() {
+  let cfg = config.default()
+  let s = config.to_string(cfg)
+  s |> should.equal("")
+}
+
+pub fn to_string_partial_test() {
+  let cfg = config.from_args(["--provider", "openai", "--verbose"])
+  let s = config.to_string(cfg)
+  string.contains(s, "provider") |> should.be_true
+  string.contains(s, "openai") |> should.be_true
+  string.contains(s, "log_verbose") |> should.be_true
 }

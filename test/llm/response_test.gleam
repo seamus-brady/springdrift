@@ -19,7 +19,7 @@ pub fn text_joins_content_blocks_test() {
       content: [TextContent(text: "Hello "), TextContent(text: "world")],
       model: "test",
       stop_reason: Some(EndTurn),
-      usage: Usage(input_tokens: 10, output_tokens: 10),
+      usage: Usage(input_tokens: 10, output_tokens: 10, thinking_tokens: 0),
     )
   response.text(resp) |> should.equal("Hello world")
 }
@@ -31,7 +31,7 @@ pub fn needs_tool_execution_false_for_text_test() {
       content: [TextContent(text: "hello")],
       model: "test",
       stop_reason: Some(EndTurn),
-      usage: Usage(input_tokens: 10, output_tokens: 10),
+      usage: Usage(input_tokens: 10, output_tokens: 10, thinking_tokens: 0),
     )
   response.needs_tool_execution(resp) |> should.equal(False)
 }
@@ -43,7 +43,7 @@ pub fn needs_tool_execution_true_for_tool_call_test() {
       content: [ToolUseContent(id: "id1", name: "tool1", input_json: "{}")],
       model: "test",
       stop_reason: Some(ToolUseRequested),
-      usage: Usage(input_tokens: 10, output_tokens: 10),
+      usage: Usage(input_tokens: 10, output_tokens: 10, thinking_tokens: 0),
     )
   response.needs_tool_execution(resp) |> should.equal(True)
 }
@@ -59,7 +59,7 @@ pub fn tool_calls_extracts_all_test() {
       ],
       model: "test",
       stop_reason: Some(ToolUseRequested),
-      usage: Usage(input_tokens: 10, output_tokens: 10),
+      usage: Usage(input_tokens: 10, output_tokens: 10, thinking_tokens: 0),
     )
   let calls = response.tool_calls(resp)
   list.length(calls) |> should.equal(2)
@@ -75,7 +75,7 @@ pub fn was_truncated_test() {
       content: [TextContent(text: "truncated")],
       model: "test",
       stop_reason: Some(MaxTokens),
-      usage: Usage(input_tokens: 10, output_tokens: 10),
+      usage: Usage(input_tokens: 10, output_tokens: 10, thinking_tokens: 0),
     )
   response.was_truncated(resp) |> should.equal(True)
 }
@@ -87,7 +87,7 @@ pub fn total_tokens_sums_usage_test() {
       content: [],
       model: "test",
       stop_reason: None,
-      usage: Usage(input_tokens: 10, output_tokens: 10),
+      usage: Usage(input_tokens: 10, output_tokens: 10, thinking_tokens: 0),
     )
   response.total_tokens(resp) |> should.equal(20)
 }

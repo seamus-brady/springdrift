@@ -94,6 +94,7 @@ pub fn log_llm_response(cycle_id: String, resp: LlmResponse) -> Nil {
       #("content", json.array(resp.content, encode_content_block)),
       #("input_tokens", json.int(resp.usage.input_tokens)),
       #("output_tokens", json.int(resp.usage.output_tokens)),
+      #("thinking_tokens", json.int(resp.usage.thinking_tokens)),
     ]),
   )
 }
@@ -263,6 +264,7 @@ pub type CycleData {
     response_text: String,
     input_tokens: Int,
     output_tokens: Int,
+    thinking_tokens: Int,
     complexity: Option(String),
   )
 }
@@ -277,6 +279,7 @@ type CycleAcc {
     response_text: String,
     input_tokens: Int,
     output_tokens: Int,
+    thinking_tokens: Int,
     complexity: Option(String),
   )
 }
@@ -293,6 +296,7 @@ type RawEvent {
     content_text: String,
     input_tokens: Int,
     output_tokens: Int,
+    thinking_tokens: Int,
   )
   ToolCallEvent(cycle_id: String, name: String)
   ClassificationEvent(cycle_id: String, complexity: String)
@@ -363,10 +367,17 @@ fn build_cycles(events: List(RawEvent)) -> List(CycleData) {
             response_text: "",
             input_tokens: 0,
             output_tokens: 0,
+            thinking_tokens: 0,
             complexity: None,
           ),
         ])
-      LlmResponseEvent(cycle_id:, content_text:, input_tokens:, output_tokens:) ->
+      LlmResponseEvent(
+        cycle_id:,
+        content_text:,
+        input_tokens:,
+        output_tokens:,
+        thinking_tokens:,
+      ) ->
         list.map(acc, fn(c) {
           case c.cycle_id == cycle_id {
             True ->
@@ -375,6 +386,7 @@ fn build_cycles(events: List(RawEvent)) -> List(CycleData) {
                 response_text: content_text,
                 input_tokens: c.input_tokens + input_tokens,
                 output_tokens: c.output_tokens + output_tokens,
+                thinking_tokens: c.thinking_tokens + thinking_tokens,
               )
             False -> c
           }
@@ -406,6 +418,7 @@ fn build_cycles(events: List(RawEvent)) -> List(CycleData) {
       response_text: c.response_text,
       input_tokens: c.input_tokens,
       output_tokens: c.output_tokens,
+      thinking_tokens: c.thinking_tokens,
       complexity: c.complexity,
     )
   })
@@ -433,11 +446,17 @@ fn event_decoder() -> decode.Decoder(RawEvent) {
       )
       use input_tokens <- decode.field("input_tokens", decode.int)
       use output_tokens <- decode.field("output_tokens", decode.int)
+      use thinking_tokens <- decode.optional_field(
+        "thinking_tokens",
+        0,
+        decode.int,
+      )
       decode.success(LlmResponseEvent(
         cycle_id:,
         content_text: string.join(parts, ""),
         input_tokens:,
         output_tokens:,
+        thinking_tokens:,
       ))
     }
     "tool_call" -> {

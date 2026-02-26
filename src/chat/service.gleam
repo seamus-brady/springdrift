@@ -1,8 +1,8 @@
-import classifier
 import context
 import cycle_log
 import gleam/dynamic/decode
 import gleam/erlang/process.{type Subject}
+import gleam/io
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -14,12 +14,21 @@ import llm/types.{
   type ToolCall, type ToolResult, Assistant, Message, TextContent, ToolFailure,
   ToolSuccess, UnknownError, User,
 }
+import query_complexity
 import storage
 import tools/builtin
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+pub type ServiceReply {
+  ServiceReply(
+    llm_result: Result(LlmResponse, LlmError),
+    final_model: String,
+    save_error: Option(String),
+  )
+}
 
 pub type ModelSwitchAnswer {
   AcceptModelSwitch
@@ -49,6 +58,7 @@ pub type ChatState {
     task_model: String,
     reasoning_model: String,
     prompt_on_complex: Bool,
+    verbose: Bool,
   )
 }
 
@@ -63,7 +73,7 @@ pub type ToolEvent {
 pub type ChatMessage {
   SendMessage(
     text: String,
-    reply_to: Subject(#(Result(LlmResponse, LlmError), String)),
+    reply_to: Subject(ServiceReply),
     question_channel: Subject(AgentQuestion),
     tool_channel: Subject(ToolEvent),
     model_question_channel: Subject(ModelSwitchQuestion),
@@ -76,7 +86,7 @@ pub type ChatMessage {
     result: Result(LlmResponse, LlmError),
     final_messages: List(Message),
     final_model: String,
-    reply_to: Subject(#(Result(LlmResponse, LlmError), String)),
+    reply_to: Subject(ServiceReply),
   )
   SetModel(model: String)
 }
@@ -98,6 +108,7 @@ pub fn start(
   task_model: String,
   reasoning_model: String,
   prompt_on_complex: Bool,
+  verbose: Bool,
 ) -> Subject(ChatMessage) {
   let setup = process.new_subject()
   process.spawn_unlinked(fn() {
@@ -119,6 +130,7 @@ pub fn start(
         task_model:,
         reasoning_model:,
         prompt_on_complex:,
+        verbose:,
       ),
     )
   })
@@ -144,14 +156,15 @@ fn service_loop(self: Subject(ChatMessage), state: ChatState) -> Nil {
       cycle_log.log_human_input(cycle_id, parent_id, text)
 
       // Classify complexity and determine the model to use for this cycle
-      let complexity = classifier.classify(text)
+      let complexity =
+        query_complexity.classify(text, state.provider, state.task_model)
       let complexity_str = case complexity {
-        classifier.Simple -> "simple"
-        classifier.Complex -> "complex"
+        query_complexity.Simple -> "simple"
+        query_complexity.Complex -> "complex"
       }
       let #(final_model, prompted, confirmed) = case complexity {
-        classifier.Simple -> #(state.model, False, None)
-        classifier.Complex ->
+        query_complexity.Simple -> #(state.model, False, None)
+        query_complexity.Complex ->
           case state.model == state.reasoning_model {
             True -> #(state.model, False, None)
             False ->
@@ -206,6 +219,7 @@ fn service_loop(self: Subject(ChatMessage), state: ChatState) -> Nil {
             question_channel,
             tool_channel,
             cycle_id,
+            new_state.verbose,
           )
         let #(result, final_messages) = case react_result {
           Ok(#(resp, msgs)) -> #(Ok(resp), msgs)
@@ -225,8 +239,14 @@ fn service_loop(self: Subject(ChatMessage), state: ChatState) -> Nil {
     }
     LlmComplete(result:, final_messages:, final_model:, reply_to:) -> {
       let new_state = ChatState(..state, messages: final_messages)
-      storage.save(new_state.messages)
-      process.send(reply_to, #(result, final_model))
+      let save_error = case storage.save(new_state.messages) {
+        Ok(_) -> None
+        Error(msg) -> Some(msg)
+      }
+      process.send(
+        reply_to,
+        ServiceReply(llm_result: result, final_model:, save_error:),
+      )
       service_loop(self, new_state)
     }
     GetHistory(reply_to:) -> {
@@ -234,11 +254,14 @@ fn service_loop(self: Subject(ChatMessage), state: ChatState) -> Nil {
       service_loop(self, state)
     }
     ClearHistory -> {
-      storage.clear()
+      case storage.clear() {
+        Ok(_) -> Nil
+        Error(msg) -> io.println_error("Warning: " <> msg)
+      }
       service_loop(self, ChatState(..state, messages: [], last_cycle_id: None))
     }
     RestoreMessages(messages:) -> {
-      storage.save(messages)
+      let _ = storage.save(messages)
       service_loop(self, ChatState(..state, messages:))
     }
     SetModel(model:) -> {
@@ -256,12 +279,19 @@ fn react_loop(
   question_channel: Subject(AgentQuestion),
   tool_channel: Subject(ToolEvent),
   cycle_id: String,
+  verbose: Bool,
 ) -> Result(#(LlmResponse, List(Message)), LlmError) {
-  cycle_log.log_llm_request(cycle_id, req)
+  case verbose {
+    True -> cycle_log.log_llm_request(cycle_id, req)
+    False -> Nil
+  }
   case provider.chat_with(req, p) {
     Error(e) -> Error(e)
     Ok(resp) -> {
-      cycle_log.log_llm_response(cycle_id, resp)
+      case verbose {
+        True -> cycle_log.log_llm_response(cycle_id, resp)
+        False -> Nil
+      }
       case response.needs_tool_execution(resp) {
         False -> {
           let final_msg = Message(role: Assistant, content: resp.content)
@@ -312,6 +342,7 @@ fn react_loop(
                     question_channel,
                     tool_channel,
                     cycle_id,
+                    verbose,
                   )
                 }
               }

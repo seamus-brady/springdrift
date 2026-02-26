@@ -22,8 +22,10 @@
 import gleam/dynamic/decode
 import gleam/int
 import gleam/json
+import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/string
 import simplifile
 
 // ---------------------------------------------------------------------------
@@ -42,6 +44,8 @@ pub type AppConfig {
     task_model: Option(String),
     reasoning_model: Option(String),
     prompt_on_complex: Option(Bool),
+    config_path: Option(String),
+    log_verbose: Option(Bool),
   )
 }
 
@@ -72,6 +76,8 @@ pub fn default() -> AppConfig {
     task_model: None,
     reasoning_model: None,
     prompt_on_complex: None,
+    config_path: None,
+    log_verbose: None,
   )
 }
 
@@ -100,6 +106,8 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       override_cfg.prompt_on_complex,
       base.prompt_on_complex,
     ),
+    config_path: option.or(override_cfg.config_path, base.config_path),
+    log_verbose: option.or(override_cfg.log_verbose, base.log_verbose),
   )
 }
 
@@ -143,6 +151,43 @@ pub fn resolve() -> AppConfig {
   merge(file_cfg, cli_cfg)
 }
 
+/// Produce a human-readable one-field-per-line summary of the config.
+/// Only fields that are set (non-None) are included.
+pub fn to_string(cfg: AppConfig) -> String {
+  [
+    option.map(cfg.provider, fn(v) { "provider: " <> v }),
+    option.map(cfg.model, fn(v) { "model: " <> v }),
+    option.map(cfg.system_prompt, fn(v) { "system_prompt: " <> v }),
+    option.map(cfg.max_tokens, fn(v) { "max_tokens: " <> int.to_string(v) }),
+    option.map(cfg.max_turns, fn(v) { "max_turns: " <> int.to_string(v) }),
+    option.map(cfg.max_consecutive_errors, fn(v) {
+      "max_consecutive_errors: " <> int.to_string(v)
+    }),
+    option.map(cfg.max_context_messages, fn(v) {
+      "max_context_messages: " <> int.to_string(v)
+    }),
+    option.map(cfg.task_model, fn(v) { "task_model: " <> v }),
+    option.map(cfg.reasoning_model, fn(v) { "reasoning_model: " <> v }),
+    option.map(cfg.prompt_on_complex, fn(v) {
+      "prompt_on_complex: "
+      <> case v {
+        True -> "true"
+        False -> "false"
+      }
+    }),
+    option.map(cfg.config_path, fn(v) { "config_path: " <> v }),
+    option.map(cfg.log_verbose, fn(v) {
+      "log_verbose: "
+      <> case v {
+        True -> "true"
+        False -> "false"
+      }
+    }),
+  ]
+  |> list.filter_map(fn(x) { option.to_result(x, Nil) })
+  |> string.join("\n")
+}
+
 // ---------------------------------------------------------------------------
 // Internal
 // ---------------------------------------------------------------------------
@@ -184,6 +229,10 @@ fn do_parse_args(args: List(String), acc: AppConfig) -> AppConfig {
       do_parse_args(rest, AppConfig(..acc, reasoning_model: Some(value)))
     ["--no-model-prompt", ..rest] ->
       do_parse_args(rest, AppConfig(..acc, prompt_on_complex: Some(False)))
+    ["--config", path, ..rest] ->
+      do_parse_args(rest, AppConfig(..acc, config_path: Some(path)))
+    ["--verbose", ..rest] ->
+      do_parse_args(rest, AppConfig(..acc, log_verbose: Some(True)))
     [_, ..rest] -> do_parse_args(rest, acc)
   }
 }
@@ -239,6 +288,11 @@ fn config_decoder() -> decode.Decoder(AppConfig) {
     None,
     decode.bool |> decode.map(Some),
   )
+  use log_verbose <- decode.optional_field(
+    "log_verbose",
+    None,
+    decode.bool |> decode.map(Some),
+  )
   decode.success(AppConfig(
     provider:,
     model:,
@@ -250,6 +304,8 @@ fn config_decoder() -> decode.Decoder(AppConfig) {
     task_model:,
     reasoning_model:,
     prompt_on_complex:,
+    config_path: None,
+    log_verbose:,
   ))
 }
 

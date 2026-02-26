@@ -1,6 +1,6 @@
 import chat/service.{
-  type AgentQuestion, type ChatMessage, type ModelSwitchQuestion, type ToolEvent,
-  ToolCalling,
+  type AgentQuestion, type ChatMessage, type ModelSwitchQuestion,
+  type ServiceReply, type ToolEvent, ToolCalling,
 }
 import cycle_log.{type CycleData}
 import etch/command
@@ -40,7 +40,11 @@ type AgentStatus {
 
 type TuiMessage {
   StdinByte(byte: String)
-  ChatResponse(result: Result(LlmResponse, LlmError), final_model: String)
+  ChatResponse(
+    result: Result(LlmResponse, LlmError),
+    final_model: String,
+    save_error: option.Option(String),
+  )
   AgentQuestionReceived(question: String, reply_to: Subject(String))
   ToolEventReceived(name: String)
   ModelSwitchReceived(
@@ -52,7 +56,7 @@ type TuiMessage {
 type TuiState {
   TuiState(
     chat: Subject(ChatMessage),
-    chat_reply: Subject(#(Result(LlmResponse, LlmError), String)),
+    chat_reply: Subject(ServiceReply),
     stdin_subj: Subject(TuiMessage),
     selector: Selector(TuiMessage),
     question_channel: Subject(AgentQuestion),
@@ -88,6 +92,12 @@ fn read_char() -> Result(String, Nil)
 @external(erlang, "erlang", "halt")
 fn do_halt(code: Int) -> Nil
 
+@external(erlang, "springdrift_ffi", "tui_run")
+fn tui_run(loop: fn() -> Nil, cleanup: fn() -> Nil) -> Nil
+
+@external(erlang, "springdrift_ffi", "throw_tui_exit")
+fn throw_tui_exit() -> Nil
+
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
@@ -116,9 +126,12 @@ pub fn start(
   let selector =
     process.new_selector()
     |> process.select(stdin_subj)
-    |> process.select_map(chat_reply, fn(pair) {
-      let #(result, final_model) = pair
-      ChatResponse(result:, final_model:)
+    |> process.select_map(chat_reply, fn(sr: ServiceReply) {
+      ChatResponse(
+        result: sr.llm_result,
+        final_model: sr.final_model,
+        save_error: sr.save_error,
+      )
     })
     |> process.select_map(question_channel, fn(aq: AgentQuestion) {
       AgentQuestionReceived(question: aq.question, reply_to: aq.reply_to)
@@ -171,7 +184,8 @@ pub fn start(
       last_usage: None,
     )
   render(state)
-  event_loop(state)
+  tui_run(fn() { event_loop(state) }, cleanup)
+  do_halt(0)
 }
 
 fn cleanup() -> Nil {
@@ -216,8 +230,8 @@ fn event_loop(state: TuiState) -> Nil {
 fn dispatch(state: TuiState, msg: TuiMessage) -> Nil {
   case msg {
     StdinByte(byte:) -> handle_stdin_byte(state, byte)
-    ChatResponse(result:, final_model:) ->
-      handle_chat_response(state, result, final_model)
+    ChatResponse(result:, final_model:, save_error:) ->
+      handle_chat_response(state, result, final_model, save_error)
     AgentQuestionReceived(question:, reply_to:) ->
       handle_agent_question(state, question, reply_to)
     ToolEventReceived(name:) -> handle_tool_event(state, name)
@@ -237,8 +251,7 @@ fn continue_loop(state: TuiState) -> Nil {
 }
 
 fn do_exit(_state: TuiState) -> Nil {
-  cleanup()
-  do_halt(0)
+  throw_tui_exit()
 }
 
 fn handle_agent_question(
@@ -448,12 +461,27 @@ fn handle_chat_response(
   state: TuiState,
   result: Result(LlmResponse, LlmError),
   final_model: String,
+  save_error: option.Option(String),
 ) -> Nil {
   let #(reply_text, usage) = case result {
     Ok(resp) -> #(response.text(resp), Some(resp.usage))
     Error(err) -> #("[Error: " <> response.error_message(err) <> "]", None)
   }
   let asst = Message(role: Assistant, content: [TextContent(text: reply_text)])
+  let switch_notice = case final_model != state.model {
+    True -> style.dim("  \u{21AA} " <> final_model)
+    False -> ""
+  }
+  let notice = case save_error {
+    None -> switch_notice
+    Some(msg) -> {
+      let err = style.yellow("  Warning: session not saved \u{2014} " <> msg)
+      case switch_notice {
+        "" -> err
+        n -> n <> "   " <> err
+      }
+    }
+  }
   let new_state =
     TuiState(
       ..state,
@@ -462,6 +490,7 @@ fn handle_chat_response(
       spinner_label: "",
       model: final_model,
       last_usage: usage,
+      notice:,
     )
   continue_loop(new_state)
 }
@@ -1008,11 +1037,19 @@ fn print_log_cycles(
             <> "t",
           )
       }
+      let thinking_part = case c.thinking_tokens {
+        0 -> ""
+        n -> style.dim("  \u{1F4AD}" <> int.to_string(n) <> "t")
+      }
       let complexity_part = case c.complexity {
         None -> ""
         Some("complex") -> style.dim("  \u{26A1}complex")
         Some("simple") -> style.dim("  \u{00B7}simple")
         Some(other) -> style.dim("  " <> other)
+      }
+      let parent_part = case c.parent_id {
+        None -> ""
+        Some(id) -> style.dim("  \u{2190}" <> string.slice(id, 0, 8))
       }
       let hdr_text =
         indicator
@@ -1022,7 +1059,9 @@ fn print_log_cycles(
         <> time
         <> tools_part
         <> token_part
+        <> thinking_part
         <> complexity_part
+        <> parent_part
       let hdr_line = case sel {
         True -> style.bold(hdr_text)
         False -> style.dim(hdr_text)

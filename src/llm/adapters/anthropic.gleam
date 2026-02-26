@@ -181,6 +181,7 @@ fn translate_response(resp: areq.CreateMessageResponse) -> types.LlmResponse {
     usage: types.Usage(
       input_tokens: resp.usage.input_tokens,
       output_tokens: resp.usage.output_tokens,
+      thinking_tokens: 0,
     ),
   )
 }

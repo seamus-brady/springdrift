@@ -150,6 +150,7 @@ fn translate_response(
     usage: types.Usage(
       input_tokens: completion.usage.prompt_tokens,
       output_tokens: completion.usage.completion_tokens,
+      thinking_tokens: 0,
     ),
   )
 }
