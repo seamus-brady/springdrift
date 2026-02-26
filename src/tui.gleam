@@ -18,6 +18,10 @@ import llm/types.{
   type LlmError, type LlmResponse, type Message, type Usage, Assistant, Message,
   TextContent, User,
 }
+import sandbox.{
+  type SandboxMessage, type SandboxStatus, GetLogs, GetStatus, Restart,
+  SandboxRunning,
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -26,6 +30,7 @@ import llm/types.{
 type Tab {
   ChatTab
   LogTab
+  SandboxTab
 }
 
 type AgentStatus {
@@ -79,6 +84,9 @@ type TuiState {
     log_cycles: List(CycleData),
     log_selected: Int,
     last_usage: Option(Usage),
+    sandbox: Option(Subject(SandboxMessage)),
+    sandbox_status: Option(SandboxStatus),
+    sandbox_log_text: String,
   )
 }
 
@@ -109,6 +117,7 @@ pub fn start(
   task_model: String,
   reasoning_model: String,
   initial_messages: List(Message),
+  sandbox: Option(Subject(SandboxMessage)),
 ) -> Nil {
   let size = terminal.window_size()
   let #(w, h) = result.unwrap(size, #(80, 24))
@@ -182,6 +191,9 @@ pub fn start(
       log_cycles: [],
       log_selected: 0,
       last_usage: None,
+      sandbox:,
+      sandbox_status: None,
+      sandbox_log_text: "",
     )
   render(state)
   tui_run(fn() { event_loop(state) }, cleanup)
@@ -275,13 +287,18 @@ fn handle_stdin_byte(state: TuiState, byte: String) -> Nil {
     "\r" | "\n" -> handle_enter(state)
     "\u{7F}" | "\u{08}" ->
       case state.tab {
-        LogTab -> event_loop(state)
+        LogTab | SandboxTab -> event_loop(state)
         ChatTab -> continue_loop(handle_backspace(state))
       }
     "\u{1B}" -> handle_escape(state)
     _ ->
       case state.tab {
         LogTab -> event_loop(state)
+        SandboxTab ->
+          case byte {
+            "r" | "R" -> do_sandbox_restart(state)
+            _ -> event_loop(state)
+          }
         ChatTab ->
           case is_printable(byte) {
             True ->
@@ -306,11 +323,13 @@ fn handle_escape(state: TuiState) -> Nil {
       case state.tab {
         LogTab -> continue_loop(log_nav_up(state))
         ChatTab -> continue_loop(scroll_up(state, 3))
+        SandboxTab -> event_loop(state)
       }
     Ok(StdinByte("[")), Ok(StdinByte("B")) ->
       case state.tab {
         LogTab -> continue_loop(log_nav_down(state))
         ChatTab -> continue_loop(scroll_down(state, 3))
+        SandboxTab -> event_loop(state)
       }
     Ok(StdinByte("[")), Ok(StdinByte("5")) -> {
       let _ = process.receive(state.stdin_subj, 50)
@@ -356,6 +375,7 @@ fn handle_command(state: TuiState, cmd: String) -> Nil {
 fn handle_enter(state: TuiState) -> Nil {
   case state.tab {
     LogTab -> handle_log_rewind(state)
+    SandboxTab -> event_loop(state)
     ChatTab -> handle_chat_enter(state)
   }
 }
@@ -525,14 +545,35 @@ fn render(state: TuiState) -> Nil {
       render_input(state)
     }
     LogTab -> render_log(state)
+    SandboxTab -> render_sandbox(state)
   }
   render_footer(state)
 }
 
 fn render_header(state: TuiState) -> Nil {
   let tab_bar = case state.tab {
-    ChatTab -> style.bold("[Chat]") <> "  " <> style.dim("[Log]")
-    LogTab -> style.dim("[Chat]") <> "  " <> style.bold("[Log]")
+    ChatTab ->
+      style.bold("[Chat]")
+      <> "  "
+      <> style.dim("[Log]")
+      <> case state.sandbox {
+        None -> ""
+        Some(_) -> "  " <> style.dim("[Sandbox]")
+      }
+    LogTab ->
+      style.dim("[Chat]")
+      <> "  "
+      <> style.bold("[Log]")
+      <> case state.sandbox {
+        None -> ""
+        Some(_) -> "  " <> style.dim("[Sandbox]")
+      }
+    SandboxTab ->
+      style.dim("[Chat]")
+      <> "  "
+      <> style.dim("[Log]")
+      <> "  "
+      <> style.bold("[Sandbox]")
   }
   let header =
     style.bold(" Springdrift ")
@@ -659,6 +700,7 @@ fn render_footer(state: TuiState) -> Nil {
       case state.tab {
         LogTab ->
           style.dim("  ↑↓: select   Enter: rewind to here   Tab: back to chat")
+        SandboxTab -> style.dim("  r: restart   Tab: back to chat")
         ChatTab ->
           case state.status {
             Idle -> {
@@ -947,7 +989,80 @@ fn switch_tab(state: TuiState) -> Nil {
         TuiState(..state, tab: LogTab, log_cycles: cycles, log_selected: last),
       )
     }
-    LogTab -> continue_loop(TuiState(..state, tab: ChatTab))
+    LogTab -> switch_to_sandbox(state)
+    SandboxTab -> continue_loop(TuiState(..state, tab: ChatTab))
+  }
+}
+
+fn switch_to_sandbox(state: TuiState) -> Nil {
+  case state.sandbox {
+    None -> continue_loop(TuiState(..state, tab: ChatTab))
+    Some(subj) -> {
+      let status_subj = process.new_subject()
+      process.send(subj, GetStatus(reply_to: status_subj))
+      let new_status = case process.receive(status_subj, 2000) {
+        Ok(s) -> Some(s)
+        Error(_) -> None
+      }
+      let logs_subj = process.new_subject()
+      process.send(subj, GetLogs(lines: 50, reply_to: logs_subj))
+      let new_logs = case process.receive(logs_subj, 2000) {
+        Ok(Ok(text)) -> text
+        _ -> ""
+      }
+      continue_loop(
+        TuiState(
+          ..state,
+          tab: SandboxTab,
+          sandbox_status: new_status,
+          sandbox_log_text: new_logs,
+        ),
+      )
+    }
+  }
+}
+
+fn do_sandbox_restart(state: TuiState) -> Nil {
+  case state.sandbox {
+    None -> event_loop(state)
+    Some(subj) -> {
+      let notice = style.dim("  Restarting sandbox\u{2026}")
+      render(TuiState(..state, notice:))
+      let reply_subj = process.new_subject()
+      process.send(subj, Restart(reply_to: reply_subj))
+      case process.receive(reply_subj, 5000) {
+        Ok(Ok(Nil)) -> {
+          let status_subj = process.new_subject()
+          process.send(subj, GetStatus(reply_to: status_subj))
+          let new_status = case process.receive(status_subj, 2000) {
+            Ok(s) -> Some(s)
+            Error(_) -> state.sandbox_status
+          }
+          let logs_subj = process.new_subject()
+          process.send(subj, GetLogs(lines: 50, reply_to: logs_subj))
+          let new_logs = case process.receive(logs_subj, 2000) {
+            Ok(Ok(text)) -> text
+            _ -> state.sandbox_log_text
+          }
+          continue_loop(
+            TuiState(
+              ..state,
+              sandbox_status: new_status,
+              sandbox_log_text: new_logs,
+              notice: style.dim("  Sandbox restarted"),
+            ),
+          )
+        }
+        Ok(Error(msg)) ->
+          continue_loop(
+            TuiState(..state, notice: style.yellow("  Restart failed: " <> msg)),
+          )
+        Error(Nil) ->
+          continue_loop(
+            TuiState(..state, notice: style.yellow("  Restart timed out")),
+          )
+      }
+    }
   }
 }
 
@@ -1089,4 +1204,30 @@ fn truncate_text(text: String, max_width: Int) -> String {
     True -> string.slice(text, 0, int.max(0, max_width - 1)) <> "\u{2026}"
     False -> text
   }
+}
+
+// ---------------------------------------------------------------------------
+// Sandbox tab
+// ---------------------------------------------------------------------------
+
+fn render_sandbox(state: TuiState) -> Nil {
+  let status_lines = case state.sandbox_status {
+    None -> [style.dim("  Loading\u{2026}")]
+    Some(SandboxRunning(container_id:, ports:)) -> {
+      let ports_str = string.join(list.map(ports, int.to_string), "  ")
+      [
+        "  Container : " <> container_id,
+        "  Status    : Running",
+        "  Ports     : " <> ports_str,
+      ]
+    }
+  }
+  let sep = string.repeat("─", state.width)
+  let log_header = ["", sep, "  Container logs (last 50 lines):"]
+  let log_body = case state.sandbox_log_text {
+    "" -> [style.dim("  (no output)")]
+    text -> list.map(string.split(text, "\n"), fn(l) { "  " <> l })
+  }
+  let all_lines = list.flatten([status_lines, log_header, log_body])
+  print_lines(all_lines, 2)
 }

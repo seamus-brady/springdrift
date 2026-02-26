@@ -62,8 +62,13 @@
 ////   # Default: false
 ////   write_anywhere = false
 ////
+////   # Ports to expose from the sandbox container (repeatable via CLI)
+////   # Default: [3000, 8000, 8080, 5000]
+////   sandbox_ports = [3000, 8000, 8080, 5000]
+////
 //// CLI flags always override config file values.
 //// --skills-dir is repeatable and appends to (rather than replaces) the list.
+//// --sandbox-port is repeatable and appends to the ports list.
 
 import gleam/dict
 import gleam/int
@@ -94,6 +99,7 @@ pub type AppConfig {
     log_verbose: Option(Bool),
     skills_dirs: Option(List(String)),
     write_anywhere: Option(Bool),
+    sandbox_ports: Option(List(Int)),
   )
 }
 
@@ -128,6 +134,7 @@ pub fn default() -> AppConfig {
     log_verbose: None,
     skills_dirs: None,
     write_anywhere: None,
+    sandbox_ports: None,
   )
 }
 
@@ -160,6 +167,7 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     log_verbose: option.or(override_cfg.log_verbose, base.log_verbose),
     skills_dirs: option.or(override_cfg.skills_dirs, base.skills_dirs),
     write_anywhere: option.or(override_cfg.write_anywhere, base.write_anywhere),
+    sandbox_ports: option.or(override_cfg.sandbox_ports, base.sandbox_ports),
   )
 }
 
@@ -247,6 +255,9 @@ pub fn to_string(cfg: AppConfig) -> String {
         False -> "false"
       }
     }),
+    option.map(cfg.sandbox_ports, fn(ports) {
+      "sandbox_ports: " <> string.join(list.map(ports, int.to_string), ", ")
+    }),
   ]
   |> list.filter_map(fn(x) { option.to_result(x, Nil) })
   |> string.join("\n")
@@ -308,6 +319,23 @@ fn do_parse_args(args: List(String), acc: AppConfig) -> AppConfig {
       }
     ["--allow-write-anywhere", ..rest] ->
       do_parse_args(rest, AppConfig(..acc, write_anywhere: Some(True)))
+    ["--sandbox-port", value, ..rest] ->
+      case int.parse(value) {
+        Ok(n) ->
+          case acc.sandbox_ports {
+            None ->
+              do_parse_args(rest, AppConfig(..acc, sandbox_ports: Some([n])))
+            Some(existing) ->
+              do_parse_args(
+                rest,
+                AppConfig(
+                  ..acc,
+                  sandbox_ports: Some(list.append(existing, [n])),
+                ),
+              )
+          }
+        Error(_) -> do_parse_args(rest, acc)
+      }
     [_, ..rest] -> do_parse_args(rest, acc)
   }
 }
@@ -343,6 +371,18 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
         }),
       )
   }
+  let sandbox_ports = case tom.get_array(table, ["sandbox_ports"]) {
+    Error(_) -> None
+    Ok(items) ->
+      Some(
+        list.filter_map(items, fn(item) {
+          case item {
+            tom.Int(n) -> Ok(n)
+            _ -> Error(Nil)
+          }
+        }),
+      )
+  }
   AppConfig(
     provider: get_str("provider"),
     model: get_str("model"),
@@ -358,6 +398,7 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     log_verbose: get_bool("log_verbose"),
     skills_dirs:,
     write_anywhere: get_bool("write_anywhere"),
+    sandbox_ports:,
   )
 }
 

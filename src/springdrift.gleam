@@ -1,8 +1,11 @@
+import app_log
 import chat/service
 import config.{type AppConfig}
+import gleam/int
 import gleam/io
 import gleam/list
 import gleam/option
+import gleam/string
 import llm/adapters/anthropic as anthropic_adapter
 import llm/adapters/mock
 import llm/adapters/openai as openai_adapter
@@ -13,6 +16,7 @@ import skills
 import storage
 import tools/builtin
 import tools/files
+import tools/sandbox_mgmt
 import tools/shell
 import tools/web
 import tui
@@ -126,6 +130,9 @@ fn print_help() -> Nil {
   io.println(
     "  --allow-write-anywhere    Allow write_file outside the current working directory",
   )
+  io.println(
+    "  --sandbox-port <n>        Expose port N from sandbox (repeatable; default: 3000 8000 8080 5000)",
+  )
   io.println("")
   io.println("Session / config:")
   io.println("  --resume                  Resume previous session from disk")
@@ -172,10 +179,15 @@ fn print_help() -> Nil {
 }
 
 fn run(cfg: AppConfig) -> Nil {
+  app_log.info("startup", [])
+
   let base_system =
     option.unwrap(cfg.system_prompt, "You are a helpful assistant.")
   let skill_dirs = option.unwrap(cfg.skills_dirs, default_skill_dirs())
   let discovered = skills.discover(skill_dirs)
+  app_log.info("skills_discovered", [
+    #("count", int.to_string(list.length(discovered))),
+  ])
   let system = case discovered {
     [] -> base_system
     _ -> base_system <> "\n\n" <> skills.to_system_prompt_xml(discovered)
@@ -187,6 +199,7 @@ fn run(cfg: AppConfig) -> Nil {
   let prompt_on_complex = option.unwrap(cfg.prompt_on_complex, False)
   let verbose = option.unwrap(cfg.log_verbose, False)
   let write_anywhere = option.unwrap(cfg.write_anywhere, False)
+  let sandbox_ports = option.unwrap(cfg.sandbox_ports, [3000, 8000, 8080, 5000])
 
   let #(p, model, default_task_model, default_reasoning_model) =
     select_provider(cfg)
@@ -195,8 +208,21 @@ fn run(cfg: AppConfig) -> Nil {
   let reasoning_model =
     option.unwrap(cfg.reasoning_model, default_reasoning_model)
 
+  let ports_str = string.join(list.map(sandbox_ports, int.to_string), ", ")
+  app_log.info("config_loaded", [
+    #("provider", p.name),
+    #("model", model),
+    #("ports", ports_str),
+  ])
+
   let initial_messages = case list.contains(get_startup_args(), "--resume") {
-    True -> storage.load()
+    True -> {
+      let msgs = storage.load()
+      app_log.info("session_loaded", [
+        #("messages", int.to_string(list.length(msgs))),
+      ])
+      msgs
+    }
     False -> []
   }
 
@@ -208,10 +234,11 @@ fn run(cfg: AppConfig) -> Nil {
       )
       option.None
     }
-    option.Some(dir) ->
-      case sandbox.start(dir) {
+    option.Some(dir) -> {
+      io.println("Sandbox  : starting...")
+      case sandbox.start(dir, sandbox_ports) {
         Ok(s) -> {
-          io.println("Sandbox  : Docker container started")
+          io.println("Sandbox  : ready (ports: " <> ports_str <> ")")
           option.Some(s)
         }
         Error(msg) -> {
@@ -221,13 +248,25 @@ fn run(cfg: AppConfig) -> Nil {
           option.None
         }
       }
+    }
   }
 
   let shell_tools = case sandbox_subj {
     option.None -> []
     option.Some(_) -> shell.all()
   }
-  let tools = list.flatten([builtin.all(), files.all(), web.all(), shell_tools])
+  let sandbox_mgmt_tools = case sandbox_subj {
+    option.None -> []
+    option.Some(_) -> sandbox_mgmt.all()
+  }
+  let tools =
+    list.flatten([
+      builtin.all(),
+      files.all(),
+      web.all(),
+      shell_tools,
+      sandbox_mgmt_tools,
+    ])
 
   let chat =
     service.start(
@@ -247,7 +286,15 @@ fn run(cfg: AppConfig) -> Nil {
       sandbox_subj,
       write_anywhere,
     )
-  tui.start(chat, p.name, model, task_model, reasoning_model, initial_messages)
+  tui.start(
+    chat,
+    p.name,
+    model,
+    task_model,
+    reasoning_model,
+    initial_messages,
+    sandbox_subj,
+  )
   let _ = option.map(sandbox_subj, sandbox.send_shutdown)
   Nil
 }

@@ -4,7 +4,8 @@
          generate_uuid/0, get_datetime/0, get_date/0,
          tui_run/2, throw_tui_exit/0,
          fetch_url/1, check_docker/0, docker_build/1,
-         docker_run_container/2, docker_exec/2, docker_stop/1]).
+         docker_run_container/3, docker_exec/2, docker_stop/1,
+         docker_logs/2]).
 
 %% Read one line from stdin.
 %% Returns {ok, Binary} (including trailing newline) or {error, nil} on EOF.
@@ -172,8 +173,9 @@ docker_build(ContextDir) ->
     end.
 
 %% Start a detached sandbox container with the project directory mounted.
+%% Ports is a list of integers; each is exposed as -p N:N.
 %% Returns {ok, ContainerId} or {error, Reason}.
-docker_run_container(Image, Cwd) ->
+docker_run_container(Image, Cwd, Ports) ->
     ImageStr = case is_binary(Image) of
         true  -> binary_to_list(Image);
         false -> Image
@@ -182,9 +184,13 @@ docker_run_container(Image, Cwd) ->
         true  -> binary_to_list(Cwd);
         false -> Cwd
     end,
+    PortArgs = lists:foldl(fun(P, Acc) ->
+        Acc ++ " -p " ++ integer_to_list(P) ++ ":" ++ integer_to_list(P)
+    end, "", Ports),
     Uuid = binary_to_list(generate_uuid()),
     Name = "springdrift-sandbox-" ++ Uuid,
     Cmd = "docker run -d --name " ++ Name ++
+          PortArgs ++
           " --mount type=bind,src=" ++ CwdStr ++ ",dst=/workspace" ++
           " --memory 512m --cpus 1.0" ++
           " --cap-drop ALL --security-opt no-new-privileges" ++
@@ -195,6 +201,23 @@ docker_run_container(Image, Cwd) ->
     case length(Out) >= 12 andalso string:str(Out, " ") =:= 0 of
         true  -> {ok, list_to_binary(Out)};
         false -> {error, list_to_binary(Out)}
+    end.
+
+%% Retrieve the last N lines of container logs.
+%% Returns {ok, Output} or {error, Reason}. Output truncated to 8 KB.
+docker_logs(ContainerId, Lines) ->
+    IdStr = case is_binary(ContainerId) of
+        true  -> binary_to_list(ContainerId);
+        false -> ContainerId
+    end,
+    LinesStr = integer_to_list(Lines),
+    Cmd = "docker logs --tail " ++ LinesStr ++ " " ++ IdStr ++ " 2>&1",
+    RawOut = os:cmd(Cmd),
+    Out = list_to_binary(RawOut),
+    Truncated = binary:part(Out, 0, min(byte_size(Out), 8192)),
+    case byte_size(Truncated) of
+        0 -> {ok, <<"(no output)">>};
+        _ -> {ok, Truncated}
     end.
 
 %% Run a command inside the container. Returns {ok, Output} or {error, Output}.

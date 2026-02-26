@@ -21,6 +21,11 @@ For simple file reads and writes without a shell, prefer:
   no Docker overhead, work even if Docker is unavailable
 - `fetch_url` — HTTP GET on the host, faster than curl in the container
 
+## Management tools
+- `sandbox_status` — check if the container is running and which ports are exposed
+- `sandbox_logs` — view last N lines of container-level output (default 50)
+- `restart_sandbox` — stop and restart the container (preserves /workspace files)
+
 ## Conventions
 - Use `set -e` in scripts to fail fast
 - Pipe long output through `head -50` or `tail -50` to stay within context limits

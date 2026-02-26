@@ -1,3 +1,4 @@
+import app_log
 import context
 import cycle_log
 import gleam/dynamic/decode
@@ -19,6 +20,7 @@ import sandbox.{type SandboxMessage}
 import storage
 import tools/builtin
 import tools/files
+import tools/sandbox_mgmt
 import tools/shell
 import tools/web
 
@@ -252,8 +254,14 @@ fn service_loop(self: Subject(ChatMessage), state: ChatState) -> Nil {
     LlmComplete(result:, final_messages:, final_model:, reply_to:) -> {
       let new_state = ChatState(..state, messages: final_messages)
       let save_error = case storage.save(new_state.messages) {
-        Ok(_) -> None
-        Error(msg) -> Some(msg)
+        Ok(_) -> {
+          app_log.info("session_saved", [])
+          None
+        }
+        Error(msg) -> {
+          app_log.err("session_save_failed", [#("reason", msg)])
+          Some(msg)
+        }
       }
       process.send(
         reply_to,
@@ -327,6 +335,8 @@ fn react_loop(
                     "fetch_url" -> web.execute(call)
                     "request_human_input" ->
                       execute_human_input(call, question_channel)
+                    "sandbox_status" | "sandbox_logs" | "restart_sandbox" ->
+                      sandbox_mgmt.execute(call, sandbox)
                     _ -> builtin.execute(call)
                   }
                   cycle_log.log_tool_result(cycle_id, result)

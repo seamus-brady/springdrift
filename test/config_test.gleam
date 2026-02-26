@@ -101,6 +101,7 @@ pub fn merge_override_wins_test() {
       log_verbose: None,
       skills_dirs: None,
       write_anywhere: None,
+      sandbox_ports: None,
     )
   let override =
     AppConfig(
@@ -118,6 +119,7 @@ pub fn merge_override_wins_test() {
       log_verbose: None,
       skills_dirs: None,
       write_anywhere: None,
+      sandbox_ports: None,
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("openai"))
@@ -140,6 +142,7 @@ pub fn merge_base_preserved_when_override_none_test() {
       log_verbose: None,
       skills_dirs: None,
       write_anywhere: None,
+      sandbox_ports: None,
     )
   let override =
     AppConfig(
@@ -157,6 +160,7 @@ pub fn merge_base_preserved_when_override_none_test() {
       log_verbose: None,
       skills_dirs: None,
       write_anywhere: None,
+      sandbox_ports: None,
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("anthropic"))
@@ -180,6 +184,7 @@ pub fn merge_combines_different_fields_test() {
       log_verbose: None,
       skills_dirs: None,
       write_anywhere: None,
+      sandbox_ports: None,
     )
   let override =
     AppConfig(
@@ -197,6 +202,7 @@ pub fn merge_combines_different_fields_test() {
       log_verbose: None,
       skills_dirs: None,
       write_anywhere: None,
+      sandbox_ports: None,
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("anthropic"))
@@ -306,6 +312,7 @@ pub fn merge_new_fields_test() {
       log_verbose: None,
       skills_dirs: None,
       write_anywhere: None,
+      sandbox_ports: None,
     )
   let override =
     AppConfig(
@@ -323,6 +330,7 @@ pub fn merge_new_fields_test() {
       log_verbose: None,
       skills_dirs: None,
       write_anywhere: None,
+      sandbox_ports: None,
     )
   let merged = config.merge(base, override:)
   merged.max_turns |> should.equal(Some(10))
@@ -414,6 +422,7 @@ pub fn merge_model_fields_override_wins_test() {
       log_verbose: None,
       skills_dirs: None,
       write_anywhere: None,
+      sandbox_ports: None,
     )
   let override =
     AppConfig(
@@ -431,6 +440,7 @@ pub fn merge_model_fields_override_wins_test() {
       log_verbose: None,
       skills_dirs: None,
       write_anywhere: None,
+      sandbox_ports: None,
     )
   let merged = config.merge(base, override:)
   merged.task_model |> should.equal(Some("override-task"))
@@ -455,6 +465,7 @@ pub fn merge_model_fields_base_preserved_test() {
       log_verbose: None,
       skills_dirs: None,
       write_anywhere: None,
+      sandbox_ports: None,
     )
   let override =
     AppConfig(
@@ -472,6 +483,7 @@ pub fn merge_model_fields_base_preserved_test() {
       log_verbose: None,
       skills_dirs: None,
       write_anywhere: None,
+      sandbox_ports: None,
     )
   let merged = config.merge(base, override:)
   merged.task_model |> should.equal(Some("haiku"))
@@ -533,6 +545,7 @@ pub fn to_string_fully_set_test() {
       log_verbose: Some(True),
       skills_dirs: Some(["/tmp/skills"]),
       write_anywhere: None,
+      sandbox_ports: None,
     )
   let s = config.to_string(cfg)
   string.contains(s, "provider") |> should.be_true
