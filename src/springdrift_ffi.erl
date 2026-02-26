@@ -5,7 +5,7 @@
          tui_run/2, throw_tui_exit/0,
          fetch_url/1, check_docker/0, docker_build/1,
          docker_run_container/3, docker_exec/2, docker_stop/1,
-         docker_logs/2]).
+         docker_logs/2, docker_cp/2]).
 
 %% Read one line from stdin.
 %% Returns {ok, Binary} (including trailing newline) or {error, nil} on EOF.
@@ -191,7 +191,8 @@ docker_run_container(Image, Cwd, Ports) ->
     Name = "springdrift-sandbox-" ++ Uuid,
     Cmd = "docker run -d --name " ++ Name ++
           PortArgs ++
-          " --mount type=bind,src=" ++ CwdStr ++ ",dst=/workspace" ++
+          " --mount type=bind,src=" ++ CwdStr ++ ",dst=/workspace,readonly" ++
+          " --tmpfs /tmp:rw,size=256m,noexec" ++
           " --memory 512m --cpus 1.0" ++
           " --cap-drop ALL --security-opt no-new-privileges" ++
           " --network bridge" ++
@@ -251,6 +252,26 @@ docker_exec(ContainerId, Cmd) ->
             Out = list_to_binary(RawOut),
             Truncated = binary:part(Out, 0, min(byte_size(Out), 16384)),
             {error, Truncated}
+    end.
+
+%% Copy files between host and container using docker cp.
+%% Src and Dst use docker cp syntax: "container:path" or plain host path.
+%% Returns {ok, nil} or {error, Reason}.
+docker_cp(Src, Dst) ->
+    SrcStr = case is_binary(Src) of true -> binary_to_list(Src); false -> Src end,
+    DstStr = case is_binary(Dst) of true -> binary_to_list(Dst); false -> Dst end,
+    FullCmd = "docker cp " ++ SrcStr ++ " " ++ DstStr ++ " 2>&1; echo \"__EXIT:$?\"",
+    RawOut = os:cmd(FullCmd),
+    case re:run(RawOut, "__EXIT:(\\d+)", [{capture, all_but_first, list}]) of
+        {match, [CodeStr]} ->
+            Code = list_to_integer(CodeStr),
+            Output0 = re:replace(RawOut, "\n?__EXIT:\\d+\n?$", "", [{return, list}]),
+            case Code of
+                0 -> {ok, nil};
+                _ -> {error, list_to_binary(string:trim(Output0))}
+            end;
+        nomatch ->
+            {error, list_to_binary(string:trim(RawOut))}
     end.
 
 %% Stop and remove the container.

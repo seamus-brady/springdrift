@@ -335,8 +335,11 @@ fn react_loop(
                     "fetch_url" -> web.execute(call)
                     "request_human_input" ->
                       execute_human_input(call, question_channel)
-                    "sandbox_status" | "sandbox_logs" | "restart_sandbox" ->
-                      sandbox_mgmt.execute(call, sandbox)
+                    "sandbox_status"
+                    | "sandbox_logs"
+                    | "restart_sandbox"
+                    | "copy_from_sandbox"
+                    | "copy_to_sandbox" -> sandbox_mgmt.execute(call, sandbox)
                     _ -> builtin.execute(call)
                   }
                   cycle_log.log_tool_result(cycle_id, result)

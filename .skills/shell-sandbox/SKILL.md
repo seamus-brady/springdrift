@@ -9,11 +9,12 @@ You have access to a `run_shell` tool that executes commands in an isolated
 Debian (bookworm-slim) container.
 
 ## Environment
-- Working directory: `/workspace` (the project root, mounted read-write)
+- `/workspace` — the project root, mounted **read-only** (use `write_file` to write to the host)
+- `/tmp` — writable scratch space, 256 MB, container-local (does not persist to host)
 - Available tools: bash, curl, wget, git, python3, pip, jq, ripgrep, fd
 - Network: outbound allowed (git clone, curl, pip install all work)
-- State **persists** across `run_shell` calls within a session — file writes,
-  installed packages, and directory changes are remembered
+- Installed packages persist across `run_shell` calls within a session;
+  scratch files written to `/tmp` also persist until the container is restarted
 
 ## Companion host tools
 For simple file reads and writes without a shell, prefer:
@@ -25,6 +26,10 @@ For simple file reads and writes without a shell, prefer:
 - `sandbox_status` — check if the container is running and which ports are exposed
 - `sandbox_logs` — view last N lines of container-level output (default 50)
 - `restart_sandbox` — stop and restart the container (preserves /workspace files)
+
+## File transfer tools
+- `copy_from_sandbox <container_path>` — copy a file from the container to `sandbox-out/<session-id>/<basename>` on the host; use this to retrieve files built in `/tmp`
+- `copy_to_sandbox <host_path> [container_dest]` — copy a relative host path into the container at `/tmp/<basename>` (or a custom `container_dest`); host_path must be relative to the project root
 
 ## Conventions
 - Use `set -e` in scripts to fail fast

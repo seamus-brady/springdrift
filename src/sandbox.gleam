@@ -26,6 +26,15 @@ pub type SandboxMessage {
   GetStatus(reply_to: Subject(SandboxStatus))
   GetLogs(lines: Int, reply_to: Subject(Result(String, String)))
   Restart(reply_to: Subject(Result(Nil, String)))
+  CopyFromSandbox(
+    container_path: String,
+    reply_to: Subject(Result(String, String)),
+  )
+  CopyToSandbox(
+    host_path: String,
+    container_dest: String,
+    reply_to: Subject(Result(Nil, String)),
+  )
   Shutdown
 }
 
@@ -58,6 +67,9 @@ fn docker_stop(container_id: String) -> Nil
 
 @external(erlang, "springdrift_ffi", "docker_logs")
 fn docker_logs(container_id: String, lines: Int) -> Result(String, String)
+
+@external(erlang, "springdrift_ffi", "docker_cp")
+fn docker_cp(src: String, dst: String) -> Result(Nil, String)
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -180,6 +192,39 @@ fn sandbox_loop(self: Subject(SandboxMessage), state: SandboxState) -> Nil {
           )
         }
       }
+    }
+    CopyFromSandbox(container_path:, reply_to:) -> {
+      let short_id = string.slice(state.container_id, 0, 12)
+      let out_dir = "sandbox-out/" <> short_id
+      let basename = case string.split(container_path, "/") {
+        [] -> "file"
+        parts -> {
+          let assert Ok(last) = list.last(parts)
+          case last {
+            "" -> "file"
+            name -> name
+          }
+        }
+      }
+      let host_dest = out_dir <> "/" <> basename
+      let result = case simplifile.create_directory_all(out_dir) {
+        Error(_) -> Error("Failed to create output directory: " <> out_dir)
+        Ok(_) -> {
+          let src = state.container_id <> ":" <> container_path
+          case docker_cp(src, host_dest) {
+            Ok(_) -> Ok("Copied to " <> host_dest)
+            Error(msg) -> Error(msg)
+          }
+        }
+      }
+      process.send(reply_to, result)
+      sandbox_loop(self, state)
+    }
+    CopyToSandbox(host_path:, container_dest:, reply_to:) -> {
+      let dst = state.container_id <> ":" <> container_dest
+      let result = docker_cp(host_path, dst)
+      process.send(reply_to, result)
+      sandbox_loop(self, state)
     }
     Shutdown -> {
       app_log.info("sandbox_shutdown", [
