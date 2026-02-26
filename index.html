@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hello World App</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .container {
+            text-align: center;
+            padding: 3rem;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+            max-width: 500px;
+        }
+        h1 { font-size: 3rem; margin-bottom: 1rem; animation: fadeInDown 1s ease-out; }
+        p { font-size: 1.2rem; opacity: 0.9; margin-bottom: 2rem; animation: fadeInUp 1s ease-out 0.3s both; }
+        .emoji { font-size: 4rem; margin-bottom: 1rem; animation: bounce 2s infinite; }
+        button {
+            padding: 12px 30px; font-size: 1rem; border: 2px solid white;
+            background: transparent; color: white; border-radius: 50px;
+            cursor: pointer; transition: all 0.3s ease;
+            animation: fadeInUp 1s ease-out 0.6s both;
+        }
+        button:hover { background: white; color: #764ba2; transform: scale(1.05); }
+        #counter { font-size: 1.5rem; margin-top: 1.5rem; animation: fadeInUp 1s ease-out 0.9s both; }
+        @keyframes fadeInDown { from { opacity: 0; transform: translateY(-30px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes fadeInUp { from { opacity: 0; transform: translateY(30px); } to { opacity: 1; transform: translateY(0); } }
+        @keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-15px); } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="emoji">ð</div>
+        <h1>Hello, World!</h1>
+        <p>Welcome to your simple webapp, running on localhost!</p>
+        <button onclick="incrementCounter()">Click Me!</button>
+        <div id="counter">Clicks: 0</div>
+    </div>
+    <script>
+        let count = 0;
+        function incrementCounter() {
+            count++;
+            document.getElementById('counter').textContent = `Clicks: ${count}`;
+        }
+    </script>
+</body>
+</html>

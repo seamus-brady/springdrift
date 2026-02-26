@@ -7,13 +7,14 @@ import llm/tool
 import llm/types.{
   type Tool, type ToolCall, type ToolResult, ToolFailure, ToolSuccess,
 }
+import simplifile
 
 // ---------------------------------------------------------------------------
 // Tool definitions
 // ---------------------------------------------------------------------------
 
 pub fn all() -> List(Tool) {
-  [calculator_tool(), date_tool(), human_input_tool()]
+  [calculator_tool(), datetime_tool(), human_input_tool(), read_skill_tool()]
 }
 
 pub fn human_input_tool() -> Tool {
@@ -41,11 +42,20 @@ pub fn calculator_tool() -> Tool {
   |> tool.build()
 }
 
-pub fn date_tool() -> Tool {
-  tool.new("get_today_date")
+pub fn datetime_tool() -> Tool {
+  tool.new("get_current_datetime")
   |> tool.with_description(
-    "Returns today's date as an ISO 8601 string (YYYY-MM-DD)",
+    "Returns the current local date and time as an ISO 8601 string (YYYY-MM-DDTHH:MM:SS)",
   )
+  |> tool.build()
+}
+
+pub fn read_skill_tool() -> Tool {
+  tool.new("read_skill")
+  |> tool.with_description(
+    "Load the full instructions for an agent skill. Use the path shown in <available_skills> in your context.",
+  )
+  |> tool.add_string_param("path", "Absolute path to a SKILL.md file", True)
   |> tool.build()
 }
 
@@ -56,7 +66,9 @@ pub fn date_tool() -> Tool {
 pub fn execute(call: ToolCall) -> ToolResult {
   case call.name {
     "calculator" -> run_calculator(call)
-    "get_today_date" -> ToolSuccess(tool_use_id: call.id, content: today_iso())
+    "get_current_datetime" ->
+      ToolSuccess(tool_use_id: call.id, content: get_datetime())
+    "read_skill" -> run_read_skill(call)
     _ -> ToolFailure(tool_use_id: call.id, error: "Unknown tool: " <> call.name)
   }
 }
@@ -100,17 +112,44 @@ fn ok_result(id: String, value: Float) -> ToolResult {
 }
 
 // ---------------------------------------------------------------------------
-// Date FFI + formatter
+// Datetime FFI
 // ---------------------------------------------------------------------------
 
-@external(erlang, "erlang", "date")
-fn erlang_date() -> #(Int, Int, Int)
+@external(erlang, "springdrift_ffi", "get_datetime")
+fn get_datetime() -> String
 
-fn today_iso() -> String {
-  let #(y, m, d) = erlang_date()
-  int.to_string(y)
-  <> "-"
-  <> string.pad_start(int.to_string(m), 2, "0")
-  <> "-"
-  <> string.pad_start(int.to_string(d), 2, "0")
+// ---------------------------------------------------------------------------
+// Read skill
+// ---------------------------------------------------------------------------
+
+fn run_read_skill(call: ToolCall) -> ToolResult {
+  let decoder = {
+    use path <- decode.field("path", decode.string)
+    decode.success(path)
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "Invalid read_skill input: missing path",
+      )
+    Ok(path) ->
+      case string.ends_with(path, "SKILL.md") {
+        False ->
+          ToolFailure(
+            tool_use_id: call.id,
+            error: "read_skill: path must end with SKILL.md",
+          )
+        True ->
+          case simplifile.read(path) {
+            Error(e) ->
+              ToolFailure(
+                tool_use_id: call.id,
+                error: "read_skill: could not read file: "
+                  <> simplifile.describe_error(e),
+              )
+            Ok(content) -> ToolSuccess(tool_use_id: call.id, content:)
+          }
+      }
+  }
 }

@@ -23,20 +23,25 @@ interface (Chat and Log).
 
 ```
 src/
-├── springdrift.gleam          Entry point — config, provider selection, wiring
+├── springdrift.gleam          Entry point — config, provider selection, skills, wiring
 ├── springdrift_ffi.erl        Erlang FFI (stdin, env, args, spinner, UUID, datetime)
 ├── config.gleam               Three-layer config (CLI flags > local JSON > user JSON)
 ├── storage.gleam              Session persistence — ~/.config/springdrift/session.json
 ├── cycle_log.gleam            Per-cycle JSON-L logging + log reading + rewind helpers
+├── context.gleam              Context window trim helper (sliding window)
+├── query_complexity.gleam     LLM-based + heuristic query classifier (Simple | Complex)
+├── skills.gleam               Skill discovery, frontmatter parsing, XML injection
 │
-├── chat/service.gleam         OTP actor owning ChatState; react_loop (max 5 turns)
-├── tools/builtin.gleam        Built-in tools: calculator, get_today_date, request_human_input
+├── chat/service.gleam         OTP actor owning ChatState; react_loop (max_turns)
+├── tools/builtin.gleam        Built-in tools: calculator, get_current_datetime,
+│                              request_human_input, read_skill
 ├── tui.gleam                  Alternate-screen TUI; Chat tab + Log tab with cycle rewind
 │
 └── llm/
     ├── types.gleam            Shared types: Message, ContentBlock, LlmRequest/Response/Error, Tool
     ├── request.gleam          Pipe-friendly request builder
     ├── response.gleam         Response helpers (text extraction, tool call detection)
+    ├── tool.gleam             Tool definition builder API
     ├── provider.gleam         Provider abstraction (name + chat function)
     └── adapters/
         ├── anthropic.gleam    Anthropic SDK translation
@@ -96,6 +101,27 @@ Three long-lived processes and one per-turn worker:
 All cross-process communication uses typed `Subject(T)` channels. No shared mutable
 state, no locks.
 
+## Config fields (AppConfig)
+
+All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
+
+| Field | CLI flag | Default | Purpose |
+|---|---|---|---|
+| `provider` | `--provider` | auto-detect | anthropic \| openrouter \| openai \| mock |
+| `model` | `--model` | provider default | Main model identifier |
+| `system_prompt` | `--system` | "You are a helpful assistant." | System prompt |
+| `max_tokens` | `--max-tokens` | 1024 | Max output tokens per LLM call |
+| `max_turns` | `--max-turns` | 5 | Max react-loop iterations per message |
+| `max_consecutive_errors` | `--max-errors` | 3 | Tool failure circuit breaker threshold |
+| `max_context_messages` | `--max-context` | unlimited | Sliding-window message cap |
+| `task_model` | `--task-model` | provider default | Model for Simple queries |
+| `reasoning_model` | `--reasoning-model` | provider default | Model for Complex queries |
+| `prompt_on_complex` | `--no-model-prompt` (sets False) | True | Prompt user before switching |
+| `config_path` | `--config` | None | Extra config file path |
+| `log_verbose` | `--verbose` | False | Log full LLM payloads to cycle log |
+| `skills_dirs` | `--skills-dir` (repeatable) | `[~/.config/springdrift/skills, .skills]` | Skill directories |
+| `write_anywhere` | `--allow-write-anywhere` | False | Allow `write_file` outside CWD |
+
 ## Patterns to follow
 
 **Provider abstraction** — all LLM work goes through `llm/provider.gleam`. Never call
@@ -112,21 +138,63 @@ functions. Build requests by piping: `request.new(model, max_tokens) |> request.
 type. Add new capabilities by adding variants, not by exposing internal functions.
 
 **Cycle logging** — every call to `react_loop` must thread the `cycle_id: String`
-parameter and log `llm_request`, `llm_response`, `tool_call`, and `tool_result` events
-via `cycle_log.*`. Do not add LLM calls that bypass this logging.
+parameter and log `tool_call` and `tool_result` events via `cycle_log.*`. Do not add
+LLM calls that bypass this logging. `llm_request` / `llm_response` are gated by
+`verbose: Bool` in `ChatState`.
+
+**ServiceReply** — `reply_to` in `SendMessage` / `LlmComplete` carries
+`Subject(ServiceReply)` where `ServiceReply` has `llm_result`, `final_model`, and
+`save_error: Option(String)`. The TUI shows a save-error notice if `save_error` is set.
+
+**Context trimming** — `context.trim` is applied inside `build_request` only. The
+full history is always stored in `ChatState.messages` and on disk.
+
+**Skills** — `skills.discover(dirs)` returns `List(SkillMeta)`. `skills.parse_frontmatter`
+is public and unit-testable (pure function, no I/O). `to_system_prompt_xml` returns `""`
+for an empty list so callers never need to special-case it. The `read_skill` tool
+validates that `path` ends with `SKILL.md` before reading.
 
 ## Config file format
 
-Local `.springdrift.json` (or `~/.config/springdrift/config.json`):
+Local `.springdrift.toml` (or `~/.config/springdrift/config.toml`). All fields are optional; TOML `#` comments are fully supported:
 
-```json
-{
-  "provider": "anthropic",
-  "model": "claude-sonnet-4-20250514",
-  "system_prompt": "You are a helpful assistant.",
-  "max_tokens": 2048
-}
+```toml
+# LLM provider — "anthropic" | "openrouter" | "openai" | "mock"
+provider = "anthropic"
+model    = "claude-sonnet-4-20250514"
+
+# System prompt
+system_prompt = "You are a helpful assistant."
+
+# Token and loop limits
+max_tokens             = 2048
+max_turns              = 5
+max_consecutive_errors = 3
+max_context_messages   = 50   # omit for unlimited
+
+# Model switching
+task_model        = "claude-haiku-4-5-20251001"
+reasoning_model   = "claude-opus-4-6"
+prompt_on_complex = true
+
+# Logging and filesystem
+log_verbose    = false
+write_anywhere = false   # allow write_file outside CWD
+
+# Extra skill directories (defaults are always included)
+skills_dirs = ["/path/to/skills"]
 ```
 
-CLI flags override config files. Supported flags: `--provider`, `--model`, `--system`,
-`--max-tokens`, `--resume`.
+CLI flags override config files. `--skills-dir` is repeatable and appends to the list.
+
+## Skill directory format
+
+```
+.skills/
+└── my-skill/
+    └── SKILL.md
+```
+
+`SKILL.md` must open with `---`-fenced YAML frontmatter containing at least `name:`
+and `description:`. Everything after the closing `---` is the Markdown instruction
+body loaded by `read_skill`.

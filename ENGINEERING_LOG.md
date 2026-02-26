@@ -137,7 +137,7 @@ Three tools registered at startup:
 | Tool | Name | Notes |
 |---|---|---|
 | Calculator | `calculator` | Parses JSON `{a, operator, b}`; handles float/int via `decode.one_of`; division-by-zero guard |
-| Date | `get_today_date` | Calls `erlang:date()` via FFI; formats as `YYYY-MM-DD` with zero-padding |
+| Datetime | `get_current_datetime` | Calls `springdrift_ffi:get_datetime/0` via FFI; returns `YYYY-MM-DDTHH:MM:SS` |
 | Human input | `request_human_input` | Sends question through OTP channel; blocks worker until TUI reply arrives |
 
 #### TUI changes
@@ -403,7 +403,7 @@ springdrift.gleam  (main)
 │   ├── react_loop        iterative tool execution (max 5 turns)
 │   └── types             ChatMessage, AgentQuestion, ToolEvent, ChatState
 │
-├── tools/builtin.gleam   calculator, get_today_date, request_human_input
+├── tools/builtin.gleam   calculator, get_current_datetime, request_human_input
 │
 ├── tui.gleam             alternate-screen TUI event loop
 │   ├── TuiState          all render + interaction state
@@ -792,6 +792,263 @@ The Chat tab footer shows last-turn token usage when idle:
 
 `TuiState` gains `last_usage: Option(Usage)`, populated from `resp.usage` in
 `handle_chat_response` on `Ok(resp)`.
+
+---
+
+### PR #5 (`model-choice` branch) — Query complexity routing + model switching (Feb 26)
+
+**Files added:** `src/query_complexity.gleam` (replaces stub `src/classifier.gleam`).
+**Files changed:** `src/config.gleam`, `src/chat/service.gleam`, `src/tui.gleam`,
+`src/springdrift.gleam`.
+
+---
+
+#### Query complexity classification (`src/query_complexity.gleam`)
+
+Every user message is classified as **Simple** or **Complex** before the main LLM
+call using a two-stage strategy:
+
+**Stage 1 — LLM classifier:**
+
+```gleam
+let req =
+  request.new(model, 10)
+  |> request.with_system(system_prompt)
+  |> request.with_user_message(query)
+```
+
+The classification system prompt instructs the model to reply with exactly one word:
+`simple` or `complex`. `max_tokens: 10` keeps the call cheap. The response is parsed
+case-insensitively with `string.contains`.
+
+**Stage 2 — Heuristic fallback** (used when the LLM call fails or returns an
+unrecognised response):
+
+```gleam
+string.length(query) > 200
+|| has_complexity_keyword(lower)
+|| has_multiple_questions(lower)
+|| has_numbered_list(lower)
+```
+
+Complexity keywords include `explain`, `compare`, `analyze`, `design`, `implement`,
+`debug`, `refactor`, and ~20 others. Multiple `?` characters signal a compound
+question; `1.` / `1)` signals a numbered list.
+
+The classifier runs synchronously in the service actor on the `task_model` (cheap
+and fast), adding latency only for the first LLM hop before the main call. If the
+classification call fails, latency is zero (heuristic is local).
+
+---
+
+#### Model routing in `service.gleam`
+
+`ChatState` gains three fields: `task_model`, `reasoning_model`, `prompt_on_complex`.
+
+On each `SendMessage`, the service:
+
+1. Calls `query_complexity.classify(text, provider, task_model)`.
+2. Logs a `classification` event to the cycle log (complexity, reasoning model,
+   whether prompted, whether confirmed).
+3. On `Complex`, if the current model is already the reasoning model, skips the
+   switch. Otherwise:
+   - If `prompt_on_complex: True` → sends a `ModelSwitchQuestion` to the TUI via
+     `model_question_channel: Subject(ModelSwitchQuestion)` and blocks on
+     `process.receive_forever` for `AcceptModelSwitch | DeclineModelSwitch`.
+   - If `prompt_on_complex: False` → silently switches.
+4. Passes the resolved model as `final_model` through `LlmComplete` so the TUI can
+   display which model was actually used.
+
+The `SetModel(model:)` `ChatMessage` variant allows the TUI to force a model switch
+without sending a message (used by `/model`).
+
+---
+
+#### TUI changes for model routing
+
+- New `WaitingForModelSwitch` agent status — shown while the switch prompt is displayed.
+- The model switch prompt appears inline above the input area, asking the user to
+  confirm switching from `task_model` to `reasoning_model`.
+- `/model` slash command: toggles `ChatState.model` between `task_model` and
+  `reasoning_model` by sending `service.SetModel`.
+- The footer and header show which model was used for the last completed turn.
+- Log tab shows `⚡complex` / `·simple` badge per cycle using the `complexity` field
+  in `CycleData`.
+
+---
+
+#### Config changes
+
+Three new `AppConfig` fields (`Option` types, all default to `None`):
+
+| Field | CLI flag | Behaviour |
+|---|---|---|
+| `task_model` | `--task-model` | Model for Simple queries |
+| `reasoning_model` | `--reasoning-model` | Model for Complex queries |
+| `prompt_on_complex` | `--no-model-prompt` sets `False` | Whether to ask before switching |
+
+`--no-model-prompt` is a boolean flag (no value argument) that sets
+`prompt_on_complex: Some(False)`.
+
+---
+
+#### `classification` cycle log event
+
+New fifth event type logged by the service before spawning the HTTP worker:
+
+```json
+{
+  "type": "classification",
+  "cycle_id": "uuid",
+  "timestamp": "...",
+  "complexity": "complex",
+  "reasoning_model": "claude-opus-4-6",
+  "prompted": true,
+  "confirmed": true
+}
+```
+
+`prompted` is `true` when the user was asked, `confirmed` is `true/false/null`
+depending on their answer.
+
+---
+
+#### Design decisions
+
+**Why classify on `task_model`, not a dedicated tiny model?** The task model is
+already configured and available. Using a separate third model would require another
+config field and another API key check, for marginal gain.
+
+**Why `max_tokens: 10` for the classifier call?** One word (`simple` or `complex`)
+needs 1 token. `10` gives headroom for any whitespace or punctuation the model adds
+while keeping cost negligible.
+
+**Why is classification synchronous in the service actor rather than the HTTP
+worker?** The classification result determines which model to pass into the HTTP
+worker. It cannot be deferred to the worker without restructuring the model-selection
+logic. The cost is one small, fast LLM call before spawning the worker.
+
+---
+
+### `use-skills` branch — Agent Skills integration (Feb 26)
+
+**Files added:** `src/skills.gleam`, `test/skills_test.gleam`.
+**Files changed:** `src/tools/builtin.gleam`, `src/config.gleam`, `src/springdrift.gleam`,
+`test/config_test.gleam`.
+
+Implements the [agentskills.io](https://agentskills.io/) open standard for giving
+agents reusable, portable capabilities.
+
+---
+
+#### `src/skills.gleam` (new)
+
+Three public functions:
+
+**`discover(dirs: List(String)) -> List(SkillMeta)`**
+
+Scans each directory for subdirectories containing a `SKILL.md` file. For each
+found file it calls `parse_frontmatter`; only skills with both `name` and
+`description` fields are returned. `~/` prefixes are expanded using the `HOME`
+environment variable (same FFI call as `config.gleam`). Missing or unreadable
+directories are silently skipped — discovery is best-effort.
+
+**`parse_frontmatter(content: String) -> Result(#(String, String), Nil)`**
+
+Parses the YAML frontmatter section of a `SKILL.md` file. The parser:
+1. Strips a leading `---\n` fence if present.
+2. Takes everything before the next `\n---` occurrence as the frontmatter body.
+3. Splits line-by-line and extracts `key: value` pairs using `string.split(line, ": ")`.
+4. Returns `Ok(#(name, description))` or `Error(Nil)` if either required field is
+   missing.
+
+Values that contain `: ` are handled correctly by splitting on the first occurrence
+and rejoining the remainder. Extra fields (`license`, `version`, etc.) are silently
+ignored. This function is `pub` so it can be unit-tested without touching the
+filesystem.
+
+**`to_system_prompt_xml(skills: List(SkillMeta)) -> String`**
+
+Produces the `<available_skills>` XML block injected into the system prompt:
+
+```xml
+<available_skills>
+  <skill>
+    <name>my-skill</name>
+    <description>What this skill does.</description>
+    <location>/abs/path/my-skill/SKILL.md</location>
+  </skill>
+</available_skills>
+```
+
+Returns `""` for an empty list so callers never need to special-case it.
+
+---
+
+#### `read_skill` tool
+
+Added to `src/tools/builtin.gleam`. The tool:
+
+1. Decodes the `path` string from the tool call JSON input.
+2. Validates that `path` ends with `"SKILL.md"` — rejects anything else with a
+   descriptive `ToolFailure`. This prevents the model from using `read_skill` as a
+   general file reader.
+3. Calls `simplifile.read(path)` and returns the content as `ToolSuccess`, or
+   a `ToolFailure` with the human-readable `simplifile.describe_error` message.
+
+---
+
+#### System prompt injection in `springdrift.gleam`
+
+`run(cfg)` now:
+
+1. Computes `skill_dirs` — either `cfg.skills_dirs` (if set) or
+   `default_skill_dirs()` which returns `[home <> "/.config/springdrift/skills", ".skills"]`.
+2. Calls `skills.discover(skill_dirs)`.
+3. If any skills were found, appends `"\n\n" <> to_system_prompt_xml(discovered)`
+   to the base system prompt.
+
+This means the model always knows what skills are available without needing to
+call any tool to find out.
+
+---
+
+#### Config: `skills_dirs: Option(List(String))`
+
+New `AppConfig` field. The `--skills-dir <path>` CLI flag is repeatable — each
+occurrence appends to the accumulated list:
+
+```gleam
+["--skills-dir", path, ..rest] ->
+  case acc.skills_dirs {
+    None    -> do_parse_args(rest, AppConfig(..acc, skills_dirs: Some([path])))
+    Some(existing) ->
+      do_parse_args(rest, AppConfig(..acc, skills_dirs: Some(list.append(existing, [path]))))
+  }
+```
+
+The JSON config field accepts an array: `"skills_dirs": ["/path/a", "/path/b"]`.
+`merge` applies `option.or` (override wins wholesale), consistent with all other
+list-valued config fields.
+
+---
+
+#### Test coverage (`test/skills_test.gleam`)
+
+Seven pure unit tests covering:
+
+| Test | Verifies |
+|---|---|
+| `parse_valid_frontmatter_test` | `name` and `description` extracted correctly |
+| `parse_missing_name_test` | Returns `Error(Nil)` |
+| `parse_missing_description_test` | Returns `Error(Nil)` |
+| `parse_extra_fields_ignored_test` | `license`, `metadata` lines don't affect result |
+| `to_system_prompt_xml_empty_test` | Returns `""` |
+| `to_system_prompt_xml_single_skill_test` | All four XML elements present |
+| `to_system_prompt_xml_multiple_skills_test` | Both `<skill>` blocks present |
+
+No filesystem setup is required — `parse_frontmatter` and `to_system_prompt_xml`
+are pure functions. Discovery is tested indirectly through end-to-end runs.
 
 ---
 

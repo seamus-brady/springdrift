@@ -15,8 +15,12 @@ import llm/types.{
   ToolSuccess, UnknownError, User,
 }
 import query_complexity
+import sandbox.{type SandboxMessage}
 import storage
 import tools/builtin
+import tools/files
+import tools/shell
+import tools/web
 
 // ---------------------------------------------------------------------------
 // Types
@@ -59,6 +63,8 @@ pub type ChatState {
     reasoning_model: String,
     prompt_on_complex: Bool,
     verbose: Bool,
+    sandbox: Option(Subject(SandboxMessage)),
+    write_anywhere: Bool,
   )
 }
 
@@ -109,6 +115,8 @@ pub fn start(
   reasoning_model: String,
   prompt_on_complex: Bool,
   verbose: Bool,
+  sandbox: Option(Subject(SandboxMessage)),
+  write_anywhere: Bool,
 ) -> Subject(ChatMessage) {
   let setup = process.new_subject()
   process.spawn_unlinked(fn() {
@@ -131,6 +139,8 @@ pub fn start(
         reasoning_model:,
         prompt_on_complex:,
         verbose:,
+        sandbox:,
+        write_anywhere:,
       ),
     )
   })
@@ -220,6 +230,8 @@ fn service_loop(self: Subject(ChatMessage), state: ChatState) -> Nil {
             tool_channel,
             cycle_id,
             new_state.verbose,
+            new_state.sandbox,
+            new_state.write_anywhere,
           )
         let #(result, final_messages) = case react_result {
           Ok(#(resp, msgs)) -> #(Ok(resp), msgs)
@@ -280,6 +292,8 @@ fn react_loop(
   tool_channel: Subject(ToolEvent),
   cycle_id: String,
   verbose: Bool,
+  sandbox: Option(Subject(SandboxMessage)),
+  write_anywhere: Bool,
 ) -> Result(#(LlmResponse, List(Message)), LlmError) {
   case verbose {
     True -> cycle_log.log_llm_request(cycle_id, req)
@@ -307,6 +321,10 @@ fn react_loop(
                   process.send(tool_channel, ToolCalling(name: call.name))
                   cycle_log.log_tool_call(cycle_id, call)
                   let result = case call.name {
+                    "run_shell" -> shell.execute(call, sandbox)
+                    "read_file" | "write_file" | "list_directory" ->
+                      files.execute(call, write_anywhere)
+                    "fetch_url" -> web.execute(call)
                     "request_human_input" ->
                       execute_human_input(call, question_channel)
                     _ -> builtin.execute(call)
@@ -343,6 +361,8 @@ fn react_loop(
                     tool_channel,
                     cycle_id,
                     verbose,
+                    sandbox,
+                    write_anywhere,
                   )
                 }
               }

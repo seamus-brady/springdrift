@@ -31,6 +31,8 @@ fn start_service(provider) {
     "mock-model",
     False,
     False,
+    None,
+    False,
   )
 }
 
@@ -97,7 +99,7 @@ pub fn max_turns_reached_test() {
   // Provider always returns a tool_use; loop should hit max_turns limit.
   let provider =
     mock.provider_with_handler(fn(_req) {
-      Ok(mock.tool_call_response("get_today_date", "{}", "tool_loop"))
+      Ok(mock.tool_call_response("get_current_datetime", "{}", "tool_loop"))
     })
   // Use max_turns: 2 so the test terminates quickly
   let chat =
@@ -114,6 +116,8 @@ pub fn max_turns_reached_test() {
       "mock-model",
       "mock-model",
       False,
+      False,
+      None,
       False,
     )
   let reply = send_and_receive(chat, "What date is it forever?")
@@ -150,6 +154,8 @@ pub fn consecutive_error_circuit_breaker_test() {
       "mock-model",
       "mock-model",
       False,
+      False,
+      None,
       False,
     )
   let reply = send_and_receive(chat, "Do something impossible")
@@ -191,6 +197,8 @@ pub fn consecutive_errors_reset_on_success_test() {
       "mock-model",
       "mock-model",
       False,
+      False,
+      None,
       False,
     )
   let reply = send_and_receive(chat, "Try some tools")

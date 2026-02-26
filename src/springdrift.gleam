@@ -7,14 +7,29 @@ import llm/adapters/anthropic as anthropic_adapter
 import llm/adapters/mock
 import llm/adapters/openai as openai_adapter
 import llm/provider.{type Provider}
+import sandbox
 import simplifile
+import skills
 import storage
 import tools/builtin
+import tools/files
+import tools/shell
+import tools/web
 import tui
 
 /// Exit the process with the given status code.
 @external(erlang, "erlang", "halt")
 fn do_halt(code: Int) -> Nil
+
+@external(erlang, "springdrift_ffi", "get_env")
+fn get_env(name: String) -> Result(String, Nil)
+
+fn default_skill_dirs() -> List(String) {
+  case get_env("HOME") {
+    Ok(home) -> [home <> "/.config/springdrift/skills", ".skills"]
+    Error(_) -> [".skills"]
+  }
+}
 
 pub fn main() -> Nil {
   let args = get_startup_args()
@@ -49,7 +64,7 @@ fn resolve_config() -> config.AppConfig {
           base_cfg
         }
         Ok(contents) ->
-          case config.parse_config_json(contents) {
+          case config.parse_config_toml(contents) {
             Error(_) -> {
               io.println("Warning: could not parse config file: " <> path)
               base_cfg
@@ -70,63 +85,108 @@ fn get_args_ffi() -> List(String)
 fn print_help() -> Nil {
   io.println("Usage: gleam run [-- OPTIONS]")
   io.println("")
-  io.println("Options:")
+  io.println("Provider / model:")
   io.println(
-    "  --provider <name>         Provider: anthropic, openrouter, openai (default: auto-detect)",
+    "  --provider <name>         anthropic | openrouter | openai | mock",
+  )
+  io.println("                            (default: auto-detect from env vars)")
+  io.println(
+    "  --model <name>            Main model identifier (default: provider default)",
   )
   io.println(
-    "  --model <name>            Model name (default: provider default)",
+    "  --system <prompt>         System prompt (default: \"You are a helpful assistant.\")",
   )
-  io.println("  --system <prompt>         System prompt")
-  io.println("  --max-tokens <n>          Max output tokens (default: 1024)")
+  io.println("")
+  io.println("Loop control:")
   io.println(
-    "  --max-turns <n>           Max react-loop turns per message (default: 5)",
-  )
-  io.println(
-    "  --max-errors <n>          Max consecutive tool failures before abort (default: 3)",
+    "  --max-tokens <n>          Max output tokens per LLM call (default: 1024)",
   )
   io.println(
-    "  --max-context <n>         Max messages kept in context window (default: unlimited)",
+    "  --max-turns <n>           Max react-loop iterations per message (default: 5)",
   )
   io.println(
-    "  --task-model <name>       Model for simple queries (default: provider-specific)",
+    "  --max-errors <n>          Consecutive tool failures before abort (default: 3)",
   )
   io.println(
-    "  --reasoning-model <name>  Model for complex queries (default: provider-specific)",
+    "  --max-context <n>         Sliding-window message cap (default: unlimited)",
+  )
+  io.println("")
+  io.println("Model switching:")
+  io.println(
+    "  --task-model <name>       Model for Simple queries (default: provider-specific)",
+  )
+  io.println(
+    "  --reasoning-model <name>  Model for Complex queries (default: provider-specific)",
   )
   io.println(
     "  --no-model-prompt         Auto-switch to reasoning model without prompting",
   )
-  io.println("  --resume                  Resume previous session")
+  io.println("")
+  io.println("Tools / sandbox:")
+  io.println(
+    "  --allow-write-anywhere    Allow write_file outside the current working directory",
+  )
+  io.println("")
+  io.println("Session / config:")
+  io.println("  --resume                  Resume previous session from disk")
+  io.println("  --skills-dir <path>       Add a skills directory (repeatable)")
+  io.println(
+    "                            (default: ~/.config/springdrift/skills and .skills)",
+  )
+  io.println("  --config <path>           Load an additional TOML config file")
+  io.println(
+    "  --verbose                 Log full LLM payloads to the cycle log",
+  )
+  io.println("  --print-config            Print resolved config and exit")
   io.println("  --help, -h                Show this help")
   io.println("")
-  io.println("Config files (checked in priority order, local overrides user):")
-  io.println("  .springdrift.json")
-  io.println("  ~/.config/springdrift/config.json")
+  io.println("Config files (checked in order; local overrides user config):")
+  io.println("  .springdrift.toml")
+  io.println("  ~/.config/springdrift/config.toml")
   io.println("")
-  io.println("Example config file (.springdrift.json):")
-  io.println("  {")
-  io.println("    \"provider\": \"anthropic\",")
-  io.println("    \"model\": \"claude-sonnet-4-20250514\",")
-  io.println("    \"system_prompt\": \"You are a helpful assistant.\",")
-  io.println("    \"max_tokens\": 2048,")
-  io.println("    \"max_turns\": 5,")
-  io.println("    \"max_consecutive_errors\": 3,")
-  io.println("    \"max_context_messages\": 50,")
-  io.println("    \"task_model\": \"claude-haiku-4-5-20251001\",")
-  io.println("    \"reasoning_model\": \"claude-opus-4-6\",")
-  io.println("    \"prompt_on_complex\": true")
-  io.println("  }")
+  io.println("Example .springdrift.toml (all fields optional):")
+  io.println("  # LLM provider and model")
+  io.println("  provider = \"anthropic\"")
+  io.println("  model    = \"claude-sonnet-4-20250514\"")
+  io.println("")
+  io.println("  # System prompt")
+  io.println("  system_prompt = \"You are a helpful assistant.\"")
+  io.println("")
+  io.println("  # Token and loop limits")
+  io.println("  max_tokens            = 2048")
+  io.println("  max_turns             = 5")
+  io.println("  max_consecutive_errors = 3")
+  io.println("  max_context_messages   = 50   # omit for unlimited")
+  io.println("")
+  io.println("  # Model switching")
+  io.println("  task_model       = \"claude-haiku-4-5-20251001\"")
+  io.println("  reasoning_model  = \"claude-opus-4-6\"")
+  io.println("  prompt_on_complex = true")
+  io.println("")
+  io.println("  # Logging and filesystem")
+  io.println("  log_verbose   = false")
+  io.println("  write_anywhere = false")
+  io.println("")
+  io.println("  # Extra skill directories")
+  io.println("  skills_dirs = [\"/path/to/skills\"]")
 }
 
 fn run(cfg: AppConfig) -> Nil {
-  let system = option.unwrap(cfg.system_prompt, "You are a helpful assistant.")
+  let base_system =
+    option.unwrap(cfg.system_prompt, "You are a helpful assistant.")
+  let skill_dirs = option.unwrap(cfg.skills_dirs, default_skill_dirs())
+  let discovered = skills.discover(skill_dirs)
+  let system = case discovered {
+    [] -> base_system
+    _ -> base_system <> "\n\n" <> skills.to_system_prompt_xml(discovered)
+  }
   let max_tokens = option.unwrap(cfg.max_tokens, 1024)
   let max_turns = option.unwrap(cfg.max_turns, 5)
   let max_consecutive_errors = option.unwrap(cfg.max_consecutive_errors, 3)
   let max_context_messages = cfg.max_context_messages
   let prompt_on_complex = option.unwrap(cfg.prompt_on_complex, False)
   let verbose = option.unwrap(cfg.log_verbose, False)
+  let write_anywhere = option.unwrap(cfg.write_anywhere, False)
 
   let #(p, model, default_task_model, default_reasoning_model) =
     select_provider(cfg)
@@ -140,6 +200,35 @@ fn run(cfg: AppConfig) -> Nil {
     False -> []
   }
 
+  let sandbox_dir = find_sandbox_dir()
+  let sandbox_subj = case sandbox_dir {
+    option.None -> {
+      io.println(
+        "Sandbox  : unavailable (sandbox/Dockerfile not found) — run_shell disabled",
+      )
+      option.None
+    }
+    option.Some(dir) ->
+      case sandbox.start(dir) {
+        Ok(s) -> {
+          io.println("Sandbox  : Docker container started")
+          option.Some(s)
+        }
+        Error(msg) -> {
+          io.println(
+            "Sandbox  : unavailable (" <> msg <> ") — run_shell disabled",
+          )
+          option.None
+        }
+      }
+  }
+
+  let shell_tools = case sandbox_subj {
+    option.None -> []
+    option.Some(_) -> shell.all()
+  }
+  let tools = list.flatten([builtin.all(), files.all(), web.all(), shell_tools])
+
   let chat =
     service.start(
       p,
@@ -149,14 +238,31 @@ fn run(cfg: AppConfig) -> Nil {
       max_turns,
       max_consecutive_errors,
       max_context_messages,
-      builtin.all(),
+      tools,
       initial_messages,
       task_model,
       reasoning_model,
       prompt_on_complex,
       verbose,
+      sandbox_subj,
+      write_anywhere,
     )
   tui.start(chat, p.name, model, task_model, reasoning_model, initial_messages)
+  let _ = option.map(sandbox_subj, sandbox.send_shutdown)
+  Nil
+}
+
+/// Find the sandbox directory containing the Dockerfile.
+/// Checks ./sandbox/Dockerfile first, then priv/sandbox/Dockerfile.
+fn find_sandbox_dir() -> option.Option(String) {
+  case simplifile.is_file("./sandbox/Dockerfile") {
+    Ok(True) -> option.Some("./sandbox")
+    _ ->
+      case simplifile.is_file("priv/sandbox/Dockerfile") {
+        Ok(True) -> option.Some("priv/sandbox")
+        _ -> option.None
+      }
+  }
 }
 
 fn select_provider(cfg: AppConfig) -> #(Provider, String, String, String) {
