@@ -23,12 +23,22 @@ fn session_path() -> String {
   }
 }
 
-pub fn save(messages: List(Message)) -> Nil {
+pub fn save(messages: List(Message)) -> Result(Nil, String) {
   let dir = config_dir()
-  let _ = simplifile.create_directory_all(dir)
-  let json_str = json.to_string(encode_messages(messages))
-  let _ = simplifile.write(session_path(), json_str)
-  Nil
+  case simplifile.create_directory_all(dir) {
+    Error(e) ->
+      Error(
+        "Could not create config directory: " <> simplifile.describe_error(e),
+      )
+    Ok(_) -> {
+      let json_str = json.to_string(encode_messages(messages))
+      case simplifile.write(session_path(), json_str) {
+        Error(e) ->
+          Error("Could not write session: " <> simplifile.describe_error(e))
+        Ok(_) -> Ok(Nil)
+      }
+    }
+  }
 }
 
 pub fn load() -> List(Message) {
@@ -42,9 +52,12 @@ pub fn load() -> List(Message) {
   }
 }
 
-pub fn clear() -> Nil {
-  let _ = simplifile.delete(session_path())
-  Nil
+pub fn clear() -> Result(Nil, String) {
+  case simplifile.delete(session_path()) {
+    Error(e) ->
+      Error("Could not clear session: " <> simplifile.describe_error(e))
+    Ok(_) -> Ok(Nil)
+  }
 }
 
 fn encode_messages(messages: List(Message)) -> json.Json {

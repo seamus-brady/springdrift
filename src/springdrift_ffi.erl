@@ -1,7 +1,8 @@
 -module(springdrift_ffi).
 -export([read_line/0, get_env/1, get_args/0, read_char/0,
          start_spinner/1, stop_spinner/0,
-         generate_uuid/0, get_datetime/0, get_date/0]).
+         generate_uuid/0, get_datetime/0, get_date/0,
+         tui_run/2, throw_tui_exit/0]).
 
 %% Read one line from stdin.
 %% Returns {ok, Binary} (including trailing newline) or {error, nil} on EOF.
@@ -89,6 +90,21 @@ get_date() ->
     {{Y, Mo, D}, _} = calendar:local_time(),
     Pad = fun(N, W) -> string:right(integer_to_list(N), W, $0) end,
     iolist_to_binary([Pad(Y,4), $-, Pad(Mo,2), $-, Pad(D,2)]).
+
+%% Run LoopFun; always run CleanupFun before returning, even on exception.
+tui_run(LoopFun, CleanupFun) ->
+    try LoopFun()
+    catch
+        throw:tui_exit -> ok;
+        _Class:_Reason -> ok
+    after
+        CleanupFun()
+    end,
+    nil.
+
+%% Throw the tui_exit atom so tui_run can catch it cleanly.
+throw_tui_exit() ->
+    throw(tui_exit).
 
 %% Read exactly one byte from stdin (blocking). Works after enter_raw().
 read_char() ->

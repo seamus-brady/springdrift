@@ -7,6 +7,7 @@ import llm/adapters/anthropic as anthropic_adapter
 import llm/adapters/mock
 import llm/adapters/openai as openai_adapter
 import llm/provider.{type Provider}
+import simplifile
 import storage
 import tools/builtin
 import tui
@@ -16,18 +17,46 @@ import tui
 fn do_halt(code: Int) -> Nil
 
 pub fn main() -> Nil {
-  case
-    list.contains(get_startup_args(), "--help")
-    || list.contains(get_startup_args(), "-h")
-  {
+  let args = get_startup_args()
+  case list.contains(args, "--help") || list.contains(args, "-h") {
     True -> {
       print_help()
       do_halt(0)
     }
-    False -> {
-      let cfg = config.resolve()
-      run(cfg)
-    }
+    False ->
+      case list.contains(args, "--print-config") {
+        True -> {
+          let cfg = resolve_config()
+          io.println(config.to_string(cfg))
+          do_halt(0)
+        }
+        False -> {
+          let cfg = resolve_config()
+          run(cfg)
+        }
+      }
+  }
+}
+
+fn resolve_config() -> config.AppConfig {
+  let base_cfg = config.resolve()
+  case base_cfg.config_path {
+    option.None -> base_cfg
+    option.Some(path) ->
+      case simplifile.read(path) {
+        Error(_) -> {
+          io.println("Warning: could not read config file: " <> path)
+          base_cfg
+        }
+        Ok(contents) ->
+          case config.parse_config_json(contents) {
+            Error(_) -> {
+              io.println("Warning: could not parse config file: " <> path)
+              base_cfg
+            }
+            Ok(file_cfg) -> config.merge(file_cfg, base_cfg)
+          }
+      }
   }
 }
 
@@ -97,6 +126,7 @@ fn run(cfg: AppConfig) -> Nil {
   let max_consecutive_errors = option.unwrap(cfg.max_consecutive_errors, 3)
   let max_context_messages = cfg.max_context_messages
   let prompt_on_complex = option.unwrap(cfg.prompt_on_complex, True)
+  let verbose = option.unwrap(cfg.log_verbose, False)
 
   let #(p, model, default_task_model, default_reasoning_model) =
     select_provider(cfg)
@@ -124,6 +154,7 @@ fn run(cfg: AppConfig) -> Nil {
       task_model,
       reasoning_model,
       prompt_on_complex,
+      verbose,
     )
   tui.start(chat, p.name, model, task_model, reasoning_model, initial_messages)
 }
