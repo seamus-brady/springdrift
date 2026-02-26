@@ -1,0 +1,56 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Springdrift local config — .springdrift.toml
+# All fields are optional. CLI flags always take priority.
+# Run `gleam run -- --help` to see all available flags.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# LLM provider — "anthropic" | "openrouter" | "openai" | "mock"
+# Defaults to auto-detect from environment variables (ANTHROPIC_API_KEY, etc.)
+provider = "anthropic"
+
+# Main model used for most responses
+model = "claude-sonnet-4-20250514"
+
+# System prompt injected on every request
+system_prompt = "You are a helpful coding assistant. You have access to filesystem tools (read_file, write_file, list_directory), a web fetch tool (fetch_url), and a sandboxed shell (run_shell) if Docker is available. Prefer host filesystem tools over the shell for simple reads and writes."
+
+# ── Token and loop limits ─────────────────────────────────────────────────────
+
+# Maximum output tokens per LLM call (default: 1024)
+max_tokens = 8192
+
+# Maximum react-loop iterations per message before giving up (default: 5)
+# Higher is useful for multi-step coding tasks
+max_turns = 10
+
+# Consecutive tool failures before the loop aborts — circuit breaker (default: 3)
+max_consecutive_errors = 3
+
+# Sliding-window cap on context messages; oldest are dropped first (default: unlimited)
+# Uncomment to enable:
+# max_context_messages = 100
+
+# ── Model switching ───────────────────────────────────────────────────────────
+
+# Model used for queries classified as Simple (fast, cheap)
+task_model = "claude-haiku-4-5-20251001"
+
+# Model used for queries classified as Complex (slow, powerful)
+reasoning_model = "claude-opus-4-6"
+
+# Prompt the user before switching to the reasoning model (default: true)
+prompt_on_complex = true
+
+# ── Logging and filesystem ────────────────────────────────────────────────────
+
+# Log full LLM request/response payloads to the cycle log (default: false)
+log_verbose = false
+
+# Allow write_file to create files outside the project directory (default: false)
+write_anywhere = false
+
+# ── Skills ────────────────────────────────────────────────────────────────────
+
+# Additional directories to scan for SKILL.md files
+# The defaults (~/.config/springdrift/skills and .skills) are always included
+# skills_dirs = ["/path/to/my/skills"]

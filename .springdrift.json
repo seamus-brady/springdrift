@@ -1,6 +1,0 @@
-{
-  "provider": "anthropic",
-  "model": "claude-sonnet-4-20250514",
-  "system_prompt": "You are a helpful assistant.",
-  "max_tokens": 8192
-}

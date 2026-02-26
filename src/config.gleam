@@ -1,32 +1,83 @@
-//// Application configuration loaded from CLI flags and JSON config files.
+//// Application configuration loaded from CLI flags and TOML config files.
 ////
 //// Priority (highest to lowest):
 ////   1. CLI flags       (--provider, --model, --system, --max-tokens, etc.)
-////   2. Local config    (.springdrift.json in current directory)
-////   3. User config     (~/.config/springdrift/config.json)
+////   2. Local config    (.springdrift.toml in current directory)
+////   3. User config     (~/.config/springdrift/config.toml)
 ////
-//// Config file format:
-////   {
-////     "provider": "anthropic",
-////     "model": "claude-sonnet-4-20250514",
-////     "system_prompt": "You are a helpful assistant.",
-////     "max_tokens": 2048,
-////     "max_turns": 5,
-////     "max_consecutive_errors": 3,
-////     "max_context_messages": 50,
-////     "task_model": "claude-haiku-4-5-20251001",
-////     "reasoning_model": "claude-opus-4-6",
-////     "prompt_on_complex": true
-////   }
+//// All fields are optional. Unset fields fall back to built-in defaults
+//// applied in springdrift.gleam at startup.
+////
+//// Config file format (all fields optional):
+////
+////   # LLM provider — "anthropic" | "openrouter" | "openai" | "mock"
+////   # Default: auto-detect from environment variables
+////   provider = "anthropic"
+////
+////   # Model identifier for the main model
+////   # Default: provider-specific (e.g. claude-sonnet-4-20250514)
+////   model = "claude-sonnet-4-20250514"
+////
+////   # System prompt sent to the LLM on every request
+////   # Default: "You are a helpful assistant."
+////   system_prompt = "You are a helpful assistant."
+////
+////   # Maximum output tokens per LLM call
+////   # Default: 1024
+////   max_tokens = 2048
+////
+////   # Maximum react-loop iterations before giving up on a single message
+////   # Default: 5
+////   max_turns = 5
+////
+////   # Consecutive tool failures before the loop aborts (circuit breaker)
+////   # Default: 3
+////   max_consecutive_errors = 3
+////
+////   # Sliding-window cap on context messages (oldest dropped first)
+////   # Default: unlimited (omit field)
+////   max_context_messages = 50
+////
+////   # Model used for queries classified as Simple
+////   # Default: provider-specific (e.g. claude-haiku-4-5-20251001)
+////   task_model = "claude-haiku-4-5-20251001"
+////
+////   # Model used for queries classified as Complex
+////   # Default: provider-specific (e.g. claude-opus-4-6)
+////   reasoning_model = "claude-opus-4-6"
+////
+////   # Whether to prompt the user before switching to the reasoning model
+////   # Default: true
+////   prompt_on_complex = true
+////
+////   # Log full LLM request/response payloads to the cycle log
+////   # Default: false
+////   log_verbose = false
+////
+////   # Additional skill directories scanned for SKILL.md files
+////   # Default: ["~/.config/springdrift/skills", ".skills"]
+////   skills_dirs = ["/path/to/my/skills"]
+////
+////   # Allow write_file to write files outside the current working directory
+////   # Default: false
+////   write_anywhere = false
+////
+////   # Ports to expose from the sandbox container (repeatable via CLI)
+////   # Default: [3000, 8000, 8080, 5000]
+////   sandbox_ports = [3000, 8000, 8080, 5000]
+////
+//// CLI flags always override config file values.
+//// --skills-dir is repeatable and appends to (rather than replaces) the list.
+//// --sandbox-port is repeatable and appends to the ports list.
 
-import gleam/dynamic/decode
+import gleam/dict
 import gleam/int
-import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import simplifile
+import tom
 
 // ---------------------------------------------------------------------------
 // Types
@@ -46,6 +97,9 @@ pub type AppConfig {
     prompt_on_complex: Option(Bool),
     config_path: Option(String),
     log_verbose: Option(Bool),
+    skills_dirs: Option(List(String)),
+    write_anywhere: Option(Bool),
+    sandbox_ports: Option(List(Int)),
   )
 }
 
@@ -78,6 +132,9 @@ pub fn default() -> AppConfig {
     prompt_on_complex: None,
     config_path: None,
     log_verbose: None,
+    skills_dirs: None,
+    write_anywhere: None,
+    sandbox_ports: None,
   )
 }
 
@@ -108,6 +165,9 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     ),
     config_path: option.or(override_cfg.config_path, base.config_path),
     log_verbose: option.or(override_cfg.log_verbose, base.log_verbose),
+    skills_dirs: option.or(override_cfg.skills_dirs, base.skills_dirs),
+    write_anywhere: option.or(override_cfg.write_anywhere, base.write_anywhere),
+    sandbox_ports: option.or(override_cfg.sandbox_ports, base.sandbox_ports),
   )
 }
 
@@ -128,17 +188,19 @@ pub fn from_args(args: List(String)) -> AppConfig {
   do_parse_args(args, default())
 }
 
-/// Parse a JSON string into an AppConfig. Returns Error(Nil) on parse failure.
-pub fn parse_config_json(input: String) -> Result(AppConfig, Nil) {
-  json.parse(input, config_decoder())
-  |> result.map_error(fn(_) { Nil })
+/// Parse a TOML string into an AppConfig. Returns Error(Nil) on parse failure.
+pub fn parse_config_toml(input: String) -> Result(AppConfig, Nil) {
+  case tom.parse(input) {
+    Error(_) -> Error(Nil)
+    Ok(toml) -> Ok(toml_to_config(toml))
+  }
 }
 
 /// Load config from disk: merges user config with local config (local wins).
 pub fn load_file() -> AppConfig {
-  let local = load_from_path(".springdrift.json")
+  let local = load_from_path(".springdrift.toml")
   let user = case get_env("HOME") {
-    Ok(home) -> load_from_path(home <> "/.config/springdrift/config.json")
+    Ok(home) -> load_from_path(home <> "/.config/springdrift/config.toml")
     Error(_) -> default()
   }
   merge(user, local)
@@ -182,6 +244,19 @@ pub fn to_string(cfg: AppConfig) -> String {
         True -> "true"
         False -> "false"
       }
+    }),
+    option.map(cfg.skills_dirs, fn(dirs) {
+      "skills_dirs: " <> string.join(dirs, ", ")
+    }),
+    option.map(cfg.write_anywhere, fn(v) {
+      "write_anywhere: "
+      <> case v {
+        True -> "true"
+        False -> "false"
+      }
+    }),
+    option.map(cfg.sandbox_ports, fn(ports) {
+      "sandbox_ports: " <> string.join(list.map(ports, int.to_string), ", ")
     }),
   ]
   |> list.filter_map(fn(x) { option.to_result(x, Nil) })
@@ -233,87 +308,105 @@ fn do_parse_args(args: List(String), acc: AppConfig) -> AppConfig {
       do_parse_args(rest, AppConfig(..acc, config_path: Some(path)))
     ["--verbose", ..rest] ->
       do_parse_args(rest, AppConfig(..acc, log_verbose: Some(True)))
+    ["--skills-dir", path, ..rest] ->
+      case acc.skills_dirs {
+        None -> do_parse_args(rest, AppConfig(..acc, skills_dirs: Some([path])))
+        Some(existing) ->
+          do_parse_args(
+            rest,
+            AppConfig(..acc, skills_dirs: Some(list.append(existing, [path]))),
+          )
+      }
+    ["--allow-write-anywhere", ..rest] ->
+      do_parse_args(rest, AppConfig(..acc, write_anywhere: Some(True)))
+    ["--sandbox-port", value, ..rest] ->
+      case int.parse(value) {
+        Ok(n) ->
+          case acc.sandbox_ports {
+            None ->
+              do_parse_args(rest, AppConfig(..acc, sandbox_ports: Some([n])))
+            Some(existing) ->
+              do_parse_args(
+                rest,
+                AppConfig(
+                  ..acc,
+                  sandbox_ports: Some(list.append(existing, [n])),
+                ),
+              )
+          }
+        Error(_) -> do_parse_args(rest, acc)
+      }
     [_, ..rest] -> do_parse_args(rest, acc)
   }
 }
 
-fn config_decoder() -> decode.Decoder(AppConfig) {
-  use provider <- decode.optional_field(
-    "provider",
-    None,
-    decode.string |> decode.map(Some),
-  )
-  use model <- decode.optional_field(
-    "model",
-    None,
-    decode.string |> decode.map(Some),
-  )
-  use system_prompt <- decode.optional_field(
-    "system_prompt",
-    None,
-    decode.string |> decode.map(Some),
-  )
-  use max_tokens <- decode.optional_field(
-    "max_tokens",
-    None,
-    decode.int |> decode.map(Some),
-  )
-  use max_turns <- decode.optional_field(
-    "max_turns",
-    None,
-    decode.int |> decode.map(Some),
-  )
-  use max_consecutive_errors <- decode.optional_field(
-    "max_consecutive_errors",
-    None,
-    decode.int |> decode.map(Some),
-  )
-  use max_context_messages <- decode.optional_field(
-    "max_context_messages",
-    None,
-    decode.int |> decode.map(Some),
-  )
-  use task_model <- decode.optional_field(
-    "task_model",
-    None,
-    decode.string |> decode.map(Some),
-  )
-  use reasoning_model <- decode.optional_field(
-    "reasoning_model",
-    None,
-    decode.string |> decode.map(Some),
-  )
-  use prompt_on_complex <- decode.optional_field(
-    "prompt_on_complex",
-    None,
-    decode.bool |> decode.map(Some),
-  )
-  use log_verbose <- decode.optional_field(
-    "log_verbose",
-    None,
-    decode.bool |> decode.map(Some),
-  )
-  decode.success(AppConfig(
-    provider:,
-    model:,
-    system_prompt:,
-    max_tokens:,
-    max_turns:,
-    max_consecutive_errors:,
-    max_context_messages:,
-    task_model:,
-    reasoning_model:,
-    prompt_on_complex:,
+fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
+  let get_str = fn(key) {
+    case tom.get_string(table, [key]) {
+      Ok(v) -> Some(v)
+      Error(_) -> None
+    }
+  }
+  let get_int = fn(key) {
+    case tom.get_int(table, [key]) {
+      Ok(v) -> Some(v)
+      Error(_) -> None
+    }
+  }
+  let get_bool = fn(key) {
+    case tom.get_bool(table, [key]) {
+      Ok(v) -> Some(v)
+      Error(_) -> None
+    }
+  }
+  let skills_dirs = case tom.get_array(table, ["skills_dirs"]) {
+    Error(_) -> None
+    Ok(items) ->
+      Some(
+        list.filter_map(items, fn(item) {
+          case item {
+            tom.String(s) -> Ok(s)
+            _ -> Error(Nil)
+          }
+        }),
+      )
+  }
+  let sandbox_ports = case tom.get_array(table, ["sandbox_ports"]) {
+    Error(_) -> None
+    Ok(items) ->
+      Some(
+        list.filter_map(items, fn(item) {
+          case item {
+            tom.Int(n) -> Ok(n)
+            _ -> Error(Nil)
+          }
+        }),
+      )
+  }
+  AppConfig(
+    provider: get_str("provider"),
+    model: get_str("model"),
+    system_prompt: get_str("system_prompt"),
+    max_tokens: get_int("max_tokens"),
+    max_turns: get_int("max_turns"),
+    max_consecutive_errors: get_int("max_consecutive_errors"),
+    max_context_messages: get_int("max_context_messages"),
+    task_model: get_str("task_model"),
+    reasoning_model: get_str("reasoning_model"),
+    prompt_on_complex: get_bool("prompt_on_complex"),
     config_path: None,
-    log_verbose:,
-  ))
+    log_verbose: get_bool("log_verbose"),
+    skills_dirs:,
+    write_anywhere: get_bool("write_anywhere"),
+    sandbox_ports:,
+  )
 }
 
 fn load_from_path(path: String) -> AppConfig {
   case simplifile.read(path) {
     Error(_) -> default()
     Ok(contents) ->
-      parse_config_json(contents)
+      parse_config_toml(contents)
       |> result.unwrap(default())
   }
 }

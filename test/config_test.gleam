@@ -26,6 +26,8 @@ pub fn default_has_all_none_test() {
   cfg.prompt_on_complex |> should.equal(None)
   cfg.config_path |> should.equal(None)
   cfg.log_verbose |> should.equal(None)
+  cfg.skills_dirs |> should.equal(None)
+  cfg.write_anywhere |> should.equal(None)
 }
 
 // ---------------------------------------------------------------------------
@@ -97,6 +99,9 @@ pub fn merge_override_wins_test() {
       prompt_on_complex: None,
       config_path: None,
       log_verbose: None,
+      skills_dirs: None,
+      write_anywhere: None,
+      sandbox_ports: None,
     )
   let override =
     AppConfig(
@@ -112,6 +117,9 @@ pub fn merge_override_wins_test() {
       prompt_on_complex: None,
       config_path: None,
       log_verbose: None,
+      skills_dirs: None,
+      write_anywhere: None,
+      sandbox_ports: None,
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("openai"))
@@ -132,6 +140,9 @@ pub fn merge_base_preserved_when_override_none_test() {
       prompt_on_complex: None,
       config_path: None,
       log_verbose: None,
+      skills_dirs: None,
+      write_anywhere: None,
+      sandbox_ports: None,
     )
   let override =
     AppConfig(
@@ -147,6 +158,9 @@ pub fn merge_base_preserved_when_override_none_test() {
       prompt_on_complex: None,
       config_path: None,
       log_verbose: None,
+      skills_dirs: None,
+      write_anywhere: None,
+      sandbox_ports: None,
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("anthropic"))
@@ -168,6 +182,9 @@ pub fn merge_combines_different_fields_test() {
       prompt_on_complex: None,
       config_path: None,
       log_verbose: None,
+      skills_dirs: None,
+      write_anywhere: None,
+      sandbox_ports: None,
     )
   let override =
     AppConfig(
@@ -183,6 +200,9 @@ pub fn merge_combines_different_fields_test() {
       prompt_on_complex: None,
       config_path: None,
       log_verbose: None,
+      skills_dirs: None,
+      write_anywhere: None,
+      sandbox_ports: None,
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("anthropic"))
@@ -191,13 +211,16 @@ pub fn merge_combines_different_fields_test() {
 }
 
 // ---------------------------------------------------------------------------
-// parse_config_json
+// parse_config_toml
 // ---------------------------------------------------------------------------
 
-pub fn parse_config_json_full_test() {
-  let json =
-    "{\"provider\":\"anthropic\",\"model\":\"claude-sonnet-4-20250514\",\"system_prompt\":\"You are helpful.\",\"max_tokens\":2048}"
-  let result = config.parse_config_json(json)
+pub fn parse_config_toml_full_test() {
+  let toml =
+    "provider = \"anthropic\"
+model = \"claude-sonnet-4-20250514\"
+system_prompt = \"You are helpful.\"
+max_tokens = 2048"
+  let result = config.parse_config_toml(toml)
   result |> should.be_ok
   let assert Ok(cfg) = result
   cfg.provider |> should.equal(Some("anthropic"))
@@ -206,8 +229,8 @@ pub fn parse_config_json_full_test() {
   cfg.max_tokens |> should.equal(Some(2048))
 }
 
-pub fn parse_config_json_partial_test() {
-  let result = config.parse_config_json("{\"provider\":\"openrouter\"}")
+pub fn parse_config_toml_partial_test() {
+  let result = config.parse_config_toml("provider = \"openrouter\"")
   result |> should.be_ok
   let assert Ok(cfg) = result
   cfg.provider |> should.equal(Some("openrouter"))
@@ -215,20 +238,20 @@ pub fn parse_config_json_partial_test() {
   cfg.max_tokens |> should.equal(None)
 }
 
-pub fn parse_config_json_empty_object_test() {
-  let result = config.parse_config_json("{}")
+pub fn parse_config_toml_empty_document_test() {
+  let result = config.parse_config_toml("")
   result |> should.be_ok
   let assert Ok(cfg) = result
   cfg.provider |> should.equal(None)
   cfg.max_tokens |> should.equal(None)
 }
 
-pub fn parse_config_json_invalid_test() {
-  config.parse_config_json("not json") |> should.be_error
+pub fn parse_config_toml_invalid_test() {
+  config.parse_config_toml("= this is not valid toml !!!") |> should.be_error
 }
 
-pub fn parse_config_json_model_only_test() {
-  let result = config.parse_config_json("{\"model\":\"gpt-4o-mini\"}")
+pub fn parse_config_toml_model_only_test() {
+  let result = config.parse_config_toml("model = \"gpt-4o-mini\"")
   result |> should.be_ok
   let assert Ok(cfg) = result
   cfg.model |> should.equal(Some("gpt-4o-mini"))
@@ -259,10 +282,12 @@ pub fn from_args_invalid_max_turns_ignored_test() {
   cfg.max_turns |> should.equal(None)
 }
 
-pub fn parse_config_json_new_fields_test() {
-  let json =
-    "{\"max_turns\":8,\"max_consecutive_errors\":4,\"max_context_messages\":100}"
-  let result = config.parse_config_json(json)
+pub fn parse_config_toml_new_fields_test() {
+  let toml =
+    "max_turns = 8
+max_consecutive_errors = 4
+max_context_messages = 100"
+  let result = config.parse_config_toml(toml)
   result |> should.be_ok
   let assert Ok(cfg) = result
   cfg.max_turns |> should.equal(Some(8))
@@ -285,6 +310,9 @@ pub fn merge_new_fields_test() {
       prompt_on_complex: None,
       config_path: None,
       log_verbose: None,
+      skills_dirs: None,
+      write_anywhere: None,
+      sandbox_ports: None,
     )
   let override =
     AppConfig(
@@ -300,6 +328,9 @@ pub fn merge_new_fields_test() {
       prompt_on_complex: None,
       config_path: None,
       log_verbose: None,
+      skills_dirs: None,
+      write_anywhere: None,
+      sandbox_ports: None,
     )
   let merged = config.merge(base, override:)
   merged.max_turns |> should.equal(Some(10))
@@ -332,40 +363,41 @@ pub fn from_args_no_model_prompt_does_not_set_task_model_test() {
   cfg.reasoning_model |> should.equal(None)
 }
 
-pub fn parse_config_json_task_model_test() {
+pub fn parse_config_toml_task_model_test() {
   let result =
-    config.parse_config_json("{\"task_model\":\"claude-haiku-4-5-20251001\"}")
+    config.parse_config_toml("task_model = \"claude-haiku-4-5-20251001\"")
   result |> should.be_ok
   let assert Ok(cfg) = result
   cfg.task_model |> should.equal(Some("claude-haiku-4-5-20251001"))
 }
 
-pub fn parse_config_json_reasoning_model_test() {
-  let result =
-    config.parse_config_json("{\"reasoning_model\":\"claude-opus-4-6\"}")
+pub fn parse_config_toml_reasoning_model_test() {
+  let result = config.parse_config_toml("reasoning_model = \"claude-opus-4-6\"")
   result |> should.be_ok
   let assert Ok(cfg) = result
   cfg.reasoning_model |> should.equal(Some("claude-opus-4-6"))
 }
 
-pub fn parse_config_json_prompt_on_complex_true_test() {
-  let result = config.parse_config_json("{\"prompt_on_complex\":true}")
+pub fn parse_config_toml_prompt_on_complex_true_test() {
+  let result = config.parse_config_toml("prompt_on_complex = true")
   result |> should.be_ok
   let assert Ok(cfg) = result
   cfg.prompt_on_complex |> should.equal(Some(True))
 }
 
-pub fn parse_config_json_prompt_on_complex_false_test() {
-  let result = config.parse_config_json("{\"prompt_on_complex\":false}")
+pub fn parse_config_toml_prompt_on_complex_false_test() {
+  let result = config.parse_config_toml("prompt_on_complex = false")
   result |> should.be_ok
   let assert Ok(cfg) = result
   cfg.prompt_on_complex |> should.equal(Some(False))
 }
 
-pub fn parse_config_json_all_model_fields_test() {
-  let json =
-    "{\"task_model\":\"gpt-4o-mini\",\"reasoning_model\":\"gpt-4o\",\"prompt_on_complex\":true}"
-  let result = config.parse_config_json(json)
+pub fn parse_config_toml_all_model_fields_test() {
+  let toml =
+    "task_model = \"gpt-4o-mini\"
+reasoning_model = \"gpt-4o\"
+prompt_on_complex = true"
+  let result = config.parse_config_toml(toml)
   result |> should.be_ok
   let assert Ok(cfg) = result
   cfg.task_model |> should.equal(Some("gpt-4o-mini"))
@@ -388,6 +420,9 @@ pub fn merge_model_fields_override_wins_test() {
       prompt_on_complex: Some(True),
       config_path: None,
       log_verbose: None,
+      skills_dirs: None,
+      write_anywhere: None,
+      sandbox_ports: None,
     )
   let override =
     AppConfig(
@@ -403,6 +438,9 @@ pub fn merge_model_fields_override_wins_test() {
       prompt_on_complex: Some(False),
       config_path: None,
       log_verbose: None,
+      skills_dirs: None,
+      write_anywhere: None,
+      sandbox_ports: None,
     )
   let merged = config.merge(base, override:)
   merged.task_model |> should.equal(Some("override-task"))
@@ -425,6 +463,9 @@ pub fn merge_model_fields_base_preserved_test() {
       prompt_on_complex: Some(True),
       config_path: None,
       log_verbose: None,
+      skills_dirs: None,
+      write_anywhere: None,
+      sandbox_ports: None,
     )
   let override =
     AppConfig(
@@ -440,6 +481,9 @@ pub fn merge_model_fields_base_preserved_test() {
       prompt_on_complex: None,
       config_path: None,
       log_verbose: None,
+      skills_dirs: None,
+      write_anywhere: None,
+      sandbox_ports: None,
     )
   let merged = config.merge(base, override:)
   merged.task_model |> should.equal(Some("haiku"))
@@ -452,8 +496,8 @@ pub fn merge_model_fields_base_preserved_test() {
 // ---------------------------------------------------------------------------
 
 pub fn from_args_config_flag_test() {
-  let cfg = config.from_args(["--config", "/tmp/test.json"])
-  cfg.config_path |> should.equal(Some("/tmp/test.json"))
+  let cfg = config.from_args(["--config", "/tmp/test.toml"])
+  cfg.config_path |> should.equal(Some("/tmp/test.toml"))
 }
 
 pub fn from_args_verbose_flag_test() {
@@ -466,15 +510,15 @@ pub fn from_args_verbose_default_none_test() {
   cfg.log_verbose |> should.equal(None)
 }
 
-pub fn parse_config_json_log_verbose_false_test() {
-  let result = config.parse_config_json("{\"log_verbose\":false}")
+pub fn parse_config_toml_log_verbose_false_test() {
+  let result = config.parse_config_toml("log_verbose = false")
   result |> should.be_ok
   let assert Ok(cfg) = result
   cfg.log_verbose |> should.equal(Some(False))
 }
 
-pub fn parse_config_json_log_verbose_true_test() {
-  let result = config.parse_config_json("{\"log_verbose\":true}")
+pub fn parse_config_toml_log_verbose_true_test() {
+  let result = config.parse_config_toml("log_verbose = true")
   result |> should.be_ok
   let assert Ok(cfg) = result
   cfg.log_verbose |> should.equal(Some(True))
@@ -497,8 +541,11 @@ pub fn to_string_fully_set_test() {
       task_model: Some("claude-haiku-4-5-20251001"),
       reasoning_model: Some("claude-opus-4-6"),
       prompt_on_complex: Some(True),
-      config_path: Some("/tmp/cfg.json"),
+      config_path: Some("/tmp/cfg.toml"),
       log_verbose: Some(True),
+      skills_dirs: Some(["/tmp/skills"]),
+      write_anywhere: None,
+      sandbox_ports: None,
     )
   let s = config.to_string(cfg)
   string.contains(s, "provider") |> should.be_true
@@ -520,4 +567,67 @@ pub fn to_string_partial_test() {
   string.contains(s, "provider") |> should.be_true
   string.contains(s, "openai") |> should.be_true
   string.contains(s, "log_verbose") |> should.be_true
+}
+
+// ---------------------------------------------------------------------------
+// skills_dirs config field
+// ---------------------------------------------------------------------------
+
+pub fn from_args_skills_dir_test() {
+  let cfg = config.from_args(["--skills-dir", "/tmp/skills"])
+  cfg.skills_dirs |> should.equal(Some(["/tmp/skills"]))
+}
+
+pub fn from_args_multiple_skills_dirs_test() {
+  let cfg =
+    config.from_args(["--skills-dir", "/path/a", "--skills-dir", "/path/b"])
+  cfg.skills_dirs |> should.equal(Some(["/path/a", "/path/b"]))
+}
+
+pub fn parse_config_toml_skills_dirs_test() {
+  let result =
+    config.parse_config_toml("skills_dirs = [\"/path/a\", \"/path/b\"]")
+  result |> should.be_ok
+  let assert Ok(cfg) = result
+  cfg.skills_dirs |> should.equal(Some(["/path/a", "/path/b"]))
+}
+
+// ---------------------------------------------------------------------------
+// write_anywhere config field
+// ---------------------------------------------------------------------------
+
+pub fn from_args_allow_write_anywhere_test() {
+  let cfg = config.from_args(["--allow-write-anywhere"])
+  cfg.write_anywhere |> should.equal(Some(True))
+}
+
+pub fn parse_config_toml_write_anywhere_false_test() {
+  let result = config.parse_config_toml("write_anywhere = false")
+  result |> should.be_ok
+  let assert Ok(cfg) = result
+  cfg.write_anywhere |> should.equal(Some(False))
+}
+
+pub fn parse_config_toml_write_anywhere_true_test() {
+  let result = config.parse_config_toml("write_anywhere = true")
+  result |> should.be_ok
+  let assert Ok(cfg) = result
+  cfg.write_anywhere |> should.equal(Some(True))
+}
+
+// ---------------------------------------------------------------------------
+// TOML-specific: comments are valid
+// ---------------------------------------------------------------------------
+
+pub fn parse_config_toml_with_comments_test() {
+  let toml =
+    "# Provider to use
+provider = \"anthropic\"
+# Max tokens
+max_tokens = 4096"
+  let result = config.parse_config_toml(toml)
+  result |> should.be_ok
+  let assert Ok(cfg) = result
+  cfg.provider |> should.equal(Some("anthropic"))
+  cfg.max_tokens |> should.equal(Some(4096))
 }

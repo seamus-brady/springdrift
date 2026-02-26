@@ -1,3 +1,4 @@
+import app_log
 import context
 import cycle_log
 import gleam/dynamic/decode
@@ -15,8 +16,13 @@ import llm/types.{
   ToolSuccess, UnknownError, User,
 }
 import query_complexity
+import sandbox.{type SandboxMessage}
 import storage
 import tools/builtin
+import tools/files
+import tools/sandbox_mgmt
+import tools/shell
+import tools/web
 
 // ---------------------------------------------------------------------------
 // Types
@@ -59,6 +65,8 @@ pub type ChatState {
     reasoning_model: String,
     prompt_on_complex: Bool,
     verbose: Bool,
+    sandbox: Option(Subject(SandboxMessage)),
+    write_anywhere: Bool,
   )
 }
 
@@ -109,6 +117,8 @@ pub fn start(
   reasoning_model: String,
   prompt_on_complex: Bool,
   verbose: Bool,
+  sandbox: Option(Subject(SandboxMessage)),
+  write_anywhere: Bool,
 ) -> Subject(ChatMessage) {
   let setup = process.new_subject()
   process.spawn_unlinked(fn() {
@@ -131,6 +141,8 @@ pub fn start(
         reasoning_model:,
         prompt_on_complex:,
         verbose:,
+        sandbox:,
+        write_anywhere:,
       ),
     )
   })
@@ -220,6 +232,8 @@ fn service_loop(self: Subject(ChatMessage), state: ChatState) -> Nil {
             tool_channel,
             cycle_id,
             new_state.verbose,
+            new_state.sandbox,
+            new_state.write_anywhere,
           )
         let #(result, final_messages) = case react_result {
           Ok(#(resp, msgs)) -> #(Ok(resp), msgs)
@@ -240,8 +254,14 @@ fn service_loop(self: Subject(ChatMessage), state: ChatState) -> Nil {
     LlmComplete(result:, final_messages:, final_model:, reply_to:) -> {
       let new_state = ChatState(..state, messages: final_messages)
       let save_error = case storage.save(new_state.messages) {
-        Ok(_) -> None
-        Error(msg) -> Some(msg)
+        Ok(_) -> {
+          app_log.info("session_saved", [])
+          None
+        }
+        Error(msg) -> {
+          app_log.err("session_save_failed", [#("reason", msg)])
+          Some(msg)
+        }
       }
       process.send(
         reply_to,
@@ -280,6 +300,8 @@ fn react_loop(
   tool_channel: Subject(ToolEvent),
   cycle_id: String,
   verbose: Bool,
+  sandbox: Option(Subject(SandboxMessage)),
+  write_anywhere: Bool,
 ) -> Result(#(LlmResponse, List(Message)), LlmError) {
   case verbose {
     True -> cycle_log.log_llm_request(cycle_id, req)
@@ -307,8 +329,17 @@ fn react_loop(
                   process.send(tool_channel, ToolCalling(name: call.name))
                   cycle_log.log_tool_call(cycle_id, call)
                   let result = case call.name {
+                    "run_shell" -> shell.execute(call, sandbox)
+                    "read_file" | "write_file" | "list_directory" ->
+                      files.execute(call, write_anywhere)
+                    "fetch_url" -> web.execute(call)
                     "request_human_input" ->
                       execute_human_input(call, question_channel)
+                    "sandbox_status"
+                    | "sandbox_logs"
+                    | "restart_sandbox"
+                    | "copy_from_sandbox"
+                    | "copy_to_sandbox" -> sandbox_mgmt.execute(call, sandbox)
                     _ -> builtin.execute(call)
                   }
                   cycle_log.log_tool_result(cycle_id, result)
@@ -343,6 +374,8 @@ fn react_loop(
                     tool_channel,
                     cycle_id,
                     verbose,
+                    sandbox,
+                    write_anywhere,
                   )
                 }
               }
