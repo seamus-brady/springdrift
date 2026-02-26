@@ -1,4 +1,3 @@
-import classifier
 import context
 import cycle_log
 import gleam/dynamic/decode
@@ -15,6 +14,7 @@ import llm/types.{
   type ToolCall, type ToolResult, Assistant, Message, TextContent, ToolFailure,
   ToolSuccess, UnknownError, User,
 }
+import query_complexity
 import storage
 import tools/builtin
 
@@ -156,14 +156,15 @@ fn service_loop(self: Subject(ChatMessage), state: ChatState) -> Nil {
       cycle_log.log_human_input(cycle_id, parent_id, text)
 
       // Classify complexity and determine the model to use for this cycle
-      let complexity = classifier.classify(text)
+      let complexity =
+        query_complexity.classify(text, state.provider, state.task_model)
       let complexity_str = case complexity {
-        classifier.Simple -> "simple"
-        classifier.Complex -> "complex"
+        query_complexity.Simple -> "simple"
+        query_complexity.Complex -> "complex"
       }
       let #(final_model, prompted, confirmed) = case complexity {
-        classifier.Simple -> #(state.model, False, None)
-        classifier.Complex ->
+        query_complexity.Simple -> #(state.model, False, None)
+        query_complexity.Complex ->
           case state.model == state.reasoning_model {
             True -> #(state.model, False, None)
             False ->

@@ -125,7 +125,7 @@ fn run(cfg: AppConfig) -> Nil {
   let max_turns = option.unwrap(cfg.max_turns, 5)
   let max_consecutive_errors = option.unwrap(cfg.max_consecutive_errors, 3)
   let max_context_messages = cfg.max_context_messages
-  let prompt_on_complex = option.unwrap(cfg.prompt_on_complex, True)
+  let prompt_on_complex = option.unwrap(cfg.prompt_on_complex, False)
   let verbose = option.unwrap(cfg.log_verbose, False)
 
   let #(p, model, default_task_model, default_reasoning_model) =

@@ -12,7 +12,7 @@ pub fn text_response(text: String) -> LlmResponse {
     content: [TextContent(text: text)],
     model: "mock",
     stop_reason: Some(EndTurn),
-    usage: Usage(input_tokens: 10, output_tokens: 10),
+    usage: Usage(input_tokens: 10, output_tokens: 10, thinking_tokens: 0),
   )
 }
 
@@ -27,7 +27,7 @@ pub fn tool_call_response(
     content: [ToolUseContent(id: id, name: name, input_json: input_json)],
     model: "mock",
     stop_reason: Some(ToolUseRequested),
-    usage: Usage(input_tokens: 15, output_tokens: 20),
+    usage: Usage(input_tokens: 15, output_tokens: 20, thinking_tokens: 0),
   )
 }
 

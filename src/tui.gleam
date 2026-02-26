@@ -468,9 +468,19 @@ fn handle_chat_response(
     Error(err) -> #("[Error: " <> response.error_message(err) <> "]", None)
   }
   let asst = Message(role: Assistant, content: [TextContent(text: reply_text)])
+  let switch_notice = case final_model != state.model {
+    True -> style.dim("  \u{21AA} " <> final_model)
+    False -> ""
+  }
   let notice = case save_error {
-    None -> ""
-    Some(msg) -> style.yellow("  Warning: session not saved \u{2014} " <> msg)
+    None -> switch_notice
+    Some(msg) -> {
+      let err = style.yellow("  Warning: session not saved \u{2014} " <> msg)
+      case switch_notice {
+        "" -> err
+        n -> n <> "   " <> err
+      }
+    }
   }
   let new_state =
     TuiState(
@@ -1027,6 +1037,10 @@ fn print_log_cycles(
             <> "t",
           )
       }
+      let thinking_part = case c.thinking_tokens {
+        0 -> ""
+        n -> style.dim("  \u{1F4AD}" <> int.to_string(n) <> "t")
+      }
       let complexity_part = case c.complexity {
         None -> ""
         Some("complex") -> style.dim("  \u{26A1}complex")
@@ -1045,6 +1059,7 @@ fn print_log_cycles(
         <> time
         <> tools_part
         <> token_part
+        <> thinking_part
         <> complexity_part
         <> parent_part
       let hdr_line = case sel {

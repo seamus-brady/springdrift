@@ -69,7 +69,7 @@ pub type StopReason {
 }
 
 pub type Usage {
-  Usage(input_tokens: Int, output_tokens: Int)
+  Usage(input_tokens: Int, output_tokens: Int, thinking_tokens: Int)
 }
 
 pub type LlmRequest {
