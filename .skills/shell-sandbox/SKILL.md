@@ -13,6 +13,7 @@ Debian (bookworm-slim) container.
 - `/tmp` — writable scratch space, 256 MB, container-local (does not persist to host)
 - Available tools: bash, curl, wget, git, python3, pip, jq, ripgrep, fd
 - Network: outbound allowed (git clone, curl, pip install all work)
+- Ports 10001–10004 are forwarded to the host by default (configurable via `--sandbox-port`)
 - Installed packages persist across `run_shell` calls within a session;
   scratch files written to `/tmp` also persist until the container is restarted
 

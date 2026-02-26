@@ -4,7 +4,8 @@
          generate_uuid/0, get_datetime/0, get_date/0,
          tui_run/2, throw_tui_exit/0,
          fetch_url/1, check_docker/0, docker_build/1,
-         docker_run_container/3, docker_exec/2, docker_stop/1,
+         project_container_name/1,
+         docker_run_container/4, docker_exec/2, docker_stop/1,
          docker_logs/2, docker_cp/2]).
 
 %% Read one line from stdin.
@@ -172,13 +173,30 @@ docker_build(ContextDir) ->
             end
     end.
 
+%% Derive a deterministic container name from the project CWD.
+%% Uses erlang:phash2/2 with a 32-bit range → 8 lowercase hex chars.
+%% e.g. <<"springdrift-sandbox-a3f1c9d7">>.
+project_container_name(Cwd) ->
+    CwdBin = case is_binary(Cwd) of
+        true  -> Cwd;
+        false -> list_to_binary(Cwd)
+    end,
+    Hash = erlang:phash2(CwdBin, 16#100000000),
+    Hex  = string:to_lower(string:right(integer_to_list(Hash, 16), 8, $0)),
+    list_to_binary("springdrift-sandbox-" ++ Hex).
+
 %% Start a detached sandbox container with the project directory mounted.
+%% Name is the pre-computed container name (see project_container_name/1).
 %% Ports is a list of integers; each is exposed as -p N:N.
 %% Returns {ok, ContainerId} or {error, Reason}.
-docker_run_container(Image, Cwd, Ports) ->
+docker_run_container(Image, Name, Cwd, Ports) ->
     ImageStr = case is_binary(Image) of
         true  -> binary_to_list(Image);
         false -> Image
+    end,
+    NameStr = case is_binary(Name) of
+        true  -> binary_to_list(Name);
+        false -> Name
     end,
     CwdStr = case is_binary(Cwd) of
         true  -> binary_to_list(Cwd);
@@ -187,9 +205,7 @@ docker_run_container(Image, Cwd, Ports) ->
     PortArgs = lists:foldl(fun(P, Acc) ->
         Acc ++ " -p " ++ integer_to_list(P) ++ ":" ++ integer_to_list(P)
     end, "", Ports),
-    Uuid = binary_to_list(generate_uuid()),
-    Name = "springdrift-sandbox-" ++ Uuid,
-    Cmd = "docker run -d --name " ++ Name ++
+    Cmd = "docker run -d --name " ++ NameStr ++
           PortArgs ++
           " --mount type=bind,src=" ++ CwdStr ++ ",dst=/workspace,readonly" ++
           " --tmpfs /tmp:rw,size=256m,noexec" ++

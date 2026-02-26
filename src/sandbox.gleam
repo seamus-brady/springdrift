@@ -1,7 +1,7 @@
 /// OTP actor managing a Docker sandbox container lifecycle.
 ///
 /// Usage:
-///   case sandbox.start("./sandbox", [3000, 8080]) {
+///   case sandbox.start("./sandbox", [10001, 10002, 10003, 10004]) {
 ///     Ok(subj)   -> // send RunCommand, GetStatus, GetLogs, Restart, Shutdown
 ///     Error(msg) -> // Docker unavailable
 ///   }
@@ -39,7 +39,12 @@ pub type SandboxMessage {
 }
 
 type SandboxState {
-  SandboxState(container_id: String, ports: List(Int), dockerfile_dir: String)
+  SandboxState(
+    container_id: String,
+    project_name: String,
+    ports: List(Int),
+    dockerfile_dir: String,
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -52,9 +57,13 @@ fn check_docker() -> Bool
 @external(erlang, "springdrift_ffi", "docker_build")
 fn docker_build(context_dir: String) -> Result(Nil, String)
 
+@external(erlang, "springdrift_ffi", "project_container_name")
+fn project_container_name(cwd: String) -> String
+
 @external(erlang, "springdrift_ffi", "docker_run_container")
 fn docker_run_container(
   image: String,
+  name: String,
   cwd: String,
   ports: List(Int),
 ) -> Result(String, String)
@@ -97,7 +106,16 @@ pub fn start(
             Ok(dir) -> dir
             Error(_) -> "."
           }
-          case docker_run_container("springdrift-sandbox:latest", cwd, ports) {
+          let project_name = project_container_name(cwd)
+          cleanup_old_container(project_name)
+          case
+            docker_run_container(
+              "springdrift-sandbox:latest",
+              project_name,
+              cwd,
+              ports,
+            )
+          {
             Error(reason) -> {
               let msg = "docker run failed: " <> reason
               app_log.err("sandbox_start_failed", [#("reason", msg)])
@@ -110,7 +128,12 @@ pub fn start(
                 process.send(setup, self)
                 sandbox_loop(
                   self,
-                  SandboxState(container_id:, ports:, dockerfile_dir:),
+                  SandboxState(
+                    container_id:,
+                    project_name:,
+                    ports:,
+                    dockerfile_dir:,
+                  ),
                 )
               })
               case process.receive(setup, 5000) {
@@ -119,6 +142,7 @@ pub fn start(
                     string.join(list.map(ports, int.to_string), ",")
                   app_log.info("sandbox_started", [
                     #("container_id", container_id),
+                    #("container_name", project_name),
                     #("ports", ports_str),
                   ])
                   Ok(subj)
@@ -141,6 +165,18 @@ pub fn start(
 /// Send a Shutdown message to the sandbox actor (non-blocking).
 pub fn send_shutdown(subj: Subject(SandboxMessage)) -> Nil {
   process.send(subj, Shutdown)
+}
+
+// ---------------------------------------------------------------------------
+// Private helpers
+// ---------------------------------------------------------------------------
+
+/// Stop and remove a container by name (silent if it doesn't exist).
+/// Used on startup to clean up any leftover container from a previous run.
+fn cleanup_old_container(name: String) -> Nil {
+  app_log.info("sandbox_cleanup_attempt", [#("container_name", name)])
+  docker_stop(name)
+  app_log.info("sandbox_cleanup_done", [#("container_name", name)])
 }
 
 // ---------------------------------------------------------------------------
@@ -173,7 +209,12 @@ fn sandbox_loop(self: Subject(SandboxMessage), state: SandboxState) -> Nil {
         Error(_) -> "."
       }
       case
-        docker_run_container("springdrift-sandbox:latest", cwd, state.ports)
+        docker_run_container(
+          "springdrift-sandbox:latest",
+          state.project_name,
+          cwd,
+          state.ports,
+        )
       {
         Error(reason) -> {
           let msg = "docker run failed: " <> reason
@@ -184,6 +225,7 @@ fn sandbox_loop(self: Subject(SandboxMessage), state: SandboxState) -> Nil {
         Ok(new_container_id) -> {
           app_log.info("sandbox_restarted", [
             #("container_id", new_container_id),
+            #("container_name", state.project_name),
           ])
           process.send(reply_to, Ok(Nil))
           sandbox_loop(

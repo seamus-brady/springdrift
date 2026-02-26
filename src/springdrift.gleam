@@ -131,7 +131,7 @@ fn print_help() -> Nil {
     "  --allow-write-anywhere    Allow write_file outside the current working directory",
   )
   io.println(
-    "  --sandbox-port <n>        Expose port N from sandbox (repeatable; default: 3000 8000 8080 5000)",
+    "  --sandbox-port <n>        Expose port N from sandbox (repeatable; default: 10001 10002 10003 10004)",
   )
   io.println("")
   io.println("Session / config:")
@@ -199,7 +199,8 @@ fn run(cfg: AppConfig) -> Nil {
   let prompt_on_complex = option.unwrap(cfg.prompt_on_complex, False)
   let verbose = option.unwrap(cfg.log_verbose, False)
   let write_anywhere = option.unwrap(cfg.write_anywhere, False)
-  let sandbox_ports = option.unwrap(cfg.sandbox_ports, [3000, 8000, 8080, 5000])
+  let sandbox_ports =
+    option.unwrap(cfg.sandbox_ports, [10_001, 10_002, 10_003, 10_004])
 
   let #(p, model, default_task_model, default_reasoning_model) =
     select_provider(cfg)

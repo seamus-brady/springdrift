@@ -144,10 +144,11 @@ gleam run -- --print-config
 | Key | Action |
 |---|---|
 | Enter | Send message (or answer agent question) |
-| Tab | Switch between Chat and Log tabs |
+| Tab | Switch between Chat, Log, and Sandbox tabs |
 | PgUp / PgDn | Scroll message history |
 | ↑ / ↓ | (Log tab) Select cycle |
 | Enter | (Log tab) Rewind to selected cycle |
+| r | (Sandbox tab) Restart the sandbox container |
 | Ctrl-C / Ctrl-D | Exit |
 
 ### Slash commands
@@ -164,26 +165,25 @@ gleam run -- --print-config
 Three-layer merge (highest priority first):
 
 1. CLI flags
-2. `.springdrift.json` (current directory)
-3. `~/.config/springdrift/config.json`
+2. `.springdrift.toml` (current directory)
+3. `~/.config/springdrift/config.toml`
 
 ### All config fields
 
-```json
-{
-  "provider":               "anthropic",
-  "model":                  "claude-sonnet-4-20250514",
-  "system_prompt":          "You are a helpful assistant.",
-  "max_tokens":             1024,
-  "max_turns":              5,
-  "max_consecutive_errors": 3,
-  "max_context_messages":   50,
-  "task_model":             "claude-haiku-4-5-20251001",
-  "reasoning_model":        "claude-opus-4-6",
-  "prompt_on_complex":      true,
-  "log_verbose":            false,
-  "skills_dirs":            ["/path/to/skills"]
-}
+```toml
+provider               = "anthropic"
+model                  = "claude-sonnet-4-20250514"
+system_prompt          = "You are a helpful assistant."
+max_tokens             = 1024
+max_turns              = 5
+max_consecutive_errors = 3
+max_context_messages   = 50
+task_model             = "claude-haiku-4-5-20251001"
+reasoning_model        = "claude-opus-4-6"
+prompt_on_complex      = true
+log_verbose            = false
+skills_dirs            = ["/path/to/skills"]
+sandbox_ports          = [10001, 10002, 10003, 10004]
 ```
 
 ### CLI flags
@@ -236,6 +236,70 @@ when it decides to use the skill.
 During a session, the model will see `<available_skills>` in its system
 prompt and can call `read_skill` with the listed path to load the full
 instructions.
+
+---
+
+## Sandbox
+
+When Docker is available and `sandbox/Dockerfile` exists, Springdrift starts an
+isolated Debian (bookworm-slim) container at startup with the project directory
+mounted read-only at `/workspace` and a 256 MB tmpfs at `/tmp` for scratch work.
+
+### Container naming
+
+The container name is derived deterministically from the current working directory:
+
+```
+springdrift-sandbox-<8 hex chars>
+```
+
+The hex suffix is `erlang:phash2(cwd_binary, 2^32)` formatted as zero-padded
+lowercase hex. This means:
+
+- The same project always gets the same container name.
+- On startup, any leftover container from a previous run is stopped and removed
+  automatically before the new one starts — no more "port already allocated"
+  errors after an unclean exit.
+- Different projects get different names, so multiple projects can run
+  sandboxes simultaneously without conflict.
+
+### Port numbering
+
+Ports are allocated from a base-10000 scheme to avoid clashing with common
+development ports:
+
+| Sandbox | Default ports |
+|---------|--------------|
+| First (current) | 10001, 10002, 10003, 10004 |
+| Second (future) | 10101, 10102, 10103, 10104 |
+
+Override with `--sandbox-port <n>` (repeatable):
+
+```sh
+gleam run -- --sandbox-port 10001 --sandbox-port 10002
+```
+
+Or set `sandbox_ports` in `.springdrift.toml`:
+
+```toml
+sandbox_ports = [10001, 10002, 10003, 10004]
+```
+
+### File transfer
+
+| Tool | Description |
+|------|-------------|
+| `copy_from_sandbox <container_path>` | Copies a file from the container to `sandbox-out/<session-id>/<basename>` on the host |
+| `copy_to_sandbox <host_path>` | Copies a relative host path into the container at `/tmp/<basename>` |
+
+### Application log
+
+Startup events, sandbox lifecycle, and session saves are written as structured
+JSON-L to `springdrift.log` in the project directory. Each line has the shape:
+
+```json
+{"timestamp":"2026-02-26T17:43:17","level":"info","event":"sandbox_started","source":"main","container_id":"...","container_name":"springdrift-sandbox-a3f1c9d7","ports":"10001,10002,10003,10004"}
+```
 
 ---
 
