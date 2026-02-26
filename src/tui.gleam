@@ -1033,6 +1033,10 @@ fn print_log_cycles(
         Some("simple") -> style.dim("  \u{00B7}simple")
         Some(other) -> style.dim("  " <> other)
       }
+      let parent_part = case c.parent_id {
+        None -> ""
+        Some(id) -> style.dim("  \u{2190}" <> string.slice(id, 0, 8))
+      }
       let hdr_text =
         indicator
         <> "#"
@@ -1042,6 +1046,7 @@ fn print_log_cycles(
         <> tools_part
         <> token_part
         <> complexity_part
+        <> parent_part
       let hdr_line = case sel {
         True -> style.bold(hdr_text)
         False -> style.dim(hdr_text)
