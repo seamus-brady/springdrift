@@ -21,13 +21,17 @@ pub const claude_sonnet_4 = "claude-sonnet-4-20250514"
 
 pub const claude_haiku_3_5 = "claude-haiku-3-5-20241022"
 
-/// Five minutes — generous enough for long code-generation responses.
-const timeout_ms = 300_000
+/// Read the configured LLM timeout from persistent_term.
+/// Set at startup by springdrift_ffi:set_httpc_timeout/1.
+/// Falls back to 300 000 ms (5 minutes) if not yet set.
+@external(erlang, "springdrift_ffi", "get_httpc_timeout")
+fn get_httpc_timeout() -> Int
 
 /// Create an Anthropic provider using the ANTHROPIC_API_KEY environment variable
 pub fn provider() -> Result(Provider, types.LlmError) {
+  let t = get_httpc_timeout()
   aconfig.config_options()
-  |> aconfig.with_timeout_ms(timeout_ms)
+  |> aconfig.with_timeout_ms(t)
   |> aconfig.load_config()
   |> result.map(aclient.new)
   |> result.map_error(translate_error)
@@ -38,9 +42,10 @@ pub fn provider() -> Result(Provider, types.LlmError) {
 
 /// Create an Anthropic provider with an explicit API key
 pub fn provider_with_key(api_key: String) -> Result(Provider, types.LlmError) {
+  let t = get_httpc_timeout()
   aconfig.config_options()
   |> aconfig.with_api_key(api_key)
-  |> aconfig.with_timeout_ms(timeout_ms)
+  |> aconfig.with_timeout_ms(t)
   |> aconfig.load_config()
   |> result.map(aclient.new)
   |> result.map_error(translate_error)
@@ -51,14 +56,15 @@ pub fn provider_with_key(api_key: String) -> Result(Provider, types.LlmError) {
 
 /// Wrap an Anthropic API call with a process-level timeout.
 ///
-/// The library's `api.chat` path calls `httpc.send` with no timeout — the
-/// `config.timeout_ms` field is only applied on the streaming path. We work
-/// around this by running the call in a spawned process and applying a
-/// `process.receive` timeout ourselves.
+/// The gleam_httpc.erl shim in src/ overrides the default 30-second HTTP
+/// timeout to use the persistent_term set by set_httpc_timeout. This
+/// process-level wrapper provides an additional safety net — it bounds the
+/// total call duration including any internal retries or hangs.
 fn chat_with_timeout(
   c: aclient.Client,
   req: types.LlmRequest,
 ) -> Result(types.LlmResponse, types.LlmError) {
+  let timeout_ms = get_httpc_timeout()
   let reply = process.new_subject()
   process.spawn_unlinked(fn() {
     let result =

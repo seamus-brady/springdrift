@@ -31,7 +31,7 @@ pub fn tui_run_reraises_exception_test() {
   let selector =
     process.new_selector()
     |> process.select_specific_monitor(mon, fn(_) { Crashed })
-  case process.select(selector, 2000) {
+  case process.selector_receive(selector, 2000) {
     Ok(Crashed) -> Nil
     Error(Nil) -> should.fail()
   }

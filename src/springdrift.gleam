@@ -43,6 +43,9 @@ fn colima_start_background() -> Nil
 @external(erlang, "springdrift_ffi", "install_beam_logger")
 fn install_beam_logger() -> Nil
 
+@external(erlang, "springdrift_ffi", "set_httpc_timeout")
+fn set_httpc_timeout(ms: Int) -> Nil
+
 fn default_skill_dirs() -> List(String) {
   case get_env("HOME") {
     Ok(home) -> [home <> "/.config/springdrift/skills", ".skills"]
@@ -157,6 +160,9 @@ fn print_help() -> Nil {
   )
   io.println("  --config <path>           Load an additional TOML config file")
   io.println(
+    "  --llm-timeout <ms>        LLM HTTP+process timeout in ms (default: 300000)",
+  )
+  io.println(
     "  --verbose                 Log full LLM payloads to the cycle log",
   )
   io.println("  --print-config            Print resolved config and exit")
@@ -195,6 +201,8 @@ fn print_help() -> Nil {
 
 fn run(cfg: AppConfig) -> Nil {
   install_beam_logger()
+  let llm_timeout_ms = option.unwrap(cfg.llm_timeout_ms, 300_000)
+  set_httpc_timeout(llm_timeout_ms)
   app_log.info("startup", [])
 
   let base_system =

@@ -100,6 +100,7 @@ pub type AppConfig {
     skills_dirs: Option(List(String)),
     write_anywhere: Option(Bool),
     sandbox_ports: Option(List(Int)),
+    llm_timeout_ms: Option(Int),
   )
 }
 
@@ -135,6 +136,7 @@ pub fn default() -> AppConfig {
     skills_dirs: None,
     write_anywhere: None,
     sandbox_ports: None,
+    llm_timeout_ms: None,
   )
 }
 
@@ -168,6 +170,7 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     skills_dirs: option.or(override_cfg.skills_dirs, base.skills_dirs),
     write_anywhere: option.or(override_cfg.write_anywhere, base.write_anywhere),
     sandbox_ports: option.or(override_cfg.sandbox_ports, base.sandbox_ports),
+    llm_timeout_ms: option.or(override_cfg.llm_timeout_ms, base.llm_timeout_ms),
   )
 }
 
@@ -258,6 +261,9 @@ pub fn to_string(cfg: AppConfig) -> String {
     option.map(cfg.sandbox_ports, fn(ports) {
       "sandbox_ports: " <> string.join(list.map(ports, int.to_string), ", ")
     }),
+    option.map(cfg.llm_timeout_ms, fn(v) {
+      "llm_timeout_ms: " <> int.to_string(v)
+    }),
   ]
   |> list.filter_map(fn(x) { option.to_result(x, Nil) })
   |> string.join("\n")
@@ -316,6 +322,11 @@ fn do_parse_args(args: List(String), acc: AppConfig) -> AppConfig {
             rest,
             AppConfig(..acc, skills_dirs: Some(list.append(existing, [path]))),
           )
+      }
+    ["--llm-timeout", value, ..rest] ->
+      case int.parse(value) {
+        Ok(n) -> do_parse_args(rest, AppConfig(..acc, llm_timeout_ms: Some(n)))
+        Error(_) -> do_parse_args(rest, acc)
       }
     ["--allow-write-anywhere", ..rest] ->
       do_parse_args(rest, AppConfig(..acc, write_anywhere: Some(True)))
@@ -399,6 +410,7 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     skills_dirs:,
     write_anywhere: get_bool("write_anywhere"),
     sandbox_ports:,
+    llm_timeout_ms: get_int("llm_timeout_ms"),
   )
 }
 

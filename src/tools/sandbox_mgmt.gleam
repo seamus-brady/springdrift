@@ -121,15 +121,19 @@ fn sandbox_status(
     Some(subj) -> {
       let reply_subj = process.new_subject()
       process.send(subj, GetStatus(reply_to: reply_subj))
-      let status = process.receive_forever(reply_subj)
-      let SandboxRunning(container_id:, ports:) = status
-      let ports_str = string.join(list.map(ports, int.to_string), ", ")
-      let content =
-        "Container: "
-        <> container_id
-        <> "\nStatus: Running\nPorts: "
-        <> ports_str
-      ToolSuccess(tool_use_id: call.id, content:)
+      case process.receive(reply_subj, 5000) {
+        Error(Nil) ->
+          ToolFailure(tool_use_id: call.id, error: "sandbox_status timed out")
+        Ok(SandboxRunning(container_id:, ports:)) -> {
+          let ports_str = string.join(list.map(ports, int.to_string), ", ")
+          let content =
+            "Container: "
+            <> container_id
+            <> "\nStatus: Running\nPorts: "
+            <> ports_str
+          ToolSuccess(tool_use_id: call.id, content:)
+        }
+      }
     }
   }
 }
@@ -156,9 +160,11 @@ fn sandbox_logs(
       }
       let reply_subj = process.new_subject()
       process.send(subj, GetLogs(lines:, reply_to: reply_subj))
-      case process.receive_forever(reply_subj) {
-        Ok(output) -> ToolSuccess(tool_use_id: call.id, content: output)
-        Error(msg) -> ToolFailure(tool_use_id: call.id, error: msg)
+      case process.receive(reply_subj, 30_000) {
+        Ok(Ok(output)) -> ToolSuccess(tool_use_id: call.id, content: output)
+        Ok(Error(msg)) -> ToolFailure(tool_use_id: call.id, error: msg)
+        Error(Nil) ->
+          ToolFailure(tool_use_id: call.id, error: "sandbox_logs timed out")
       }
     }
   }

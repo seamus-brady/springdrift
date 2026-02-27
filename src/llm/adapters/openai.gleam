@@ -5,6 +5,7 @@
 //// responses. For best results use `openrouter_base_url` with an OpenRouter
 //// key. `openai_base_url` works if the API surface matches OpenRouter's schema.
 
+import gleam/erlang/process
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
@@ -37,11 +38,14 @@ pub const gpt_4_1 = "gpt-4.1"
 pub const o3_mini = "o3-mini"
 
 // ---------------------------------------------------------------------------
-// Read an environment variable (Erlang FFI)
+// FFI
 // ---------------------------------------------------------------------------
 
 @external(erlang, "springdrift_ffi", "get_env")
 fn get_env(name: String) -> Result(String, Nil)
+
+@external(erlang, "springdrift_ffi", "get_httpc_timeout")
+fn get_httpc_timeout() -> Int
 
 // ---------------------------------------------------------------------------
 // Public provider constructors
@@ -83,13 +87,32 @@ pub fn provider_from_openrouter_env() -> Result(Provider, types.LlmError) {
 // ---------------------------------------------------------------------------
 
 fn build_provider(client: gllm.Client) -> Provider {
-  Provider(name: "openai", chat: fn(req) {
+  Provider(name: "openai", chat: chat_with_timeout(client, _))
+}
+
+/// Wrap a gllm call with a process-level timeout matching the configured
+/// llm_timeout_ms. gllm calls gleam_httpc.send internally; the gleam_httpc.erl
+/// shim already extends the HTTP timeout, but this process wrapper provides an
+/// additional safety net against hangs.
+fn chat_with_timeout(
+  client: gllm.Client,
+  req: types.LlmRequest,
+) -> Result(types.LlmResponse, types.LlmError) {
+  let timeout_ms = get_httpc_timeout()
+  let reply = process.new_subject()
+  process.spawn_unlinked(fn() {
     let messages = translate_messages(req)
     let temperature = option.unwrap(req.temperature, 1.0)
-    gllm.completion(client, req.model, messages, temperature)
-    |> result.map(translate_response)
-    |> result.map_error(translate_error)
+    let result =
+      gllm.completion(client, req.model, messages, temperature)
+      |> result.map(translate_response)
+      |> result.map_error(translate_error)
+    process.send(reply, result)
   })
+  case process.receive(reply, timeout_ms) {
+    Ok(result) -> result
+    Error(Nil) -> Error(types.TimeoutError)
+  }
 }
 
 // ---------------------------------------------------------------------------

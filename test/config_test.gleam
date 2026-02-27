@@ -28,6 +28,7 @@ pub fn default_has_all_none_test() {
   cfg.log_verbose |> should.equal(None)
   cfg.skills_dirs |> should.equal(None)
   cfg.write_anywhere |> should.equal(None)
+  cfg.llm_timeout_ms |> should.equal(None)
 }
 
 // ---------------------------------------------------------------------------
@@ -102,6 +103,7 @@ pub fn merge_override_wins_test() {
       skills_dirs: None,
       write_anywhere: None,
       sandbox_ports: None,
+      llm_timeout_ms: None,
     )
   let override =
     AppConfig(
@@ -120,6 +122,7 @@ pub fn merge_override_wins_test() {
       skills_dirs: None,
       write_anywhere: None,
       sandbox_ports: None,
+      llm_timeout_ms: None,
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("openai"))
@@ -143,6 +146,7 @@ pub fn merge_base_preserved_when_override_none_test() {
       skills_dirs: None,
       write_anywhere: None,
       sandbox_ports: None,
+      llm_timeout_ms: None,
     )
   let override =
     AppConfig(
@@ -161,6 +165,7 @@ pub fn merge_base_preserved_when_override_none_test() {
       skills_dirs: None,
       write_anywhere: None,
       sandbox_ports: None,
+      llm_timeout_ms: None,
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("anthropic"))
@@ -185,6 +190,7 @@ pub fn merge_combines_different_fields_test() {
       skills_dirs: None,
       write_anywhere: None,
       sandbox_ports: None,
+      llm_timeout_ms: None,
     )
   let override =
     AppConfig(
@@ -203,6 +209,7 @@ pub fn merge_combines_different_fields_test() {
       skills_dirs: None,
       write_anywhere: None,
       sandbox_ports: None,
+      llm_timeout_ms: None,
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("anthropic"))
@@ -313,6 +320,7 @@ pub fn merge_new_fields_test() {
       skills_dirs: None,
       write_anywhere: None,
       sandbox_ports: None,
+      llm_timeout_ms: None,
     )
   let override =
     AppConfig(
@@ -331,6 +339,7 @@ pub fn merge_new_fields_test() {
       skills_dirs: None,
       write_anywhere: None,
       sandbox_ports: None,
+      llm_timeout_ms: None,
     )
   let merged = config.merge(base, override:)
   merged.max_turns |> should.equal(Some(10))
@@ -423,6 +432,7 @@ pub fn merge_model_fields_override_wins_test() {
       skills_dirs: None,
       write_anywhere: None,
       sandbox_ports: None,
+      llm_timeout_ms: None,
     )
   let override =
     AppConfig(
@@ -441,6 +451,7 @@ pub fn merge_model_fields_override_wins_test() {
       skills_dirs: None,
       write_anywhere: None,
       sandbox_ports: None,
+      llm_timeout_ms: None,
     )
   let merged = config.merge(base, override:)
   merged.task_model |> should.equal(Some("override-task"))
@@ -466,6 +477,7 @@ pub fn merge_model_fields_base_preserved_test() {
       skills_dirs: None,
       write_anywhere: None,
       sandbox_ports: None,
+      llm_timeout_ms: None,
     )
   let override =
     AppConfig(
@@ -484,6 +496,7 @@ pub fn merge_model_fields_base_preserved_test() {
       skills_dirs: None,
       write_anywhere: None,
       sandbox_ports: None,
+      llm_timeout_ms: None,
     )
   let merged = config.merge(base, override:)
   merged.task_model |> should.equal(Some("haiku"))
@@ -546,6 +559,7 @@ pub fn to_string_fully_set_test() {
       skills_dirs: Some(["/tmp/skills"]),
       write_anywhere: None,
       sandbox_ports: None,
+      llm_timeout_ms: None,
     )
   let s = config.to_string(cfg)
   string.contains(s, "provider") |> should.be_true
@@ -613,6 +627,27 @@ pub fn parse_config_toml_write_anywhere_true_test() {
   result |> should.be_ok
   let assert Ok(cfg) = result
   cfg.write_anywhere |> should.equal(Some(True))
+}
+
+// ---------------------------------------------------------------------------
+// llm_timeout_ms
+// ---------------------------------------------------------------------------
+
+pub fn from_args_llm_timeout_test() {
+  let cfg = config.from_args(["--llm-timeout", "120000"])
+  cfg.llm_timeout_ms |> should.equal(Some(120_000))
+}
+
+pub fn from_args_llm_timeout_invalid_ignored_test() {
+  let cfg = config.from_args(["--llm-timeout", "fast"])
+  cfg.llm_timeout_ms |> should.equal(None)
+}
+
+pub fn parse_config_toml_llm_timeout_test() {
+  let result = config.parse_config_toml("llm_timeout_ms = 600000")
+  result |> should.be_ok
+  let assert Ok(cfg) = result
+  cfg.llm_timeout_ms |> should.equal(Some(600_000))
 }
 
 // ---------------------------------------------------------------------------

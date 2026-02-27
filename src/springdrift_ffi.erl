@@ -9,7 +9,8 @@
          docker_logs/2, docker_cp/2,
          is_macos/0, colima_available/0, colima_running/0,
          colima_start_background/0,
-         install_beam_logger/0, monotonic_time_ms/0]).
+         install_beam_logger/0, monotonic_time_ms/0,
+         set_httpc_timeout/1, get_httpc_timeout/0]).
 
 %% Read one line from stdin.
 %% Returns {ok, Binary} (including trailing newline) or {error, nil} on EOF.
@@ -132,10 +133,10 @@ format_term(T) ->
     lists:flatten(io_lib:format("~p", [T])).
 
 encode_exception_line(Timestamp, ClassStr, ReasonStr, StackStr) ->
-    Ts  = list_to_binary(Timestamp),
-    Cls = ffi_json_escape(list_to_binary(ClassStr)),
-    Rsn = ffi_json_escape(list_to_binary(ReasonStr)),
-    Stk = ffi_json_escape(list_to_binary(StackStr)),
+    Ts  = iolist_to_binary(Timestamp),
+    Cls = ffi_json_escape(iolist_to_binary(ClassStr)),
+    Rsn = ffi_json_escape(iolist_to_binary(ReasonStr)),
+    Stk = ffi_json_escape(iolist_to_binary(StackStr)),
     iolist_to_binary([
         <<"{\"timestamp\":\"">>, Ts,
         <<"\",\"level\":\"error\",\"event\":\"exception\",\"source\":\"tui_run\"">>,
@@ -396,3 +397,15 @@ install_beam_logger() ->
 %% Use two readings around an LLM call to get elapsed_ms.
 monotonic_time_ms() ->
     erlang:monotonic_time(millisecond).
+
+%% Set the global HTTP timeout (milliseconds) used by gleam_httpc.
+%% Called once at startup with the user-configured llm_timeout_ms value.
+%% The gleam_httpc.erl override in src/ reads this persistent_term.
+set_httpc_timeout(TimeoutMs) ->
+    persistent_term:put(springdrift_httpc_timeout_ms, TimeoutMs),
+    nil.
+
+%% Read back the configured HTTP timeout.
+%% Returns 300 000 ms if set_httpc_timeout has not been called yet.
+get_httpc_timeout() ->
+    persistent_term:get(springdrift_httpc_timeout_ms, 300_000).

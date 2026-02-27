@@ -65,13 +65,15 @@ fn run_shell(
         Ok(cmd) -> {
           let reply_subj = process.new_subject()
           process.send(subj, RunCommand(cmd:, reply_to: reply_subj))
-          case process.receive_forever(reply_subj) {
-            Ok(output) -> ToolSuccess(tool_use_id: call.id, content: output)
-            Error(output) ->
+          case process.receive(reply_subj, 120_000) {
+            Ok(Ok(output)) -> ToolSuccess(tool_use_id: call.id, content: output)
+            Ok(Error(output)) ->
               ToolFailure(
                 tool_use_id: call.id,
                 error: "Command failed:\n" <> output,
               )
+            Error(Nil) ->
+              ToolFailure(tool_use_id: call.id, error: "run_shell timed out")
           }
         }
       }
