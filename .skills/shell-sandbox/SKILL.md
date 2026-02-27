@@ -32,6 +32,27 @@ For simple file reads and writes without a shell, prefer:
 - `copy_from_sandbox <container_path>` — copy a file from the container to `sandbox-out/<session-id>/<basename>` on the host; use this to retrieve files built in `/tmp`
 - `copy_to_sandbox <host_path> [container_dest]` — copy a relative host path into the container at `/tmp/<basename>` (or a custom `container_dest`); host_path must be relative to the project root
 
+## Starting background servers (important)
+
+When starting a long-running server in the background, **always redirect stdin,
+stdout, and stderr to /dev/null**. Each `run_shell` call is a `docker exec`
+session; when the session ends its stdio pipes close. A background process that
+inherits those pipes will accept TCP connections but return empty replies the
+moment it tries to log anything (broken pipe).
+
+```bash
+# Correct — fully detached, survives after run_shell returns
+python3 -m http.server 8080 --bind 0.0.0.0 </dev/null >/dev/null 2>&1 &
+
+# Wrong — server accepts connections but returns empty replies
+python3 -m http.server 8080 &
+```
+
+After starting, verify with a brief sleep + internal curl:
+```bash
+sleep 1 && curl -s http://localhost:8080/ | head -5
+```
+
 ## Conventions
 - Use `set -e` in scripts to fail fast
 - Pipe long output through `head -50` or `tail -50` to stay within context limits
