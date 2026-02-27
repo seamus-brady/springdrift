@@ -1,6 +1,6 @@
 import chat/service.{
   type AgentQuestion, type ChatMessage, type ModelSwitchQuestion,
-  type ServiceReply, type ToolEvent, ToolCalling,
+  type ServiceReply, type ToolEvent, RateLimitWaiting, ToolCalling,
 }
 import cycle_log.{type CycleData}
 import etch/command
@@ -148,6 +148,10 @@ pub fn start(
     |> process.select_map(tool_channel, fn(te: ToolEvent) {
       case te {
         ToolCalling(name:) -> ToolEventReceived(name:)
+        RateLimitWaiting(seconds:) ->
+          ToolEventReceived(
+            name: "rate limited — retrying in " <> int.to_string(seconds) <> "s",
+          )
       }
     })
     |> process.select_map(

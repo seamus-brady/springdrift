@@ -3,6 +3,7 @@ import context
 import cycle_log
 import gleam/dynamic/decode
 import gleam/erlang/process.{type Subject}
+import gleam/int
 import gleam/io
 import gleam/json
 import gleam/list
@@ -76,6 +77,7 @@ pub type AgentQuestion {
 
 pub type ToolEvent {
   ToolCalling(name: String)
+  RateLimitWaiting(seconds: Int)
 }
 
 pub type ChatMessage {
@@ -290,6 +292,33 @@ fn service_loop(self: Subject(ChatMessage), state: ChatState) -> Nil {
   }
 }
 
+/// Attempt an LLM call and retry on rate limit errors with a fixed 62-second
+/// wait between attempts. 62s > 60s ensures we clear the 1-minute window.
+fn call_with_rate_limit_retry(
+  req: LlmRequest,
+  p: Provider,
+  tool_channel: Subject(ToolEvent),
+  retries_left: Int,
+) -> Result(LlmResponse, LlmError) {
+  case provider.chat_with(req, p) {
+    Error(types.RateLimitError(_) as e) ->
+      case retries_left {
+        0 -> Error(e)
+        _ -> {
+          let wait_secs = 62
+          process.send(tool_channel, RateLimitWaiting(seconds: wait_secs))
+          app_log.warn("rate_limit_wait", [
+            #("wait_secs", int.to_string(wait_secs)),
+            #("retries_left", int.to_string(retries_left - 1)),
+          ])
+          process.sleep(wait_secs * 1000)
+          call_with_rate_limit_retry(req, p, tool_channel, retries_left - 1)
+        }
+      }
+    result -> result
+  }
+}
+
 fn react_loop(
   req: LlmRequest,
   p: Provider,
@@ -307,7 +336,7 @@ fn react_loop(
     True -> cycle_log.log_llm_request(cycle_id, req)
     False -> Nil
   }
-  case provider.chat_with(req, p) {
+  case call_with_rate_limit_retry(req, p, tool_channel, 3) {
     Error(e) -> Error(e)
     Ok(resp) -> {
       case verbose {
