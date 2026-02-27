@@ -485,7 +485,7 @@ fn handle_chat_response(
 ) -> Nil {
   let #(reply_text, usage) = case result {
     Ok(resp) -> #(response.text(resp), Some(resp.usage))
-    Error(err) -> #("[Error: " <> response.error_message(err) <> "]", None)
+    Error(err) -> #(response.user_facing_error_message(err), None)
   }
   let asst = Message(role: Assistant, content: [TextContent(text: reply_text)])
   let switch_notice = case final_model != state.model {

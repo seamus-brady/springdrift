@@ -5,6 +5,7 @@ import anthropic/error as aerr
 import anthropic/message as amsg
 import anthropic/request as areq
 import anthropic/tool as atool
+import gleam/erlang/process
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
@@ -29,11 +30,7 @@ pub fn provider() -> Result(Provider, types.LlmError) {
   |> result.map(aclient.new)
   |> result.map_error(translate_error)
   |> result.map(fn(c) {
-    Provider(name: "anthropic", chat: fn(req) {
-      aapi.chat(c, translate_request(req))
-      |> result.map(translate_response)
-      |> result.map_error(translate_error)
-    })
+    Provider(name: "anthropic", chat: chat_with_timeout(c, _))
   })
 }
 
@@ -46,12 +43,32 @@ pub fn provider_with_key(api_key: String) -> Result(Provider, types.LlmError) {
   |> result.map(aclient.new)
   |> result.map_error(translate_error)
   |> result.map(fn(c) {
-    Provider(name: "anthropic", chat: fn(req) {
+    Provider(name: "anthropic", chat: chat_with_timeout(c, _))
+  })
+}
+
+/// Wrap an Anthropic API call with a process-level timeout.
+///
+/// The library's `api.chat` path calls `httpc.send` with no timeout — the
+/// `config.timeout_ms` field is only applied on the streaming path. We work
+/// around this by running the call in a spawned process and applying a
+/// `process.receive` timeout ourselves.
+fn chat_with_timeout(
+  c: aclient.Client,
+  req: types.LlmRequest,
+) -> Result(types.LlmResponse, types.LlmError) {
+  let reply = process.new_subject()
+  process.spawn_unlinked(fn() {
+    let result =
       aapi.chat(c, translate_request(req))
       |> result.map(translate_response)
       |> result.map_error(translate_error)
-    })
+    process.send(reply, result)
   })
+  case process.receive(reply, timeout_ms) {
+    Ok(result) -> result
+    Error(Nil) -> Error(types.TimeoutError)
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -94,13 +94,16 @@ pub fn start(
     False -> Error("Docker daemon not reachable")
     True -> {
       io.println("  Building sandbox image...")
+      app_log.info("docker_build_start", [#("dir", dockerfile_dir)])
       case docker_build(dockerfile_dir) {
         Error(reason) -> {
           let msg = "docker build failed: " <> reason
+          app_log.err("docker_build_failed", [#("reason", reason)])
           app_log.err("sandbox_start_failed", [#("reason", msg)])
           Error(msg)
         }
         Ok(_) -> {
+          app_log.info("docker_build_ok", [])
           io.println("  Starting container...")
           let cwd = case simplifile.current_directory() {
             Ok(dir) -> dir
@@ -179,6 +182,75 @@ fn cleanup_old_container(name: String) -> Nil {
   app_log.info("sandbox_cleanup_done", [#("container_name", name)])
 }
 
+// ---------------------------------------------------------------------------
+// Logged Docker wrappers — every Docker call is traced to app_log
+// ---------------------------------------------------------------------------
+
+fn logged_exec(container_id: String, cmd: String) -> Result(String, String) {
+  let short = string.slice(container_id, 0, 12)
+  let display_cmd = case string.length(cmd) > 120 {
+    True -> string.slice(cmd, 0, 120) <> "…"
+    False -> cmd
+  }
+  app_log.info("docker_exec", [#("container", short), #("cmd", display_cmd)])
+  let result = docker_exec(container_id, cmd)
+  case result {
+    Ok(out) ->
+      app_log.info("docker_exec_ok", [
+        #("container", short),
+        #("output_len", int.to_string(string.length(out))),
+      ])
+    Error(err) -> {
+      let display_err = case string.length(err) > 300 {
+        True -> string.slice(err, 0, 300) <> "…"
+        False -> err
+      }
+      app_log.err("docker_exec_failed", [
+        #("container", short),
+        #("error", display_err),
+      ])
+    }
+  }
+  result
+}
+
+fn logged_logs(container_id: String, lines: Int) -> Result(String, String) {
+  let short = string.slice(container_id, 0, 12)
+  app_log.info("docker_logs", [
+    #("container", short),
+    #("lines", int.to_string(lines)),
+  ])
+  let result = docker_logs(container_id, lines)
+  case result {
+    Ok(_) -> app_log.info("docker_logs_ok", [#("container", short)])
+    Error(err) ->
+      app_log.err("docker_logs_failed", [#("container", short), #("error", err)])
+  }
+  result
+}
+
+fn logged_cp(src: String, dst: String) -> Result(Nil, String) {
+  app_log.info("docker_cp", [#("src", src), #("dst", dst)])
+  let result = docker_cp(src, dst)
+  case result {
+    Ok(_) -> app_log.info("docker_cp_ok", [#("src", src), #("dst", dst)])
+    Error(err) ->
+      app_log.err("docker_cp_failed", [
+        #("src", src),
+        #("dst", dst),
+        #("error", err),
+      ])
+  }
+  result
+}
+
+fn logged_stop(container_id: String) -> Nil {
+  let short = string.slice(container_id, 0, 12)
+  app_log.info("docker_stop", [#("container", short)])
+  docker_stop(container_id)
+  app_log.info("docker_stop_done", [#("container", short)])
+}
+
 /// Returns True when a docker_exec error indicates the container is no longer
 /// running (stopped, removed, or never existed). These errors warrant an
 /// auto-restart attempt rather than surfacing raw Docker output to the user.
@@ -193,6 +265,9 @@ fn is_container_gone(reason: String) -> Bool {
 /// Returns a SandboxState with the new container_id on success, or the
 /// original state (unchanged container_id) on failure.
 fn attempt_auto_restart(state: SandboxState) -> SandboxState {
+  app_log.info("sandbox_auto_restart_attempt", [
+    #("container_name", state.project_name),
+  ])
   let cwd = case simplifile.current_directory() {
     Ok(dir) -> dir
     Error(_) -> "."
@@ -226,7 +301,7 @@ fn attempt_auto_restart(state: SandboxState) -> SandboxState {
 fn sandbox_loop(self: Subject(SandboxMessage), state: SandboxState) -> Nil {
   case process.receive_forever(self) {
     RunCommand(cmd:, reply_to:) -> {
-      case docker_exec(state.container_id, cmd) {
+      case logged_exec(state.container_id, cmd) {
         Ok(output) -> {
           process.send(reply_to, Ok(output))
           sandbox_loop(self, state)
@@ -271,12 +346,12 @@ fn sandbox_loop(self: Subject(SandboxMessage), state: SandboxState) -> Nil {
       sandbox_loop(self, state)
     }
     GetLogs(lines:, reply_to:) -> {
-      let result = docker_logs(state.container_id, lines)
+      let result = logged_logs(state.container_id, lines)
       process.send(reply_to, result)
       sandbox_loop(self, state)
     }
     Restart(reply_to:) -> {
-      docker_stop(state.container_id)
+      logged_stop(state.container_id)
       let new_state = attempt_auto_restart(state)
       case new_state.container_id == state.container_id {
         True ->
@@ -306,7 +381,7 @@ fn sandbox_loop(self: Subject(SandboxMessage), state: SandboxState) -> Nil {
         Error(_) -> Error("Failed to create output directory: " <> out_dir)
         Ok(_) -> {
           let src = state.container_id <> ":" <> container_path
-          case docker_cp(src, host_dest) {
+          case logged_cp(src, host_dest) {
             Ok(_) -> Ok("Copied to " <> host_dest)
             Error(msg) -> Error(msg)
           }
@@ -317,7 +392,7 @@ fn sandbox_loop(self: Subject(SandboxMessage), state: SandboxState) -> Nil {
     }
     CopyToSandbox(host_path:, container_dest:, reply_to:) -> {
       let dst = state.container_id <> ":" <> container_dest
-      let result = docker_cp(host_path, dst)
+      let result = logged_cp(host_path, dst)
       process.send(reply_to, result)
       sandbox_loop(self, state)
     }
@@ -325,7 +400,7 @@ fn sandbox_loop(self: Subject(SandboxMessage), state: SandboxState) -> Nil {
       app_log.info("sandbox_shutdown", [
         #("container_id", state.container_id),
       ])
-      docker_stop(state.container_id)
+      logged_stop(state.container_id)
       Nil
     }
   }

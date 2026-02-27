@@ -39,7 +39,7 @@ task_model = "claude-haiku-4-5-20251001"
 reasoning_model = "claude-opus-4-6"
 
 # Prompt the user before switching to the reasoning model (default: true)
-prompt_on_complex = true
+prompt_on_complex = false
 
 # ── Logging and filesystem ────────────────────────────────────────────────────
 

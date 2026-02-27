@@ -6,7 +6,9 @@
          fetch_url/1, check_docker/0, docker_build/1,
          project_container_name/1,
          docker_run_container/4, docker_exec/2, docker_stop/1,
-         docker_logs/2, docker_cp/2]).
+         docker_logs/2, docker_cp/2,
+         is_macos/0, colima_available/0, colima_running/0,
+         colima_start_background/0]).
 
 %% Read one line from stdin.
 %% Returns {ok, Binary} (including trailing newline) or {error, nil} on EOF.
@@ -289,6 +291,35 @@ docker_cp(Src, Dst) ->
         nomatch ->
             {error, list_to_binary(string:trim(RawOut))}
     end.
+
+%% Return true if the current OS is macOS (darwin).
+is_macos() ->
+    case os:type() of
+        {unix, darwin} -> true;
+        _              -> false
+    end.
+
+%% Return true if the `colima` binary is on PATH.
+colima_available() ->
+    case os:find_executable("colima") of
+        false -> false;
+        _     -> true
+    end.
+
+%% Return true if Colima is currently running.
+%% Uses `colima status` exit code: 0 = running, non-zero = stopped/error.
+colima_running() ->
+    Out = os:cmd("colima status 2>&1; echo \"__EXIT:$?\""),
+    case re:run(Out, "__EXIT:(\\d+)", [{capture, all_but_first, list}]) of
+        {match, ["0"]} -> true;
+        _              -> false
+    end.
+
+%% Start Colima in the background (non-blocking).
+%% Output is redirected to /tmp/springdrift-colima.log.
+colima_start_background() ->
+    os:cmd("nohup colima start > /tmp/springdrift-colima.log 2>&1 &"),
+    nil.
 
 %% Stop and remove the container.
 docker_stop(ContainerId) ->

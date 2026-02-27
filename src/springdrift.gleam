@@ -28,6 +28,18 @@ fn do_halt(code: Int) -> Nil
 @external(erlang, "springdrift_ffi", "get_env")
 fn get_env(name: String) -> Result(String, Nil)
 
+@external(erlang, "springdrift_ffi", "is_macos")
+fn is_macos() -> Bool
+
+@external(erlang, "springdrift_ffi", "colima_available")
+fn colima_available() -> Bool
+
+@external(erlang, "springdrift_ffi", "colima_running")
+fn colima_running() -> Bool
+
+@external(erlang, "springdrift_ffi", "colima_start_background")
+fn colima_start_background() -> Nil
+
 fn default_skill_dirs() -> List(String) {
   case get_env("HOME") {
     Ok(home) -> [home <> "/.config/springdrift/skills", ".skills"]
@@ -227,6 +239,8 @@ fn run(cfg: AppConfig) -> Nil {
     False -> []
   }
 
+  ensure_colima_running()
+
   let sandbox_dir = find_sandbox_dir()
   let sandbox_subj = case sandbox_dir {
     option.None -> {
@@ -407,4 +421,29 @@ fn mock_provider() -> Provider {
   mock.provider_with_text(
     "I'm a mock assistant. Set ANTHROPIC_API_KEY or OPENROUTER_API_KEY to use a real LLM.",
   )
+}
+
+/// On macOS, check whether Colima is available and running.
+/// If it is installed but not running, start it in the background so Docker
+/// will be available for the sandbox (possibly on the next run if startup
+/// takes longer than the app waits).
+fn ensure_colima_running() -> Nil {
+  case is_macos() {
+    False -> Nil
+    True ->
+      case colima_available() {
+        False -> Nil
+        True ->
+          case colima_running() {
+            True -> Nil
+            False -> {
+              io.println(
+                "Colima   : not running — starting in background (logs: /tmp/springdrift-colima.log)",
+              )
+              app_log.info("colima_starting", [])
+              colima_start_background()
+            }
+          }
+      }
+  }
 }

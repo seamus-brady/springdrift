@@ -3,9 +3,11 @@ import context
 import cycle_log
 import gleam/dynamic/decode
 import gleam/erlang/process.{type Down, type Monitor, type Subject}
+import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/string
 import llm/provider.{type Provider}
 import llm/request
 import llm/response
@@ -270,18 +272,15 @@ fn service_loop(self: Subject(ChatMessage), state: ChatState) -> Nil {
                   question_channel,
                   tool_channel,
                   cycle_id,
-                  new_state.verbose,
                   new_state.sandbox,
                   new_state.write_anywhere,
                 )
               let #(result, final_messages) = case react_result {
                 Ok(#(resp, msgs)) -> #(Ok(resp), msgs)
                 Error(err) -> {
-                  let err_text =
-                    "[Error: " <> response.error_message(err) <> "]"
                   let err_msg =
                     Message(role: Assistant, content: [
-                      TextContent(text: err_text),
+                      TextContent(text: response.user_facing_error_message(err)),
                     ])
                   #(Error(err), list.append(new_state.messages, [err_msg]))
                 }
@@ -312,6 +311,8 @@ fn service_loop(self: Subject(ChatMessage), state: ChatState) -> Nil {
             Error(e) ->
               app_log.err("llm_request_failed", [
                 #("reason", response.error_message(e)),
+                #("model", final_model),
+                #("messages", int.to_string(list.length(final_messages))),
               ])
             Ok(_) -> Nil
           }
@@ -377,21 +378,29 @@ fn react_loop(
   question_channel: Subject(AgentQuestion),
   tool_channel: Subject(ToolEvent),
   cycle_id: String,
-  verbose: Bool,
   sandbox: Option(Subject(SandboxMessage)),
   write_anywhere: Bool,
 ) -> Result(#(LlmResponse, List(Message)), LlmError) {
-  case verbose {
-    True -> cycle_log.log_llm_request(cycle_id, req)
-    False -> Nil
-  }
+  cycle_log.log_llm_request(cycle_id, req)
+  app_log.info("llm_call", [
+    #("model", req.model),
+    #("messages", int.to_string(list.length(req.messages))),
+  ])
   case provider.chat_with(req, p) {
-    Error(e) -> Error(e)
+    Error(e) -> {
+      app_log.err("llm_call_failed", [
+        #("model", req.model),
+        #("reason", response.error_message(e)),
+      ])
+      Error(e)
+    }
     Ok(resp) -> {
-      case verbose {
-        True -> cycle_log.log_llm_response(cycle_id, resp)
-        False -> Nil
-      }
+      cycle_log.log_llm_response(cycle_id, resp)
+      app_log.info("llm_call_ok", [
+        #("model", resp.model),
+        #("input_tokens", int.to_string(resp.usage.input_tokens)),
+        #("output_tokens", int.to_string(resp.usage.output_tokens)),
+      ])
       case response.needs_tool_execution(resp) {
         False -> {
           let final_msg = Message(role: Assistant, content: resp.content)
@@ -406,6 +415,7 @@ fn react_loop(
                 list.map(calls, fn(call) {
                   process.send(tool_channel, ToolCalling(name: call.name))
                   cycle_log.log_tool_call(cycle_id, call)
+                  app_log.info("tool_call", [#("tool", call.name)])
                   let result = case call.name {
                     "run_shell" -> shell.execute(call, sandbox)
                     "read_file" | "write_file" | "list_directory" ->
@@ -421,6 +431,18 @@ fn react_loop(
                     _ -> builtin.execute(call)
                   }
                   cycle_log.log_tool_result(cycle_id, result)
+                  case result {
+                    ToolFailure(error: err, ..) ->
+                      app_log.err("tool_failed", [
+                        #("tool", call.name),
+                        #("error", err),
+                      ])
+                    ToolSuccess(content: out, ..) ->
+                      app_log.info("tool_ok", [
+                        #("tool", call.name),
+                        #("output_len", int.to_string(string.length(out))),
+                      ])
+                  }
                   result
                 })
               let has_any_failure =
@@ -451,7 +473,6 @@ fn react_loop(
                     question_channel,
                     tool_channel,
                     cycle_id,
-                    verbose,
                     sandbox,
                     write_anywhere,
                   )
