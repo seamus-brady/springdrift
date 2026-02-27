@@ -382,22 +382,27 @@ fn react_loop(
   write_anywhere: Bool,
 ) -> Result(#(LlmResponse, List(Message)), LlmError) {
   cycle_log.log_llm_request(cycle_id, req)
+  let t0 = monotonic_time_ms()
   app_log.info("llm_call", [
     #("model", req.model),
     #("messages", int.to_string(list.length(req.messages))),
   ])
   case provider.chat_with(req, p) {
     Error(e) -> {
+      let elapsed = int.to_string(monotonic_time_ms() - t0)
       app_log.err("llm_call_failed", [
         #("model", req.model),
+        #("elapsed_ms", elapsed),
         #("reason", response.error_message(e)),
       ])
       Error(e)
     }
     Ok(resp) -> {
+      let elapsed = int.to_string(monotonic_time_ms() - t0)
       cycle_log.log_llm_response(cycle_id, resp)
       app_log.info("llm_call_ok", [
         #("model", resp.model),
+        #("elapsed_ms", elapsed),
         #("input_tokens", int.to_string(resp.usage.input_tokens)),
         #("output_tokens", int.to_string(resp.usage.output_tokens)),
       ])
@@ -530,3 +535,6 @@ fn build_request(state: ChatState) -> LlmRequest {
     tools -> request.with_tools(base, tools)
   }
 }
+
+@external(erlang, "springdrift_ffi", "monotonic_time_ms")
+fn monotonic_time_ms() -> Int

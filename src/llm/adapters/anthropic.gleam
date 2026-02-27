@@ -5,7 +5,9 @@ import anthropic/error as aerr
 import anthropic/message as amsg
 import anthropic/request as areq
 import anthropic/tool as atool
+import app_log
 import gleam/erlang/process
+import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
@@ -248,6 +250,23 @@ fn translate_stop_reason(reason: areq.StopReason) -> types.StopReason {
 // ---------------------------------------------------------------------------
 
 fn translate_error(error: aerr.AnthropicError) -> types.LlmError {
+  // Log the full raw error before translating so nothing is silently discarded.
+  let raw = case error {
+    aerr.ApiError(status_code: code, details: details) ->
+      "ApiError status="
+      <> int.to_string(code)
+      <> " type="
+      <> aerr.api_error_type_to_string(details.error_type)
+      <> " msg="
+      <> details.message
+    aerr.HttpError(reason: reason) -> "HttpError reason=" <> reason
+    aerr.NetworkError(reason: reason) -> "NetworkError reason=" <> reason
+    aerr.ConfigError(reason: reason) -> "ConfigError reason=" <> reason
+    aerr.TimeoutError(timeout_ms: ms) ->
+      "TimeoutError timeout_ms=" <> int.to_string(ms)
+    aerr.JsonError(reason: reason) -> "JsonError reason=" <> reason
+  }
+  app_log.err("anthropic_error_raw", [#("detail", raw)])
   case error {
     aerr.ApiError(status_code: code, details: details) ->
       case details.error_type {

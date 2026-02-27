@@ -8,7 +8,8 @@
          docker_run_container/4, docker_exec/2, docker_stop/1,
          docker_logs/2, docker_cp/2,
          is_macos/0, colima_available/0, colima_running/0,
-         colima_start_background/0]).
+         colima_start_background/0,
+         install_beam_logger/0, monotonic_time_ms/0]).
 
 %% Read one line from stdin.
 %% Returns {ok, Binary} (including trailing newline) or {error, nil} on EOF.
@@ -330,3 +331,19 @@ docker_stop(ContainerId) ->
     os:cmd("docker stop " ++ IdStr ++ " 2>&1"),
     os:cmd("docker rm " ++ IdStr ++ " 2>&1"),
     nil.
+
+%% Install the custom BEAM logger handler and remove the default terminal handler.
+%% This redirects all BEAM-level warning/error/crash reports (including stack traces)
+%% from stderr to springdrift.log, preventing TUI corruption in alternate-screen mode.
+install_beam_logger() ->
+    catch logger:remove_handler(default),
+    catch logger:add_handler(springdrift_beam, springdrift_beam_logger, #{
+        level => warning,
+        config => #{}
+    }),
+    nil.
+
+%% Return the current monotonic time in milliseconds.
+%% Use two readings around an LLM call to get elapsed_ms.
+monotonic_time_ms() ->
+    erlang:monotonic_time(millisecond).

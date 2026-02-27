@@ -40,6 +40,9 @@ fn colima_running() -> Bool
 @external(erlang, "springdrift_ffi", "colima_start_background")
 fn colima_start_background() -> Nil
 
+@external(erlang, "springdrift_ffi", "install_beam_logger")
+fn install_beam_logger() -> Nil
+
 fn default_skill_dirs() -> List(String) {
   case get_env("HOME") {
     Ok(home) -> [home <> "/.config/springdrift/skills", ".skills"]
@@ -191,6 +194,7 @@ fn print_help() -> Nil {
 }
 
 fn run(cfg: AppConfig) -> Nil {
+  install_beam_logger()
   app_log.info("startup", [])
 
   let base_system =
