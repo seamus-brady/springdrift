@@ -46,6 +46,9 @@ fn install_beam_logger() -> Nil
 @external(erlang, "springdrift_ffi", "set_httpc_timeout")
 fn set_httpc_timeout(ms: Int) -> Nil
 
+@external(erlang, "springdrift_ffi", "httpc_module_file")
+fn httpc_module_file() -> String
+
 fn default_skill_dirs() -> List(String) {
   case get_env("HOME") {
     Ok(home) -> [home <> "/.config/springdrift/skills", ".skills"]
@@ -203,7 +206,7 @@ fn run(cfg: AppConfig) -> Nil {
   install_beam_logger()
   let llm_timeout_ms = option.unwrap(cfg.llm_timeout_ms, 300_000)
   set_httpc_timeout(llm_timeout_ms)
-  app_log.info("startup", [])
+  app_log.info("startup", [#("httpc_module", httpc_module_file())])
 
   let base_system =
     option.unwrap(cfg.system_prompt, "You are a helpful assistant.")

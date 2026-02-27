@@ -10,7 +10,8 @@
          is_macos/0, colima_available/0, colima_running/0,
          colima_start_background/0,
          install_beam_logger/0, monotonic_time_ms/0,
-         set_httpc_timeout/1, get_httpc_timeout/0]).
+         set_httpc_timeout/1, get_httpc_timeout/0,
+         httpc_module_file/0]).
 
 %% Read one line from stdin.
 %% Returns {ok, Binary} (including trailing newline) or {error, nil} on EOF.
@@ -400,12 +401,30 @@ monotonic_time_ms() ->
 
 %% Set the global HTTP timeout (milliseconds) used by gleam_httpc.
 %% Called once at startup with the user-configured llm_timeout_ms value.
-%% The gleam_httpc.erl override in src/ reads this persistent_term.
+%% The gleam@httpc.erl override in src/ reads this persistent_term.
+%%
+%% We also force-load our override beam by absolute path so that code path
+%% ordering cannot cause the package's gleam@httpc.beam to shadow ours.
+%% gleam_httpc/ebin appears before springdrift/ebin in the runtime code path,
+%% so code:load_file would find the wrong module; code:load_abs bypasses that.
 set_httpc_timeout(TimeoutMs) ->
     persistent_term:put(springdrift_httpc_timeout_ms, TimeoutMs),
+    %% Locate this module's own ebin directory and load gleam@httpc from it.
+    ThisFile = code:which(?MODULE),
+    EbinDir = filename:dirname(ThisFile),
+    BeamPath = filename:join(EbinDir, "gleam@httpc"),
+    _ = code:load_abs(BeamPath),
     nil.
 
 %% Read back the configured HTTP timeout.
 %% Returns 300 000 ms if set_httpc_timeout has not been called yet.
 get_httpc_timeout() ->
     persistent_term:get(springdrift_httpc_timeout_ms, 300_000).
+
+%% Return the file path of the currently-loaded gleam@httpc beam.
+%% Used for startup diagnostics to confirm the override is in effect.
+httpc_module_file() ->
+    case code:which('gleam@httpc') of
+        non_existing -> <<"not loaded">>;
+        Path -> unicode:characters_to_binary(Path)
+    end.
