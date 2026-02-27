@@ -99,15 +99,64 @@ get_date() ->
     iolist_to_binary([Pad(Y,4), $-, Pad(Mo,2), $-, Pad(D,2)]).
 
 %% Run LoopFun; always run CleanupFun before returning, even on exception.
+%% - throw:tui_exit is a clean exit: no logging, no re-raise.
+%% - Any other exception is logged (stderr + springdrift.log) then re-raised.
 tui_run(LoopFun, CleanupFun) ->
     try LoopFun()
     catch
         throw:tui_exit -> ok;
-        _Class:_Reason -> ok
+        Class:Reason:Stacktrace ->
+            log_exception(Class, Reason, Stacktrace),
+            erlang:raise(Class, Reason, Stacktrace)
     after
         CleanupFun()
     end,
     nil.
+
+%% Log an exception with stacktrace to stderr and to springdrift.log (JSONL).
+log_exception(Class, Reason, Stacktrace) ->
+    Timestamp = get_datetime(),
+    ClassStr  = format_term(Class),
+    ReasonStr = format_term(Reason),
+    StackStr  = format_term(Stacktrace),
+    Msg = ["[springdrift] tui_run exception\n",
+           "  class:      ", ClassStr, "\n",
+           "  reason:     ", ReasonStr, "\n",
+           "  stacktrace: ", StackStr, "\n"],
+    io:format(standard_error, "~s", [Msg]),
+    Line = encode_exception_line(Timestamp, ClassStr, ReasonStr, StackStr),
+    catch file:write_file("springdrift.log", [Line, <<"\n">>], [append]),
+    ok.
+
+format_term(T) ->
+    lists:flatten(io_lib:format("~p", [T])).
+
+encode_exception_line(Timestamp, ClassStr, ReasonStr, StackStr) ->
+    Ts  = list_to_binary(Timestamp),
+    Cls = ffi_json_escape(list_to_binary(ClassStr)),
+    Rsn = ffi_json_escape(list_to_binary(ReasonStr)),
+    Stk = ffi_json_escape(list_to_binary(StackStr)),
+    iolist_to_binary([
+        <<"{\"timestamp\":\"">>, Ts,
+        <<"\",\"level\":\"error\",\"event\":\"exception\",\"source\":\"tui_run\"">>,
+        <<",\"class\":\"">>,       Cls,
+        <<"\",\"reason\":\"">>,    Rsn,
+        <<"\",\"stacktrace\":\"">>, Stk,
+        <<"\"}">>
+    ]).
+
+ffi_json_escape(Bin) -> ffi_json_escape(Bin, <<>>).
+ffi_json_escape(<<>>, Acc) -> Acc;
+ffi_json_escape(<<$", R/binary>>,  Acc) -> ffi_json_escape(R, <<Acc/binary, $\\, $">>);
+ffi_json_escape(<<$\\, R/binary>>, Acc) -> ffi_json_escape(R, <<Acc/binary, $\\, $\\>>);
+ffi_json_escape(<<$\n, R/binary>>, Acc) -> ffi_json_escape(R, <<Acc/binary, $\\, $n>>);
+ffi_json_escape(<<$\r, R/binary>>, Acc) -> ffi_json_escape(R, <<Acc/binary, $\\, $r>>);
+ffi_json_escape(<<$\t, R/binary>>, Acc) -> ffi_json_escape(R, <<Acc/binary, $\\, $t>>);
+ffi_json_escape(<<C, R/binary>>, Acc) when C < 32 ->
+    Hex = io_lib:format("\\u~4.16.0b", [C]),
+    ffi_json_escape(R, <<Acc/binary, (list_to_binary(Hex))/binary>>);
+ffi_json_escape(<<C, R/binary>>, Acc) ->
+    ffi_json_escape(R, <<Acc/binary, C>>).
 
 %% Throw the tui_exit atom so tui_run can catch it cleanly.
 throw_tui_exit() ->

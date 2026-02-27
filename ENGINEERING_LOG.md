@@ -19,6 +19,32 @@ The project is a Gleam/OTP terminal-UI chatbot exploring the [12-Factor Agents](
 
 ---
 
+## Crash Logging Behaviour
+
+Unexpected exceptions inside the TUI loop boundary are now **logged and re-raised**
+rather than silently swallowed.  The implementation lives in `tui_run/2` in
+`src/springdrift_ffi.erl`.
+
+| Scenario | Behaviour |
+|---|---|
+| `throw:tui_exit` | Clean exit — no logging, process ends normally |
+| Any other exception | Log with full stacktrace → re-raise (`erlang:raise/3`) |
+
+When an unexpected exception occurs, a line is appended to both:
+
+1. **`stderr`** — human-readable, includes class / reason / stacktrace
+2. **`./springdrift.log`** — single JSON object per line (JSONL), consistent with the
+   rest of the application's structured logging
+
+The JSONL entry uses the following keys:
+`timestamp`, `level` (`"error"`), `event` (`"exception"`), `source` (`"tui_run"`),
+`class`, `reason`, `stacktrace`.
+
+Terminal cleanup (`CleanupFun`) is always executed via an Erlang `after` block, so
+the terminal is restored to a sane state before the process terminates.
+
+---
+
 ## Commit History & Implementation Notes
 
 ### `e69f833` · `45c5518` — Bootstrap (Feb 15)
