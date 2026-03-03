@@ -1,3 +1,4 @@
+import agent/types as agent_types
 import chat/service.{
   type AgentQuestion, type ChatMessage, type ModelSwitchQuestion,
   type ServiceReply, type ToolEvent, ToolCalling,
@@ -28,10 +29,18 @@ type Tab {
   LogTab
 }
 
+type ChatBackend {
+  ServiceBackend(chat: Subject(ChatMessage), chat_reply: Subject(ServiceReply))
+  CognitiveBackend(
+    cognitive: Subject(agent_types.CognitiveMessage),
+    cognitive_reply: Subject(agent_types.CognitiveReply),
+  )
+}
+
 type AgentStatus {
   Idle
   WaitingForLlm
-  WaitingForInput(question: String, reply_to: Subject(String))
+  WaitingForInput(question: String, reply_to: Option(Subject(String)))
   WaitingForModelSwitch(
     suggested_model: String,
     reply_to: Subject(service.ModelSwitchAnswer),
@@ -51,12 +60,13 @@ type TuiMessage {
     suggested_model: String,
     reply_to: Subject(service.ModelSwitchAnswer),
   )
+  CognitiveReplyReceived(response: String, model: String)
+  NotificationReceived(notification: agent_types.Notification)
 }
 
 type TuiState {
   TuiState(
-    chat: Subject(ChatMessage),
-    chat_reply: Subject(ServiceReply),
+    backend: ChatBackend,
     stdin_subj: Subject(TuiMessage),
     selector: Selector(TuiMessage),
     question_channel: Subject(AgentQuestion),
@@ -158,8 +168,78 @@ pub fn start(
   }
   let state =
     TuiState(
-      chat:,
-      chat_reply:,
+      backend: ServiceBackend(chat:, chat_reply:),
+      stdin_subj:,
+      selector:,
+      question_channel:,
+      tool_channel:,
+      model_question_channel:,
+      provider_name:,
+      model:,
+      task_model:,
+      reasoning_model:,
+      messages: initial_messages,
+      input_buf: "",
+      scroll_offset: 0,
+      width: w,
+      height: h,
+      status: Idle,
+      notice: resume_notice,
+      spinner_frame: 0,
+      spinner_label: "",
+      tab: ChatTab,
+      log_cycles: [],
+      log_selected: 0,
+      last_usage: None,
+    )
+  render(state)
+  tui_run(fn() { event_loop(state) }, cleanup)
+  do_halt(0)
+}
+
+/// Start the TUI in cognitive mode — backed by the cognitive loop.
+pub fn start_cognitive(
+  cognitive: Subject(agent_types.CognitiveMessage),
+  notify: Subject(agent_types.Notification),
+  provider_name: String,
+  model: String,
+  task_model: String,
+  reasoning_model: String,
+  initial_messages: List(Message),
+) -> Nil {
+  let size = terminal.window_size()
+  let #(w, h) = result.unwrap(size, #(80, 24))
+  let _ = terminal.enter_raw()
+  stdout.execute([
+    command.EnterAlternateScreen,
+    command.HideCursor,
+    command.Clear(terminal.All),
+  ])
+  let stdin_subj = process.new_subject()
+  let cognitive_reply: Subject(agent_types.CognitiveReply) =
+    process.new_subject()
+  // Unused in cognitive mode but needed for TuiState
+  let question_channel = process.new_subject()
+  let tool_channel = process.new_subject()
+  let model_question_channel = process.new_subject()
+  let selector =
+    process.new_selector()
+    |> process.select(stdin_subj)
+    |> process.select_map(cognitive_reply, fn(cr: agent_types.CognitiveReply) {
+      CognitiveReplyReceived(response: cr.response, model: cr.model)
+    })
+    |> process.select_map(notify, fn(n: agent_types.Notification) {
+      NotificationReceived(notification: n)
+    })
+  process.spawn_unlinked(fn() { stdin_loop(stdin_subj) })
+  let resume_notice = case initial_messages {
+    [] -> ""
+    msgs ->
+      "  Resumed: " <> int.to_string(list.length(msgs)) <> " messages loaded"
+  }
+  let state =
+    TuiState(
+      backend: CognitiveBackend(cognitive:, cognitive_reply:),
       stdin_subj:,
       selector:,
       question_channel:,
@@ -242,6 +322,10 @@ fn dispatch(state: TuiState, msg: TuiMessage) -> Nil {
           status: WaitingForModelSwitch(suggested_model:, reply_to:),
         ),
       )
+    CognitiveReplyReceived(response:, model:) ->
+      handle_cognitive_reply(state, response, model)
+    NotificationReceived(notification:) ->
+      handle_notification(state, notification)
   }
 }
 
@@ -260,12 +344,81 @@ fn handle_agent_question(
   reply_to: Subject(String),
 ) -> Nil {
   continue_loop(
-    TuiState(..state, status: WaitingForInput(question:, reply_to:)),
+    TuiState(
+      ..state,
+      status: WaitingForInput(question:, reply_to: Some(reply_to)),
+    ),
   )
 }
 
 fn handle_tool_event(state: TuiState, name: String) -> Nil {
   continue_loop(TuiState(..state, spinner_label: name))
+}
+
+fn handle_cognitive_reply(
+  state: TuiState,
+  response: String,
+  model: String,
+) -> Nil {
+  let asst = Message(role: Assistant, content: [TextContent(text: response)])
+  let notice = case model != state.model {
+    True -> style.dim("  \u{21AA} " <> model)
+    False -> ""
+  }
+  continue_loop(
+    TuiState(
+      ..state,
+      messages: list.append(state.messages, [asst]),
+      status: Idle,
+      spinner_label: "",
+      model:,
+      notice:,
+    ),
+  )
+}
+
+fn handle_notification(
+  state: TuiState,
+  notification: agent_types.Notification,
+) -> Nil {
+  case notification {
+    agent_types.QuestionForHuman(question:, ..) ->
+      continue_loop(
+        TuiState(..state, status: WaitingForInput(question:, reply_to: None)),
+      )
+    agent_types.SaveWarning(message:) ->
+      continue_loop(
+        TuiState(
+          ..state,
+          notice: style.yellow(
+            "  Warning: session not saved \u{2014} " <> message,
+          ),
+        ),
+      )
+    agent_types.ToolCalling(name:) ->
+      continue_loop(TuiState(..state, spinner_label: name))
+  }
+}
+
+fn send_user_message(state: TuiState, text: String) -> Nil {
+  case state.backend {
+    ServiceBackend(chat:, chat_reply:) ->
+      process.send(
+        chat,
+        service.SendMessage(
+          text:,
+          reply_to: chat_reply,
+          question_channel: state.question_channel,
+          tool_channel: state.tool_channel,
+          model_question_channel: state.model_question_channel,
+        ),
+      )
+    CognitiveBackend(cognitive:, cognitive_reply:) ->
+      process.send(
+        cognitive,
+        agent_types.UserInput(text:, reply_to: cognitive_reply),
+      )
+  }
 }
 
 fn handle_stdin_byte(state: TuiState, byte: String) -> Nil {
@@ -329,7 +482,10 @@ fn handle_command(state: TuiState, cmd: String) -> Nil {
   case cmd {
     "/exit" | "/quit" -> do_exit(state)
     "/clear" -> {
-      process.send(state.chat, service.ClearHistory)
+      case state.backend {
+        ServiceBackend(chat:, ..) -> process.send(chat, service.ClearHistory)
+        CognitiveBackend(..) -> Nil
+      }
       let notice = style.dim("  Conversation cleared")
       continue_loop(TuiState(..state, messages: [], scroll_offset: 0, notice:))
     }
@@ -338,7 +494,11 @@ fn handle_command(state: TuiState, cmd: String) -> Nil {
         True -> state.reasoning_model
         False -> state.task_model
       }
-      process.send(state.chat, service.SetModel(model: new_model))
+      case state.backend {
+        ServiceBackend(chat:, ..) ->
+          process.send(chat, service.SetModel(model: new_model))
+        CognitiveBackend(..) -> Nil
+      }
       let label = case new_model == state.task_model {
         True -> "task"
         False -> "reasoning"
@@ -414,7 +574,19 @@ fn handle_chat_enter(state: TuiState) -> Nil {
                   let a_msg =
                     Message(role: User, content: [TextContent(text: input_text)])
                   let msgs = list.append(state.messages, [q_msg, a_msg])
-                  process.send(reply_to, input_text)
+                  // Route answer based on backend mode
+                  case reply_to {
+                    Some(rt) -> process.send(rt, input_text)
+                    None ->
+                      case state.backend {
+                        CognitiveBackend(cognitive:, ..) ->
+                          process.send(
+                            cognitive,
+                            agent_types.UserAnswer(answer: input_text),
+                          )
+                        ServiceBackend(..) -> Nil
+                      }
+                  }
                   continue_loop(
                     TuiState(
                       ..state,
@@ -438,16 +610,7 @@ fn handle_chat_enter(state: TuiState) -> Nil {
                       scroll_offset: 0,
                     )
                   render(s1)
-                  process.send(
-                    state.chat,
-                    service.SendMessage(
-                      text: input_text,
-                      reply_to: state.chat_reply,
-                      question_channel: state.question_channel,
-                      tool_channel: state.tool_channel,
-                      model_question_channel: state.model_question_channel,
-                    ),
-                  )
+                  send_user_message(state, input_text)
                   event_loop(s1)
                 }
                 WaitingForModelSwitch(..) -> event_loop(state)
@@ -969,7 +1132,11 @@ fn handle_log_rewind(state: TuiState) -> Nil {
     _ -> {
       let msgs =
         cycle_log.messages_for_rewind(state.log_cycles, state.log_selected)
-      process.send(state.chat, service.RestoreMessages(messages: msgs))
+      case state.backend {
+        ServiceBackend(chat:, ..) ->
+          process.send(chat, service.RestoreMessages(messages: msgs))
+        CognitiveBackend(..) -> Nil
+      }
       let num = int.to_string(state.log_selected + 1)
       let notice = style.dim("  Rewound to cycle #" <> num)
       continue_loop(

@@ -1052,6 +1052,181 @@ are pure functions. Discovery is tested indirectly through end-to-end runs.
 
 ---
 
+### `main` branch — Decoupled notification channel + cognitive `request_human_input` (Mar 3)
+
+**Files changed:** `src/agent/types.gleam`, `src/agent/cognitive.gleam`,
+`test/agent/cognitive_test.gleam`, `src/tui.gleam`, `src/springdrift.gleam`.
+
+**Factors addressed:** 7 (Contact humans via tool calls — now in cognitive loop too),
+10 (Small focused agents — cognitive mode orchestrates planner/researcher/coder),
+11 (Trigger from anywhere — decoupled notification channel).
+
+---
+
+#### Problem statement
+
+The agent substrate (types, registry, worker, supervisor, framework, cognitive loop,
+agent specs) was built and tested, but two gaps remained:
+
+1. The cognitive loop had no `request_human_input` tool — it could dispatch to agents
+   but couldn't ask the human questions directly.
+2. The notification channel (`TuiNotification`) was TUI-coupled — it contained
+   `reply_to: Subject(String)`, forcing any consumer to be an Erlang process with a
+   typed Subject. A websocket handler or HTTP endpoint couldn't hold one.
+
+---
+
+#### Decoupled notification types (`src/agent/types.gleam`)
+
+Replaced `TuiNotification` (which embedded `Subject(String)`) with pure-data types:
+
+```gleam
+pub type QuestionSource {
+  CognitiveQuestion
+  AgentQuestionSource(agent: String)
+}
+
+pub type Notification {
+  QuestionForHuman(question: String, source: QuestionSource)
+  SaveWarning(message: String)
+  ToolCalling(name: String)
+}
+```
+
+No `Subject` references in `Notification` — it's fully serialisable. The answer
+flow goes through `UserAnswer(answer)` sent to the cognitive loop's `Subject`,
+which routes based on stashed `WaitingContext`.
+
+**`WaitingContext`** — dual-purpose stash for what to do when the human answers:
+
+```gleam
+pub type WaitingContext {
+  OwnToolWaiting(
+    tool_use_id: String,
+    assistant_content: List(ContentBlock),
+    reply_to: Subject(CognitiveReply),
+  )
+  AgentWaiting(reply_to: Subject(String))
+}
+```
+
+`WaitingForUser` now holds `context: WaitingContext` instead of
+`agent_reply_to: Option(Subject(String))`.
+
+---
+
+#### Cognitive loop `request_human_input` (`src/agent/cognitive.gleam`)
+
+Renamed `tui_notify` → `notify` (type `Subject(Notification)`).
+
+`start()` now auto-prepends `builtin.human_input_tool()` to the agent tools list.
+The cognitive loop's tools are: one `agent_*` tool per registered agent +
+`request_human_input`. All other tools (calculator, file ops, shell, web) are
+agent-level only.
+
+**`dispatch_tool_calls` rewrite:**
+
+```gleam
+fn dispatch_tool_calls(state, task_id, resp, calls, reply_to) {
+  case list.find(calls, fn(c) { c.name == "request_human_input" }) {
+    Ok(hi_call) -> handle_own_human_input(state, task_id, resp, hi_call, reply_to)
+    Error(_) -> dispatch_agent_calls(state, task_id, resp, calls, reply_to)
+  }
+}
+```
+
+`request_human_input` is checked first. If found:
+
+1. Parse question from tool call JSON.
+2. Send `QuestionForHuman(question, CognitiveQuestion)` to notify channel.
+3. Add assistant message (with tool-use content) to history.
+4. Stash `OwnToolWaiting(tool_use_id, assistant_content, reply_to)`.
+5. Set `WaitingForUser(question, context)`.
+
+**`handle_user_answer` rewrite** — dual-purpose based on `WaitingContext`:
+
+- `AgentWaiting(reply_to)` → forward answer to agent's Subject, set Idle.
+- `OwnToolWaiting(tool_use_id, .., reply_to)` → build `ToolResultContent` with the
+  answer, append to messages, spawn continuation think worker, set Thinking.
+
+The think worker completes and the cycle continues (potentially more tool calls
+or a final text response).
+
+---
+
+#### TUI dual-backend support (`src/tui.gleam`)
+
+Introduced `ChatBackend` union to support both the existing service path and the
+new cognitive path:
+
+```gleam
+type ChatBackend {
+  ServiceBackend(chat: Subject(ChatMessage), chat_reply: Subject(ServiceReply))
+  CognitiveBackend(
+    cognitive: Subject(CognitiveMessage),
+    cognitive_reply: Subject(CognitiveReply),
+  )
+}
+```
+
+`TuiState` replaced `chat` and `chat_reply` fields with a single `backend` field.
+
+New `start_cognitive/7` entry point creates a selector that maps:
+- `CognitiveReply` → `CognitiveReplyReceived`
+- `Notification` → `NotificationReceived`
+
+`WaitingForInput.reply_to` changed from `Subject(String)` to `Option(Subject(String))`:
+- `Some(subj)` — service mode, send answer directly to the Subject.
+- `None` — cognitive mode, send `UserAnswer` to the cognitive loop's Subject.
+
+All backend-aware operations (`/clear`, `/model`, log rewind, message send) dispatch
+through `state.backend`.
+
+---
+
+#### `--cognitive` wiring (`src/springdrift.gleam`)
+
+New `--cognitive` CLI flag. `run()` branches:
+
+```gleam
+case list.contains(args, "--cognitive") {
+  True -> run_cognitive(cfg)
+  False -> run_service(cfg)
+}
+```
+
+`run_cognitive` builds agent specs (planner, researcher, coder), converts them to
+`agent_*` tools via `cognitive.agent_to_tool`, creates a `Subject(Notification)`,
+starts the cognitive loop, and calls `tui.start_cognitive`.
+
+---
+
+#### Test coverage
+
+Two new tests in `test/agent/cognitive_test.gleam`:
+
+| Test | Verifies |
+|---|---|
+| `request_human_input_tool_test` | Full round-trip: LLM calls `request_human_input` → `QuestionForHuman` notification arrives → `UserAnswer` sent back → LLM gets tool result → final text response returned |
+| `agent_question_decoupled_test` | `AgentQuestion` produces pure-data `QuestionForHuman(AgentQuestionSource(...))` notification → `UserAnswer` forwards to agent's `Subject(String)` |
+
+All 189 tests pass (187 existing + 2 new).
+
+---
+
+#### Design decisions
+
+| Decision | Rationale |
+|---|---|
+| `Notification` has no `Subject` fields | Enables non-OTP consumers (websocket, HTTP). The answer path goes through the cognitive loop's own Subject, which is the only process that needs to route answers. |
+| `WaitingContext` rather than separate status variants | Keeps `WaitingForUser` as a single status with context-dependent resume logic. Avoids proliferating status variants. |
+| `request_human_input` checked before agent tools in dispatch | Human questions are time-sensitive and should take priority over agent dispatch. Also avoids edge cases where the LLM calls both agent and human-input tools. |
+| `builtin.human_input_tool()` auto-added in `cognitive.start()` | Callers don't need to know which built-in tools the cognitive loop needs. The cognitive loop's contract is: "give me agent tools, I add my own". |
+| Forwarder not needed for `CognitiveReply` | The `cognitive_reply` Subject is registered directly in the selector at `start_cognitive` time, so replies arrive as `CognitiveReplyReceived` without spawning intermediary processes. |
+| `ChatBackend` union rather than trait/behaviour | Gleam has no traits. A tagged union is the idiomatic way to dispatch to two different backend protocols from the same TUI code. |
+
+---
+
 ## Decisions Log
 
 | Decision | Rationale |

@@ -1,5 +1,12 @@
+import agent/cognitive
+import agent/registry
+import agent/types as agent_types
+import agents/coder
+import agents/planner
+import agents/researcher
 import chat/service
 import config.{type AppConfig}
+import gleam/erlang/process
 import gleam/io
 import gleam/list
 import gleam/option
@@ -127,6 +134,11 @@ fn print_help() -> Nil {
     "  --allow-write-anywhere    Allow write_file outside the current working directory",
   )
   io.println("")
+  io.println("Mode:")
+  io.println(
+    "  --cognitive               Run in cognitive mode with agent orchestration",
+  )
+  io.println("")
   io.println("Session / config:")
   io.println("  --resume                  Resume previous session from disk")
   io.println("  --skills-dir <path>       Add a skills directory (repeatable)")
@@ -172,6 +184,14 @@ fn print_help() -> Nil {
 }
 
 fn run(cfg: AppConfig) -> Nil {
+  let args = get_startup_args()
+  case list.contains(args, "--cognitive") {
+    True -> run_cognitive(cfg)
+    False -> run_service(cfg)
+  }
+}
+
+fn run_service(cfg: AppConfig) -> Nil {
   let base_system =
     option.unwrap(cfg.system_prompt, "You are a helpful assistant.")
   let skill_dirs = option.unwrap(cfg.skills_dirs, default_skill_dirs())
@@ -248,6 +268,105 @@ fn run(cfg: AppConfig) -> Nil {
       write_anywhere,
     )
   tui.start(chat, p.name, model, task_model, reasoning_model, initial_messages)
+  let _ = option.map(sandbox_subj, sandbox.send_shutdown)
+  Nil
+}
+
+fn run_cognitive(cfg: AppConfig) -> Nil {
+  let base_system =
+    option.unwrap(
+      cfg.system_prompt,
+      "You are a cognitive orchestrator. You manage specialist agents and talk to the human. Use agent tools to delegate work and request_human_input to ask questions.",
+    )
+  let skill_dirs = option.unwrap(cfg.skills_dirs, default_skill_dirs())
+  let discovered = skills.discover(skill_dirs)
+  let system = case discovered {
+    [] -> base_system
+    _ -> base_system <> "\n\n" <> skills.to_system_prompt_xml(discovered)
+  }
+  let max_tokens = option.unwrap(cfg.max_tokens, 2048)
+  let verbose = option.unwrap(cfg.log_verbose, False)
+  let write_anywhere = option.unwrap(cfg.write_anywhere, False)
+
+  let #(p, model, default_task_model, default_reasoning_model) =
+    select_provider(cfg)
+
+  let task_model = option.unwrap(cfg.task_model, default_task_model)
+  let reasoning_model =
+    option.unwrap(cfg.reasoning_model, default_reasoning_model)
+
+  let initial_messages = case list.contains(get_startup_args(), "--resume") {
+    True -> storage.load()
+    False -> []
+  }
+
+  // Start sandbox (needed for coder agent)
+  let sandbox_dir = find_sandbox_dir()
+  let sandbox_subj = case sandbox_dir {
+    option.None -> {
+      io.println(
+        "Sandbox  : unavailable (sandbox/Dockerfile not found) — coder agent limited",
+      )
+      option.None
+    }
+    option.Some(dir) ->
+      case sandbox.start(dir) {
+        Ok(s) -> {
+          io.println("Sandbox  : Docker container started")
+          option.Some(s)
+        }
+        Error(msg) -> {
+          io.println(
+            "Sandbox  : unavailable (" <> msg <> ") — coder agent limited",
+          )
+          option.None
+        }
+      }
+  }
+
+  // Build agent specs
+  let agent_specs = [
+    planner.spec(p, model),
+    researcher.spec(p, model),
+    coder.spec(p, model, sandbox_subj, write_anywhere),
+  ]
+
+  // Build agent tools for the cognitive loop
+  let agent_tools = list.map(agent_specs, cognitive.agent_to_tool)
+
+  // Create registry and register agents
+  let reg = registry.new()
+
+  // Create notification channel
+  let notify: process.Subject(agent_types.Notification) = process.new_subject()
+
+  io.println("Mode     : cognitive (agents: planner, researcher, coder)")
+
+  // Start cognitive loop
+  let cognitive_subj =
+    cognitive.start(
+      p,
+      model,
+      system,
+      max_tokens,
+      cfg.max_context_messages,
+      agent_tools,
+      initial_messages,
+      reg,
+      verbose,
+      notify,
+    )
+
+  // Start TUI in cognitive mode
+  tui.start_cognitive(
+    cognitive_subj,
+    notify,
+    p.name,
+    model,
+    task_model,
+    reasoning_model,
+    initial_messages,
+  )
   let _ = option.map(sandbox_subj, sandbox.send_shutdown)
   Nil
 }

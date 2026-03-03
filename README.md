@@ -90,6 +90,33 @@ Set `--max-context <n>` to cap the number of messages passed to the LLM per
 call. The full history is always kept in memory and on disk; trimming only
 happens at request-build time.
 
+### Cognitive mode (agent orchestration)
+
+Run with `--cognitive` to start in **cognitive mode** — a multi-agent architecture
+where the LLM acts as an orchestrator rather than a direct tool executor:
+
+```sh
+gleam run -- --cognitive
+```
+
+In cognitive mode the main LLM manages three specialist sub-agents:
+
+| Agent | Role | Tools |
+|---|---|---|
+| `planner` | Break down complex goals into structured plans | None (text only) |
+| `researcher` | Gather information from files, web, and built-in tools | files, web, builtin |
+| `coder` | Write code, run shell commands in the sandbox | files, shell, builtin |
+
+The cognitive loop only has two kinds of tools: `agent_*` tools (one per
+registered agent) and `request_human_input`. All other tools (calculator, file
+ops, shell, web) are delegated to agents. This keeps the orchestrator focused
+on planning and communication.
+
+The notification channel between the cognitive loop and the TUI is decoupled —
+`Notification` is a pure data type with no process references (`Subject`). This
+means the same cognitive loop could be driven by a websocket handler or any
+other UI without code changes.
+
 ### Safety circuit breakers
 - **Max turns** (`--max-turns`, default 5): prevents infinite tool loops.
 - **Consecutive errors** (`--max-errors`, default 3): aborts if the same tool
@@ -128,6 +155,9 @@ gleam run -- --resume
 
 # Force provider and model
 gleam run -- --provider anthropic --model claude-opus-4-6
+
+# Start in cognitive mode (multi-agent orchestration)
+gleam run -- --cognitive
 
 # Use a config file
 gleam run -- --config /path/to/my.json
@@ -200,6 +230,7 @@ Three-layer merge (highest priority first):
 --reasoning-model <name>  Model for complex queries
 --no-model-prompt         Auto-switch to reasoning model without prompting
 --config <path>           Load an additional config file
+--cognitive               Run in cognitive mode (multi-agent orchestration)
 --verbose                 Log full LLM request/response payloads
 --skills-dir <path>       Add a skill directory (repeatable)
 --resume                  Reload previous session
@@ -242,7 +273,7 @@ instructions.
 ## Architecture
 
 ```
-springdrift.gleam         Entry point — config, provider selection, skills, wiring
+springdrift.gleam         Entry point — config, provider selection, mode dispatch
 ├── config.gleam          3-layer config (CLI flags > local JSON > user JSON)
 ├── storage.gleam         Session save/load/clear  (~/.config/springdrift/session.json)
 ├── skills.gleam          Skill discovery, frontmatter parsing, XML injection
@@ -250,14 +281,30 @@ springdrift.gleam         Entry point — config, provider selection, skills, wi
 ├── chat/service.gleam    OTP actor — owns ChatState; serialises conversation writes
 │   └── react_loop        Iterative tool execution with max_turns + circuit breaker
 │
+├── agent/                Agent substrate (cognitive mode)
+│   ├── types.gleam       Notification, QuestionSource, WaitingContext, CognitiveMessage, etc.
+│   ├── cognitive.gleam   Cognitive loop — orchestrates agents + request_human_input
+│   ├── framework.gleam   Gen-server wrapper for agent specs → running agent processes
+│   ├── supervisor.gleam  Restart strategies (Permanent/Transient/Temporary)
+│   ├── registry.gleam    Pure data structure tracking agent status + task subjects
+│   └── worker.gleam      Unlinked think workers with monitor forwarding
+│
+├── agents/               Specialist agent specs
+│   ├── planner.gleam     Planning agent (no tools, max_turns=3)
+│   ├── researcher.gleam  Research agent (files+web+builtin, max_turns=8)
+│   └── coder.gleam       Coding agent (files+shell+builtin, max_turns=10)
+│
 ├── query_complexity.gleam  LLM-based + heuristic query classifier (Simple | Complex)
 ├── context.gleam           Sliding-window context trim helper
 ├── cycle_log.gleam         Per-cycle JSON-L logging + log reading + rewind helpers
 │
-├── tools/builtin.gleam   Built-in tools: calculator, get_today_date,
-│                         request_human_input, read_skill
+├── tools/
+│   ├── builtin.gleam     calculator, get_current_datetime, request_human_input, read_skill
+│   ├── files.gleam       read_file, write_file, list_directory
+│   ├── web.gleam         fetch_url
+│   └── shell.gleam       run_shell (delegates to sandbox)
 │
-├── tui.gleam             Alternate-screen TUI — Chat tab + Log tab, markdown renderer
+├── tui.gleam             Alternate-screen TUI — Chat + Log tabs, dual backend support
 │
 └── llm/
     ├── types.gleam        Shared types: Message, ContentBlock, LlmRequest/Response/Error, Tool
@@ -271,7 +318,7 @@ springdrift.gleam         Entry point — config, provider selection, skills, wi
         └── mock.gleam       Test/fallback provider with injectable responses
 ```
 
-### Concurrency model
+### Concurrency model (service mode)
 
 | Process | Lifetime | Role |
 |---|---|---|
@@ -280,10 +327,22 @@ springdrift.gleam         Entry point — config, provider selection, skills, wi
 | Stdin reader | App | Blocking `read_char` loop → `StdinByte` to selector |
 | HTTP worker | Per turn | Blocking LLM calls + tool execution inside `react_loop` |
 
-All cross-process communication uses typed `Subject(T)` channels — no shared
-mutable state, no locks.
+### Concurrency model (cognitive mode)
 
-### Message flow
+| Process | Lifetime | Role |
+|---|---|---|
+| Main / TUI event loop | App | Render, raw stdin, message dispatch |
+| Cognitive loop | App | Orchestrates agents, handles `request_human_input` |
+| Stdin reader | App | Blocking `read_char` loop → `StdinByte` to selector |
+| Think worker | Per turn | Blocking LLM call for the cognitive loop |
+| Agent processes | App | Each specialist agent runs its own react loop |
+
+All cross-process communication uses typed `Subject(T)` channels — no shared
+mutable state, no locks. The cognitive loop's notification channel uses pure
+data types (`Notification`) with no embedded `Subject` references, enabling
+non-OTP consumers (e.g. websocket handlers).
+
+### Message flow (service mode)
 
 ```
 User input → TUI
@@ -295,6 +354,19 @@ User input → TUI
       → If done: send LlmComplete back to service
   → Service stores final_messages, saves to disk
   → Reply sent to TUI → render
+```
+
+### Message flow (cognitive mode)
+
+```
+User input → TUI
+  → cognitive.UserInput(text, reply_to)
+  → Cognitive loop spawns think worker (LLM call)
+  → Think worker completes:
+      → If agent_* tool call: dispatch to agent, wait for AgentComplete
+      → If request_human_input: send QuestionForHuman notification, wait for UserAnswer
+      → If final text: send CognitiveReply to TUI
+  → TUI renders response
 ```
 
 ---
@@ -312,8 +384,8 @@ User input → TUI
 | 7 — Contact humans via tools | ✓ | `request_human_input` blocks worker via OTP channel |
 | 8 — Own your control flow | ✓ | Explicit `max_turns` limit + visible error on exhaustion |
 | 9 — Compact errors into context | ✓ | Consecutive-error circuit breaker; errors shown in TUI |
-| 10 — Small focused agents | N/A | General-purpose chatbot, not an orchestrator |
-| 11 — Trigger from anywhere | N/A | TUI only; no webhook/event integration |
+| 10 — Small focused agents | ✓ | Cognitive mode: planner, researcher, coder agents with focused tool sets |
+| 11 — Trigger from anywhere | Partial | Decoupled `Notification` channel enables non-TUI consumers |
 | 12 — Stateless reducer | ✓ | `react_loop` returns full accumulated message list |
 
 ---
