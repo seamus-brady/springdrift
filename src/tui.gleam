@@ -435,7 +435,7 @@ fn scroll_down(state: TuiState, amount: Int) -> TuiState {
 // ---------------------------------------------------------------------------
 
 fn render(state: TuiState) -> Nil {
-  stdout.execute([command.MoveTo(0, 0), command.Clear(terminal.All)])
+  stdout.execute([command.MoveTo(0, 0)])
   render_header(state)
   render_separator(state.width, 1)
   case state.tab {
@@ -462,12 +462,12 @@ fn render_header(state: TuiState) -> Nil {
     <> state.model
     <> "    "
     <> tab_bar
-  stdout.execute([command.MoveTo(0, 0), command.Print(header)])
+  print_at(0, 0, header)
 }
 
 fn render_separator(width: Int, row: Int) -> Nil {
   let line = string.repeat("─", width)
-  stdout.execute([command.MoveTo(0, row), command.Print(line)])
+  print_at(0, row, line)
 }
 
 fn render_messages(state: TuiState) -> Nil {
@@ -481,13 +481,15 @@ fn render_messages(state: TuiState) -> Nil {
     |> list.drop(start_idx)
     |> list.take(available)
   print_lines(window, 2)
+  // Clear any remaining rows in the content area
+  clear_rows(2 + list.length(window), 2 + available)
 }
 
 fn print_lines(lines: List(String), start_row: Int) -> Nil {
   case lines {
     [] -> Nil
     [line, ..rest] -> {
-      stdout.execute([command.MoveTo(0, start_row), command.Print(line)])
+      print_at(0, start_row, line)
       print_lines(rest, start_row + 1)
     }
   }
@@ -558,7 +560,7 @@ fn render_input(state: TuiState) -> Nil {
   }
   let line =
     "  " <> style.bold("> ") <> display_input <> style.blinking("\u{2588}")
-  stdout.execute([command.MoveTo(0, state.height - 2), command.Print(line)])
+  print_at(0, state.height - 2, line)
 }
 
 fn render_footer(state: TuiState) -> Nil {
@@ -594,7 +596,7 @@ fn render_footer(state: TuiState) -> Nil {
       }
     msg -> style.yellow(msg)
   }
-  stdout.execute([command.MoveTo(0, state.height - 1), command.Print(footer)])
+  print_at(0, state.height - 1, footer)
 }
 
 // ---------------------------------------------------------------------------
@@ -828,6 +830,29 @@ fn str_split_once(s: String, sep: String) -> Result(#(String, String), Nil) {
 // Utilities
 // ---------------------------------------------------------------------------
 
+/// Move to (col, row), clear the line, then print text.
+fn print_at(col: Int, row: Int, text: String) -> Nil {
+  stdout.execute([
+    command.MoveTo(col, row),
+    command.Clear(terminal.CurrentLine),
+    command.Print(text),
+  ])
+}
+
+/// Clear rows from `from` (inclusive) to `to` (exclusive).
+fn clear_rows(from: Int, to: Int) -> Nil {
+  case from >= to {
+    True -> Nil
+    False -> {
+      stdout.execute([
+        command.MoveTo(0, from),
+        command.Clear(terminal.CurrentLine),
+      ])
+      clear_rows(from + 1, to)
+    }
+  }
+}
+
 fn is_printable(byte: String) -> Bool {
   case string.to_utf_codepoints(byte) {
     [cp] -> {
@@ -896,16 +921,17 @@ fn render_log(state: TuiState) -> Nil {
   let available = state.height - 3
   let max_visible = int.max(1, available / cycle_height)
   case list.length(cycles) {
-    0 ->
-      stdout.execute([
-        command.MoveTo(0, 2),
-        command.Print(style.dim("  No cycles logged today.")),
-      ])
+    0 -> {
+      print_at(0, 2, style.dim("  No cycles logged today."))
+      clear_rows(3, 2 + available)
+    }
     _ -> {
       let page = state.log_selected / max_visible
       let top = page * max_visible
       let visible = cycles |> list.drop(top) |> list.take(max_visible)
       print_log_cycles(visible, top, state.log_selected, 2, state.width)
+      let used_rows = list.length(visible) * cycle_height
+      clear_rows(2 + used_rows, 2 + available)
     }
   }
 }
@@ -975,14 +1001,9 @@ fn print_log_cycles(
         "" -> style.dim("    Asst: \u{2026}")
         t -> style.dim("    Asst: ") <> truncate_text(t, width - 11)
       }
-      stdout.execute([
-        command.MoveTo(0, row),
-        command.Print(hdr_line),
-        command.MoveTo(0, row + 1),
-        command.Print(user_text),
-        command.MoveTo(0, row + 2),
-        command.Print(asst_text),
-      ])
+      print_at(0, row, hdr_line)
+      print_at(0, row + 1, user_text)
+      print_at(0, row + 2, asst_text)
       print_log_cycles(rest, base_idx + 1, selected, row + 3, width)
     }
   }
