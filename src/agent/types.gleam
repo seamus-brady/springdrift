@@ -5,6 +5,7 @@ import llm/types.{
   type ContentBlock, type LlmResponse, type Message, type Tool, type ToolCall,
   type ToolResult, type Usage,
 }
+import query_complexity.{type QueryComplexity}
 
 // ---------------------------------------------------------------------------
 // Restart strategy
@@ -65,9 +66,9 @@ pub type AgentOutcome {
 // ---------------------------------------------------------------------------
 
 pub type AgentLifecycleEvent {
-  AgentStarted(name: String)
+  AgentStarted(name: String, task_subject: Subject(AgentTask))
   AgentCrashed(name: String, reason: String)
-  AgentRestarted(name: String, attempt: Int)
+  AgentRestarted(name: String, attempt: Int, task_subject: Subject(AgentTask))
   AgentRestartFailed(name: String, reason: String)
   AgentStopped(name: String)
 }
@@ -77,7 +78,10 @@ pub type AgentLifecycleEvent {
 // ---------------------------------------------------------------------------
 
 pub type SupervisorMessage {
-  StartChild(spec: AgentSpec, reply_to: Subject(Result(Nil, String)))
+  StartChild(
+    spec: AgentSpec,
+    reply_to: Subject(Result(Subject(AgentTask), String)),
+  )
   StopChild(name: String)
   ShutdownAll
 }
@@ -98,6 +102,12 @@ pub type CognitiveMessage {
   SaveResult(error: Option(String))
   SetModel(model: String)
   RestoreMessages(messages: List(Message))
+  ClassifyComplete(
+    cycle_id: String,
+    complexity: QueryComplexity,
+    text: String,
+    reply_to: Subject(CognitiveReply),
+  )
 }
 
 pub type CognitiveReply {
@@ -111,7 +121,12 @@ pub type CognitiveReply {
 pub type CognitiveStatus {
   Idle
   Thinking(task_id: String)
-  WaitingForAgents(pending_ids: List(String))
+  Classifying(cycle_id: String)
+  WaitingForAgents(
+    pending_ids: List(String),
+    accumulated_results: List(ContentBlock),
+    reply_to: Subject(CognitiveReply),
+  )
   WaitingForUser(question: String, context: WaitingContext)
 }
 
@@ -120,11 +135,7 @@ pub type CognitiveStatus {
 // ---------------------------------------------------------------------------
 
 pub type WaitingContext {
-  OwnToolWaiting(
-    tool_use_id: String,
-    assistant_content: List(ContentBlock),
-    reply_to: Subject(CognitiveReply),
-  )
+  OwnToolWaiting(tool_use_id: String, reply_to: Subject(CognitiveReply))
   AgentWaiting(reply_to: Subject(String))
 }
 

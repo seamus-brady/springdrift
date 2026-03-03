@@ -55,7 +55,7 @@ pub fn start_child_test() {
   case event_msg {
     AgentEvent(event:) ->
       case event {
-        AgentStarted(name:) -> name |> should.equal("test")
+        AgentStarted(name:, ..) -> name |> should.equal("test")
         _ -> should.fail()
       }
     _ -> should.fail()

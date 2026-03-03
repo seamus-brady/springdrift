@@ -8,9 +8,9 @@ import gleam/erlang/process.{type ExitMessage, type Pid, type Subject}
 import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
-import llm/provider
 import llm/request
 import llm/response
+import llm/retry
 import llm/types as llm_types
 
 // ---------------------------------------------------------------------------
@@ -154,7 +154,7 @@ fn do_react(
   case remaining {
     0 -> Error("max turns reached")
     _ ->
-      case provider.chat_with(req, spec.provider) {
+      case retry.call_with_retry(req, spec.provider, 3, 500) {
         Error(e) -> Error(response.error_message(e))
         Ok(resp) -> {
           case response.needs_tool_execution(resp) {

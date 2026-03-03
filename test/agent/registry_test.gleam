@@ -98,6 +98,42 @@ pub fn mark_stopped_test() {
   |> should.equal(Some(registry.Stopped))
 }
 
+// ---------------------------------------------------------------------------
+// duplicate guard
+// ---------------------------------------------------------------------------
+
+pub fn register_duplicate_updates_instead_of_appending_test() {
+  let subj1 = process.new_subject()
+  let subj2 = process.new_subject()
+  let reg =
+    registry.new()
+    |> registry.register("planner", subj1)
+    |> registry.register("planner", subj2)
+
+  // Should still be size 1, not 2
+  registry.size(reg) |> should.equal(1)
+  // Should have the new subject
+  registry.get_task_subject(reg, "planner") |> should.equal(Some(subj2))
+}
+
+// ---------------------------------------------------------------------------
+// update_task_subject
+// ---------------------------------------------------------------------------
+
+pub fn update_task_subject_test() {
+  let subj1 = process.new_subject()
+  let subj2 = process.new_subject()
+  let reg =
+    registry.new()
+    |> registry.register("planner", subj1)
+    |> registry.mark_restarting("planner")
+    |> registry.update_task_subject("planner", subj2)
+
+  registry.get_task_subject(reg, "planner") |> should.equal(Some(subj2))
+  // update_task_subject sets status back to Running
+  registry.get_status(reg, "planner") |> should.equal(Some(registry.Running))
+}
+
 pub fn mark_running_after_restarting_test() {
   let subj = process.new_subject()
   let reg =

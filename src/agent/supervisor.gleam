@@ -83,8 +83,8 @@ fn handle_external(state: SupervisorState, msg: SupervisorMessage) -> Nil {
               ..state,
               children: list.append(state.children, [entry]),
             )
-          notify(state.cognitive, AgentStarted(name: spec.name))
-          process.send(reply_to, Ok(Nil))
+          notify(state.cognitive, AgentStarted(name: spec.name, task_subject:))
+          process.send(reply_to, Ok(task_subject))
           supervisor_loop(new_state)
         }
         Error(reason) -> {
@@ -161,7 +161,11 @@ fn handle_child_exit(state: SupervisorState, exit_msg: ExitMessage) -> Nil {
                 Ok(#(pid, task_subject)) -> {
                   notify(
                     state.cognitive,
-                    AgentRestarted(name: child.spec.name, attempt: new_count),
+                    AgentRestarted(
+                      name: child.spec.name,
+                      attempt: new_count,
+                      task_subject:,
+                    ),
                   )
                   let new_entry =
                     ChildEntry(

@@ -1,6 +1,6 @@
 import agent/cognitive
-import agent/framework
 import agent/registry
+import agent/supervisor
 import agent/types as agent_types
 import agents/coder
 import agents/planner
@@ -232,27 +232,10 @@ fn run(cfg: AppConfig) -> Nil {
   // Build agent tools for the cognitive loop
   let agent_tools = list.map(agent_specs, cognitive.agent_to_tool)
 
-  // Start agents and register in registry
-  let reg =
-    list.fold(agent_specs, registry.new(), fn(reg, spec) {
-      case framework.start_agent(spec) {
-        Ok(#(_pid, task_subj)) -> {
-          io.println("  Agent  : " <> spec.name <> " started")
-          registry.register(reg, spec.name, task_subj)
-        }
-        Error(msg) -> {
-          io.println("  Agent  : " <> spec.name <> " failed (" <> msg <> ")")
-          reg
-        }
-      }
-    })
-
   // Create notification channel
   let notify: process.Subject(agent_types.Notification) = process.new_subject()
 
-  io.println("Mode     : cognitive (agents: planner, researcher, coder)")
-
-  // Start cognitive loop
+  // Start cognitive loop with empty registry (supervisor will register agents)
   let cognitive_subj =
     cognitive.start(
       p,
@@ -262,12 +245,27 @@ fn run(cfg: AppConfig) -> Nil {
       cfg.max_context_messages,
       agent_tools,
       initial_messages,
-      reg,
+      registry.new(),
       verbose,
       notify,
       task_model,
       reasoning_model,
     )
+
+  // Start supervisor and register agents via StartChild
+  let sup = supervisor.start(cognitive_subj, 5)
+  list.each(agent_specs, fn(spec) {
+    let reply_subj = process.new_subject()
+    process.send(sup, agent_types.StartChild(spec:, reply_to: reply_subj))
+    case process.receive(reply_subj, 5000) {
+      Ok(Ok(_task_subj)) -> io.println("  Agent  : " <> spec.name <> " started")
+      Ok(Error(msg)) ->
+        io.println("  Agent  : " <> spec.name <> " failed (" <> msg <> ")")
+      Error(_) -> io.println("  Agent  : " <> spec.name <> " failed (timeout)")
+    }
+  })
+
+  io.println("Mode     : cognitive (agents: planner, researcher, coder)")
 
   // Start TUI
   tui.start(

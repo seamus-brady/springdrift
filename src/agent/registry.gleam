@@ -38,8 +38,28 @@ pub fn register(
   name: String,
   task_subject: Subject(AgentTask),
 ) -> Registry {
-  let entry = RegistryEntry(name:, task_subject:, status: Running)
-  Registry(entries: list.append(registry.entries, [entry]))
+  case list.find(registry.entries, fn(e) { e.name == name }) {
+    Ok(_) -> update_task_subject(registry, name, task_subject)
+    Error(_) -> {
+      let entry = RegistryEntry(name:, task_subject:, status: Running)
+      Registry(entries: list.append(registry.entries, [entry]))
+    }
+  }
+}
+
+pub fn update_task_subject(
+  registry: Registry,
+  name: String,
+  new_subject: Subject(AgentTask),
+) -> Registry {
+  Registry(
+    entries: list.map(registry.entries, fn(e) {
+      case e.name == name {
+        True -> RegistryEntry(..e, task_subject: new_subject, status: Running)
+        False -> e
+      }
+    }),
+  )
 }
 
 pub fn unregister(registry: Registry, name: String) -> Registry {
