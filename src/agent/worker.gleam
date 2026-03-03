@@ -65,6 +65,8 @@ fn do_call_with_retry(
 
 fn is_retryable(err: llm_types.LlmError) -> Bool {
   case err {
+    // 500 = internal server error (transient)
+    llm_types.ApiError(status_code: 500, ..) -> True
     // 529 = Anthropic overloaded
     llm_types.ApiError(status_code: 529, ..) -> True
     // 503 = service unavailable

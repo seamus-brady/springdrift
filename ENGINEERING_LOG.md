@@ -1272,25 +1272,16 @@ mode.
 #### Query complexity classification in cognitive loop
 
 Model switching (previously in `service.gleam`) is now wired into
-`cognitive.gleam`. Three new `CognitiveState` fields:
+`cognitive.gleam`. Two new `CognitiveState` fields:
 
 - `task_model: String` — model for simple queries
 - `reasoning_model: String` — model for complex queries
-- `prompt_on_complex: Bool` — whether to ask the user before switching
 
-`handle_user_input` now calls `query_complexity.classify` before spawning the
-think worker. On Complex:
+`handle_user_input` calls `query_complexity.classify` before spawning the
+think worker. Simple queries use `task_model`; Complex queries auto-switch to
+`reasoning_model`.
 
-- If `prompt_on_complex` is true: sends `ModelSwitchPrompt` notification and
-  enters `WaitingForModelSwitch` status.
-- If false: auto-switches to `reasoning_model` and proceeds.
-
-New `CognitiveMessage` variants: `SetModel(model)`, `ModelSwitchAnswer(accept)`,
-`RestoreMessages(messages)`.
-
-New `CognitiveStatus` variant: `WaitingForModelSwitch(text, reply_to)`.
-
-New `Notification` variant: `ModelSwitchPrompt(current_model, suggested_model)`.
+New `CognitiveMessage` variants: `SetModel(model)`, `RestoreMessages(messages)`.
 
 ---
 
@@ -1305,11 +1296,10 @@ and service-specific message variants (`ChatResponse`, `AgentQuestionReceived`,
 `question_channel`, `tool_channel`, `model_question_channel` fields.
 
 `AgentStatus.WaitingForInput` no longer carries `reply_to` — answers always go
-via `UserAnswer` to the cognitive loop. `WaitingForModelSwitch` holds only
-`suggested_model`.
+via `UserAnswer` to the cognitive loop.
 
-`/model` sends `SetModel` to cognitive. `/clear` removed. Log rewind sends
-`RestoreMessages` to cognitive.
+`/model` sends `SetModel` to cognitive. `/clear` sends `RestoreMessages([])` to
+cognitive. Log rewind sends `RestoreMessages` to cognitive.
 
 ---
 
@@ -1325,3 +1315,120 @@ Removed `import chat/service`, `run_service()`, and `--cognitive` flag.
 
 185 tests pass (4 fewer than before — service tests removed, 1 new `set_model_test`
 added to `cognitive_test.gleam`).
+
+---
+
+### `main` branch — Retry, model fallback, usage tracking, /clear, and cleanup (Mar 3)
+
+**Files changed:** `src/agent/types.gleam`, `src/agent/cognitive.gleam`,
+`src/agent/worker.gleam`, `src/agent/framework.gleam`, `src/tui.gleam`,
+`src/springdrift.gleam`, `src/config.gleam`, `test/agent/cognitive_test.gleam`,
+`test/agent/worker_test.gleam`, `test/config_test.gleam`, `README.md`, `CLAUDE.md`.
+
+---
+
+#### Worker retry with exponential backoff (`src/agent/worker.gleam`)
+
+Think workers now retry transient errors before reporting failure. `do_call_with_retry`
+attempts up to 3 retries with exponential backoff (500ms → 1s → 2s → 4s).
+
+Retryable errors: 500 (internal server error), 529 (Anthropic overloaded), 503
+(service unavailable), 429 (rate limit), network errors, timeouts.
+
+`ThinkError` now carries a `retryable: Bool` flag so the cognitive loop knows whether
+fallback is appropriate.
+
+---
+
+#### Automatic model fallback (`src/agent/cognitive.gleam`)
+
+When `handle_think_error` receives a retryable error and the failed model isn't
+`task_model`, it automatically falls back:
+
+1. Spawns a new think worker with `task_model`.
+2. Tracks the original model in `PendingThink.fallback_from`.
+3. When the fallback completes, prefixes the response:
+   `[original_model unavailable, used fallback_model]`.
+
+This is provider-agnostic — works identically for Anthropic, OpenAI, and OpenRouter.
+
+New `PendingThink` fields: `model: String` (tracks which model this request uses),
+`fallback_from: Option(String)` (tracks the original model if this is a fallback).
+
+---
+
+#### Usage tracking in CognitiveReply
+
+`CognitiveReply` now includes `usage: Option(Usage)`:
+
+- Successful responses: `Some(resp.usage)` with input/output/thinking token counts.
+- Error/fallback responses that fail: `None`.
+
+The TUI extracts usage from replies and displays token counts in the footer.
+
+---
+
+#### `/clear` command (`src/tui.gleam`)
+
+New slash command sends `RestoreMessages([])` to the cognitive loop and resets
+local `messages` to `[]`.
+
+---
+
+#### Removed `prompt_on_complex`
+
+The entire "prompt user before switching to reasoning model" flow has been removed.
+Complex queries now always auto-switch to `reasoning_model` silently.
+
+Removed across all files:
+- `prompt_on_complex: Option(Bool)` from `AppConfig`
+- `--no-model-prompt` CLI flag
+- `ModelSwitchAnswer` message variant
+- `WaitingForModelSwitch` status variant
+- `ModelSwitchPrompt` notification variant
+- `handle_model_switch_answer` handler
+- All TUI code for the model-switch prompt flow
+- All related tests
+
+184 tests pass (1 fewer — removed `prompt_on_complex` tests, added model fallback test).
+
+---
+
+#### Agent `request_human_input` routing (`src/agent/framework.gleam`)
+
+Sub-agents can now call `request_human_input`. In `do_react`, before calling
+`spec.tool_executor(call)`, the framework checks if `call.name == "request_human_input"`.
+If so, it:
+
+1. Parses the question from the tool call JSON.
+2. Sends `AgentQuestion(question, agent_name, answer_subj)` to the cognitive loop.
+3. Blocks until the human answers via `process.receive_forever(answer_subj)`.
+4. Returns `ToolSuccess` with the answer.
+
+The cognitive loop already handles `AgentQuestion` → `QuestionForHuman` notification
+→ TUI shows it → user answers → `UserAnswer` → cognitive forwards to agent.
+
+---
+
+#### Bug fixes
+
+- **`RestoreMessages` missing `cycle_id` reset**: Now resets `cycle_id: None` so the
+  next cycle doesn't chain off a stale parent.
+- **`dispatch_agent_calls` dropping assistant message**: The unknown-tools branch now
+  adds the assistant message to history before replying.
+- **Dead `tool_use_id` in `handle_agent_complete`**: Removed unused extraction from
+  `AgentSuccess`/`AgentFailure` — only `task_id` and `result_text` are extracted.
+- **`WaitingForModelSwitch` guard**: Added check in `handle_user_input` to ignore
+  input when status is not `Idle` (removed with the prompt_on_complex feature).
+
+---
+
+#### Design decisions
+
+| Decision | Rationale |
+|---|---|
+| Retry in worker, fallback in cognitive | Worker handles transient retries (same model, exponential backoff). Cognitive handles strategic fallback (different model). Clean separation of concerns. |
+| `retryable: Bool` in `ThinkError` | Avoids re-parsing error strings in the cognitive loop. The worker already knows if it retried. |
+| `fallback_from: Option(String)` in `PendingThink` | Enables response prefixing without extra state in CognitiveState. The pending task already tracks per-request context. |
+| Auto-switch (remove prompt_on_complex) | The model switch prompt interrupted the user flow for minimal benefit. Auto-switching with fallback is a better UX. |
+| 500 as retryable | Internal server errors from API providers are transient. Not retrying them would surface unnecessary errors to users. |

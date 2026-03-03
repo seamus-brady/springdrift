@@ -25,14 +25,26 @@ interface (Chat and Log).
 src/
 ├── springdrift.gleam          Entry point — config, provider selection, skills, wiring
 ├── springdrift_ffi.erl        Erlang FFI (stdin, env, args, spinner, UUID, datetime)
-├── config.gleam               Three-layer config (CLI flags > local JSON > user JSON)
+├── config.gleam               Three-layer config (CLI flags > local TOML > user TOML)
 ├── storage.gleam              Session persistence — ~/.config/springdrift/session.json
 ├── cycle_log.gleam            Per-cycle JSON-L logging + log reading + rewind helpers
 ├── context.gleam              Context window trim helper (sliding window)
 ├── query_complexity.gleam     LLM-based + heuristic query classifier (Simple | Complex)
 ├── skills.gleam               Skill discovery, frontmatter parsing, XML injection
 │
-├── chat/service.gleam         OTP actor owning ChatState; react_loop (max_turns)
+├── agent/                     Agent substrate
+│   ├── types.gleam            CognitiveMessage, Notification, PendingTask, CognitiveReply
+│   ├── cognitive.gleam        Cognitive loop — orchestrates agents, model switching, fallback
+│   ├── framework.gleam        Gen-server wrapper for agent specs → running agent processes
+│   ├── supervisor.gleam       Restart strategies (Permanent/Transient/Temporary)
+│   ├── registry.gleam         Pure data structure tracking agent status + task subjects
+│   └── worker.gleam           Unlinked think workers with retry + monitor forwarding
+│
+├── agents/                    Specialist agent specs
+│   ├── planner.gleam          Planning agent (no tools, max_turns=3)
+│   ├── researcher.gleam       Research agent (files+web+builtin, max_turns=8)
+│   └── coder.gleam            Coding agent (files+shell+builtin, max_turns=10)
+│
 ├── tools/builtin.gleam        Built-in tools: calculator, get_current_datetime,
 │                              request_human_input, read_skill
 ├── tui.gleam                  Alternate-screen TUI; Chat tab + Log tab with cycle rewind
@@ -89,17 +101,19 @@ formatting is needed, run `gleam format` anyway; it is idempotent.
 
 ## Concurrency model
 
-Three long-lived processes and one per-turn worker:
+Long-lived processes and per-turn workers:
 
 | Process | Lifetime | Role |
 |---|---|---|
 | TUI event loop | App | Render, raw stdin, message dispatch |
-| Service actor | App | Owns `ChatState`; serialises all conversation writes |
+| Cognitive loop | App | Orchestrates agents, model switching, handles `request_human_input` |
 | Stdin reader | App | Blocking `read_char` loop → `StdinByte` messages to selector |
-| HTTP worker | Per turn | Blocking LLM calls + tool execution inside `react_loop` |
+| Think worker | Per turn | Blocking LLM call with retry + exponential backoff |
+| Agent processes | App | Each specialist agent runs its own react loop |
 
 All cross-process communication uses typed `Subject(T)` channels. No shared mutable
-state, no locks.
+state, no locks. The cognitive loop's notification channel uses pure data types
+(`Notification`) with no embedded `Subject` references.
 
 ## Config fields (AppConfig)
 
@@ -116,7 +130,6 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `max_context_messages` | `--max-context` | unlimited | Sliding-window message cap |
 | `task_model` | `--task-model` | provider default | Model for Simple queries |
 | `reasoning_model` | `--reasoning-model` | provider default | Model for Complex queries |
-| `prompt_on_complex` | `--no-model-prompt` (sets False) | True | Prompt user before switching |
 | `config_path` | `--config` | None | Extra config file path |
 | `log_verbose` | `--verbose` | False | Log full LLM payloads to cycle log |
 | `skills_dirs` | `--skills-dir` (repeatable) | `[~/.config/springdrift/skills, .skills]` | Skill directories |
@@ -134,20 +147,25 @@ accessor in a `case` arm extracts from the same root dynamic value.
 **Pipe-friendly builders** — `llm/request.gleam` exports `new/2` plus `with_*`
 functions. Build requests by piping: `request.new(model, max_tokens) |> request.with_system(...) |> ...`.
 
-**Actor messages as the API surface** — public API of the service is the `ChatMessage`
-type. Add new capabilities by adding variants, not by exposing internal functions.
+**Actor messages as the API surface** — public API of the cognitive loop is the
+`CognitiveMessage` type. Add new capabilities by adding variants, not by exposing
+internal functions.
 
-**Cycle logging** — every call to `react_loop` must thread the `cycle_id: String`
-parameter and log `tool_call` and `tool_result` events via `cycle_log.*`. Do not add
-LLM calls that bypass this logging. `llm_request` / `llm_response` are gated by
-`verbose: Bool` in `ChatState`.
+**Cycle logging** — every LLM call must thread a `cycle_id: String` and log events
+via `cycle_log.*`. Do not add LLM calls that bypass this logging. `llm_request` /
+`llm_response` are gated by `verbose: Bool` in `CognitiveState`.
 
-**ServiceReply** — `reply_to` in `SendMessage` / `LlmComplete` carries
-`Subject(ServiceReply)` where `ServiceReply` has `llm_result`, `final_model`, and
-`save_error: Option(String)`. The TUI shows a save-error notice if `save_error` is set.
+**CognitiveReply** — `reply_to` in `UserInput` carries `Subject(CognitiveReply)`
+where `CognitiveReply` has `response: String`, `model: String`, and
+`usage: Option(Usage)`. The TUI displays token usage from the `usage` field.
+
+**Model fallback** — when a retryable error (500, 503, 529, 429, network, timeout)
+exhausts worker retries and the failed model isn't `task_model`, the cognitive loop
+automatically falls back to `task_model`. The response is prefixed with
+`[model_x unavailable, used model_y]`.
 
 **Context trimming** — `context.trim` is applied inside `build_request` only. The
-full history is always stored in `ChatState.messages` and on disk.
+full history is always stored in `CognitiveState.messages` and on disk.
 
 **Skills** — `skills.discover(dirs)` returns `List(SkillMeta)`. `skills.parse_frontmatter`
 is public and unit-testable (pure function, no I/O). `to_system_prompt_xml` returns `""`
@@ -175,7 +193,6 @@ max_context_messages   = 50   # omit for unlimited
 # Model switching
 task_model        = "claude-haiku-4-5-20251001"
 reasoning_model   = "claude-opus-4-6"
-prompt_on_complex = true
 
 # Logging and filesystem
 log_verbose    = false

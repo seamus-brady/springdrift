@@ -59,10 +59,17 @@ main LLM call:
 2. If that call fails, a heuristic fallback (message length, keywords, `?` count,
    numbered lists).
 
-On a Complex classification, the app can optionally switch to `reasoning_model`.
-If `prompt_on_complex` is true (the default), it asks the user first via an
-inline TUI prompt. The `/model` command lets you toggle between the two models
+Simple queries use `task_model`; Complex queries automatically switch to
+`reasoning_model`. The `/model` command lets you toggle between the two models
 manually at any time.
+
+### Automatic model fallback with retry
+When an LLM call fails with a retryable error (500, 503, 529, 429, network,
+timeout), the worker retries up to 3 times with exponential backoff (500ms →
+1s → 2s). If all retries exhaust and the failed model isn't the task model, the
+cognitive loop automatically falls back to `task_model` and prepends a brief
+notice to the response: `[model_x unavailable, used model_y]`. This is
+provider-agnostic — it works with Anthropic, OpenAI, and OpenRouter.
 
 ### Session persistence and resume
 After every completed turn the full conversation (including all tool-use and
@@ -150,7 +157,7 @@ gleam run -- --resume
 gleam run -- --provider anthropic --model claude-opus-4-6
 
 # Use a config file
-gleam run -- --config /path/to/my.json
+gleam run -- --config /path/to/my.toml
 
 # Start with an extra skill directory
 gleam run -- --skills-dir ~/my-skills
@@ -184,26 +191,24 @@ gleam run -- --print-config
 Three-layer merge (highest priority first):
 
 1. CLI flags
-2. `.springdrift.json` (current directory)
-3. `~/.config/springdrift/config.json`
+2. `.springdrift.toml` (current directory)
+3. `~/.config/springdrift/config.toml`
 
 ### All config fields
 
-```json
-{
-  "provider":               "anthropic",
-  "model":                  "claude-sonnet-4-20250514",
-  "system_prompt":          "You are a helpful assistant.",
-  "max_tokens":             1024,
-  "max_turns":              5,
-  "max_consecutive_errors": 3,
-  "max_context_messages":   50,
-  "task_model":             "claude-haiku-4-5-20251001",
-  "reasoning_model":        "claude-opus-4-6",
-  "prompt_on_complex":      true,
-  "log_verbose":            false,
-  "skills_dirs":            ["/path/to/skills"]
-}
+```toml
+provider               = "anthropic"
+model                  = "claude-sonnet-4-20250514"
+system_prompt          = "You are a helpful assistant."
+max_tokens             = 1024
+max_turns              = 5
+max_consecutive_errors = 3
+max_context_messages   = 50
+task_model             = "claude-haiku-4-5-20251001"
+reasoning_model        = "claude-opus-4-6"
+log_verbose            = false
+write_anywhere         = false
+skills_dirs            = ["/path/to/skills"]
 ```
 
 ### CLI flags
@@ -218,10 +223,10 @@ Three-layer merge (highest priority first):
 --max-context <n>         Max messages in context window (default: unlimited)
 --task-model <name>       Model for simple queries
 --reasoning-model <name>  Model for complex queries
---no-model-prompt         Auto-switch to reasoning model without prompting
---config <path>           Load an additional config file
+--config <path>           Load an additional TOML config file
 --verbose                 Log full LLM request/response payloads
 --skills-dir <path>       Add a skill directory (repeatable)
+--allow-write-anywhere    Allow write_file outside the current working directory
 --resume                  Reload previous session
 --print-config            Print resolved config and exit
 --help, -h                Show help
@@ -263,8 +268,8 @@ instructions.
 
 ```
 springdrift.gleam         Entry point — config, provider selection, wiring
-├── config.gleam          3-layer config (CLI flags > local TOML > user TOML)
-├── storage.gleam         Session save/load/clear  (~/.config/springdrift/session.json)
+├── config.gleam          3-layer config (CLI flags > .springdrift.toml > ~/.config/springdrift/config.toml)
+├── storage.gleam         Session save/load  (~/.config/springdrift/session.json)
 ├── skills.gleam          Skill discovery, frontmatter parsing, XML injection
 │
 ├── agent/                Agent substrate
