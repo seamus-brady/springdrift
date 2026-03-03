@@ -4,9 +4,9 @@ import agent/types.{
   type CognitiveStatus, type Notification, type PendingTask, AgentComplete,
   AgentEvent, AgentFailure, AgentQuestionSource, AgentSuccess, AgentTask,
   AgentWaiting, CognitiveQuestion, CognitiveReply, Idle, OwnToolWaiting,
-  PendingAgent, PendingThink, QuestionForHuman, SaveResult, SaveWarning,
-  ThinkComplete, ThinkError, ThinkWorkerDown, Thinking, ToolCalling, UserAnswer,
-  UserInput, WaitingForAgents, WaitingForUser,
+  PendingAgent, PendingThink, QuestionForHuman, RestoreMessages, SaveResult,
+  SaveWarning, SetModel, ThinkComplete, ThinkError, ThinkWorkerDown, Thinking,
+  ToolCalling, UserAnswer, UserInput, WaitingForAgents, WaitingForUser,
 }
 import agent/worker
 import context
@@ -22,6 +22,7 @@ import llm/request
 import llm/response
 import llm/tool
 import llm/types as llm_types
+import query_complexity
 import storage
 import tools/builtin
 
@@ -45,6 +46,8 @@ pub type CognitiveState {
     cycle_id: Option(String),
     verbose: Bool,
     notify: Subject(Notification),
+    task_model: String,
+    reasoning_model: String,
   )
 }
 
@@ -64,6 +67,8 @@ pub fn start(
   registry: Registry,
   verbose: Bool,
   notify: Subject(Notification),
+  task_model: String,
+  reasoning_model: String,
 ) -> Subject(CognitiveMessage) {
   // The cognitive loop gets agent tools + request_human_input
   let tools = [builtin.human_input_tool(), ..agent_tools]
@@ -86,6 +91,8 @@ pub fn start(
         cycle_id: None,
         verbose:,
         notify:,
+        task_model:,
+        reasoning_model:,
       )
     process.send(setup, self)
     cognitive_loop(state)
@@ -124,7 +131,8 @@ fn handle_message(
     UserInput(text, reply_to) -> handle_user_input(state, text, reply_to)
     UserAnswer(answer) -> handle_user_answer(state, answer)
     ThinkComplete(task_id, resp) -> handle_think_complete(state, task_id, resp)
-    ThinkError(task_id, error) -> handle_think_error(state, task_id, error)
+    ThinkError(task_id, error, retryable) ->
+      handle_think_error(state, task_id, error, retryable)
     ThinkWorkerDown(task_id, reason) ->
       handle_think_down(state, task_id, reason)
     AgentComplete(outcome) -> handle_agent_complete(state, outcome)
@@ -132,6 +140,11 @@ fn handle_message(
       handle_agent_question(state, question, agent, reply_to)
     AgentEvent(event) -> handle_agent_event(state, event)
     SaveResult(error) -> handle_save_result(state, error)
+    SetModel(model) -> CognitiveState(..state, model:)
+    RestoreMessages(messages) -> {
+      spawn_save(messages, state.self)
+      CognitiveState(..state, messages:, cycle_id: None)
+    }
   }
 }
 
@@ -144,9 +157,67 @@ fn handle_user_input(
   text: String,
   reply_to: Subject(CognitiveReply),
 ) -> CognitiveState {
-  let cycle_id = cycle_log.generate_uuid()
-  cycle_log.log_human_input(cycle_id, state.cycle_id, text)
+  // Guard: ignore input if not idle
+  case state.status {
+    Idle -> {
+      let cycle_id = cycle_log.generate_uuid()
+      cycle_log.log_human_input(cycle_id, state.cycle_id, text)
 
+      // Classify query complexity
+      let complexity =
+        query_complexity.classify(text, state.provider, state.task_model)
+
+      case complexity {
+        query_complexity.Complex -> {
+          cycle_log.log_classification(
+            cycle_id,
+            "complex",
+            state.reasoning_model,
+            False,
+            None,
+          )
+          proceed_with_model(
+            state,
+            state.reasoning_model,
+            text,
+            cycle_id,
+            reply_to,
+          )
+        }
+        query_complexity.Simple -> {
+          cycle_log.log_classification(
+            cycle_id,
+            "simple",
+            state.task_model,
+            False,
+            None,
+          )
+          proceed_with_input(state, text, cycle_id, reply_to)
+        }
+      }
+    }
+    _ -> state
+  }
+}
+
+fn proceed_with_input(
+  state: CognitiveState,
+  text: String,
+  cycle_id: String,
+  reply_to: Subject(CognitiveReply),
+) -> CognitiveState {
+  proceed_with_model(state, state.model, text, cycle_id, reply_to)
+}
+
+/// Like proceed_with_input but uses a specific model for this request
+/// without permanently changing state.model.
+fn proceed_with_model(
+  state: CognitiveState,
+  model: String,
+  text: String,
+  cycle_id: String,
+  reply_to: Subject(CognitiveReply),
+) -> CognitiveState {
   let msg =
     llm_types.Message(role: llm_types.User, content: [
       llm_types.TextContent(text:),
@@ -154,7 +225,11 @@ fn handle_user_input(
   let messages = list.append(state.messages, [msg])
   let task_id = cycle_id
 
-  let req = build_request(state, messages)
+  let req = build_request_with_model(state, model, messages)
+  case state.verbose {
+    True -> cycle_log.log_llm_request(cycle_id, req)
+    False -> Nil
+  }
   worker.spawn_think(task_id, req, state.provider, state.self)
 
   CognitiveState(
@@ -162,7 +237,10 @@ fn handle_user_input(
     messages:,
     cycle_id: Some(cycle_id),
     status: Thinking(task_id:),
-    pending: [PendingThink(task_id:, reply_to:), ..state.pending],
+    pending: [
+      PendingThink(task_id:, model:, fallback_from: None, reply_to:),
+      ..state.pending
+    ],
   )
 }
 
@@ -177,15 +255,36 @@ fn handle_think_complete(
 ) -> CognitiveState {
   case find_pending_think(state.pending, task_id) {
     None -> state
-    Some(PendingThink(reply_to: rt, ..)) -> {
+    Some(PendingThink(model: req_model, fallback_from:, reply_to: rt, ..)) -> {
+      let cycle_id = option.unwrap(state.cycle_id, task_id)
+      cycle_log.log_llm_response(cycle_id, resp)
       case response.needs_tool_execution(resp) {
         False -> {
-          // Final text response
+          // Final text response — prefix if this was a model fallback
           let text = response.text(resp)
+          let #(reply_text, reply_model) = case fallback_from {
+            Some(original) -> #(
+              "["
+                <> original
+                <> " unavailable, used "
+                <> req_model
+                <> "] "
+                <> text,
+              req_model,
+            )
+            None -> #(text, req_model)
+          }
           let assistant_msg =
             llm_types.Message(role: llm_types.Assistant, content: resp.content)
           let messages = list.append(state.messages, [assistant_msg])
-          process.send(rt, CognitiveReply(response: text, model: state.model))
+          process.send(
+            rt,
+            CognitiveReply(
+              response: reply_text,
+              model: reply_model,
+              usage: Some(resp.usage),
+            ),
+          )
           // Fire-and-forget save
           spawn_save(messages, state.self)
           CognitiveState(
@@ -344,12 +443,21 @@ fn dispatch_agent_calls(
         "" -> "No agent tools matched."
         t -> t
       }
+      // Add assistant message to history so it isn't silently lost
+      let assistant_msg =
+        llm_types.Message(role: llm_types.Assistant, content: resp.content)
+      let messages = list.append(state.messages, [assistant_msg])
       process.send(
         reply_to,
-        CognitiveReply(response: reply_text, model: state.model),
+        CognitiveReply(
+          response: reply_text,
+          model: state.model,
+          usage: Some(resp.usage),
+        ),
       )
       CognitiveState(
         ..state,
+        messages:,
         status: Idle,
         pending: remove_pending(state.pending, task_id),
       )
@@ -369,19 +477,58 @@ fn handle_think_error(
   state: CognitiveState,
   task_id: String,
   error: String,
+  retryable: Bool,
 ) -> CognitiveState {
+  let cycle_id = option.unwrap(state.cycle_id, task_id)
+  cycle_log.log_llm_error(cycle_id, error)
   case find_pending_think(state.pending, task_id) {
     None -> state
-    Some(PendingThink(reply_to: rt, ..)) -> {
-      process.send(
-        rt,
-        CognitiveReply(response: "[Error: " <> error <> "]", model: state.model),
-      )
-      CognitiveState(
-        ..state,
-        status: Idle,
-        pending: remove_pending(state.pending, task_id),
-      )
+    Some(PendingThink(model: failed_model, reply_to: rt, ..)) -> {
+      // If the error is retryable and we have a different model to try, fall back
+      case retryable && failed_model != state.task_model {
+        True -> {
+          cycle_log.log_llm_error(
+            cycle_id,
+            "Falling back from " <> failed_model <> " to " <> state.task_model,
+          )
+          let new_task_id = cycle_log.generate_uuid()
+          let req =
+            build_request_with_model(state, state.task_model, state.messages)
+          case state.verbose {
+            True -> cycle_log.log_llm_request(cycle_id, req)
+            False -> Nil
+          }
+          worker.spawn_think(new_task_id, req, state.provider, state.self)
+          CognitiveState(
+            ..state,
+            status: Thinking(task_id: new_task_id),
+            pending: [
+              PendingThink(
+                task_id: new_task_id,
+                model: state.task_model,
+                fallback_from: Some(failed_model),
+                reply_to: rt,
+              ),
+              ..remove_pending(state.pending, task_id)
+            ],
+          )
+        }
+        False -> {
+          process.send(
+            rt,
+            CognitiveReply(
+              response: "[Error: " <> error <> "]",
+              model: state.model,
+              usage: None,
+            ),
+          )
+          CognitiveState(
+            ..state,
+            status: Idle,
+            pending: remove_pending(state.pending, task_id),
+          )
+        }
+      }
     }
     Some(_) -> state
   }
@@ -401,6 +548,7 @@ fn handle_think_down(
         CognitiveReply(
           response: "[Error: think worker crashed: " <> reason <> "]",
           model: state.model,
+          usage: None,
         ),
       )
       CognitiveState(
@@ -421,11 +569,10 @@ fn handle_agent_complete(
   state: CognitiveState,
   outcome: AgentOutcome,
 ) -> CognitiveState {
-  let #(outcome_task_id, tool_use_id, result_text) = case outcome {
-    AgentSuccess(task_id, _agent, result) -> #(task_id, "", result)
+  let #(outcome_task_id, result_text) = case outcome {
+    AgentSuccess(task_id, _agent, result) -> #(task_id, result)
     AgentFailure(task_id, _agent, error) -> #(
       task_id,
-      "",
       "[Agent error: " <> error <> "]",
     )
   }
@@ -435,7 +582,7 @@ fn handle_agent_complete(
     Some(pending_agent) -> {
       let actual_tool_use_id = case pending_agent {
         PendingAgent(tool_use_id: tuid, ..) -> tuid
-        _ -> tool_use_id
+        _ -> ""
       }
       let reply_to = case pending_agent {
         PendingAgent(reply_to: rt, ..) -> rt
@@ -479,7 +626,12 @@ fn handle_agent_complete(
             llm_types.Message(role: llm_types.User, content: [tool_result_block])
           let messages = list.append(state.messages, [user_msg])
           let new_task_id = cycle_log.generate_uuid()
+          let cycle_id = option.unwrap(state.cycle_id, new_task_id)
           let req = build_request(state, messages)
+          case state.verbose {
+            True -> cycle_log.log_llm_request(cycle_id, req)
+            False -> Nil
+          }
           worker.spawn_think(new_task_id, req, state.provider, state.self)
 
           CognitiveState(
@@ -487,7 +639,12 @@ fn handle_agent_complete(
             messages:,
             status: Thinking(task_id: new_task_id),
             pending: [
-              PendingThink(task_id: new_task_id, reply_to:),
+              PendingThink(
+                task_id: new_task_id,
+                model: state.model,
+                fallback_from: None,
+                reply_to:,
+              ),
               ..remaining
             ],
           )
@@ -542,7 +699,12 @@ fn handle_user_answer(state: CognitiveState, answer: String) -> CognitiveState {
 
       // Spawn a continuation think worker
       let new_task_id = cycle_log.generate_uuid()
+      let cycle_id = option.unwrap(state.cycle_id, new_task_id)
       let req = build_request(state, messages)
+      case state.verbose {
+        True -> cycle_log.log_llm_request(cycle_id, req)
+        False -> Nil
+      }
       worker.spawn_think(new_task_id, req, state.provider, state.self)
 
       CognitiveState(
@@ -550,7 +712,12 @@ fn handle_user_answer(state: CognitiveState, answer: String) -> CognitiveState {
         messages:,
         status: Thinking(task_id: new_task_id),
         pending: [
-          PendingThink(task_id: new_task_id, reply_to:),
+          PendingThink(
+            task_id: new_task_id,
+            model: state.model,
+            fallback_from: None,
+            reply_to:,
+          ),
           ..state.pending
         ],
       )
@@ -621,12 +788,20 @@ fn build_request(
   state: CognitiveState,
   messages: List(llm_types.Message),
 ) -> llm_types.LlmRequest {
+  build_request_with_model(state, state.model, messages)
+}
+
+fn build_request_with_model(
+  state: CognitiveState,
+  model: String,
+  messages: List(llm_types.Message),
+) -> llm_types.LlmRequest {
   let trimmed = case state.max_context_messages {
     None -> messages
     Some(max) -> context.trim(messages, max)
   }
   let base =
-    request.new(state.model, state.max_tokens)
+    request.new(model, state.max_tokens)
     |> request.with_system(state.system)
     |> request.with_messages(trimmed)
   case state.tools {

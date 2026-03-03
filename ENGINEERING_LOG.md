@@ -1242,3 +1242,86 @@ All 189 tests pass (187 existing + 2 new).
 | Spinner uses 100 ms poll, not a separate timer process | Avoids a third process and a third selector mapping. The slight jitter in spinner frame rate (frame advances only when no message arrives within 100 ms) is acceptable for a terminal UI. |
 | `decode.failure(TextContent(""), "Unknown block type")` | The placeholder value is never used (the decoder always errors), but Gleam's type system requires a value of the target type. `TextContent("")` is the simplest zero-value for `ContentBlock`. |
 | `--resume` is a flag, not default behaviour | Explicit opt-in prevents accidentally loading a stale session from a previous project context. |
+
+---
+
+### `main` branch — Remove service mode, cognitive-only (Mar 3)
+
+**Files deleted:** `src/chat/service.gleam`, `test/service_test.gleam`.
+
+**Files changed:** `src/agent/types.gleam`, `src/agent/cognitive.gleam`,
+`src/tui.gleam`, `src/springdrift.gleam`, `test/agent/cognitive_test.gleam`,
+`README.md`, `ENGINEERING_LOG.md`.
+
+---
+
+#### Motivation
+
+The service/chat mode (`chat/service.gleam`) was the original single-actor
+architecture — one OTP actor owning `ChatState` with a blocking `react_loop`.
+The cognitive loop (`agent/cognitive.gleam`) superseded it by orchestrating
+specialist sub-agents and handling `request_human_input` directly. Maintaining
+two code paths (service mode vs cognitive mode, `--cognitive` flag, dual
+`ChatBackend` union in the TUI) added complexity with no benefit.
+
+This change removes service mode entirely. The cognitive loop is now the only
+mode.
+
+---
+
+#### Query complexity classification in cognitive loop
+
+Model switching (previously in `service.gleam`) is now wired into
+`cognitive.gleam`. Three new `CognitiveState` fields:
+
+- `task_model: String` — model for simple queries
+- `reasoning_model: String` — model for complex queries
+- `prompt_on_complex: Bool` — whether to ask the user before switching
+
+`handle_user_input` now calls `query_complexity.classify` before spawning the
+think worker. On Complex:
+
+- If `prompt_on_complex` is true: sends `ModelSwitchPrompt` notification and
+  enters `WaitingForModelSwitch` status.
+- If false: auto-switches to `reasoning_model` and proceeds.
+
+New `CognitiveMessage` variants: `SetModel(model)`, `ModelSwitchAnswer(accept)`,
+`RestoreMessages(messages)`.
+
+New `CognitiveStatus` variant: `WaitingForModelSwitch(text, reply_to)`.
+
+New `Notification` variant: `ModelSwitchPrompt(current_model, suggested_model)`.
+
+---
+
+#### TUI simplification
+
+Removed `ChatBackend` union, `ServiceBackend`, old `start()`, `handle_chat_response`,
+and service-specific message variants (`ChatResponse`, `AgentQuestionReceived`,
+`ToolEventReceived`, `ModelSwitchReceived`).
+
+`start_cognitive` renamed to `start`. `TuiState` now holds `cognitive` and
+`cognitive_reply` directly instead of a `backend` field. Removed
+`question_channel`, `tool_channel`, `model_question_channel` fields.
+
+`AgentStatus.WaitingForInput` no longer carries `reply_to` — answers always go
+via `UserAnswer` to the cognitive loop. `WaitingForModelSwitch` holds only
+`suggested_model`.
+
+`/model` sends `SetModel` to cognitive. `/clear` removed. Log rewind sends
+`RestoreMessages` to cognitive.
+
+---
+
+#### springdrift.gleam
+
+Removed `import chat/service`, `run_service()`, and `--cognitive` flag.
+`run()` now directly starts the cognitive loop with agents. Three new params
+(`task_model`, `reasoning_model`, `prompt_on_complex`) passed to `cognitive.start`.
+
+---
+
+#### Test changes
+
+185 tests pass (4 fewer than before — service tests removed, 1 new `set_model_test`
+added to `cognitive_test.gleam`).

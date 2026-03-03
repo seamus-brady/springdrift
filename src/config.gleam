@@ -46,10 +46,6 @@
 ////   # Default: provider-specific (e.g. claude-opus-4-6)
 ////   reasoning_model = "claude-opus-4-6"
 ////
-////   # Whether to prompt the user before switching to the reasoning model
-////   # Default: true
-////   prompt_on_complex = true
-////
 ////   # Log full LLM request/response payloads to the cycle log
 ////   # Default: false
 ////   log_verbose = false
@@ -89,7 +85,6 @@ pub type AppConfig {
     max_context_messages: Option(Int),
     task_model: Option(String),
     reasoning_model: Option(String),
-    prompt_on_complex: Option(Bool),
     config_path: Option(String),
     log_verbose: Option(Bool),
     skills_dirs: Option(List(String)),
@@ -123,7 +118,6 @@ pub fn default() -> AppConfig {
     max_context_messages: None,
     task_model: None,
     reasoning_model: None,
-    prompt_on_complex: None,
     config_path: None,
     log_verbose: None,
     skills_dirs: None,
@@ -152,10 +146,6 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       override_cfg.reasoning_model,
       base.reasoning_model,
     ),
-    prompt_on_complex: option.or(
-      override_cfg.prompt_on_complex,
-      base.prompt_on_complex,
-    ),
     config_path: option.or(override_cfg.config_path, base.config_path),
     log_verbose: option.or(override_cfg.log_verbose, base.log_verbose),
     skills_dirs: option.or(override_cfg.skills_dirs, base.skills_dirs),
@@ -175,7 +165,6 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
 ///   --max-context <n>      integer — max messages kept in context window (default unlimited)
 ///   --task-model <name>    model to use for simple queries
 ///   --reasoning-model <name>  model to use for complex queries
-///   --no-model-prompt      auto-switch to reasoning model without prompting
 pub fn from_args(args: List(String)) -> AppConfig {
   do_parse_args(args, default())
 }
@@ -222,13 +211,6 @@ pub fn to_string(cfg: AppConfig) -> String {
     }),
     option.map(cfg.task_model, fn(v) { "task_model: " <> v }),
     option.map(cfg.reasoning_model, fn(v) { "reasoning_model: " <> v }),
-    option.map(cfg.prompt_on_complex, fn(v) {
-      "prompt_on_complex: "
-      <> case v {
-        True -> "true"
-        False -> "false"
-      }
-    }),
     option.map(cfg.config_path, fn(v) { "config_path: " <> v }),
     option.map(cfg.log_verbose, fn(v) {
       "log_verbose: "
@@ -291,8 +273,6 @@ fn do_parse_args(args: List(String), acc: AppConfig) -> AppConfig {
       do_parse_args(rest, AppConfig(..acc, task_model: Some(value)))
     ["--reasoning-model", value, ..rest] ->
       do_parse_args(rest, AppConfig(..acc, reasoning_model: Some(value)))
-    ["--no-model-prompt", ..rest] ->
-      do_parse_args(rest, AppConfig(..acc, prompt_on_complex: Some(False)))
     ["--config", path, ..rest] ->
       do_parse_args(rest, AppConfig(..acc, config_path: Some(path)))
     ["--verbose", ..rest] ->
@@ -353,7 +333,6 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     max_context_messages: get_int("max_context_messages"),
     task_model: get_str("task_model"),
     reasoning_model: get_str("reasoning_model"),
-    prompt_on_complex: get_bool("prompt_on_complex"),
     config_path: None,
     log_verbose: get_bool("log_verbose"),
     skills_dirs:,

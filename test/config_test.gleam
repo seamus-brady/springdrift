@@ -23,7 +23,6 @@ pub fn default_has_all_none_test() {
   cfg.max_context_messages |> should.equal(None)
   cfg.task_model |> should.equal(None)
   cfg.reasoning_model |> should.equal(None)
-  cfg.prompt_on_complex |> should.equal(None)
   cfg.config_path |> should.equal(None)
   cfg.log_verbose |> should.equal(None)
   cfg.skills_dirs |> should.equal(None)
@@ -96,7 +95,6 @@ pub fn merge_override_wins_test() {
       max_context_messages: None,
       task_model: None,
       reasoning_model: None,
-      prompt_on_complex: None,
       config_path: None,
       log_verbose: None,
       skills_dirs: None,
@@ -113,7 +111,6 @@ pub fn merge_override_wins_test() {
       max_context_messages: None,
       task_model: None,
       reasoning_model: None,
-      prompt_on_complex: None,
       config_path: None,
       log_verbose: None,
       skills_dirs: None,
@@ -135,7 +132,6 @@ pub fn merge_base_preserved_when_override_none_test() {
       max_context_messages: None,
       task_model: None,
       reasoning_model: None,
-      prompt_on_complex: None,
       config_path: None,
       log_verbose: None,
       skills_dirs: None,
@@ -152,7 +148,6 @@ pub fn merge_base_preserved_when_override_none_test() {
       max_context_messages: None,
       task_model: None,
       reasoning_model: None,
-      prompt_on_complex: None,
       config_path: None,
       log_verbose: None,
       skills_dirs: None,
@@ -175,7 +170,6 @@ pub fn merge_combines_different_fields_test() {
       max_context_messages: None,
       task_model: None,
       reasoning_model: None,
-      prompt_on_complex: None,
       config_path: None,
       log_verbose: None,
       skills_dirs: None,
@@ -192,7 +186,6 @@ pub fn merge_combines_different_fields_test() {
       max_context_messages: None,
       task_model: None,
       reasoning_model: None,
-      prompt_on_complex: None,
       config_path: None,
       log_verbose: None,
       skills_dirs: None,
@@ -301,7 +294,6 @@ pub fn merge_new_fields_test() {
       max_context_messages: None,
       task_model: None,
       reasoning_model: None,
-      prompt_on_complex: None,
       config_path: None,
       log_verbose: None,
       skills_dirs: None,
@@ -318,7 +310,6 @@ pub fn merge_new_fields_test() {
       max_context_messages: None,
       task_model: None,
       reasoning_model: None,
-      prompt_on_complex: None,
       config_path: None,
       log_verbose: None,
       skills_dirs: None,
@@ -344,17 +335,6 @@ pub fn from_args_reasoning_model_test() {
   cfg.reasoning_model |> should.equal(Some("claude-opus-4-6"))
 }
 
-pub fn from_args_no_model_prompt_test() {
-  let cfg = config.from_args(["--no-model-prompt"])
-  cfg.prompt_on_complex |> should.equal(Some(False))
-}
-
-pub fn from_args_no_model_prompt_does_not_set_task_model_test() {
-  let cfg = config.from_args(["--no-model-prompt"])
-  cfg.task_model |> should.equal(None)
-  cfg.reasoning_model |> should.equal(None)
-}
-
 pub fn parse_config_toml_task_model_test() {
   let result =
     config.parse_config_toml("task_model = \"claude-haiku-4-5-20251001\"")
@@ -370,31 +350,15 @@ pub fn parse_config_toml_reasoning_model_test() {
   cfg.reasoning_model |> should.equal(Some("claude-opus-4-6"))
 }
 
-pub fn parse_config_toml_prompt_on_complex_true_test() {
-  let result = config.parse_config_toml("prompt_on_complex = true")
-  result |> should.be_ok
-  let assert Ok(cfg) = result
-  cfg.prompt_on_complex |> should.equal(Some(True))
-}
-
-pub fn parse_config_toml_prompt_on_complex_false_test() {
-  let result = config.parse_config_toml("prompt_on_complex = false")
-  result |> should.be_ok
-  let assert Ok(cfg) = result
-  cfg.prompt_on_complex |> should.equal(Some(False))
-}
-
 pub fn parse_config_toml_all_model_fields_test() {
   let toml =
     "task_model = \"gpt-4o-mini\"
-reasoning_model = \"gpt-4o\"
-prompt_on_complex = true"
+reasoning_model = \"gpt-4o\""
   let result = config.parse_config_toml(toml)
   result |> should.be_ok
   let assert Ok(cfg) = result
   cfg.task_model |> should.equal(Some("gpt-4o-mini"))
   cfg.reasoning_model |> should.equal(Some("gpt-4o"))
-  cfg.prompt_on_complex |> should.equal(Some(True))
 }
 
 pub fn merge_model_fields_override_wins_test() {
@@ -409,7 +373,6 @@ pub fn merge_model_fields_override_wins_test() {
       max_context_messages: None,
       task_model: Some("base-task"),
       reasoning_model: Some("base-reasoning"),
-      prompt_on_complex: Some(True),
       config_path: None,
       log_verbose: None,
       skills_dirs: None,
@@ -426,7 +389,6 @@ pub fn merge_model_fields_override_wins_test() {
       max_context_messages: None,
       task_model: Some("override-task"),
       reasoning_model: None,
-      prompt_on_complex: Some(False),
       config_path: None,
       log_verbose: None,
       skills_dirs: None,
@@ -435,7 +397,6 @@ pub fn merge_model_fields_override_wins_test() {
   let merged = config.merge(base, override:)
   merged.task_model |> should.equal(Some("override-task"))
   merged.reasoning_model |> should.equal(Some("base-reasoning"))
-  merged.prompt_on_complex |> should.equal(Some(False))
 }
 
 pub fn merge_model_fields_base_preserved_test() {
@@ -450,7 +411,6 @@ pub fn merge_model_fields_base_preserved_test() {
       max_context_messages: None,
       task_model: Some("haiku"),
       reasoning_model: Some("opus"),
-      prompt_on_complex: Some(True),
       config_path: None,
       log_verbose: None,
       skills_dirs: None,
@@ -467,7 +427,6 @@ pub fn merge_model_fields_base_preserved_test() {
       max_context_messages: None,
       task_model: None,
       reasoning_model: None,
-      prompt_on_complex: None,
       config_path: None,
       log_verbose: None,
       skills_dirs: None,
@@ -476,7 +435,6 @@ pub fn merge_model_fields_base_preserved_test() {
   let merged = config.merge(base, override:)
   merged.task_model |> should.equal(Some("haiku"))
   merged.reasoning_model |> should.equal(Some("opus"))
-  merged.prompt_on_complex |> should.equal(Some(True))
 }
 
 // ---------------------------------------------------------------------------
@@ -528,7 +486,6 @@ pub fn to_string_fully_set_test() {
       max_context_messages: Some(50),
       task_model: Some("claude-haiku-4-5-20251001"),
       reasoning_model: Some("claude-opus-4-6"),
-      prompt_on_complex: Some(True),
       config_path: Some("/tmp/cfg.toml"),
       log_verbose: Some(True),
       skills_dirs: Some(["/tmp/skills"]),

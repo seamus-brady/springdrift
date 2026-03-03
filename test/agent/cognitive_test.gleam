@@ -1,14 +1,16 @@
 import agent/cognitive
 import agent/registry
 import agent/types.{
-  type CognitiveReply, type Notification, QuestionForHuman, UserAnswer,
-  UserInput,
+  type CognitiveReply, type Notification, QuestionForHuman, RestoreMessages,
+  SetModel, UserAnswer, UserInput,
 }
 import gleam/erlang/process
 import gleam/list
 import gleam/option.{None}
+import gleam/string
 import gleeunit/should
 import llm/adapters/mock
+import llm/types as llm_types
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -29,6 +31,8 @@ fn start_cognitive(provider) {
       reg,
       False,
       notify_subj,
+      "mock-model",
+      "mock-reasoning",
     )
   #(subj, notify_subj)
 }
@@ -50,6 +54,8 @@ pub fn single_turn_text_response_test() {
   let reply = send_and_receive(cognitive, "Hi there")
   reply.response |> should.equal("Hello from cognitive!")
   reply.model |> should.equal("mock-model")
+  // Usage should be present for successful responses
+  should.be_true(reply.usage != None)
 }
 
 // ---------------------------------------------------------------------------
@@ -144,6 +150,58 @@ pub fn request_human_input_tool_test() {
 // Agent question — decoupled notification (no Subject in Notification)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// SetModel — change model at runtime
+// ---------------------------------------------------------------------------
+
+pub fn set_model_test() {
+  let provider = mock.provider_with_text("Hello!")
+  let #(cognitive, _notify) = start_cognitive(provider)
+
+  // Send SetModel to change the model
+  process.send(cognitive, SetModel(model: "new-model"))
+
+  // Next reply should reflect the new model
+  let reply = send_and_receive(cognitive, "Hi")
+  reply.response |> should.equal("Hello!")
+  reply.model |> should.equal("new-model")
+}
+
+// ---------------------------------------------------------------------------
+// Agent question — decoupled notification (no Subject in Notification)
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// RestoreMessages (clear) — verify cognitive loop handles empty restore
+// ---------------------------------------------------------------------------
+
+pub fn restore_messages_clear_test() {
+  let provider = mock.provider_with_text("After clear")
+  let #(cognitive, _notify) = start_cognitive(provider)
+
+  // Send a message first to build some history
+  let reply1 = send_and_receive(cognitive, "Hello")
+  reply1.response |> should.equal("After clear")
+
+  // Clear via RestoreMessages with empty list
+  process.send(cognitive, RestoreMessages(messages: []))
+
+  // Send another message — should work fine with cleared history
+  let reply2 = send_and_receive(cognitive, "Fresh start")
+  reply2.response |> should.equal("After clear")
+}
+
+// ---------------------------------------------------------------------------
+// Error reply includes usage: None
+// ---------------------------------------------------------------------------
+
+pub fn error_reply_has_no_usage_test() {
+  let provider = mock.provider_with_error("test failure")
+  let #(cognitive, _notify) = start_cognitive(provider)
+  let reply = send_and_receive(cognitive, "Hi")
+  reply.usage |> should.equal(None)
+}
+
 pub fn agent_question_decoupled_test() {
   // Verify that AgentQuestion results in a pure-data notification
   let provider = mock.provider_with_text("ok")
@@ -179,4 +237,52 @@ pub fn agent_question_decoupled_test() {
   // The agent's reply_to subject should receive the answer
   let assert Ok(answer) = process.receive(agent_reply_subj, 5000)
   answer |> should.equal("yes")
+}
+
+// ---------------------------------------------------------------------------
+// Model fallback — retryable error on reasoning model falls back to task model
+// ---------------------------------------------------------------------------
+
+pub fn model_fallback_on_retryable_error_test() {
+  // Reasoning model returns 529 (overloaded), task model works fine.
+  // The worker retries with backoff (~3.5s) then the cognitive loop
+  // falls back to the task model automatically.
+  let provider =
+    mock.provider_with_handler(fn(req) {
+      case req.model {
+        "mock-reasoning" ->
+          Error(llm_types.ApiError(status_code: 529, message: "Overloaded"))
+        _ -> Ok(mock.text_response("Fallback response"))
+      }
+    })
+
+  let notify_subj: process.Subject(types.Notification) = process.new_subject()
+  let reg = registry.new()
+  let cognitive =
+    cognitive.start(
+      provider,
+      // Set main model to reasoning so proceed_with_input uses it
+      "mock-reasoning",
+      "You are a test assistant.",
+      256,
+      None,
+      [],
+      [],
+      reg,
+      False,
+      notify_subj,
+      "mock-task",
+      "mock-reasoning",
+    )
+
+  // Send a message — will try mock-reasoning (529) then fall back to mock-task
+  let reply_subj = process.new_subject()
+  process.send(cognitive, UserInput(text: "Hi", reply_to: reply_subj))
+  // Longer timeout: worker retries 3x with backoff before fallback kicks in
+  let assert Ok(reply) = process.receive(reply_subj, 15_000)
+
+  // Should include fallback prefix and the actual response
+  should.be_true(string.contains(reply.response, "mock-reasoning unavailable"))
+  should.be_true(string.contains(reply.response, "Fallback response"))
+  should.be_true(reply.usage != None)
 }

@@ -67,7 +67,7 @@ manually at any time.
 ### Session persistence and resume
 After every completed turn the full conversation (including all tool-use and
 tool-result blocks) is saved to `~/.config/springdrift/session.json`. Start with
-`--resume` to reload it. `/clear` resets both the in-memory state and the file.
+`--resume` to reload it.
 
 ### Cycle logging
 Every conversation cycle is assigned a UUID and logged to
@@ -90,16 +90,9 @@ Set `--max-context <n>` to cap the number of messages passed to the LLM per
 call. The full history is always kept in memory and on disk; trimming only
 happens at request-build time.
 
-### Cognitive mode (agent orchestration)
+### Agent orchestration
 
-Run with `--cognitive` to start in **cognitive mode** — a multi-agent architecture
-where the LLM acts as an orchestrator rather than a direct tool executor:
-
-```sh
-gleam run -- --cognitive
-```
-
-In cognitive mode the main LLM manages three specialist sub-agents:
+The main LLM acts as a cognitive orchestrator managing three specialist sub-agents:
 
 | Agent | Role | Tools |
 |---|---|---|
@@ -156,9 +149,6 @@ gleam run -- --resume
 # Force provider and model
 gleam run -- --provider anthropic --model claude-opus-4-6
 
-# Start in cognitive mode (multi-agent orchestration)
-gleam run -- --cognitive
-
 # Use a config file
 gleam run -- --config /path/to/my.json
 
@@ -184,8 +174,8 @@ gleam run -- --print-config
 
 | Command | Action |
 |---|---|
-| `/clear` | Clear conversation history and saved session |
 | `/model` | Toggle between task model and reasoning model |
+| `/clear` | Clear the conversation history |
 
 ---
 
@@ -230,7 +220,6 @@ Three-layer merge (highest priority first):
 --reasoning-model <name>  Model for complex queries
 --no-model-prompt         Auto-switch to reasoning model without prompting
 --config <path>           Load an additional config file
---cognitive               Run in cognitive mode (multi-agent orchestration)
 --verbose                 Log full LLM request/response payloads
 --skills-dir <path>       Add a skill directory (repeatable)
 --resume                  Reload previous session
@@ -273,17 +262,14 @@ instructions.
 ## Architecture
 
 ```
-springdrift.gleam         Entry point — config, provider selection, mode dispatch
-├── config.gleam          3-layer config (CLI flags > local JSON > user JSON)
+springdrift.gleam         Entry point — config, provider selection, wiring
+├── config.gleam          3-layer config (CLI flags > local TOML > user TOML)
 ├── storage.gleam         Session save/load/clear  (~/.config/springdrift/session.json)
 ├── skills.gleam          Skill discovery, frontmatter parsing, XML injection
 │
-├── chat/service.gleam    OTP actor — owns ChatState; serialises conversation writes
-│   └── react_loop        Iterative tool execution with max_turns + circuit breaker
-│
-├── agent/                Agent substrate (cognitive mode)
+├── agent/                Agent substrate
 │   ├── types.gleam       Notification, QuestionSource, WaitingContext, CognitiveMessage, etc.
-│   ├── cognitive.gleam   Cognitive loop — orchestrates agents + request_human_input
+│   ├── cognitive.gleam   Cognitive loop — orchestrates agents, model switching, request_human_input
 │   ├── framework.gleam   Gen-server wrapper for agent specs → running agent processes
 │   ├── supervisor.gleam  Restart strategies (Permanent/Transient/Temporary)
 │   ├── registry.gleam    Pure data structure tracking agent status + task subjects
@@ -304,7 +290,7 @@ springdrift.gleam         Entry point — config, provider selection, mode dispa
 │   ├── web.gleam         fetch_url
 │   └── shell.gleam       run_shell (delegates to sandbox)
 │
-├── tui.gleam             Alternate-screen TUI — Chat + Log tabs, dual backend support
+├── tui.gleam             Alternate-screen TUI — Chat + Log tabs
 │
 └── llm/
     ├── types.gleam        Shared types: Message, ContentBlock, LlmRequest/Response/Error, Tool
@@ -318,21 +304,12 @@ springdrift.gleam         Entry point — config, provider selection, mode dispa
         └── mock.gleam       Test/fallback provider with injectable responses
 ```
 
-### Concurrency model (service mode)
+### Concurrency model
 
 | Process | Lifetime | Role |
 |---|---|---|
 | Main / TUI event loop | App | Render, raw stdin, message dispatch |
-| Service actor | App | Owns `ChatState`, serialises all conversation writes |
-| Stdin reader | App | Blocking `read_char` loop → `StdinByte` to selector |
-| HTTP worker | Per turn | Blocking LLM calls + tool execution inside `react_loop` |
-
-### Concurrency model (cognitive mode)
-
-| Process | Lifetime | Role |
-|---|---|---|
-| Main / TUI event loop | App | Render, raw stdin, message dispatch |
-| Cognitive loop | App | Orchestrates agents, handles `request_human_input` |
+| Cognitive loop | App | Orchestrates agents, model switching, handles `request_human_input` |
 | Stdin reader | App | Blocking `read_char` loop → `StdinByte` to selector |
 | Think worker | Per turn | Blocking LLM call for the cognitive loop |
 | Agent processes | App | Each specialist agent runs its own react loop |
@@ -342,26 +319,13 @@ mutable state, no locks. The cognitive loop's notification channel uses pure
 data types (`Notification`) with no embedded `Subject` references, enabling
 non-OTP consumers (e.g. websocket handlers).
 
-### Message flow (service mode)
-
-```
-User input → TUI
-  → service.SendMessage(text, reply_to, channels…)
-  → Service appends user message, classifies complexity, picks model
-  → Spawns HTTP worker: react_loop (blocking)
-      → LLM call
-      → If tool calls: execute, log, recurse
-      → If done: send LlmComplete back to service
-  → Service stores final_messages, saves to disk
-  → Reply sent to TUI → render
-```
-
-### Message flow (cognitive mode)
+### Message flow
 
 ```
 User input → TUI
   → cognitive.UserInput(text, reply_to)
-  → Cognitive loop spawns think worker (LLM call)
+  → Cognitive loop classifies query complexity, picks model
+  → Spawns think worker (LLM call)
   → Think worker completes:
       → If agent_* tool call: dispatch to agent, wait for AgentComplete
       → If request_human_input: send QuestionForHuman notification, wait for UserAnswer

@@ -1,10 +1,10 @@
 import agent/cognitive
+import agent/framework
 import agent/registry
 import agent/types as agent_types
 import agents/coder
 import agents/planner
 import agents/researcher
-import chat/service
 import config.{type AppConfig}
 import gleam/erlang/process
 import gleam/io
@@ -18,10 +18,6 @@ import sandbox
 import simplifile
 import skills
 import storage
-import tools/builtin
-import tools/files
-import tools/shell
-import tools/web
 import tui
 
 /// Exit the process with the given status code.
@@ -125,18 +121,10 @@ fn print_help() -> Nil {
   io.println(
     "  --reasoning-model <name>  Model for Complex queries (default: provider-specific)",
   )
-  io.println(
-    "  --no-model-prompt         Auto-switch to reasoning model without prompting",
-  )
   io.println("")
   io.println("Tools / sandbox:")
   io.println(
     "  --allow-write-anywhere    Allow write_file outside the current working directory",
-  )
-  io.println("")
-  io.println("Mode:")
-  io.println(
-    "  --cognitive               Run in cognitive mode with agent orchestration",
   )
   io.println("")
   io.println("Session / config:")
@@ -173,7 +161,6 @@ fn print_help() -> Nil {
   io.println("  # Model switching")
   io.println("  task_model       = \"claude-haiku-4-5-20251001\"")
   io.println("  reasoning_model  = \"claude-opus-4-6\"")
-  io.println("  prompt_on_complex = true")
   io.println("")
   io.println("  # Logging and filesystem")
   io.println("  log_verbose   = false")
@@ -184,95 +171,6 @@ fn print_help() -> Nil {
 }
 
 fn run(cfg: AppConfig) -> Nil {
-  let args = get_startup_args()
-  case list.contains(args, "--cognitive") {
-    True -> run_cognitive(cfg)
-    False -> run_service(cfg)
-  }
-}
-
-fn run_service(cfg: AppConfig) -> Nil {
-  let base_system =
-    option.unwrap(cfg.system_prompt, "You are a helpful assistant.")
-  let skill_dirs = option.unwrap(cfg.skills_dirs, default_skill_dirs())
-  let discovered = skills.discover(skill_dirs)
-  let system = case discovered {
-    [] -> base_system
-    _ -> base_system <> "\n\n" <> skills.to_system_prompt_xml(discovered)
-  }
-  let max_tokens = option.unwrap(cfg.max_tokens, 1024)
-  let max_turns = option.unwrap(cfg.max_turns, 5)
-  let max_consecutive_errors = option.unwrap(cfg.max_consecutive_errors, 3)
-  let max_context_messages = cfg.max_context_messages
-  let prompt_on_complex = option.unwrap(cfg.prompt_on_complex, False)
-  let verbose = option.unwrap(cfg.log_verbose, False)
-  let write_anywhere = option.unwrap(cfg.write_anywhere, False)
-
-  let #(p, model, default_task_model, default_reasoning_model) =
-    select_provider(cfg)
-
-  let task_model = option.unwrap(cfg.task_model, default_task_model)
-  let reasoning_model =
-    option.unwrap(cfg.reasoning_model, default_reasoning_model)
-
-  let initial_messages = case list.contains(get_startup_args(), "--resume") {
-    True -> storage.load()
-    False -> []
-  }
-
-  let sandbox_dir = find_sandbox_dir()
-  let sandbox_subj = case sandbox_dir {
-    option.None -> {
-      io.println(
-        "Sandbox  : unavailable (sandbox/Dockerfile not found) — run_shell disabled",
-      )
-      option.None
-    }
-    option.Some(dir) ->
-      case sandbox.start(dir) {
-        Ok(s) -> {
-          io.println("Sandbox  : Docker container started")
-          option.Some(s)
-        }
-        Error(msg) -> {
-          io.println(
-            "Sandbox  : unavailable (" <> msg <> ") — run_shell disabled",
-          )
-          option.None
-        }
-      }
-  }
-
-  let shell_tools = case sandbox_subj {
-    option.None -> []
-    option.Some(_) -> shell.all()
-  }
-  let tools = list.flatten([builtin.all(), files.all(), web.all(), shell_tools])
-
-  let chat =
-    service.start(
-      p,
-      model,
-      system,
-      max_tokens,
-      max_turns,
-      max_consecutive_errors,
-      max_context_messages,
-      tools,
-      initial_messages,
-      task_model,
-      reasoning_model,
-      prompt_on_complex,
-      verbose,
-      sandbox_subj,
-      write_anywhere,
-    )
-  tui.start(chat, p.name, model, task_model, reasoning_model, initial_messages)
-  let _ = option.map(sandbox_subj, sandbox.send_shutdown)
-  Nil
-}
-
-fn run_cognitive(cfg: AppConfig) -> Nil {
   let base_system =
     option.unwrap(
       cfg.system_prompt,
@@ -334,8 +232,20 @@ fn run_cognitive(cfg: AppConfig) -> Nil {
   // Build agent tools for the cognitive loop
   let agent_tools = list.map(agent_specs, cognitive.agent_to_tool)
 
-  // Create registry and register agents
-  let reg = registry.new()
+  // Start agents and register in registry
+  let reg =
+    list.fold(agent_specs, registry.new(), fn(reg, spec) {
+      case framework.start_agent(spec) {
+        Ok(#(_pid, task_subj)) -> {
+          io.println("  Agent  : " <> spec.name <> " started")
+          registry.register(reg, spec.name, task_subj)
+        }
+        Error(msg) -> {
+          io.println("  Agent  : " <> spec.name <> " failed (" <> msg <> ")")
+          reg
+        }
+      }
+    })
 
   // Create notification channel
   let notify: process.Subject(agent_types.Notification) = process.new_subject()
@@ -355,10 +265,12 @@ fn run_cognitive(cfg: AppConfig) -> Nil {
       reg,
       verbose,
       notify,
+      task_model,
+      reasoning_model,
     )
 
-  // Start TUI in cognitive mode
-  tui.start_cognitive(
+  // Start TUI
+  tui.start(
     cognitive_subj,
     notify,
     p.name,

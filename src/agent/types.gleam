@@ -2,7 +2,8 @@ import gleam/erlang/process.{type Subject}
 import gleam/option.{type Option}
 import llm/provider.{type Provider}
 import llm/types.{
-  type ContentBlock, type LlmResponse, type Tool, type ToolCall, type ToolResult,
+  type ContentBlock, type LlmResponse, type Message, type Tool, type ToolCall,
+  type ToolResult, type Usage,
 }
 
 // ---------------------------------------------------------------------------
@@ -89,16 +90,18 @@ pub type CognitiveMessage {
   UserInput(text: String, reply_to: Subject(CognitiveReply))
   UserAnswer(answer: String)
   ThinkComplete(task_id: String, response: LlmResponse)
-  ThinkError(task_id: String, error: String)
+  ThinkError(task_id: String, error: String, retryable: Bool)
   ThinkWorkerDown(task_id: String, reason: String)
   AgentComplete(outcome: AgentOutcome)
   AgentQuestion(question: String, agent: String, reply_to: Subject(String))
   AgentEvent(event: AgentLifecycleEvent)
   SaveResult(error: Option(String))
+  SetModel(model: String)
+  RestoreMessages(messages: List(Message))
 }
 
 pub type CognitiveReply {
-  CognitiveReply(response: String, model: String)
+  CognitiveReply(response: String, model: String, usage: Option(Usage))
 }
 
 // ---------------------------------------------------------------------------
@@ -130,7 +133,12 @@ pub type WaitingContext {
 // ---------------------------------------------------------------------------
 
 pub type PendingTask {
-  PendingThink(task_id: String, reply_to: Subject(CognitiveReply))
+  PendingThink(
+    task_id: String,
+    model: String,
+    fallback_from: Option(String),
+    reply_to: Subject(CognitiveReply),
+  )
   PendingAgent(
     task_id: String,
     tool_use_id: String,

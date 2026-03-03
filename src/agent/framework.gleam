@@ -1,9 +1,11 @@
 import agent/types.{
   type AgentOutcome, type AgentSpec, type AgentTask, type CognitiveMessage,
-  AgentComplete, AgentFailure, AgentSuccess,
+  AgentComplete, AgentFailure, AgentQuestion, AgentSuccess,
 }
 import cycle_log
+import gleam/dynamic/decode
 import gleam/erlang/process.{type ExitMessage, type Pid, type Subject}
+import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
 import llm/provider
@@ -138,7 +140,7 @@ fn agent_loop(
 fn do_react_loop(spec: AgentSpec, task: AgentTask) -> Result(String, String) {
   let agent_cycle_id = cycle_log.generate_uuid()
   let req = build_agent_request(spec, task)
-  do_react(req, spec, spec.max_turns, 0, agent_cycle_id)
+  do_react(req, spec, spec.max_turns, 0, agent_cycle_id, task.reply_to)
 }
 
 fn do_react(
@@ -147,6 +149,7 @@ fn do_react(
   remaining: Int,
   consecutive_errors: Int,
   cycle_id: String,
+  cognitive: Subject(CognitiveMessage),
 ) -> Result(String, String) {
   case remaining {
     0 -> Error("max turns reached")
@@ -161,7 +164,7 @@ fn do_react(
               let results =
                 list.map(calls, fn(call) {
                   cycle_log.log_tool_call(cycle_id, call)
-                  let result = spec.tool_executor(call)
+                  let result = execute_tool(call, spec, cognitive)
                   cycle_log.log_tool_result(cycle_id, result)
                   result
                 })
@@ -181,13 +184,52 @@ fn do_react(
                 False -> {
                   let next =
                     request.with_tool_results(req, resp.content, results)
-                  do_react(next, spec, remaining - 1, new_consecutive, cycle_id)
+                  do_react(
+                    next,
+                    spec,
+                    remaining - 1,
+                    new_consecutive,
+                    cycle_id,
+                    cognitive,
+                  )
                 }
               }
             }
           }
         }
       }
+  }
+}
+
+/// Execute a tool call, routing request_human_input through the cognitive loop.
+fn execute_tool(
+  call: llm_types.ToolCall,
+  spec: AgentSpec,
+  cognitive: Subject(CognitiveMessage),
+) -> llm_types.ToolResult {
+  case call.name {
+    "request_human_input" -> {
+      let question = parse_human_input_question(call.input_json)
+      let answer_subj = process.new_subject()
+      process.send(
+        cognitive,
+        AgentQuestion(question:, agent: spec.name, reply_to: answer_subj),
+      )
+      let answer = process.receive_forever(answer_subj)
+      llm_types.ToolSuccess(tool_use_id: call.id, content: answer)
+    }
+    _ -> spec.tool_executor(call)
+  }
+}
+
+fn parse_human_input_question(input_json: String) -> String {
+  let decoder = {
+    use question <- decode.field("question", decode.string)
+    decode.success(question)
+  }
+  case json.parse(input_json, decoder) {
+    Ok(q) -> q
+    Error(_) -> input_json
   }
 }
 

@@ -48,9 +48,11 @@ pub fn think_error_on_provider_error_test() {
   // Should receive ThinkError
   let assert Ok(msg) = process.receive(cognitive_subj, 5000)
   case msg {
-    ThinkError(tid, error) -> {
+    ThinkError(tid, error, retryable) -> {
       tid |> should.equal(task_id)
       should.be_true(error != "")
+      // UnknownError is not retryable
+      retryable |> should.equal(False)
     }
     _ -> should.fail()
   }

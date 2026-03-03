@@ -99,6 +99,17 @@ pub fn log_llm_response(cycle_id: String, resp: LlmResponse) -> Nil {
   )
 }
 
+pub fn log_llm_error(cycle_id: String, error: String) -> Nil {
+  append_entry(
+    json.object([
+      #("cycle_id", json.string(cycle_id)),
+      #("timestamp", json.string(get_datetime())),
+      #("type", json.string("llm_error")),
+      #("error", json.string(error)),
+    ]),
+  )
+}
+
 pub fn log_tool_call(cycle_id: String, call: ToolCall) -> Nil {
   append_entry(
     json.object([
