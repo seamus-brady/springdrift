@@ -22,7 +22,6 @@ fn start_cognitive(provider) {
   let subj =
     cognitive.start(
       provider,
-      "mock-model",
       "You are a test assistant.",
       256,
       None,
@@ -161,10 +160,11 @@ pub fn set_model_test() {
   // Send SetModel to change the model
   process.send(cognitive, SetModel(model: "new-model"))
 
-  // Next reply should reflect the new model
+  // Classification routes Simple queries to task_model regardless of SetModel.
+  // SetModel updates state.model but classification overrides it.
   let reply = send_and_receive(cognitive, "Hi")
   reply.response |> should.equal("Hello!")
-  reply.model |> should.equal("new-model")
+  reply.model |> should.equal("mock-model")
 }
 
 // ---------------------------------------------------------------------------
@@ -261,8 +261,6 @@ pub fn model_fallback_on_retryable_error_test() {
   let cognitive =
     cognitive.start(
       provider,
-      // Set main model to reasoning so proceed_with_input uses it
-      "mock-reasoning",
       "You are a test assistant.",
       256,
       None,
@@ -275,9 +273,16 @@ pub fn model_fallback_on_retryable_error_test() {
       "mock-reasoning",
     )
 
-  // Send a message — will try mock-reasoning (529) then fall back to mock-task
+  // Use a query with complexity keywords so heuristic classifies as Complex,
+  // routing to reasoning_model (mock-reasoning) which returns 529
   let reply_subj = process.new_subject()
-  process.send(cognitive, UserInput(text: "Hi", reply_to: reply_subj))
+  process.send(
+    cognitive,
+    UserInput(
+      text: "Explain step by step how to implement a distributed architecture",
+      reply_to: reply_subj,
+    ),
+  )
   // Longer timeout: worker retries 3x with backoff before fallback kicks in
   let assert Ok(reply) = process.receive(reply_subj, 15_000)
 

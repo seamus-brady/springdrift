@@ -27,6 +27,9 @@ import query_complexity
 import storage
 import tools/builtin
 
+@external(erlang, "springdrift_ffi", "rescue")
+fn rescue(body: fn() -> a) -> Result(a, String)
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -61,7 +64,6 @@ pub type CognitiveState {
 /// Start the cognitive loop process. Returns a Subject for sending messages.
 pub fn start(
   provider: Provider,
-  model: String,
   system: String,
   max_tokens: Int,
   max_context_messages: Option(Int),
@@ -82,7 +84,7 @@ pub fn start(
       CognitiveState(
         self:,
         provider:,
-        model:,
+        model: task_model,
         system:,
         max_tokens:,
         max_context_messages:,
@@ -170,12 +172,17 @@ fn handle_user_input(
       let cycle_id = cycle_log.generate_uuid()
       cycle_log.log_human_input(cycle_id, state.cycle_id, text)
 
-      // Spawn async classification worker
+      // Spawn async classification worker — rescue catches panics
       let self = state.self
       let provider = state.provider
       let task_model = state.task_model
       process.spawn_unlinked(fn() {
-        let complexity = query_complexity.classify(text, provider, task_model)
+        let complexity = case
+          rescue(fn() { query_complexity.classify(text, provider, task_model) })
+        {
+          Ok(c) -> c
+          Error(_) -> query_complexity.Simple
+        }
         process.send(
           self,
           types.ClassifyComplete(cycle_id:, complexity:, text:, reply_to:),
@@ -223,7 +230,7 @@ fn handle_classify_complete(
             False,
             None,
           )
-          proceed_with_input(state, text, cycle_id, reply_to)
+          proceed_with_model(state, state.task_model, text, cycle_id, reply_to)
         }
       }
     }
@@ -231,17 +238,8 @@ fn handle_classify_complete(
   }
 }
 
-fn proceed_with_input(
-  state: CognitiveState,
-  text: String,
-  cycle_id: String,
-  reply_to: Subject(CognitiveReply),
-) -> CognitiveState {
-  proceed_with_model(state, state.model, text, cycle_id, reply_to)
-}
-
-/// Like proceed_with_input but uses a specific model for this request
-/// without permanently changing state.model.
+/// Build a user message, spawn a think worker with the given model,
+/// and transition to Thinking status.
 fn proceed_with_model(
   state: CognitiveState,
   model: String,
@@ -265,6 +263,7 @@ fn proceed_with_model(
 
   CognitiveState(
     ..state,
+    model:,
     messages:,
     cycle_id: Some(cycle_id),
     status: Thinking(task_id:),

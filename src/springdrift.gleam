@@ -11,6 +11,8 @@ import gleam/io
 import gleam/list
 import gleam/option
 import llm/adapters/anthropic as anthropic_adapter
+import llm/adapters/local as local_adapter
+import llm/adapters/mistral as mistral_adapter
 import llm/adapters/mock
 import llm/adapters/openai as openai_adapter
 import llm/provider.{type Provider}
@@ -88,22 +90,27 @@ fn get_args_ffi() -> List(String)
 fn print_help() -> Nil {
   io.println("Usage: gleam run [-- OPTIONS]")
   io.println("")
-  io.println("Provider / model:")
+  io.println("LLM provider and models:")
   io.println(
-    "  --provider <name>         anthropic | openrouter | openai | mock",
+    "  --provider <name>         anthropic | openrouter | openai | mistral | local | mock",
   )
-  io.println("                            (default: auto-detect from env vars)")
   io.println(
-    "  --model <name>            Main model identifier (default: provider default)",
+    "                            (default: mock — set in config or via flag)",
+  )
+  io.println(
+    "  --task-model <name>       Model for Simple queries (default: provider-specific)",
+  )
+  io.println(
+    "  --reasoning-model <name>  Model for Complex queries (default: provider-specific)",
   )
   io.println(
     "  --system <prompt>         System prompt (default: \"You are a helpful assistant.\")",
   )
-  io.println("")
-  io.println("Loop control:")
   io.println(
     "  --max-tokens <n>          Max output tokens per LLM call (default: 1024)",
   )
+  io.println("")
+  io.println("Loop control:")
   io.println(
     "  --max-turns <n>           Max react-loop iterations per message (default: 5)",
   )
@@ -112,14 +119,6 @@ fn print_help() -> Nil {
   )
   io.println(
     "  --max-context <n>         Sliding-window message cap (default: unlimited)",
-  )
-  io.println("")
-  io.println("Model switching:")
-  io.println(
-    "  --task-model <name>       Model for Simple queries (default: provider-specific)",
-  )
-  io.println(
-    "  --reasoning-model <name>  Model for Complex queries (default: provider-specific)",
   )
   io.println("")
   io.println("Tools / sandbox:")
@@ -145,29 +144,22 @@ fn print_help() -> Nil {
   io.println("  ~/.config/springdrift/config.toml")
   io.println("")
   io.println("Example .springdrift.toml (all fields optional):")
-  io.println("  # LLM provider and model")
-  io.println("  provider = \"anthropic\"")
-  io.println("  model    = \"claude-sonnet-4-20250514\"")
+  io.println("  # LLM provider and models")
+  io.println("  provider        = \"anthropic\"")
+  io.println("  task_model      = \"claude-haiku-4-5-20251001\"")
+  io.println("  reasoning_model = \"claude-opus-4-6\"")
+  io.println("  system_prompt   = \"You are a helpful assistant.\"")
+  io.println("  max_tokens      = 2048")
   io.println("")
-  io.println("  # System prompt")
-  io.println("  system_prompt = \"You are a helpful assistant.\"")
-  io.println("")
-  io.println("  # Token and loop limits")
-  io.println("  max_tokens            = 2048")
-  io.println("  max_turns             = 5")
+  io.println("  # Loop control")
+  io.println("  max_turns              = 5")
   io.println("  max_consecutive_errors = 3")
   io.println("  max_context_messages   = 50   # omit for unlimited")
   io.println("")
-  io.println("  # Model switching")
-  io.println("  task_model       = \"claude-haiku-4-5-20251001\"")
-  io.println("  reasoning_model  = \"claude-opus-4-6\"")
-  io.println("")
   io.println("  # Logging and filesystem")
-  io.println("  log_verbose   = false")
+  io.println("  log_verbose    = false")
   io.println("  write_anywhere = false")
-  io.println("")
-  io.println("  # Extra skill directories")
-  io.println("  skills_dirs = [\"/path/to/skills\"]")
+  io.println("  skills_dirs    = [\"/path/to/skills\"]")
 }
 
 fn run(cfg: AppConfig) -> Nil {
@@ -186,8 +178,7 @@ fn run(cfg: AppConfig) -> Nil {
   let verbose = option.unwrap(cfg.log_verbose, False)
   let write_anywhere = option.unwrap(cfg.write_anywhere, False)
 
-  let #(p, model, default_task_model, default_reasoning_model) =
-    select_provider(cfg)
+  let #(p, default_task_model, default_reasoning_model) = select_provider(cfg)
 
   let task_model = option.unwrap(cfg.task_model, default_task_model)
   let reasoning_model =
@@ -224,9 +215,9 @@ fn run(cfg: AppConfig) -> Nil {
 
   // Build agent specs
   let agent_specs = [
-    planner.spec(p, model),
-    researcher.spec(p, model),
-    coder.spec(p, model, sandbox_subj, write_anywhere),
+    planner.spec(p, task_model),
+    researcher.spec(p, task_model),
+    coder.spec(p, task_model, sandbox_subj, write_anywhere),
   ]
 
   // Build agent tools for the cognitive loop
@@ -239,7 +230,6 @@ fn run(cfg: AppConfig) -> Nil {
   let cognitive_subj =
     cognitive.start(
       p,
-      model,
       system,
       max_tokens,
       cfg.max_context_messages,
@@ -272,7 +262,6 @@ fn run(cfg: AppConfig) -> Nil {
     cognitive_subj,
     notify,
     p.name,
-    model,
     task_model,
     reasoning_model,
     initial_messages,
@@ -294,98 +283,83 @@ fn find_sandbox_dir() -> option.Option(String) {
   }
 }
 
-fn select_provider(cfg: AppConfig) -> #(Provider, String, String, String) {
+fn select_provider(cfg: AppConfig) -> #(Provider, String, String) {
   case cfg.provider {
     option.Some("anthropic") -> {
       case anthropic_adapter.provider() {
         Ok(p) -> {
-          let m = option.unwrap(cfg.model, anthropic_adapter.claude_sonnet_4)
-          io.println("Provider : Anthropic (" <> m <> ")")
-          #(p, m, "claude-haiku-4-5-20251001", "claude-opus-4-6")
+          io.println("Provider : Anthropic")
+          #(p, "claude-haiku-4-5-20251001", "claude-opus-4-6")
         }
         Error(_) -> {
           io.println("Error: ANTHROPIC_API_KEY not set. Falling back to mock.")
-          #(mock_provider(), "mock-model", "mock-model", "mock-model")
+          #(mock_provider(), "mock-model", "mock-model")
         }
       }
     }
     option.Some("openrouter") -> {
       case openai_adapter.provider_from_openrouter_env() {
         Ok(p) -> {
-          let m = option.unwrap(cfg.model, openai_adapter.gpt_4o)
-          io.println("Provider : OpenRouter (" <> m <> ")")
-          #(p, m, openai_adapter.gpt_4o_mini, openai_adapter.gpt_4o)
+          io.println("Provider : OpenRouter")
+          #(p, openai_adapter.gpt_4o_mini, openai_adapter.gpt_4o)
         }
         Error(_) -> {
           io.println("Error: OPENROUTER_API_KEY not set. Falling back to mock.")
-          #(mock_provider(), "mock-model", "mock-model", "mock-model")
+          #(mock_provider(), "mock-model", "mock-model")
         }
       }
     }
     option.Some("openai") -> {
       case openai_adapter.provider_from_env() {
         Ok(p) -> {
-          let m = option.unwrap(cfg.model, openai_adapter.gpt_4o)
-          io.println("Provider : OpenAI (" <> m <> ")")
-          #(p, m, openai_adapter.gpt_4o_mini, openai_adapter.gpt_4o)
+          io.println("Provider : OpenAI")
+          #(p, openai_adapter.gpt_4o_mini, openai_adapter.gpt_4o)
         }
         Error(_) -> {
           io.println("Error: OPENAI_API_KEY not set. Falling back to mock.")
-          #(mock_provider(), "mock-model", "mock-model", "mock-model")
+          #(mock_provider(), "mock-model", "mock-model")
         }
       }
     }
-    option.Some("mock") -> #(
-      mock_provider(),
-      "mock-model",
-      "mock-model",
-      "mock-model",
-    )
+    option.Some("mistral") -> {
+      case mistral_adapter.provider_from_env() {
+        Ok(p) -> {
+          io.println("Provider : Mistral")
+          #(p, mistral_adapter.mistral_small, mistral_adapter.mistral_large)
+        }
+        Error(_) -> {
+          io.println("Error: MISTRAL_API_KEY not set. Falling back to mock.")
+          #(mock_provider(), "mock-model", "mock-model")
+        }
+      }
+    }
+    option.Some("local") -> {
+      let assert Ok(p) = local_adapter.provider_from_env()
+      io.println("Provider : Local")
+      #(p, local_adapter.smollm3, local_adapter.smollm3)
+    }
+    option.Some("mock") -> #(mock_provider(), "mock-model", "mock-model")
     option.Some(unknown) -> {
-      io.println("Unknown provider \"" <> unknown <> "\". Using auto-detect.")
-      auto_detect(cfg.model)
+      io.println(
+        "Unknown provider \""
+        <> unknown
+        <> "\". Set provider in config or use --provider flag.",
+      )
+      io.println("Falling back to mock.")
+      #(mock_provider(), "mock-model", "mock-model")
     }
-    option.None -> auto_detect(cfg.model)
-  }
-}
-
-fn auto_detect(
-  model_override: option.Option(String),
-) -> #(Provider, String, String, String) {
-  case anthropic_adapter.provider() {
-    Ok(ap) -> {
-      let m = option.unwrap(model_override, anthropic_adapter.claude_sonnet_4)
-      io.println("Provider : Anthropic (" <> m <> ")")
-      #(ap, m, "claude-haiku-4-5-20251001", "claude-opus-4-6")
+    option.None -> {
+      io.println(
+        "No provider configured. Set provider in config or use --provider flag.",
+      )
+      io.println("Falling back to mock.")
+      #(mock_provider(), "mock-model", "mock-model")
     }
-    Error(_) ->
-      case openai_adapter.provider_from_openrouter_env() {
-        Ok(op) -> {
-          let m = option.unwrap(model_override, openai_adapter.gpt_4o)
-          io.println("Provider : OpenRouter (" <> m <> ")")
-          #(op, m, openai_adapter.gpt_4o_mini, openai_adapter.gpt_4o)
-        }
-        Error(_) ->
-          case openai_adapter.provider_from_env() {
-            Ok(op) -> {
-              let m = option.unwrap(model_override, openai_adapter.gpt_4o)
-              io.println("Provider : OpenAI (" <> m <> ")")
-              #(op, m, openai_adapter.gpt_4o_mini, openai_adapter.gpt_4o)
-            }
-            Error(_) -> {
-              io.println("Provider : mock")
-              io.println(
-                "           (set ANTHROPIC_API_KEY or OPENROUTER_API_KEY to use a real LLM)",
-              )
-              #(mock_provider(), "mock-model", "mock-model", "mock-model")
-            }
-          }
-      }
   }
 }
 
 fn mock_provider() -> Provider {
   mock.provider_with_text(
-    "I'm a mock assistant. Set ANTHROPIC_API_KEY or OPENROUTER_API_KEY to use a real LLM.",
+    "I'm a mock assistant. Set a provider in your config file or use --provider to use a real LLM.",
   )
 }

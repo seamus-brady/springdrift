@@ -121,15 +121,14 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 
 | Field | CLI flag | Default | Purpose |
 |---|---|---|---|
-| `provider` | `--provider` | auto-detect | anthropic \| openrouter \| openai \| mock |
-| `model` | `--model` | provider default | Main model identifier |
+| `provider` | `--provider` | mock | anthropic \| openrouter \| openai \| mistral \| local \| mock |
+| `task_model` | `--task-model` | provider default | Model for Simple queries |
+| `reasoning_model` | `--reasoning-model` | provider default | Model for Complex queries |
 | `system_prompt` | `--system` | "You are a helpful assistant." | System prompt |
 | `max_tokens` | `--max-tokens` | 1024 | Max output tokens per LLM call |
 | `max_turns` | `--max-turns` | 5 | Max react-loop iterations per message |
 | `max_consecutive_errors` | `--max-errors` | 3 | Tool failure circuit breaker threshold |
 | `max_context_messages` | `--max-context` | unlimited | Sliding-window message cap |
-| `task_model` | `--task-model` | provider default | Model for Simple queries |
-| `reasoning_model` | `--reasoning-model` | provider default | Model for Complex queries |
 | `config_path` | `--config` | None | Extra config file path |
 | `log_verbose` | `--verbose` | False | Log full LLM payloads to cycle log |
 | `skills_dirs` | `--skills-dir` (repeatable) | `[~/.config/springdrift/skills, .skills]` | Skill directories |
@@ -177,29 +176,22 @@ validates that `path` ends with `SKILL.md` before reading.
 Local `.springdrift.toml` (or `~/.config/springdrift/config.toml`). All fields are optional; TOML `#` comments are fully supported:
 
 ```toml
-# LLM provider — "anthropic" | "openrouter" | "openai" | "mock"
-provider = "anthropic"
-model    = "claude-sonnet-4-20250514"
+# LLM provider and models
+provider        = "anthropic"        # "anthropic" | "openrouter" | "openai" | "mistral" | "local" | "mock"
+task_model      = "claude-haiku-4-5-20251001"   # Model for Simple queries
+reasoning_model = "claude-opus-4-6"             # Model for Complex queries
+system_prompt   = "You are a helpful assistant."
+max_tokens      = 2048               # Max output tokens per LLM call
 
-# System prompt
-system_prompt = "You are a helpful assistant."
-
-# Token and loop limits
-max_tokens             = 2048
-max_turns              = 5
-max_consecutive_errors = 3
-max_context_messages   = 50   # omit for unlimited
-
-# Model switching
-task_model        = "claude-haiku-4-5-20251001"
-reasoning_model   = "claude-opus-4-6"
+# Loop control
+max_turns              = 5           # React-loop iterations per message
+max_consecutive_errors = 3           # Tool failures before abort
+max_context_messages   = 50          # Sliding-window cap (omit for unlimited)
 
 # Logging and filesystem
-log_verbose    = false
-write_anywhere = false   # allow write_file outside CWD
-
-# Extra skill directories (defaults are always included)
-skills_dirs = ["/path/to/skills"]
+log_verbose    = false               # Log full LLM payloads to cycle log
+write_anywhere = false               # Allow write_file outside CWD
+skills_dirs    = ["/path/to/skills"] # Extra skill directories
 ```
 
 CLI flags override config files. `--skills-dir` is repeatable and appends to the list.

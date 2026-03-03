@@ -3,8 +3,9 @@
          start_spinner/1, stop_spinner/0,
          generate_uuid/0, get_datetime/0, get_date/0,
          tui_run/2, throw_tui_exit/0,
-         fetch_url/1, check_docker/0, docker_build/1,
-         docker_run_container/2, docker_exec/2, docker_stop/1]).
+         fetch_url/1, http_post/3, check_docker/0, docker_build/1,
+         docker_run_container/2, docker_exec/2, docker_stop/1,
+         rescue/1]).
 
 %% Read one line from stdin.
 %% Returns {ok, Binary} (including trailing newline) or {error, nil} on EOF.
@@ -135,6 +136,29 @@ fetch_url(Url) ->
             {error, list_to_binary(io_lib:format("~p", [Reason]))}
     end.
 
+%% HTTP POST with headers and JSON body via httpc.
+%% Headers is a list of {Name, Value} tuples (binaries).
+%% Returns {ok, {StatusCode, Body}} or {error, Reason}.
+http_post(Url, Headers, Body) ->
+    application:ensure_all_started(inets),
+    application:ensure_all_started(ssl),
+    UrlStr = case is_binary(Url) of
+        true  -> binary_to_list(Url);
+        false -> Url
+    end,
+    BodyStr = case is_binary(Body) of
+        true  -> binary_to_list(Body);
+        false -> Body
+    end,
+    HeaderList = [{binary_to_list(K), binary_to_list(V)} || {K, V} <- Headers],
+    Opts = [{timeout, 60000}],
+    case httpc:request(post, {UrlStr, HeaderList, "application/json", BodyStr}, Opts, [{body_format, binary}]) of
+        {ok, {{_, StatusCode, _}, _, RespBody}} ->
+            {ok, {StatusCode, RespBody}};
+        {error, Reason} ->
+            {error, list_to_binary(io_lib:format("~p", [Reason]))}
+    end.
+
 %% Check whether Docker daemon is reachable. Returns true or false.
 check_docker() ->
     case os:find_executable("docker") of
@@ -228,6 +252,15 @@ docker_exec(ContainerId, Cmd) ->
             Out = list_to_binary(RawOut),
             Truncated = binary:part(Out, 0, min(byte_size(Out), 16384)),
             {error, Truncated}
+    end.
+
+%% Run a zero-arity function, catching any throw/error/exit.
+%% Returns {ok, Result} or {error, Reason}.
+rescue(Fun) ->
+    try Fun() of
+        Result -> {ok, Result}
+    catch
+        _Class:Reason -> {error, list_to_binary(io_lib:format("~p", [Reason]))}
     end.
 
 %% Stop and remove the container.

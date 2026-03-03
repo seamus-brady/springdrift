@@ -15,7 +15,7 @@ pub fn main() -> Nil {
 pub fn default_has_all_none_test() {
   let cfg = config.default()
   cfg.provider |> should.equal(None)
-  cfg.model |> should.equal(None)
+
   cfg.system_prompt |> should.equal(None)
   cfg.max_tokens |> should.equal(None)
   cfg.max_turns |> should.equal(None)
@@ -36,11 +36,6 @@ pub fn default_has_all_none_test() {
 pub fn from_args_provider_test() {
   let cfg = config.from_args(["--provider", "anthropic"])
   cfg.provider |> should.equal(Some("anthropic"))
-}
-
-pub fn from_args_model_test() {
-  let cfg = config.from_args(["--model", "gpt-4o"])
-  cfg.model |> should.equal(Some("gpt-4o"))
 }
 
 pub fn from_args_system_test() {
@@ -66,11 +61,11 @@ pub fn from_args_unknown_flags_ignored_test() {
 pub fn from_args_multiple_flags_test() {
   let cfg =
     config.from_args([
-      "--provider", "anthropic", "--model", "claude-sonnet-4-20250514",
+      "--provider", "anthropic", "--task-model", "claude-haiku-4-5-20251001",
       "--max-tokens", "1024",
     ])
   cfg.provider |> should.equal(Some("anthropic"))
-  cfg.model |> should.equal(Some("claude-sonnet-4-20250514"))
+  cfg.task_model |> should.equal(Some("claude-haiku-4-5-20251001"))
   cfg.max_tokens |> should.equal(Some(1024))
 }
 
@@ -87,7 +82,6 @@ pub fn merge_override_wins_test() {
   let base =
     AppConfig(
       provider: Some("anthropic"),
-      model: None,
       system_prompt: None,
       max_tokens: None,
       max_turns: None,
@@ -103,7 +97,6 @@ pub fn merge_override_wins_test() {
   let override =
     AppConfig(
       provider: Some("openai"),
-      model: None,
       system_prompt: None,
       max_tokens: None,
       max_turns: None,
@@ -124,7 +117,6 @@ pub fn merge_base_preserved_when_override_none_test() {
   let base =
     AppConfig(
       provider: Some("anthropic"),
-      model: Some("claude"),
       system_prompt: None,
       max_tokens: None,
       max_turns: None,
@@ -140,7 +132,6 @@ pub fn merge_base_preserved_when_override_none_test() {
   let override =
     AppConfig(
       provider: None,
-      model: None,
       system_prompt: None,
       max_tokens: None,
       max_turns: None,
@@ -155,14 +146,12 @@ pub fn merge_base_preserved_when_override_none_test() {
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("anthropic"))
-  merged.model |> should.equal(Some("claude"))
 }
 
 pub fn merge_combines_different_fields_test() {
   let base =
     AppConfig(
       provider: Some("anthropic"),
-      model: None,
       system_prompt: None,
       max_tokens: None,
       max_turns: None,
@@ -178,7 +167,6 @@ pub fn merge_combines_different_fields_test() {
   let override =
     AppConfig(
       provider: None,
-      model: Some("gpt-4o"),
       system_prompt: Some("Be concise."),
       max_tokens: None,
       max_turns: None,
@@ -193,7 +181,6 @@ pub fn merge_combines_different_fields_test() {
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("anthropic"))
-  merged.model |> should.equal(Some("gpt-4o"))
   merged.system_prompt |> should.equal(Some("Be concise."))
 }
 
@@ -204,14 +191,14 @@ pub fn merge_combines_different_fields_test() {
 pub fn parse_config_toml_full_test() {
   let toml =
     "provider = \"anthropic\"
-model = \"claude-sonnet-4-20250514\"
+task_model = \"claude-haiku-4-5-20251001\"
 system_prompt = \"You are helpful.\"
 max_tokens = 2048"
   let result = config.parse_config_toml(toml)
   result |> should.be_ok
   let assert Ok(cfg) = result
   cfg.provider |> should.equal(Some("anthropic"))
-  cfg.model |> should.equal(Some("claude-sonnet-4-20250514"))
+  cfg.task_model |> should.equal(Some("claude-haiku-4-5-20251001"))
   cfg.system_prompt |> should.equal(Some("You are helpful."))
   cfg.max_tokens |> should.equal(Some(2048))
 }
@@ -221,7 +208,7 @@ pub fn parse_config_toml_partial_test() {
   result |> should.be_ok
   let assert Ok(cfg) = result
   cfg.provider |> should.equal(Some("openrouter"))
-  cfg.model |> should.equal(None)
+
   cfg.max_tokens |> should.equal(None)
 }
 
@@ -235,14 +222,6 @@ pub fn parse_config_toml_empty_document_test() {
 
 pub fn parse_config_toml_invalid_test() {
   config.parse_config_toml("= this is not valid toml !!!") |> should.be_error
-}
-
-pub fn parse_config_toml_model_only_test() {
-  let result = config.parse_config_toml("model = \"gpt-4o-mini\"")
-  result |> should.be_ok
-  let assert Ok(cfg) = result
-  cfg.model |> should.equal(Some("gpt-4o-mini"))
-  cfg.provider |> should.equal(None)
 }
 
 // ---------------------------------------------------------------------------
@@ -286,7 +265,6 @@ pub fn merge_new_fields_test() {
   let base =
     AppConfig(
       provider: None,
-      model: None,
       system_prompt: None,
       max_tokens: None,
       max_turns: Some(5),
@@ -302,7 +280,6 @@ pub fn merge_new_fields_test() {
   let override =
     AppConfig(
       provider: None,
-      model: None,
       system_prompt: None,
       max_tokens: None,
       max_turns: Some(10),
@@ -365,7 +342,6 @@ pub fn merge_model_fields_override_wins_test() {
   let base =
     AppConfig(
       provider: None,
-      model: None,
       system_prompt: None,
       max_tokens: None,
       max_turns: None,
@@ -381,7 +357,6 @@ pub fn merge_model_fields_override_wins_test() {
   let override =
     AppConfig(
       provider: None,
-      model: None,
       system_prompt: None,
       max_tokens: None,
       max_turns: None,
@@ -403,7 +378,6 @@ pub fn merge_model_fields_base_preserved_test() {
   let base =
     AppConfig(
       provider: None,
-      model: None,
       system_prompt: None,
       max_tokens: None,
       max_turns: None,
@@ -419,7 +393,6 @@ pub fn merge_model_fields_base_preserved_test() {
   let override =
     AppConfig(
       provider: None,
-      model: None,
       system_prompt: None,
       max_tokens: None,
       max_turns: None,
@@ -478,7 +451,6 @@ pub fn to_string_fully_set_test() {
   let cfg =
     AppConfig(
       provider: Some("anthropic"),
-      model: Some("claude-sonnet-4-20250514"),
       system_prompt: Some("You are helpful."),
       max_tokens: Some(1024),
       max_turns: Some(5),
@@ -494,7 +466,7 @@ pub fn to_string_fully_set_test() {
   let s = config.to_string(cfg)
   string.contains(s, "provider") |> should.be_true
   string.contains(s, "anthropic") |> should.be_true
-  string.contains(s, "model") |> should.be_true
+  string.contains(s, "task_model") |> should.be_true
   string.contains(s, "max_tokens") |> should.be_true
   string.contains(s, "log_verbose") |> should.be_true
 }
