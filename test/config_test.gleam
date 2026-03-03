@@ -27,6 +27,7 @@ pub fn default_has_all_none_test() {
   cfg.log_verbose |> should.equal(None)
   cfg.skills_dirs |> should.equal(None)
   cfg.write_anywhere |> should.equal(None)
+  cfg.gui |> should.equal(None)
 }
 
 // ---------------------------------------------------------------------------
@@ -93,6 +94,7 @@ pub fn merge_override_wins_test() {
       log_verbose: None,
       skills_dirs: None,
       write_anywhere: None,
+      gui: None,
     )
   let override =
     AppConfig(
@@ -108,6 +110,7 @@ pub fn merge_override_wins_test() {
       log_verbose: None,
       skills_dirs: None,
       write_anywhere: None,
+      gui: None,
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("openai"))
@@ -128,6 +131,7 @@ pub fn merge_base_preserved_when_override_none_test() {
       log_verbose: None,
       skills_dirs: None,
       write_anywhere: None,
+      gui: None,
     )
   let override =
     AppConfig(
@@ -143,6 +147,7 @@ pub fn merge_base_preserved_when_override_none_test() {
       log_verbose: None,
       skills_dirs: None,
       write_anywhere: None,
+      gui: None,
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("anthropic"))
@@ -163,6 +168,7 @@ pub fn merge_combines_different_fields_test() {
       log_verbose: None,
       skills_dirs: None,
       write_anywhere: None,
+      gui: None,
     )
   let override =
     AppConfig(
@@ -178,6 +184,7 @@ pub fn merge_combines_different_fields_test() {
       log_verbose: None,
       skills_dirs: None,
       write_anywhere: None,
+      gui: None,
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("anthropic"))
@@ -276,6 +283,7 @@ pub fn merge_new_fields_test() {
       log_verbose: None,
       skills_dirs: None,
       write_anywhere: None,
+      gui: None,
     )
   let override =
     AppConfig(
@@ -291,6 +299,7 @@ pub fn merge_new_fields_test() {
       log_verbose: None,
       skills_dirs: None,
       write_anywhere: None,
+      gui: None,
     )
   let merged = config.merge(base, override:)
   merged.max_turns |> should.equal(Some(10))
@@ -353,6 +362,7 @@ pub fn merge_model_fields_override_wins_test() {
       log_verbose: None,
       skills_dirs: None,
       write_anywhere: None,
+      gui: None,
     )
   let override =
     AppConfig(
@@ -368,6 +378,7 @@ pub fn merge_model_fields_override_wins_test() {
       log_verbose: None,
       skills_dirs: None,
       write_anywhere: None,
+      gui: None,
     )
   let merged = config.merge(base, override:)
   merged.task_model |> should.equal(Some("override-task"))
@@ -389,6 +400,7 @@ pub fn merge_model_fields_base_preserved_test() {
       log_verbose: None,
       skills_dirs: None,
       write_anywhere: None,
+      gui: None,
     )
   let override =
     AppConfig(
@@ -404,6 +416,7 @@ pub fn merge_model_fields_base_preserved_test() {
       log_verbose: None,
       skills_dirs: None,
       write_anywhere: None,
+      gui: None,
     )
   let merged = config.merge(base, override:)
   merged.task_model |> should.equal(Some("haiku"))
@@ -462,6 +475,7 @@ pub fn to_string_fully_set_test() {
       log_verbose: Some(True),
       skills_dirs: Some(["/tmp/skills"]),
       write_anywhere: None,
+      gui: None,
     )
   let s = config.to_string(cfg)
   string.contains(s, "provider") |> should.be_true
@@ -529,6 +543,75 @@ pub fn parse_config_toml_write_anywhere_true_test() {
   result |> should.be_ok
   let assert Ok(cfg) = result
   cfg.write_anywhere |> should.equal(Some(True))
+}
+
+// ---------------------------------------------------------------------------
+// gui config field
+// ---------------------------------------------------------------------------
+
+pub fn default_gui_is_none_test() {
+  let cfg = config.default()
+  cfg.gui |> should.equal(None)
+}
+
+pub fn from_args_gui_web_test() {
+  let cfg = config.from_args(["--gui", "web"])
+  cfg.gui |> should.equal(Some("web"))
+}
+
+pub fn from_args_gui_tui_test() {
+  let cfg = config.from_args(["--gui", "tui"])
+  cfg.gui |> should.equal(Some("tui"))
+}
+
+pub fn parse_config_toml_gui_test() {
+  let result = config.parse_config_toml("gui = \"web\"")
+  result |> should.be_ok
+  let assert Ok(cfg) = result
+  cfg.gui |> should.equal(Some("web"))
+}
+
+pub fn merge_gui_override_wins_test() {
+  let base =
+    AppConfig(
+      provider: None,
+      system_prompt: None,
+      max_tokens: None,
+      max_turns: None,
+      max_consecutive_errors: None,
+      max_context_messages: None,
+      task_model: None,
+      reasoning_model: None,
+      config_path: None,
+      log_verbose: None,
+      skills_dirs: None,
+      write_anywhere: None,
+      gui: Some("tui"),
+    )
+  let override =
+    AppConfig(
+      provider: None,
+      system_prompt: None,
+      max_tokens: None,
+      max_turns: None,
+      max_consecutive_errors: None,
+      max_context_messages: None,
+      task_model: None,
+      reasoning_model: None,
+      config_path: None,
+      log_verbose: None,
+      skills_dirs: None,
+      write_anywhere: None,
+      gui: Some("web"),
+    )
+  let merged = config.merge(base, override:)
+  merged.gui |> should.equal(Some("web"))
+}
+
+pub fn to_string_includes_gui_test() {
+  let cfg = config.from_args(["--gui", "web"])
+  let s = config.to_string(cfg)
+  string.contains(s, "gui: web") |> should.be_true
 }
 
 // ---------------------------------------------------------------------------

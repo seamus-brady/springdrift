@@ -7,6 +7,7 @@ import agents/planner
 import agents/researcher
 import config.{type AppConfig}
 import gleam/erlang/process
+import gleam/int
 import gleam/io
 import gleam/list
 import gleam/option
@@ -21,6 +22,7 @@ import simplifile
 import skills
 import storage
 import tui
+import web/gui as web_gui
 
 /// Exit the process with the given status code.
 @external(erlang, "erlang", "halt")
@@ -127,6 +129,9 @@ fn print_help() -> Nil {
   )
   io.println("")
   io.println("Session / config:")
+  io.println(
+    "  --gui <tui|web>           GUI mode: tui (default) or web (port 8080)",
+  )
   io.println("  --resume                  Resume previous session from disk")
   io.println("  --skills-dir <path>       Add a skills directory (repeatable)")
   io.println(
@@ -257,15 +262,32 @@ fn run(cfg: AppConfig) -> Nil {
 
   io.println("Mode     : cognitive (agents: planner, researcher, coder)")
 
-  // Start TUI
-  tui.start(
-    cognitive_subj,
-    notify,
-    p.name,
-    task_model,
-    reasoning_model,
-    initial_messages,
-  )
+  // Start GUI
+  let gui = option.unwrap(cfg.gui, "tui")
+  case gui {
+    "web" -> {
+      let port = 8080
+      io.println("Web GUI  : http://localhost:" <> int.to_string(port))
+      web_gui.start(
+        cognitive_subj,
+        notify,
+        p.name,
+        task_model,
+        reasoning_model,
+        initial_messages,
+        port,
+      )
+    }
+    _ ->
+      tui.start(
+        cognitive_subj,
+        notify,
+        p.name,
+        task_model,
+        reasoning_model,
+        initial_messages,
+      )
+  }
   let _ = option.map(sandbox_subj, sandbox.send_shutdown)
   Nil
 }

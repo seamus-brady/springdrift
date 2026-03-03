@@ -49,6 +49,11 @@ src/
 │                              request_human_input, read_skill
 ├── tui.gleam                  Alternate-screen TUI; Chat tab + Log tab with cycle rewind
 │
+├── web/                       Web chat GUI
+│   ├── gui.gleam              Mist HTTP + WebSocket server, cognitive bridge
+│   ├── html.gleam             Embedded HTML/CSS/JS chat page
+│   └── protocol.gleam         WebSocket JSON codec (ClientMessage/ServerMessage)
+│
 └── llm/
     ├── types.gleam            Shared types: Message, ContentBlock, LlmRequest/Response/Error, Tool
     ├── request.gleam          Pipe-friendly request builder
@@ -133,6 +138,7 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `log_verbose` | `--verbose` | False | Log full LLM payloads to cycle log |
 | `skills_dirs` | `--skills-dir` (repeatable) | `[~/.config/springdrift/skills, .skills]` | Skill directories |
 | `write_anywhere` | `--allow-write-anywhere` | False | Allow `write_file` outside CWD |
+| `gui` | `--gui` | tui | GUI mode: `tui` (terminal) or `web` (browser on port 8080) |
 
 ## Patterns to follow
 

@@ -36,6 +36,11 @@ max_consecutive_errors = 3
 # Sliding-window cap on context messages; oldest dropped first (default: unlimited)
 # max_context_messages = 100
 
+# ── GUI ──────────────────────────────────────────────────────────────────────
+
+# GUI mode: "tui" (terminal, default) or "web" (browser on port 8080)
+gui = "web"
+
 # ── Logging and filesystem ───────────────────────────────────────────────────
 
 # Log full LLM request/response payloads to the cycle log (default: false)

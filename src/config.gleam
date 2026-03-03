@@ -27,6 +27,9 @@
 ////   write_anywhere = false                # Allow write_file outside CWD
 ////   skills_dirs    = ["/path/to/skills"]  # Extra skill directories
 ////
+////   # GUI
+////   gui = "tui"                           # "tui" (default) or "web"
+////
 //// CLI flags always override config file values.
 //// --skills-dir is repeatable and appends to (rather than replaces) the list.
 
@@ -61,6 +64,8 @@ pub type AppConfig {
     skills_dirs: Option(List(String)),
     // Session
     config_path: Option(String),
+    // GUI
+    gui: Option(String),
   )
 }
 
@@ -93,6 +98,7 @@ pub fn default() -> AppConfig {
     write_anywhere: None,
     skills_dirs: None,
     config_path: None,
+    gui: None,
   )
 }
 
@@ -120,6 +126,7 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     write_anywhere: option.or(override_cfg.write_anywhere, base.write_anywhere),
     skills_dirs: option.or(override_cfg.skills_dirs, base.skills_dirs),
     config_path: option.or(override_cfg.config_path, base.config_path),
+    gui: option.or(override_cfg.gui, base.gui),
   )
 }
 
@@ -191,6 +198,8 @@ pub fn to_string(cfg: AppConfig) -> String {
     }),
     // Session
     option.map(cfg.config_path, fn(v) { "config_path: " <> v }),
+    // GUI
+    option.map(cfg.gui, fn(v) { "gui: " <> v }),
   ]
   |> list.filter_map(fn(x) { option.to_result(x, Nil) })
   |> string.join("\n")
@@ -252,6 +261,9 @@ fn do_parse_args(args: List(String), acc: AppConfig) -> AppConfig {
     // Session
     ["--config", path, ..rest] ->
       do_parse_args(rest, AppConfig(..acc, config_path: Some(path)))
+    // GUI
+    ["--gui", value, ..rest] ->
+      do_parse_args(rest, AppConfig(..acc, gui: Some(value)))
     [_, ..rest] -> do_parse_args(rest, acc)
   }
 }
@@ -300,6 +312,7 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     write_anywhere: get_bool("write_anywhere"),
     skills_dirs:,
     config_path: None,
+    gui: get_str("gui"),
   )
 }
 
