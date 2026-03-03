@@ -326,7 +326,7 @@ pub fn page() -> String {
 </head>
 <body>
 <div id=\"sidebar\">
-  <h1>springdrift</h1>
+  <h1>Springdrift</h1>
   <div class=\"sidebar-status\">
     <span class=\"dot\" id=\"status-dot\"></span>
     <span id=\"status\">connecting...</span>
