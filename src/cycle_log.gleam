@@ -1,3 +1,4 @@
+import dprime/types as dprime_types
 import gleam/dynamic/decode
 import gleam/json
 import gleam/list
@@ -160,6 +161,51 @@ pub fn log_tool_result(cycle_id: String, result: ToolResult) -> Nil {
       #("tool_use_id", json.string(tool_use_id)),
       #("success", json.bool(success)),
       #("content", json.string(content)),
+    ]),
+  )
+}
+
+pub fn log_dprime_evaluation(
+  cycle_id: String,
+  result: dprime_types.GateResult,
+) -> Nil {
+  let decision_str = case result.decision {
+    dprime_types.Accept -> "accept"
+    dprime_types.Modify -> "modify"
+    dprime_types.Reject -> "reject"
+  }
+  let layer_str = case result.layer {
+    dprime_types.Reactive -> "reactive"
+    dprime_types.Deliberative -> "deliberative"
+    dprime_types.MetaManagement -> "meta_management"
+  }
+  let forecasts_json =
+    json.array(result.forecasts, fn(f) {
+      json.object([
+        #("feature", json.string(f.feature_name)),
+        #("magnitude", json.int(f.magnitude)),
+        #("rationale", json.string(f.rationale)),
+      ])
+    })
+  append_entry(
+    json.object([
+      #("cycle_id", json.string(cycle_id)),
+      #("timestamp", json.string(get_datetime())),
+      #("type", json.string("dprime_evaluation")),
+      #("decision", json.string(decision_str)),
+      #("score", json.float(result.dprime_score)),
+      #("layer", json.string(layer_str)),
+      #("explanation", json.string(result.explanation)),
+      #("forecasts", forecasts_json),
+      #("canary_result", case result.canary_result {
+        None -> json.null()
+        Some(probe) ->
+          json.object([
+            #("hijack_detected", json.bool(probe.hijack_detected)),
+            #("leakage_detected", json.bool(probe.leakage_detected)),
+            #("details", json.string(probe.details)),
+          ])
+      }),
     ]),
   )
 }

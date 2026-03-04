@@ -45,6 +45,15 @@ src/
 │   ├── researcher.gleam       Research agent (files+web+builtin, max_turns=8)
 │   └── coder.gleam            Coding agent (files+shell+builtin, max_turns=10)
 │
+├── dprime/                    D' discrepancy-gated safety system
+│   ├── types.gleam            Feature, Forecast, GateDecision, GateResult, DprimeConfig/State
+│   ├── engine.gleam           Pure D' computation (importance weighting, scaling, gate decision)
+│   ├── scorer.gleam           LLM magnitude scoring with prompt building + JSON parsing
+│   ├── canary.gleam           Hijack + leakage probes (fail-closed, fresh tokens per request)
+│   ├── gate.gleam             Three-layer H-CogAff orchestrator (reactive → deliberative → meta)
+│   ├── config.gleam           D' config loading from JSON, sensible defaults
+│   └── meta.gleam             History ring buffer, stall detection, threshold tightening
+│
 ├── tools/builtin.gleam        Built-in tools: calculator, get_current_datetime,
 │                              request_human_input, read_skill
 ├── tui.gleam                  Alternate-screen TUI; Chat tab + Log tab with cycle rewind
@@ -139,6 +148,8 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `skills_dirs` | `--skills-dir` (repeatable) | `[~/.config/springdrift/skills, .skills]` | Skill directories |
 | `write_anywhere` | `--allow-write-anywhere` | False | Allow `write_file` outside CWD |
 | `gui` | `--gui` | tui | GUI mode: `tui` (terminal) or `web` (browser on port 8080) |
+| `dprime_enabled` | `--dprime` / `--no-dprime` | False | Enable D' safety evaluation before tool dispatch |
+| `dprime_config` | `--dprime-config` | built-in defaults | Path to D' config JSON file |
 
 ## Patterns to follow
 
@@ -198,6 +209,10 @@ max_context_messages   = 50          # Sliding-window cap (omit for unlimited)
 log_verbose    = false               # Log full LLM payloads to cycle log
 write_anywhere = false               # Allow write_file outside CWD
 skills_dirs    = ["/path/to/skills"] # Extra skill directories
+
+# D' safety system
+dprime_enabled = false               # Enable D' safety gate before tool dispatch
+dprime_config  = "dprime-config.json" # Path to D' config JSON (omit for built-in defaults)
 ```
 
 CLI flags override config files. `--skills-dir` is repeatable and appends to the list.

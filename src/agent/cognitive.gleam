@@ -3,17 +3,22 @@ import agent/types.{
   type AgentOutcome, type CognitiveMessage, type CognitiveReply,
   type CognitiveStatus, type Notification, type PendingTask, AgentComplete,
   AgentEvent, AgentFailure, AgentQuestionSource, AgentSuccess, AgentTask,
-  AgentWaiting, Classifying, CognitiveQuestion, CognitiveReply, Idle,
-  OwnToolWaiting, PendingAgent, PendingThink, QuestionForHuman, RestoreMessages,
-  SaveResult, SaveWarning, SetModel, ThinkComplete, ThinkError, ThinkWorkerDown,
-  Thinking, ToolCalling, UserAnswer, UserInput, WaitingForAgents, WaitingForUser,
+  AgentWaiting, Classifying, CognitiveQuestion, CognitiveReply, EvaluatingSafety,
+  Idle, OwnToolWaiting, PendingAgent, PendingThink, QuestionForHuman,
+  RestoreMessages, SafetyGateNotice, SaveResult, SaveWarning, SetModel,
+  ThinkComplete, ThinkError, ThinkWorkerDown, Thinking, ToolCalling, UserAnswer,
+  UserInput, WaitingForAgents, WaitingForUser,
 }
 import agent/worker
 import context
 import cycle_log
+import dprime/gate
+import dprime/meta
+import dprime/types as dprime_types
 import gleam/dict.{type Dict}
 import gleam/dynamic/decode
 import gleam/erlang/process.{type Subject}
+import gleam/float
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -54,6 +59,7 @@ pub type CognitiveState {
     reasoning_model: String,
     save_in_progress: Bool,
     save_pending: Option(List(llm_types.Message)),
+    dprime_state: Option(dprime_types.DprimeState),
   )
 }
 
@@ -74,6 +80,7 @@ pub fn start(
   notify: Subject(Notification),
   task_model: String,
   reasoning_model: String,
+  dprime_state: Option(dprime_types.DprimeState),
 ) -> Subject(CognitiveMessage) {
   // The cognitive loop gets agent tools + request_human_input
   let tools = [builtin.human_input_tool(), ..agent_tools]
@@ -100,6 +107,7 @@ pub fn start(
         reasoning_model:,
         save_in_progress: False,
         save_pending: None,
+        dprime_state:,
       )
     process.send(setup, self)
     cognitive_loop(state)
@@ -154,6 +162,8 @@ fn handle_message(
     }
     types.ClassifyComplete(cycle_id, complexity, text, reply_to) ->
       handle_classify_complete(state, cycle_id, complexity, text, reply_to)
+    types.SafetyGateComplete(task_id, result, resp, calls, reply_to) ->
+      handle_safety_gate_complete(state, task_id, result, resp, calls, reply_to)
   }
 }
 
@@ -328,7 +338,12 @@ fn handle_think_complete(
         }
         True -> {
           let calls = response.tool_calls(resp)
-          dispatch_tool_calls(state, task_id, resp, calls, rt)
+          // D' gate intercept: if enabled, evaluate before dispatch
+          case state.dprime_state {
+            None -> dispatch_tool_calls(state, task_id, resp, calls, rt)
+            Some(_dprime_st) ->
+              spawn_safety_gate(state, task_id, resp, calls, rt)
+          }
         }
       }
     }
@@ -938,6 +953,194 @@ fn do_spawn_save(
     )
   })
   Nil
+}
+
+// ---------------------------------------------------------------------------
+// Safety gate (D' evaluation)
+// ---------------------------------------------------------------------------
+
+fn spawn_safety_gate(
+  state: CognitiveState,
+  task_id: String,
+  resp: llm_types.LlmResponse,
+  calls: List(llm_types.ToolCall),
+  reply_to: Subject(CognitiveReply),
+) -> CognitiveState {
+  let assert Some(dprime_st) = state.dprime_state
+  let self = state.self
+  let provider = state.provider
+  let model = state.task_model
+
+  // Extract instruction text from tool calls
+  let instruction =
+    list.map(calls, fn(c) { c.name <> ": " <> c.input_json })
+    |> string.join("; ")
+
+  // Build context from recent messages
+  let ctx =
+    list.filter_map(state.messages, fn(m) {
+      case m.content {
+        [llm_types.TextContent(text:), ..] -> Ok(text)
+        _ -> Error(Nil)
+      }
+    })
+    |> list.take(3)
+    |> string.join("\n")
+
+  process.spawn_unlinked(fn() {
+    let result = gate.evaluate(instruction, ctx, dprime_st, provider, model)
+    process.send(
+      self,
+      types.SafetyGateComplete(
+        task_id:,
+        result:,
+        response: resp,
+        calls:,
+        reply_to:,
+      ),
+    )
+  })
+
+  CognitiveState(
+    ..state,
+    status: EvaluatingSafety(task_id:, response: resp, calls:, reply_to:),
+  )
+}
+
+fn handle_safety_gate_complete(
+  state: CognitiveState,
+  task_id: String,
+  result: dprime_types.GateResult,
+  resp: llm_types.LlmResponse,
+  calls: List(llm_types.ToolCall),
+  reply_to: Subject(CognitiveReply),
+) -> CognitiveState {
+  let cycle_id = option.unwrap(state.cycle_id, task_id)
+
+  // Log the D' evaluation
+  cycle_log.log_dprime_evaluation(cycle_id, result)
+
+  // Send notification
+  let decision_str = case result.decision {
+    dprime_types.Accept -> "ACCEPT"
+    dprime_types.Modify -> "MODIFY"
+    dprime_types.Reject -> "REJECT"
+  }
+  process.send(
+    state.notify,
+    SafetyGateNotice(
+      decision: decision_str,
+      score: result.dprime_score,
+      explanation: result.explanation,
+    ),
+  )
+
+  // Update D' state history
+  let new_dprime_state = case state.dprime_state {
+    None -> None
+    Some(ds) -> {
+      let updated = meta.record(ds, cycle_id, result, "")
+      let final_state = case meta.should_tighten(updated) {
+        True -> meta.tighten_thresholds(updated)
+        False -> updated
+      }
+      Some(final_state)
+    }
+  }
+  let state = CognitiveState(..state, dprime_state: new_dprime_state)
+
+  case result.decision {
+    dprime_types.Accept -> {
+      // Proceed normally
+      dispatch_tool_calls(state, task_id, resp, calls, reply_to)
+    }
+
+    dprime_types.Modify -> {
+      // Append modification instruction and continue thinking
+      let assistant_msg =
+        llm_types.Message(role: llm_types.Assistant, content: resp.content)
+      let modify_msg =
+        llm_types.Message(role: llm_types.User, content: [
+          llm_types.TextContent(
+            text: "[Safety system: D' evaluation flagged potential concerns (score: "
+            <> float.to_string(result.dprime_score)
+            <> "). "
+            <> result.explanation
+            <> ". Please reconsider your approach and proceed with additional caution.]",
+          ),
+        ])
+      let messages = list.append(state.messages, [assistant_msg, modify_msg])
+
+      let new_task_id = cycle_log.generate_uuid()
+      let req = build_request(state, messages)
+      case state.verbose {
+        True -> cycle_log.log_llm_request(cycle_id, req)
+        False -> Nil
+      }
+      worker.spawn_think(new_task_id, req, state.provider, state.self)
+
+      CognitiveState(
+        ..state,
+        messages:,
+        status: Thinking(task_id: new_task_id),
+        pending: dict.insert(
+          dict.delete(state.pending, task_id),
+          new_task_id,
+          PendingThink(
+            task_id: new_task_id,
+            model: state.model,
+            fallback_from: None,
+            reply_to:,
+          ),
+        ),
+      )
+    }
+
+    dprime_types.Reject -> {
+      // Generate error tool results for all calls and continue
+      let assistant_msg =
+        llm_types.Message(role: llm_types.Assistant, content: resp.content)
+      let error_blocks =
+        list.map(calls, fn(call) {
+          llm_types.ToolResultContent(
+            tool_use_id: call.id,
+            content: "[Safety system rejected: "
+              <> result.explanation
+              <> " (D' score: "
+              <> float.to_string(result.dprime_score)
+              <> ")]",
+            is_error: True,
+          )
+        })
+      let user_msg =
+        llm_types.Message(role: llm_types.User, content: error_blocks)
+      let messages = list.append(state.messages, [assistant_msg, user_msg])
+
+      let new_task_id = cycle_log.generate_uuid()
+      let req = build_request(state, messages)
+      case state.verbose {
+        True -> cycle_log.log_llm_request(cycle_id, req)
+        False -> Nil
+      }
+      worker.spawn_think(new_task_id, req, state.provider, state.self)
+
+      CognitiveState(
+        ..state,
+        messages:,
+        status: Thinking(task_id: new_task_id),
+        pending: dict.insert(
+          dict.delete(state.pending, task_id),
+          new_task_id,
+          PendingThink(
+            task_id: new_task_id,
+            model: state.model,
+            fallback_from: None,
+            reply_to:,
+          ),
+        ),
+      )
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

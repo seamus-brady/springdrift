@@ -412,6 +412,9 @@ pub fn page() -> String {
           addNotification('Using tool: ' + data.name);
         } else if (data.kind === 'save_warning') {
           addNotification(data.message);
+        } else if (data.kind === 'safety') {
+          var badge = data.decision === 'ACCEPT' ? '\\u2705' : data.decision === 'REJECT' ? '\\u274C' : '\\u26A0\\uFE0F';
+          addNotification(badge + ' D\\' ' + data.decision + ' (score: ' + data.score.toFixed(2) + ')');
         }
         break;
     }

@@ -215,6 +215,8 @@ fn notification_to_server_message(
     }
     agent_types.ToolCalling(name:) -> protocol.ToolNotification(name:)
     agent_types.SaveWarning(message:) -> protocol.SaveNotification(message:)
+    agent_types.SafetyGateNotice(decision:, score:, explanation:) ->
+      protocol.SafetyNotification(decision:, score:, explanation:)
   }
 }
 

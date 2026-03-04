@@ -32,6 +32,7 @@ pub type ServerMessage {
   Question(text: String, source: String)
   ToolNotification(name: String)
   SaveNotification(message: String)
+  SafetyNotification(decision: String, score: Float, explanation: String)
 }
 
 // ---------------------------------------------------------------------------
@@ -99,6 +100,16 @@ pub fn encode_server_message(msg: ServerMessage) -> String {
         #("type", json.string("notification")),
         #("kind", json.string("save_warning")),
         #("message", json.string(message)),
+      ])
+      |> json.to_string
+
+    SafetyNotification(decision:, score:, explanation:) ->
+      json.object([
+        #("type", json.string("notification")),
+        #("kind", json.string("safety")),
+        #("decision", json.string(decision)),
+        #("score", json.float(score)),
+        #("explanation", json.string(explanation)),
       ])
       |> json.to_string
   }

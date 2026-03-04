@@ -1,3 +1,4 @@
+import dprime/types as dprime_types
 import gleam/erlang/process.{type Subject}
 import gleam/option.{type Option}
 import llm/provider.{type Provider}
@@ -108,6 +109,13 @@ pub type CognitiveMessage {
     text: String,
     reply_to: Subject(CognitiveReply),
   )
+  SafetyGateComplete(
+    task_id: String,
+    result: dprime_types.GateResult,
+    response: LlmResponse,
+    calls: List(ToolCall),
+    reply_to: Subject(CognitiveReply),
+  )
 }
 
 pub type CognitiveReply {
@@ -128,6 +136,12 @@ pub type CognitiveStatus {
     reply_to: Subject(CognitiveReply),
   )
   WaitingForUser(question: String, context: WaitingContext)
+  EvaluatingSafety(
+    task_id: String,
+    response: LlmResponse,
+    calls: List(ToolCall),
+    reply_to: Subject(CognitiveReply),
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -171,4 +185,5 @@ pub type Notification {
   QuestionForHuman(question: String, source: QuestionSource)
   SaveWarning(message: String)
   ToolCalling(name: String)
+  SafetyGateNotice(decision: String, score: Float, explanation: String)
 }
