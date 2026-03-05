@@ -154,7 +154,7 @@ pub fn format_usage_none_test() {
 }
 
 // ---------------------------------------------------------------------------
-// decode_client_message — RequestLogData
+// decode_client_message — RequestLogData / RequestRewind
 // ---------------------------------------------------------------------------
 
 pub fn decode_request_log_data_test() {
@@ -162,6 +162,14 @@ pub fn decode_request_log_data_test() {
   let result = protocol.decode_client_message(json)
   result |> should.be_ok
   let assert Ok(protocol.RequestLogData) = result
+}
+
+pub fn decode_request_rewind_test() {
+  let json = "{\"type\": \"request_rewind\", \"index\": 3}"
+  let result = protocol.decode_client_message(json)
+  result |> should.be_ok
+  let assert Ok(protocol.RequestRewind(index:)) = result
+  index |> should.equal(3)
 }
 
 // ---------------------------------------------------------------------------

@@ -67,6 +67,9 @@ pub type AppConfig {
     config_path: Option(String),
     // GUI
     gui: Option(String),
+    // D' safety system
+    dprime_enabled: Option(Bool),
+    dprime_config: Option(String),
   )
 }
 
@@ -100,6 +103,8 @@ pub fn default() -> AppConfig {
     skills_dirs: None,
     config_path: None,
     gui: None,
+    dprime_enabled: None,
+    dprime_config: None,
   )
 }
 
@@ -128,6 +133,8 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     skills_dirs: option.or(override_cfg.skills_dirs, base.skills_dirs),
     config_path: option.or(override_cfg.config_path, base.config_path),
     gui: option.or(override_cfg.gui, base.gui),
+    dprime_enabled: option.or(override_cfg.dprime_enabled, base.dprime_enabled),
+    dprime_config: option.or(override_cfg.dprime_config, base.dprime_config),
   )
 }
 
@@ -202,6 +209,15 @@ pub fn to_string(cfg: AppConfig) -> String {
     option.map(cfg.config_path, fn(v) { "config_path: " <> v }),
     // GUI
     option.map(cfg.gui, fn(v) { "gui: " <> v }),
+    // D' safety system
+    option.map(cfg.dprime_enabled, fn(v) {
+      "dprime_enabled: "
+      <> case v {
+        True -> "true"
+        False -> "false"
+      }
+    }),
+    option.map(cfg.dprime_config, fn(v) { "dprime_config: " <> v }),
   ]
   |> list.filter_map(fn(x) { option.to_result(x, Nil) })
   |> string.join("\n")
@@ -266,6 +282,13 @@ fn do_parse_args(args: List(String), acc: AppConfig) -> AppConfig {
     // GUI
     ["--gui", value, ..rest] ->
       do_parse_args(rest, AppConfig(..acc, gui: Some(value)))
+    // D' safety system
+    ["--dprime", ..rest] ->
+      do_parse_args(rest, AppConfig(..acc, dprime_enabled: Some(True)))
+    ["--no-dprime", ..rest] ->
+      do_parse_args(rest, AppConfig(..acc, dprime_enabled: Some(False)))
+    ["--dprime-config", path, ..rest] ->
+      do_parse_args(rest, AppConfig(..acc, dprime_config: Some(path)))
     [_, ..rest] -> do_parse_args(rest, acc)
   }
 }
@@ -315,6 +338,8 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     skills_dirs:,
     config_path: None,
     gui: get_str("gui"),
+    dprime_enabled: get_bool("dprime_enabled"),
+    dprime_config: get_str("dprime_config"),
   )
 }
 

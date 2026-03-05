@@ -353,6 +353,34 @@ pub fn page() -> String {
     margin-top: 8px;
   }
 
+  /* ── Tab bar ──────────────────────────────────────── */
+  #tab-bar {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    background: var(--surface);
+  }
+  .tab-btn {
+    padding: 10px 20px;
+    border: none;
+    background: none;
+    color: var(--text-dim);
+    font-family: inherit;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+  .tab-content { display: none; flex: 1; flex-direction: column; min-height: 0; }
+  .tab-content.active { display: flex; }
+
   /* ── Log tab ──────────────────────────────────────── */
   #log-container {
     flex: 1;
@@ -537,6 +565,9 @@ pub fn page() -> String {
           addNotification('Using tool: ' + data.name);
         } else if (data.kind === 'save_warning') {
           addNotification(data.message);
+        } else if (data.kind === 'safety') {
+          var badge = data.decision === 'ACCEPT' ? '\\u2705' : data.decision === 'REJECT' ? '\\u274C' : '\\u26A0\\uFE0F';
+          addNotification(badge + ' D\\' ' + data.decision + ' (score: ' + data.score.toFixed(2) + ')');
         }
         break;
       case 'log_data':

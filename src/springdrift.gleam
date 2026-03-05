@@ -6,6 +6,7 @@ import agents/coder
 import agents/planner
 import agents/researcher
 import config.{type AppConfig}
+import dprime/config as dprime_config_mod
 import gleam/erlang/process
 import gleam/int
 import gleam/io
@@ -145,6 +146,17 @@ fn print_help() -> Nil {
   io.println("  --print-config            Print resolved config and exit")
   io.println("  --help, -h                Show this help")
   io.println("")
+  io.println("Safety (D' discrepancy gate):")
+  io.println(
+    "  --dprime                  Enable D' safety evaluation before tool dispatch",
+  )
+  io.println(
+    "  --no-dprime               Disable D' safety evaluation (default)",
+  )
+  io.println(
+    "  --dprime-config <path>    Path to D' config JSON (default: built-in)",
+  )
+  io.println("")
   io.println("Config files (checked in order; local overrides user config):")
   io.println("  .springdrift.toml")
   io.println("  ~/.config/springdrift/config.toml")
@@ -235,6 +247,18 @@ fn run(cfg: AppConfig) -> Nil {
   // Create notification channel
   let notify: process.Subject(agent_types.Notification) = process.new_subject()
 
+  // Load D' config if enabled
+  let dprime_state = case option.unwrap(cfg.dprime_enabled, False) {
+    False -> option.None
+    True -> {
+      let dprime_cfg = case cfg.dprime_config {
+        option.Some(path) -> dprime_config_mod.load(path)
+        option.None -> dprime_config_mod.default()
+      }
+      option.Some(dprime_config_mod.initial_state(dprime_cfg))
+    }
+  }
+
   // Start cognitive loop with empty registry (supervisor will register agents)
   let cognitive_subj =
     cognitive.start(
@@ -249,6 +273,7 @@ fn run(cfg: AppConfig) -> Nil {
       notify,
       task_model,
       reasoning_model,
+      dprime_state,
     )
 
   // Start supervisor and register agents via StartChild
@@ -264,6 +289,10 @@ fn run(cfg: AppConfig) -> Nil {
     }
   })
 
+  case dprime_state {
+    option.Some(_) -> io.println("D' Safety: enabled")
+    option.None -> Nil
+  }
   io.println("Mode     : cognitive (agents: planner, researcher, coder)")
 
   // Start GUI

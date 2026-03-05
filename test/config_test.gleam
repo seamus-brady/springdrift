@@ -28,6 +28,8 @@ pub fn default_has_all_none_test() {
   cfg.skills_dirs |> should.equal(None)
   cfg.write_anywhere |> should.equal(None)
   cfg.gui |> should.equal(None)
+  cfg.dprime_enabled |> should.equal(None)
+  cfg.dprime_config |> should.equal(None)
 }
 
 // ---------------------------------------------------------------------------
@@ -95,6 +97,8 @@ pub fn merge_override_wins_test() {
       skills_dirs: None,
       write_anywhere: None,
       gui: None,
+      dprime_enabled: None,
+      dprime_config: None,
     )
   let override =
     AppConfig(
@@ -111,6 +115,8 @@ pub fn merge_override_wins_test() {
       skills_dirs: None,
       write_anywhere: None,
       gui: None,
+      dprime_enabled: None,
+      dprime_config: None,
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("openai"))
@@ -132,6 +138,8 @@ pub fn merge_base_preserved_when_override_none_test() {
       skills_dirs: None,
       write_anywhere: None,
       gui: None,
+      dprime_enabled: None,
+      dprime_config: None,
     )
   let override =
     AppConfig(
@@ -148,6 +156,8 @@ pub fn merge_base_preserved_when_override_none_test() {
       skills_dirs: None,
       write_anywhere: None,
       gui: None,
+      dprime_enabled: None,
+      dprime_config: None,
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("anthropic"))
@@ -169,6 +179,8 @@ pub fn merge_combines_different_fields_test() {
       skills_dirs: None,
       write_anywhere: None,
       gui: None,
+      dprime_enabled: None,
+      dprime_config: None,
     )
   let override =
     AppConfig(
@@ -185,6 +197,8 @@ pub fn merge_combines_different_fields_test() {
       skills_dirs: None,
       write_anywhere: None,
       gui: None,
+      dprime_enabled: None,
+      dprime_config: None,
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("anthropic"))
@@ -284,6 +298,8 @@ pub fn merge_new_fields_test() {
       skills_dirs: None,
       write_anywhere: None,
       gui: None,
+      dprime_enabled: None,
+      dprime_config: None,
     )
   let override =
     AppConfig(
@@ -300,6 +316,8 @@ pub fn merge_new_fields_test() {
       skills_dirs: None,
       write_anywhere: None,
       gui: None,
+      dprime_enabled: None,
+      dprime_config: None,
     )
   let merged = config.merge(base, override:)
   merged.max_turns |> should.equal(Some(10))
@@ -363,6 +381,8 @@ pub fn merge_model_fields_override_wins_test() {
       skills_dirs: None,
       write_anywhere: None,
       gui: None,
+      dprime_enabled: None,
+      dprime_config: None,
     )
   let override =
     AppConfig(
@@ -379,6 +399,8 @@ pub fn merge_model_fields_override_wins_test() {
       skills_dirs: None,
       write_anywhere: None,
       gui: None,
+      dprime_enabled: None,
+      dprime_config: None,
     )
   let merged = config.merge(base, override:)
   merged.task_model |> should.equal(Some("override-task"))
@@ -401,6 +423,8 @@ pub fn merge_model_fields_base_preserved_test() {
       skills_dirs: None,
       write_anywhere: None,
       gui: None,
+      dprime_enabled: None,
+      dprime_config: None,
     )
   let override =
     AppConfig(
@@ -417,6 +441,8 @@ pub fn merge_model_fields_base_preserved_test() {
       skills_dirs: None,
       write_anywhere: None,
       gui: None,
+      dprime_enabled: None,
+      dprime_config: None,
     )
   let merged = config.merge(base, override:)
   merged.task_model |> should.equal(Some("haiku"))
@@ -476,6 +502,8 @@ pub fn to_string_fully_set_test() {
       skills_dirs: Some(["/tmp/skills"]),
       write_anywhere: None,
       gui: None,
+      dprime_enabled: None,
+      dprime_config: None,
     )
   let s = config.to_string(cfg)
   string.contains(s, "provider") |> should.be_true
@@ -587,6 +615,8 @@ pub fn merge_gui_override_wins_test() {
       skills_dirs: None,
       write_anywhere: None,
       gui: Some("tui"),
+      dprime_enabled: None,
+      dprime_config: None,
     )
   let override =
     AppConfig(
@@ -603,6 +633,8 @@ pub fn merge_gui_override_wins_test() {
       skills_dirs: None,
       write_anywhere: None,
       gui: Some("web"),
+      dprime_enabled: None,
+      dprime_config: None,
     )
   let merged = config.merge(base, override:)
   merged.gui |> should.equal(Some("web"))
@@ -629,4 +661,93 @@ max_tokens = 4096"
   let assert Ok(cfg) = result
   cfg.provider |> should.equal(Some("anthropic"))
   cfg.max_tokens |> should.equal(Some(4096))
+}
+
+// ---------------------------------------------------------------------------
+// D' safety config fields
+// ---------------------------------------------------------------------------
+
+pub fn from_args_dprime_flag_test() {
+  let cfg = config.from_args(["--dprime"])
+  cfg.dprime_enabled |> should.equal(Some(True))
+}
+
+pub fn from_args_no_dprime_flag_test() {
+  let cfg = config.from_args(["--no-dprime"])
+  cfg.dprime_enabled |> should.equal(Some(False))
+}
+
+pub fn from_args_dprime_config_flag_test() {
+  let cfg = config.from_args(["--dprime-config", "/tmp/dprime.json"])
+  cfg.dprime_config |> should.equal(Some("/tmp/dprime.json"))
+}
+
+pub fn from_args_dprime_combined_test() {
+  let cfg =
+    config.from_args(["--dprime", "--dprime-config", "/tmp/dprime.json"])
+  cfg.dprime_enabled |> should.equal(Some(True))
+  cfg.dprime_config |> should.equal(Some("/tmp/dprime.json"))
+}
+
+pub fn parse_config_toml_dprime_enabled_test() {
+  let result = config.parse_config_toml("dprime_enabled = true")
+  result |> should.be_ok
+  let assert Ok(cfg) = result
+  cfg.dprime_enabled |> should.equal(Some(True))
+}
+
+pub fn parse_config_toml_dprime_config_test() {
+  let result = config.parse_config_toml("dprime_config = \"/etc/dprime.json\"")
+  result |> should.be_ok
+  let assert Ok(cfg) = result
+  cfg.dprime_config |> should.equal(Some("/etc/dprime.json"))
+}
+
+pub fn merge_dprime_override_wins_test() {
+  let base =
+    AppConfig(
+      provider: None,
+      system_prompt: None,
+      max_tokens: None,
+      max_turns: None,
+      max_consecutive_errors: None,
+      max_context_messages: None,
+      task_model: None,
+      reasoning_model: None,
+      config_path: None,
+      log_verbose: None,
+      skills_dirs: None,
+      write_anywhere: None,
+      gui: None,
+      dprime_enabled: Some(False),
+      dprime_config: Some("/old.json"),
+    )
+  let override =
+    AppConfig(
+      provider: None,
+      system_prompt: None,
+      max_tokens: None,
+      max_turns: None,
+      max_consecutive_errors: None,
+      max_context_messages: None,
+      task_model: None,
+      reasoning_model: None,
+      config_path: None,
+      log_verbose: None,
+      skills_dirs: None,
+      write_anywhere: None,
+      gui: None,
+      dprime_enabled: Some(True),
+      dprime_config: Some("/new.json"),
+    )
+  let merged = config.merge(base, override:)
+  merged.dprime_enabled |> should.equal(Some(True))
+  merged.dprime_config |> should.equal(Some("/new.json"))
+}
+
+pub fn to_string_includes_dprime_test() {
+  let cfg = config.from_args(["--dprime", "--dprime-config", "/tmp/d.json"])
+  let s = config.to_string(cfg)
+  string.contains(s, "dprime_enabled: true") |> should.be_true
+  string.contains(s, "dprime_config: /tmp/d.json") |> should.be_true
 }

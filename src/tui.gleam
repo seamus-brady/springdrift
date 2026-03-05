@@ -248,6 +248,15 @@ fn handle_notification(
       )
     agent_types.ToolCalling(name:) ->
       continue_loop(TuiState(..state, spinner_label: name))
+    agent_types.SafetyGateNotice(decision:, score: _, explanation: _) -> {
+      let badge = case decision {
+        "ACCEPT" -> style.green("[D' ACCEPT]")
+        "MODIFY" -> style.yellow("[D' MODIFY]")
+        "REJECT" -> style.red("[D' REJECT]")
+        _ -> style.dim("[D' " <> decision <> "]")
+      }
+      continue_loop(TuiState(..state, notice: "  " <> badge))
+    }
   }
 }
 

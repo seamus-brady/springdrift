@@ -26,6 +26,7 @@ pub type ClientMessage {
   UserMessage(text: String)
   UserAnswer(text: String)
   RequestLogData
+  RequestRewind(index: Int)
 }
 
 pub type ServerMessage {
@@ -34,7 +35,22 @@ pub type ServerMessage {
   Question(text: String, source: String)
   ToolNotification(name: String)
   SaveNotification(message: String)
+  SafetyNotification(decision: String, score: Float, explanation: String)
   LogData(entries: List(slog.LogEntry))
+}
+
+pub type CycleDataJson {
+  CycleDataJson(
+    cycle_id: String,
+    timestamp: String,
+    human_input: String,
+    tool_names: List(String),
+    response_text: String,
+    input_tokens: Int,
+    output_tokens: Int,
+    thinking_tokens: Int,
+    complexity: String,
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -54,6 +70,10 @@ pub fn decode_client_message(json_string: String) -> Result(ClientMessage, Nil) 
         decode.success(UserAnswer(text:))
       }
       "request_log_data" -> decode.success(RequestLogData)
+      "request_rewind" -> {
+        use index <- decode.field("index", decode.int)
+        decode.success(RequestRewind(index:))
+      }
       _ -> decode.failure(UserMessage(""), "Unknown client message type")
     }
   }
@@ -103,6 +123,16 @@ pub fn encode_server_message(msg: ServerMessage) -> String {
         #("type", json.string("notification")),
         #("kind", json.string("save_warning")),
         #("message", json.string(message)),
+      ])
+      |> json.to_string
+
+    SafetyNotification(decision:, score:, explanation:) ->
+      json.object([
+        #("type", json.string("notification")),
+        #("kind", json.string("safety")),
+        #("decision", json.string(decision)),
+        #("score", json.float(score)),
+        #("explanation", json.string(explanation)),
       ])
       |> json.to_string
 
