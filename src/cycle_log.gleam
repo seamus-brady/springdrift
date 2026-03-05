@@ -165,6 +165,80 @@ pub fn log_tool_result(cycle_id: String, result: ToolResult) -> Nil {
   )
 }
 
+pub fn log_dprime_canary(
+  cycle_id: String,
+  hijack_detected: Bool,
+  leakage_detected: Bool,
+  details: String,
+) -> Nil {
+  append_entry(
+    json.object([
+      #("cycle_id", json.string(cycle_id)),
+      #("timestamp", json.string(get_datetime())),
+      #("type", json.string("dprime_canary")),
+      #("hijack_detected", json.bool(hijack_detected)),
+      #("leakage_detected", json.bool(leakage_detected)),
+      #("details", json.string(details)),
+    ]),
+  )
+}
+
+pub fn log_dprime_layer(
+  cycle_id: String,
+  layer: String,
+  decision: String,
+  score: Float,
+  explanation: String,
+) -> Nil {
+  append_entry(
+    json.object([
+      #("cycle_id", json.string(cycle_id)),
+      #("timestamp", json.string(get_datetime())),
+      #("type", json.string("dprime_layer")),
+      #("layer", json.string(layer)),
+      #("decision", json.string(decision)),
+      #("score", json.float(score)),
+      #("explanation", json.string(explanation)),
+    ]),
+  )
+}
+
+pub fn log_dprime_scorer_fallback(
+  cycle_id: String,
+  reason: String,
+  feature_count: Int,
+) -> Nil {
+  append_entry(
+    json.object([
+      #("cycle_id", json.string(cycle_id)),
+      #("timestamp", json.string(get_datetime())),
+      #("type", json.string("dprime_scorer_fallback")),
+      #("reason", json.string(reason)),
+      #("feature_count", json.int(feature_count)),
+    ]),
+  )
+}
+
+pub fn log_dprime_meta_stall(
+  cycle_id: String,
+  stall_detected: Bool,
+  window_size: Int,
+  original_decision: String,
+  final_decision: String,
+) -> Nil {
+  append_entry(
+    json.object([
+      #("cycle_id", json.string(cycle_id)),
+      #("timestamp", json.string(get_datetime())),
+      #("type", json.string("dprime_meta_stall")),
+      #("stall_detected", json.bool(stall_detected)),
+      #("window_size", json.int(window_size)),
+      #("original_decision", json.string(original_decision)),
+      #("final_decision", json.string(final_decision)),
+    ]),
+  )
+}
+
 pub fn log_dprime_evaluation(
   cycle_id: String,
   result: dprime_types.GateResult,

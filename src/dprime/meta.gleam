@@ -4,8 +4,8 @@
 //// and tightens thresholds when repeated borderline decisions are detected.
 
 import dprime/types.{
-  type DprimeState, type GateDecision, type GateResult,
-  DprimeHistoryEntry, DprimeState,
+  type DprimeState, type GateDecision, type GateResult, DprimeHistoryEntry,
+  DprimeState,
 }
 import gleam/int
 import gleam/list

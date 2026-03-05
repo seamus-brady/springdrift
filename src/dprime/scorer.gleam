@@ -4,6 +4,7 @@
 //// deviation magnitude (0-3) given an instruction and context.
 //// Falls back to all-zero forecasts on LLM error or parse failure.
 
+import cycle_log
 import dprime/types.{type Feature, type Forecast, Forecast}
 import gleam/dynamic/decode
 import gleam/int
@@ -23,6 +24,8 @@ pub fn score_features(
   features: List(Feature),
   provider: Provider,
   model: String,
+  cycle_id: String,
+  verbose: Bool,
 ) -> List(Forecast) {
   let prompt = build_scoring_prompt(instruction, context, features)
   let req =
@@ -32,15 +35,38 @@ pub fn score_features(
     )
     |> request.with_user_message(prompt)
 
+  case verbose {
+    True -> cycle_log.log_llm_request(cycle_id, req)
+    False -> Nil
+  }
+
   case provider.chat(req) {
     Ok(resp) -> {
+      case verbose {
+        True -> cycle_log.log_llm_response(cycle_id, resp)
+        False -> Nil
+      }
       let text = response.text(resp)
       case parse_forecasts(text) {
         Ok(forecasts) -> forecasts
-        Error(_) -> default_forecasts(features)
+        Error(_) -> {
+          cycle_log.log_dprime_scorer_fallback(
+            cycle_id,
+            "JSON parse failed",
+            list.length(features),
+          )
+          default_forecasts(features)
+        }
       }
     }
-    Error(_) -> default_forecasts(features)
+    Error(_) -> {
+      cycle_log.log_dprime_scorer_fallback(
+        cycle_id,
+        "LLM error",
+        list.length(features),
+      )
+      default_forecasts(features)
+    }
   }
 }
 

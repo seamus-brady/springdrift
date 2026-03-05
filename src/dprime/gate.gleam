@@ -6,6 +6,7 @@
 //// 3. Deliberative — full feature set; compute D' and gate
 //// 4. Meta-management — stall detection may escalate MODIFY → REJECT
 
+import cycle_log
 import dprime/canary
 import dprime/engine
 import dprime/meta
@@ -14,6 +15,7 @@ import dprime/types.{
   type DprimeState, type GateResult, Accept, Deliberative, GateResult,
   MetaManagement, Modify, Reactive, Reject,
 }
+import gleam/list
 import gleam/option.{type Option, None, Some}
 import llm/provider.{type Provider}
 
@@ -25,13 +27,29 @@ pub fn evaluate(
   state: DprimeState,
   provider: Provider,
   model: String,
+  cycle_id: String,
+  verbose: Bool,
 ) -> GateResult {
   // Layer 0: Canary probes (if enabled)
   case state.config.canary_enabled {
     True -> {
-      let probe_result = canary.run_probes(instruction, provider, model)
+      let probe_result =
+        canary.run_probes(instruction, provider, model, cycle_id, verbose)
+      cycle_log.log_dprime_canary(
+        cycle_id,
+        probe_result.hijack_detected,
+        probe_result.leakage_detected,
+        probe_result.details,
+      )
       case probe_result.hijack_detected || probe_result.leakage_detected {
-        True ->
+        True -> {
+          cycle_log.log_dprime_layer(
+            cycle_id,
+            "reactive",
+            "reject",
+            1.0,
+            "Canary probe failed: " <> probe_result.details,
+          )
           GateResult(
             decision: Reject,
             dprime_score: 1.0,
@@ -40,6 +58,7 @@ pub fn evaluate(
             layer: Reactive,
             canary_result: Some(probe_result),
           )
+        }
         False ->
           evaluate_reactive(
             instruction,
@@ -48,11 +67,22 @@ pub fn evaluate(
             provider,
             model,
             Some(probe_result),
+            cycle_id,
+            verbose,
           )
       }
     }
     False ->
-      evaluate_reactive(instruction, context, state, provider, model, None)
+      evaluate_reactive(
+        instruction,
+        context,
+        state,
+        provider,
+        model,
+        None,
+        cycle_id,
+        verbose,
+      )
   }
 }
 
@@ -67,6 +97,8 @@ fn evaluate_reactive(
   provider: Provider,
   model: String,
   canary_result: Option(types.ProbeResult),
+  cycle_id: String,
+  verbose: Bool,
 ) -> GateResult {
   let critical = engine.critical_features(state.config.features)
   case critical {
@@ -79,13 +111,30 @@ fn evaluate_reactive(
         provider,
         model,
         canary_result,
+        cycle_id,
+        verbose,
       )
     _ -> {
       let forecasts =
-        scorer.score_features(instruction, context, critical, provider, model)
+        scorer.score_features(
+          instruction,
+          context,
+          critical,
+          provider,
+          model,
+          cycle_id,
+          verbose,
+        )
       case engine.all_zero(forecasts) {
         // Fast accept — no critical concerns
-        True ->
+        True -> {
+          cycle_log.log_dprime_layer(
+            cycle_id,
+            "reactive",
+            "accept",
+            0.0,
+            "Fast accept: no critical feature discrepancies",
+          )
           GateResult(
             decision: Accept,
             dprime_score: 0.0,
@@ -94,11 +143,19 @@ fn evaluate_reactive(
             layer: Reactive,
             canary_result:,
           )
+        }
         False -> {
           let score =
             engine.compute_dprime(forecasts, critical, state.config.tiers)
           case score >=. state.current_reject_threshold {
-            True ->
+            True -> {
+              cycle_log.log_dprime_layer(
+                cycle_id,
+                "reactive",
+                "reject",
+                score,
+                "Reactive reject: critical feature score exceeds threshold",
+              )
               GateResult(
                 decision: Reject,
                 dprime_score: score,
@@ -107,6 +164,7 @@ fn evaluate_reactive(
                 layer: Reactive,
                 canary_result:,
               )
+            }
             False ->
               // Critical features flagged but not rejected → full deliberative
               evaluate_deliberative(
@@ -116,6 +174,8 @@ fn evaluate_reactive(
                 provider,
                 model,
                 canary_result,
+                cycle_id,
+                verbose,
               )
           }
         }
@@ -135,6 +195,8 @@ fn evaluate_deliberative(
   provider: Provider,
   model: String,
   canary_result: Option(types.ProbeResult),
+  cycle_id: String,
+  verbose: Bool,
 ) -> GateResult {
   let forecasts =
     scorer.score_features(
@@ -143,6 +205,8 @@ fn evaluate_deliberative(
       state.config.features,
       provider,
       model,
+      cycle_id,
+      verbose,
     )
   let score =
     engine.compute_dprime(forecasts, state.config.features, state.config.tiers)
@@ -178,6 +242,37 @@ fn evaluate_deliberative(
       }
   }
 
+  // Log meta-management check when decision was Modify
+  case decision {
+    Modify -> {
+      let stall_detected = final_decision != decision
+      let original_str = decision_to_string(decision)
+      let final_str = decision_to_string(final_decision)
+      cycle_log.log_dprime_meta_stall(
+        cycle_id,
+        stall_detected,
+        list.length(state.history),
+        original_str,
+        final_str,
+      )
+    }
+    _ -> Nil
+  }
+
+  // Log the layer decision
+  let layer_str = case layer {
+    Deliberative -> "deliberative"
+    MetaManagement -> "meta_management"
+    Reactive -> "reactive"
+  }
+  cycle_log.log_dprime_layer(
+    cycle_id,
+    layer_str,
+    decision_to_string(final_decision),
+    score,
+    explanation,
+  )
+
   GateResult(
     decision: final_decision,
     dprime_score: score,
@@ -186,4 +281,12 @@ fn evaluate_deliberative(
     layer:,
     canary_result:,
   )
+}
+
+fn decision_to_string(decision: types.GateDecision) -> String {
+  case decision {
+    Accept -> "accept"
+    Modify -> "modify"
+    Reject -> "reject"
+  }
 }

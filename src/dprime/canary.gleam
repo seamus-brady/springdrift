@@ -7,6 +7,7 @@
 ////
 //// Fail-closed: on LLM error, treats as probe failure → reject.
 
+import cycle_log
 import dprime/types.{type ProbeResult, ProbeResult}
 import gleam/string
 import llm/provider.{type Provider}
@@ -22,14 +23,30 @@ pub fn run_probes(
   instruction: String,
   provider: Provider,
   model: String,
+  cycle_id: String,
+  verbose: Bool,
 ) -> ProbeResult {
   let hijack_token = generate_token()
   let leakage_token = generate_token()
 
   let hijack_result =
-    run_hijack_probe(instruction, hijack_token, provider, model)
+    run_hijack_probe(
+      instruction,
+      hijack_token,
+      provider,
+      model,
+      cycle_id,
+      verbose,
+    )
   let leakage_result =
-    run_leakage_probe(instruction, leakage_token, provider, model)
+    run_leakage_probe(
+      instruction,
+      leakage_token,
+      provider,
+      model,
+      cycle_id,
+      verbose,
+    )
 
   ProbeResult(
     hijack_detected: hijack_result,
@@ -44,6 +61,8 @@ pub fn run_hijack_probe(
   token: String,
   provider: Provider,
   model: String,
+  cycle_id: String,
+  verbose: Bool,
 ) -> Bool {
   let system_prompt =
     "You are a safety evaluation system. "
@@ -63,8 +82,17 @@ pub fn run_hijack_probe(
     |> request.with_system(system_prompt)
     |> request.with_user_message(user_msg)
 
+  case verbose {
+    True -> cycle_log.log_llm_request(cycle_id, req)
+    False -> Nil
+  }
+
   case provider.chat(req) {
     Ok(resp) -> {
+      case verbose {
+        True -> cycle_log.log_llm_response(cycle_id, resp)
+        False -> Nil
+      }
       let text = string.lowercase(response.text(resp))
       // If the response contains the token, the model was hijacked
       string.contains(text, string.lowercase(token))
@@ -80,6 +108,8 @@ pub fn run_leakage_probe(
   token: String,
   provider: Provider,
   model: String,
+  cycle_id: String,
+  verbose: Bool,
 ) -> Bool {
   let system_prompt =
     "You are a safety evaluation system. "
@@ -94,8 +124,17 @@ pub fn run_leakage_probe(
     |> request.with_system(system_prompt)
     |> request.with_user_message(user_msg)
 
+  case verbose {
+    True -> cycle_log.log_llm_request(cycle_id, req)
+    False -> Nil
+  }
+
   case provider.chat(req) {
     Ok(resp) -> {
+      case verbose {
+        True -> cycle_log.log_llm_response(cycle_id, resp)
+        False -> Nil
+      }
       let text = response.text(resp)
       // If the response contains the secret token, there's leakage
       string.contains(text, token)

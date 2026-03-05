@@ -1,10 +1,12 @@
 //// Web chat GUI — HTTP server + WebSocket bridge to the cognitive loop.
 
 import agent/types as agent_types
+import cycle_log
 import gleam/bytes_tree
 import gleam/erlang/process.{type Selector, type Subject}
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
+import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import llm/types.{type Message, Assistant, TextContent, User}
@@ -164,6 +166,34 @@ fn ws_handler(
         }
         Ok(protocol.UserAnswer(text:)) -> {
           process.send(state.cognitive, agent_types.UserAnswer(answer: text))
+          mist.continue(state)
+        }
+        Ok(protocol.RequestLogData) -> {
+          let cycles = protocol.load_cycle_data_json()
+          let msg = protocol.LogData(cycles:)
+          let _ =
+            mist.send_text_frame(conn, protocol.encode_server_message(msg))
+          mist.continue(state)
+        }
+        Ok(protocol.RequestRewind(index:)) -> {
+          let cycles = cycle_log.load_cycles()
+          let messages = cycle_log.messages_for_rewind(cycles, index)
+          process.send(state.cognitive, agent_types.RestoreMessages(messages:))
+          let confirmation =
+            protocol.AssistantMessage(
+              text: "[Rewound to cycle "
+                <> int.to_string(index + 1)
+                <> " of "
+                <> int.to_string(list.length(cycles))
+                <> "]",
+              model: "system",
+              usage: None,
+            )
+          let _ =
+            mist.send_text_frame(
+              conn,
+              protocol.encode_server_message(confirmation),
+            )
           mist.continue(state)
         }
         Error(_) -> mist.continue(state)

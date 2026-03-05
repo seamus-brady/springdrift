@@ -970,6 +970,8 @@ fn spawn_safety_gate(
   let self = state.self
   let provider = state.provider
   let model = state.task_model
+  let cycle_id = option.unwrap(state.cycle_id, task_id)
+  let verbose = state.verbose
 
   // Extract instruction text from tool calls
   let instruction =
@@ -988,7 +990,16 @@ fn spawn_safety_gate(
     |> string.join("\n")
 
   process.spawn_unlinked(fn() {
-    let result = gate.evaluate(instruction, ctx, dprime_st, provider, model)
+    let result =
+      gate.evaluate(
+        instruction,
+        ctx,
+        dprime_st,
+        provider,
+        model,
+        cycle_id,
+        verbose,
+      )
     process.send(
       self,
       types.SafetyGateComplete(

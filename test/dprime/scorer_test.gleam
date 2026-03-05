@@ -174,6 +174,8 @@ pub fn score_features_with_mock_provider_test() {
       features,
       provider,
       "mock-model",
+      "test-cycle",
+      False,
     )
   list.length(forecasts) |> should.equal(1)
   let assert [f] = forecasts
@@ -192,7 +194,15 @@ pub fn score_features_falls_back_on_error_test() {
   ]
   let provider = mock.provider_with_error("API down")
   let forecasts =
-    scorer.score_features("test", "", features, provider, "mock-model")
+    scorer.score_features(
+      "test",
+      "",
+      features,
+      provider,
+      "mock-model",
+      "test-cycle",
+      False,
+    )
   list.length(forecasts) |> should.equal(1)
   let assert [f] = forecasts
   f.magnitude |> should.equal(0)
@@ -209,7 +219,15 @@ pub fn score_features_falls_back_on_invalid_response_test() {
   ]
   let provider = mock.provider_with_text("I can't evaluate that")
   let forecasts =
-    scorer.score_features("test", "", features, provider, "mock-model")
+    scorer.score_features(
+      "test",
+      "",
+      features,
+      provider,
+      "mock-model",
+      "test-cycle",
+      False,
+    )
   list.length(forecasts) |> should.equal(1)
   list.all(forecasts, fn(f) { f.magnitude == 0 }) |> should.be_true
 }
