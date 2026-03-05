@@ -84,6 +84,36 @@ pub fn page() -> String {
     min-width: 0;
   }
 
+  /* ── Tab bar ──────────────────────────────────────── */
+  #tab-bar {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    padding: 0 24px;
+  }
+  .tab-btn {
+    padding: 10px 20px;
+    border: none;
+    background: none;
+    font-family: inherit;
+    font-size: 15px;
+    color: var(--text-dim);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    font-weight: 600;
+  }
+
+  /* ── Tab content ─────────────────────────────────── */
+  .tab-content { display: none; flex: 1; flex-direction: column; min-height: 0; }
+  .tab-content.active { display: flex; }
+
   /* ── Hidden scrollbar ────────────────────────────── */
   #messages {
     scrollbar-width: none;
@@ -322,6 +352,45 @@ pub fn page() -> String {
     color: var(--text-dim);
     margin-top: 8px;
   }
+
+  /* ── Log tab ──────────────────────────────────────── */
+  #log-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 24px;
+    font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+    font-size: 13px;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  #log-container::-webkit-scrollbar { display: none; }
+  .log-entry {
+    padding: 3px 0;
+    display: flex;
+    gap: 8px;
+    line-height: 1.4;
+  }
+  .log-time { color: var(--text-dim); white-space: nowrap; }
+  .log-level { font-weight: 600; white-space: nowrap; min-width: 36px; }
+  .log-level.debug { color: var(--text-dim); }
+  .log-level.info { color: #007aff; }
+  .log-level.warn { color: #ff9500; }
+  .log-level.error { color: #ff3b30; }
+  .log-mod { color: var(--text-secondary); white-space: nowrap; }
+  .log-msg { color: var(--text); word-break: break-all; }
+  .log-cycle { color: var(--text-dim); white-space: nowrap; }
+  #log-refresh {
+    padding: 6px 14px;
+    margin: 12px 24px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+  #log-refresh:hover { background: var(--code-bg); }
 </style>
 </head>
 <body>
@@ -333,13 +402,23 @@ pub fn page() -> String {
   </div>
 </div>
 <div id=\"main\">
-  <div id=\"messages\"></div>
-  <div id=\"input-area\">
-    <form id=\"chat-form\">
-      <input id=\"chat-input\" type=\"text\" placeholder=\"Message springdrift...\" autocomplete=\"off\" autofocus>
-      <button type=\"submit\" aria-label=\"Send\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><line x1=\"22\" y1=\"2\" x2=\"11\" y2=\"13\"/><polygon points=\"22 2 15 22 11 13 2 9 22 2\"/></svg></button>
-    </form>
-    <div id=\"input-hint\">Press Enter to send</div>
+  <div id=\"tab-bar\">
+    <button class=\"tab-btn active\" data-tab=\"chat\">Chat</button>
+    <button class=\"tab-btn\" data-tab=\"log\">Log</button>
+  </div>
+  <div id=\"chat-tab\" class=\"tab-content active\">
+    <div id=\"messages\"></div>
+    <div id=\"input-area\">
+      <form id=\"chat-form\">
+        <input id=\"chat-input\" type=\"text\" placeholder=\"Message springdrift...\" autocomplete=\"off\" autofocus>
+        <button type=\"submit\" aria-label=\"Send\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><line x1=\"22\" y1=\"2\" x2=\"11\" y2=\"13\"/><polygon points=\"22 2 15 22 11 13 2 9 22 2\"/></svg></button>
+      </form>
+      <div id=\"input-hint\">Press Enter to send</div>
+    </div>
+  </div>
+  <div id=\"log-tab\" class=\"tab-content\">
+    <button id=\"log-refresh\">Refresh</button>
+    <div id=\"log-container\">Loading...</div>
   </div>
 </div>
 <script>
@@ -349,6 +428,7 @@ pub fn page() -> String {
   const input = document.getElementById('chat-input');
   const status = document.getElementById('status');
   const statusDot = document.getElementById('status-dot');
+  const logContainer = document.getElementById('log-container');
   let ws = null;
   let thinkingEl = null;
   let questionEl = null;
@@ -366,6 +446,51 @@ pub fn page() -> String {
     } catch(e) {
       return escapeHtml(text);
     }
+  }
+
+  // ── Tab switching ──
+  document.querySelectorAll('.tab-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+      document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
+      btn.classList.add('active');
+      var tabId = btn.getAttribute('data-tab') + '-tab';
+      document.getElementById(tabId).classList.add('active');
+      if (btn.getAttribute('data-tab') === 'log') {
+        requestLogData();
+      }
+    });
+  });
+
+  document.getElementById('log-refresh').addEventListener('click', requestLogData);
+
+  function requestLogData() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'request_log_data' }));
+    }
+  }
+
+  function renderLogEntries(entries) {
+    if (!entries || entries.length === 0) {
+      logContainer.innerHTML = '<div style=\"color:var(--text-dim);padding:20px;\">No log entries today.</div>';
+      return;
+    }
+    var html = '';
+    entries.forEach(function(e) {
+      var time = (e.timestamp || '').substring(11, 19);
+      var lvl = e.level || 'debug';
+      var badge = lvl.toUpperCase().substring(0, 3);
+      var cycleHtml = e.cycle_id ? '<span class=\"log-cycle\">' + escapeHtml(e.cycle_id.substring(0, 8)) + '</span>' : '';
+      html += '<div class=\"log-entry\">' +
+        '<span class=\"log-time\">' + escapeHtml(time) + '</span>' +
+        '<span class=\"log-level ' + lvl + '\">' + badge + '</span>' +
+        '<span class=\"log-mod\">' + escapeHtml(e.module + '::' + e.function) + '</span>' +
+        '<span class=\"log-msg\">' + escapeHtml(e.message) + '</span>' +
+        cycleHtml +
+        '</div>';
+    });
+    logContainer.innerHTML = html;
+    logContainer.scrollTop = logContainer.scrollHeight;
   }
 
   function connect() {
@@ -413,6 +538,9 @@ pub fn page() -> String {
         } else if (data.kind === 'save_warning') {
           addNotification(data.message);
         }
+        break;
+      case 'log_data':
+        renderLogEntries(data.entries);
         break;
     }
   }

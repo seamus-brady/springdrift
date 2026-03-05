@@ -1432,3 +1432,91 @@ The cognitive loop already handles `AgentQuestion` → `QuestionForHuman` notifi
 | `fallback_from: Option(String)` in `PendingThink` | Enables response prefixing without extra state in CognitiveState. The pending task already tracks per-request context. |
 | Auto-switch (remove prompt_on_complex) | The model switch prompt interrupted the user flow for minimal benefit. Auto-switching with fallback is a better UX. |
 | 500 as retryable | Internal server errors from API providers are transient. Not retrying them would surface unnecessary errors to users. |
+
+---
+
+### System-Level Logger + Web/TUI Log Tabs (Mar 5)
+
+**Files added:** `src/slog.gleam`, `test/slog_test.gleam`
+
+**Files modified:** `src/springdrift_ffi.erl`, `src/springdrift.gleam`,
+`src/agent/cognitive.gleam`, `src/agent/framework.gleam`, `src/agent/worker.gleam`,
+`src/agent/supervisor.gleam`, `src/tools/builtin.gleam`, `src/tools/files.gleam`,
+`src/tools/web.gleam`, `src/tools/shell.gleam`, `src/query_complexity.gleam`,
+`src/context.gleam`, `src/skills.gleam`, `src/storage.gleam`, `src/config.gleam`,
+`src/web/gui.gleam`, `src/web/protocol.gleam`, `src/web/html.gleam`, `src/tui.gleam`,
+`test/web/protocol_test.gleam`
+
+#### System logger (`slog`)
+
+Added a ubiquitous system-level logger with three output sinks:
+
+1. **Date-rotated JSON-L files** — `logs/YYYY-MM-DD.jsonl`. Each entry is a JSON
+   object with `timestamp`, `level`, `module`, `function`, `message`, `cycle_id`.
+   Uses `simplifile.append` (same pattern as `cycle_log.gleam`).
+
+2. **Optional stderr** — when `--verbose` is set, `slog.init(True)` stores the flag
+   in `persistent_term` via FFI. Each log call checks the flag and writes a formatted
+   one-liner to stderr. Uses stderr (not stdout) to avoid corrupting TUI
+   alternate-screen output.
+
+3. **UI log tabs** — `slog.load_entries()` reads today's log file and parses entries
+   back into `LogEntry` records. Used by both TUI and Web GUI.
+
+Named `slog` instead of `logger` to avoid collision with Erlang's built-in `logger`
+module. The `LogLevel` type uses `LogError` (not `Error`) to avoid shadowing Gleam's
+`Result.Error` constructor.
+
+FFI additions to `springdrift_ffi.erl`:
+- `log_init/1` — stores stderr-enabled flag in `persistent_term`
+- `log_stdout_enabled/0` — reads the flag
+- `log_stderr/1` — writes formatted text to stderr via `io:format(standard_error, ...)`
+
+#### Module instrumentation
+
+Every major module now imports `slog` and logs at key decision points:
+
+- **cognitive.gleam** — message dispatch, user input, classify result, model selection,
+  think errors, agent events, save operations
+- **framework.gleam** — agent start, react turn number, tool execution
+- **worker.gleam** — think spawn (model + task_id)
+- **supervisor.gleam** — start, child lifecycle, restart attempts
+- **tools/** — each tool logs its name and key input parameters
+- **query_complexity.gleam** — input length, classification result
+- **context.gleam** — trim operation (before/after counts)
+- **skills.gleam** — discovery (dirs searched, skills found)
+- **storage.gleam** — save/load operations with message counts
+- **config.gleam** — config resolution
+
+All log calls use `None` for `cycle_id` unless a cycle context is available (cognitive
+loop passes `Some(state.cycle_id)`).
+
+#### TUI log tab overhaul
+
+Replaced the cycle-data log tab with system log entries:
+
+- `TuiState` fields: `log_cycles → log_entries`, `log_selected → log_scroll`
+- `switch_tab` calls `slog.load_entries()` instead of `cycle_log.load_cycles()`
+- `render_log` displays: timestamp (HH:MM:SS), colored level badge (dim=Debug,
+  cyan=Info, yellow=Warn, red=Error), module::function, message, optional cycle ID
+- Navigation: ↑/↓ scrolls by 3 lines (no per-cycle selection/rewind)
+
+#### Web GUI log tab
+
+Added a second tab to the web interface:
+
+- **Protocol**: `RequestLogData` client message, `LogData(entries)` server message
+- **gui.gleam**: handler loads entries and sends `LogData` back over WebSocket
+- **html.gleam**: tab bar (Chat/Log), log container with refresh button, JS for
+  rendering log entries as a table with level-colored badges
+
+#### Design decisions
+
+| Decision | Rationale |
+|---|---|
+| `slog` not `logger` | Erlang has a built-in `logger` module; Gleam compiles to Erlang so the names would collide. |
+| `LogError` not `Error` | Gleam's `Error` constructor from `Result` is used pervasively; shadowing it causes type errors in pattern matches. |
+| stderr not stdout | TUI alternate-screen mode intercepts stdout. stderr bypasses the TUI and shows up in the terminal. |
+| `persistent_term` for flag | Global read-heavy flag checked on every log call. `persistent_term` is optimized for exactly this: very fast reads, rare writes. |
+| JSON-L (not structured logs) | Consistent with `cycle_log.gleam` pattern. One entry per line, easy to grep, easy to parse back. |
+| `load_entries()` reads full file | Simple and sufficient for single-day files. No index or database needed. |

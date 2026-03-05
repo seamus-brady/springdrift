@@ -5,6 +5,7 @@ import agent/types.{
 import cycle_log
 import gleam/dynamic/decode
 import gleam/erlang/process.{type ExitMessage, type Pid, type Subject}
+import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
@@ -12,6 +13,7 @@ import llm/request
 import llm/response
 import llm/retry
 import llm/types as llm_types
+import slog
 
 // ---------------------------------------------------------------------------
 // Internal types
@@ -40,6 +42,7 @@ type AgentEvent {
 pub fn start_agent(
   spec: AgentSpec,
 ) -> Result(#(Pid, Subject(types.AgentTask)), String) {
+  slog.info("framework", "start_agent", "Starting agent: " <> spec.name, None)
   let setup = process.new_subject()
   let pid =
     process.spawn(fn() {
@@ -151,6 +154,12 @@ fn do_react(
   cycle_id: String,
   cognitive: Subject(CognitiveMessage),
 ) -> Result(String, String) {
+  slog.debug(
+    "framework",
+    "do_react",
+    spec.name <> " turn " <> int.to_string(spec.max_turns - remaining + 1),
+    Some(cycle_id),
+  )
   case remaining {
     0 -> Error("max turns reached")
     _ ->
@@ -207,6 +216,12 @@ fn execute_tool(
   spec: AgentSpec,
   cognitive: Subject(CognitiveMessage),
 ) -> llm_types.ToolResult {
+  slog.debug(
+    "framework",
+    "execute_tool",
+    spec.name <> " -> " <> call.name,
+    None,
+  )
   case call.name {
     "request_human_input" -> {
       let question = parse_human_input_question(call.input_json)

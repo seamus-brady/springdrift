@@ -8,6 +8,7 @@ import llm/types.{
   type Tool, type ToolCall, type ToolResult, ToolFailure, ToolSuccess,
 }
 import sandbox.{type SandboxMessage, RunCommand}
+import slog
 
 // ---------------------------------------------------------------------------
 // Tool definitions
@@ -34,6 +35,7 @@ pub fn execute(
   call: ToolCall,
   sandbox: Option(process.Subject(SandboxMessage)),
 ) -> ToolResult {
+  slog.debug("shell", "execute", "tool=" <> call.name, None)
   case call.name {
     "run_shell" -> run_shell(call, sandbox)
     _ -> ToolFailure(tool_use_id: call.id, error: "Unknown tool: " <> call.name)

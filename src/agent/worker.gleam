@@ -2,10 +2,12 @@ import agent/types.{
   type CognitiveMessage, ThinkComplete, ThinkError, ThinkWorkerDown,
 }
 import gleam/erlang/process
+import gleam/option
 import llm/provider.{type Provider}
 import llm/response
 import llm/retry
 import llm/types as llm_types
+import slog
 
 /// Spawn an unlinked think worker that makes an LLM call and sends the result
 /// back to the cognitive loop. A monitor forwarder detects crashes.
@@ -15,6 +17,12 @@ pub fn spawn_think(
   provider: Provider,
   cognitive_self: process.Subject(CognitiveMessage),
 ) -> Nil {
+  slog.debug(
+    "worker",
+    "spawn_think",
+    "model=" <> req.model <> " task=" <> task_id,
+    option.Some(task_id),
+  )
   let pid =
     process.spawn_unlinked(fn() {
       case retry.call_with_retry(req, provider, 3, 500) {

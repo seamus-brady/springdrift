@@ -2,12 +2,14 @@ import gleam/dynamic/decode
 import gleam/float
 import gleam/int
 import gleam/json
+import gleam/option
 import gleam/string
 import llm/tool
 import llm/types.{
   type Tool, type ToolCall, type ToolResult, ToolFailure, ToolSuccess,
 }
 import simplifile
+import slog
 
 // ---------------------------------------------------------------------------
 // Tool definitions
@@ -64,6 +66,7 @@ pub fn read_skill_tool() -> Tool {
 // ---------------------------------------------------------------------------
 
 pub fn execute(call: ToolCall) -> ToolResult {
+  slog.debug("builtin", "execute", "tool=" <> call.name, option.None)
   case call.name {
     "calculator" -> run_calculator(call)
     "get_current_datetime" ->

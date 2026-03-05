@@ -1,5 +1,4 @@
 import agent/types as agent_types
-import cycle_log.{type CycleData}
 import etch/command
 import etch/stdout
 import etch/style
@@ -13,6 +12,7 @@ import gleam/string
 import llm/types.{
   type Message, type Usage, Assistant, Message, TextContent, User,
 }
+import slog.{type LogEntry}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -55,8 +55,8 @@ type TuiState {
     spinner_frame: Int,
     spinner_label: String,
     tab: Tab,
-    log_cycles: List(CycleData),
-    log_selected: Int,
+    log_entries: List(LogEntry),
+    log_scroll: Int,
     last_usage: Option(Usage),
   )
 }
@@ -139,8 +139,8 @@ pub fn start(
       spinner_frame: 0,
       spinner_label: "",
       tab: ChatTab,
-      log_cycles: [],
-      log_selected: 0,
+      log_entries: [],
+      log_scroll: 0,
       last_usage: None,
     )
   render(state)
@@ -346,7 +346,7 @@ fn handle_command(state: TuiState, cmd: String) -> Nil {
 
 fn handle_enter(state: TuiState) -> Nil {
   case state.tab {
-    LogTab -> handle_log_rewind(state)
+    LogTab -> handle_log_enter(state)
     ChatTab -> handle_chat_enter(state)
   }
 }
@@ -567,8 +567,7 @@ fn render_footer(state: TuiState) -> Nil {
   let footer = case state.notice {
     "" ->
       case state.tab {
-        LogTab ->
-          style.dim("  ↑↓: select   Enter: rewind to here   Tab: back to chat")
+        LogTab -> style.dim("  ↑↓: scroll   Enter/Tab: back to chat")
         ChatTab ->
           case state.status {
             Idle -> {
@@ -870,10 +869,9 @@ fn is_printable(byte: String) -> Bool {
 fn switch_tab(state: TuiState) -> Nil {
   case state.tab {
     ChatTab -> {
-      let cycles = cycle_log.load_cycles()
-      let last = int.max(0, list.length(cycles) - 1)
+      let entries = slog.load_entries()
       continue_loop(
-        TuiState(..state, tab: LogTab, log_cycles: cycles, log_selected: last),
+        TuiState(..state, tab: LogTab, log_entries: entries, log_scroll: 0),
       )
     }
     LogTab -> continue_loop(TuiState(..state, tab: ChatTab))
@@ -881,130 +879,71 @@ fn switch_tab(state: TuiState) -> Nil {
 }
 
 fn log_nav_up(state: TuiState) -> TuiState {
-  TuiState(..state, log_selected: int.max(0, state.log_selected - 1))
+  TuiState(..state, log_scroll: state.log_scroll + 3)
 }
 
 fn log_nav_down(state: TuiState) -> TuiState {
-  let max_idx = int.max(0, list.length(state.log_cycles) - 1)
-  TuiState(..state, log_selected: int.min(max_idx, state.log_selected + 1))
+  TuiState(..state, log_scroll: int.max(0, state.log_scroll - 3))
 }
 
-fn handle_log_rewind(state: TuiState) -> Nil {
-  case state.log_cycles {
-    [] ->
-      continue_loop(
-        TuiState(..state, notice: style.dim("  No cycles to rewind to")),
-      )
-    _ -> {
-      let msgs =
-        cycle_log.messages_for_rewind(state.log_cycles, state.log_selected)
-      process.send(state.cognitive, agent_types.RestoreMessages(messages: msgs))
-      let num = int.to_string(state.log_selected + 1)
-      let notice = style.dim("  Rewound to cycle #" <> num)
-      continue_loop(
-        TuiState(
-          ..state,
-          tab: ChatTab,
-          messages: msgs,
-          scroll_offset: 0,
-          notice:,
-        ),
-      )
-    }
-  }
+fn handle_log_enter(state: TuiState) -> Nil {
+  // Enter on log tab switches back to chat (no rewind from system log)
+  continue_loop(TuiState(..state, tab: ChatTab))
 }
 
 fn render_log(state: TuiState) -> Nil {
-  let cycles = state.log_cycles
-  // 3 lines per cycle: header + user + asst
-  let cycle_height = 3
+  let entries = state.log_entries
   let available = state.height - 3
-  let max_visible = int.max(1, available / cycle_height)
-  case list.length(cycles) {
+  case list.length(entries) {
     0 -> {
-      print_at(0, 2, style.dim("  No cycles logged today."))
+      print_at(0, 2, style.dim("  No log entries today."))
       clear_rows(3, 2 + available)
     }
-    _ -> {
-      let page = state.log_selected / max_visible
-      let top = page * max_visible
-      let visible = cycles |> list.drop(top) |> list.take(max_visible)
-      print_log_cycles(visible, top, state.log_selected, 2, state.width)
-      let used_rows = list.length(visible) * cycle_height
+    total -> {
+      // Scroll from the bottom (most recent entries last)
+      let end_idx = int.max(0, total - state.log_scroll)
+      let start_idx = int.max(0, end_idx - available)
+      let visible =
+        entries
+        |> list.drop(start_idx)
+        |> list.take(available)
+      print_log_entries(visible, 2, state.width)
+      let used_rows = list.length(visible)
       clear_rows(2 + used_rows, 2 + available)
     }
   }
 }
 
-fn print_log_cycles(
-  cycles: List(CycleData),
-  base_idx: Int,
-  selected: Int,
-  row: Int,
-  width: Int,
-) -> Nil {
-  case cycles {
+fn print_log_entries(entries: List(LogEntry), row: Int, width: Int) -> Nil {
+  case entries {
     [] -> Nil
-    [c, ..rest] -> {
-      let sel = base_idx == selected
-      let indicator = case sel {
-        True -> "▶ "
-        False -> "  "
+    [entry, ..rest] -> {
+      let time = string.slice(entry.timestamp, 11, 8)
+      let level_badge = case entry.level {
+        slog.Debug -> style.dim("[DBG]")
+        slog.Info -> style.cyan("[INF]")
+        slog.Warn -> style.yellow("[WRN]")
+        slog.LogError -> style.red("[ERR]")
       }
-      let time = string.slice(c.timestamp, 11, 8)
-      let tools_part = case c.tool_names {
-        [] -> ""
-        names -> style.dim("  [" <> string.join(names, ", ") <> "]")
-      }
-      let token_part = case c.input_tokens + c.output_tokens {
-        0 -> ""
-        _ ->
-          style.dim(
-            "  ↑"
-            <> int.to_string(c.input_tokens)
-            <> "t ↓"
-            <> int.to_string(c.output_tokens)
-            <> "t",
-          )
-      }
-      let thinking_part = case c.thinking_tokens {
-        0 -> ""
-        n -> style.dim("  \u{1F4AD}" <> int.to_string(n) <> "t")
-      }
-      let complexity_part = case c.complexity {
+      let cycle_part = case entry.cycle_id {
         None -> ""
-        Some("complex") -> style.dim("  \u{26A1}complex")
-        Some("simple") -> style.dim("  \u{00B7}simple")
-        Some(other) -> style.dim("  " <> other)
+        Some(id) -> style.dim(" " <> string.slice(id, 0, 8))
       }
-      let parent_part = case c.parent_id {
-        None -> ""
-        Some(id) -> style.dim("  \u{2190}" <> string.slice(id, 0, 8))
-      }
-      let hdr_text =
-        indicator
-        <> "#"
-        <> int.to_string(base_idx + 1)
-        <> "  "
+      let mod_fn = style.dim(entry.module <> "::" <> entry.function)
+      let msg_max = int.max(10, width - 40)
+      let msg = truncate_text(entry.message, msg_max)
+      let line =
+        "  "
         <> time
-        <> tools_part
-        <> token_part
-        <> thinking_part
-        <> complexity_part
-        <> parent_part
-      let hdr_line = case sel {
-        True -> style.bold(hdr_text)
-        False -> style.dim(hdr_text)
-      }
-      let user_text = truncate_text("    You: " <> c.human_input, width - 2)
-      let asst_text = case c.response_text {
-        "" -> style.dim("    Asst: \u{2026}")
-        t -> style.dim("    Asst: ") <> truncate_text(t, width - 11)
-      }
-      print_at(0, row, hdr_line)
-      print_at(0, row + 1, user_text)
-      print_at(0, row + 2, asst_text)
-      print_log_cycles(rest, base_idx + 1, selected, row + 3, width)
+        <> " "
+        <> level_badge
+        <> " "
+        <> mod_fn
+        <> " "
+        <> msg
+        <> cycle_part
+      print_at(0, row, line)
+      print_log_entries(rest, row + 1, width)
     }
   }
 }

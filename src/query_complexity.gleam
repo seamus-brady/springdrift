@@ -4,11 +4,14 @@
 //// reasoning model or the standard model. Falls back to heuristic rules
 //// if the LLM call fails or returns an unrecognised response.
 
+import gleam/int
 import gleam/list
+import gleam/option
 import gleam/string
 import llm/provider.{type Provider}
 import llm/request
 import llm/response
+import slog
 
 pub type QueryComplexity {
   Simple
@@ -33,11 +36,17 @@ type LlmClassification {
 /// Falls back to heuristic classification if the call fails or the
 /// response is unrecognised.
 pub fn classify(query: String, p: Provider, model: String) -> QueryComplexity {
+  slog.debug(
+    "query_complexity",
+    "classify",
+    "len=" <> int.to_string(string.length(query)),
+    option.None,
+  )
   let req =
     request.new(model, 10)
     |> request.with_system(system_prompt)
     |> request.with_user_message(query)
-  case provider.chat_with(req, p) {
+  let result = case provider.chat_with(req, p) {
     Error(_) -> heuristic_classify(query)
     Ok(resp) ->
       case parse_llm_response(response.text(resp)) {
@@ -46,6 +55,17 @@ pub fn classify(query: String, p: Provider, model: String) -> QueryComplexity {
         LlmUnrecognised -> heuristic_classify(query)
       }
   }
+  slog.info(
+    "query_complexity",
+    "classify",
+    "result="
+      <> case result {
+      Simple -> "simple"
+      Complex -> "complex"
+    },
+    option.None,
+  )
+  result
 }
 
 fn parse_llm_response(text: String) -> LlmClassification {

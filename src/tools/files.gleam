@@ -2,12 +2,14 @@
 import gleam/dynamic/decode
 import gleam/json
 import gleam/list
+import gleam/option
 import gleam/string
 import llm/tool
 import llm/types.{
   type Tool, type ToolCall, type ToolResult, ToolFailure, ToolSuccess,
 }
 import simplifile
+import slog
 
 // ---------------------------------------------------------------------------
 // Tool definitions
@@ -52,6 +54,7 @@ fn list_directory_tool() -> Tool {
 // ---------------------------------------------------------------------------
 
 pub fn execute(call: ToolCall, write_anywhere: Bool) -> ToolResult {
+  slog.debug("files", "execute", "tool=" <> call.name, option.None)
   case call.name {
     "read_file" -> run_read_file(call)
     "write_file" -> run_write_file(call, write_anywhere)

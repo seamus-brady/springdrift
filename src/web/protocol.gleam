@@ -16,6 +16,7 @@ import gleam/int
 import gleam/json
 import gleam/option.{type Option, None, Some}
 import llm/types.{type Usage, Usage}
+import slog
 
 // ---------------------------------------------------------------------------
 // Types
@@ -24,6 +25,7 @@ import llm/types.{type Usage, Usage}
 pub type ClientMessage {
   UserMessage(text: String)
   UserAnswer(text: String)
+  RequestLogData
 }
 
 pub type ServerMessage {
@@ -32,6 +34,7 @@ pub type ServerMessage {
   Question(text: String, source: String)
   ToolNotification(name: String)
   SaveNotification(message: String)
+  LogData(entries: List(slog.LogEntry))
 }
 
 // ---------------------------------------------------------------------------
@@ -50,6 +53,7 @@ pub fn decode_client_message(json_string: String) -> Result(ClientMessage, Nil) 
         use text <- decode.field("text", decode.string)
         decode.success(UserAnswer(text:))
       }
+      "request_log_data" -> decode.success(RequestLogData)
       _ -> decode.failure(UserMessage(""), "Unknown client message type")
     }
   }
@@ -99,6 +103,28 @@ pub fn encode_server_message(msg: ServerMessage) -> String {
         #("type", json.string("notification")),
         #("kind", json.string("save_warning")),
         #("message", json.string(message)),
+      ])
+      |> json.to_string
+
+    LogData(entries:) ->
+      json.object([
+        #("type", json.string("log_data")),
+        #(
+          "entries",
+          json.array(entries, fn(entry) {
+            json.object([
+              #("timestamp", json.string(entry.timestamp)),
+              #("level", json.string(slog.level_to_string(entry.level))),
+              #("module", json.string(entry.module)),
+              #("function", json.string(entry.function)),
+              #("message", json.string(entry.message)),
+              #("cycle_id", case entry.cycle_id {
+                None -> json.null()
+                Some(id) -> json.string(id)
+              }),
+            ])
+          }),
+        ),
       ])
       |> json.to_string
   }

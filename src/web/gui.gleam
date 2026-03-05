@@ -5,10 +5,12 @@ import gleam/bytes_tree
 import gleam/erlang/process.{type Selector, type Subject}
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
+import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import llm/types.{type Message, Assistant, TextContent, User}
 import mist.{type Connection, type ResponseData}
+import slog
 import web/html
 import web/protocol
 
@@ -45,6 +47,12 @@ pub fn start(
   initial_messages: List(Message),
   port: Int,
 ) -> Nil {
+  slog.info(
+    "gui",
+    "start",
+    "Starting web GUI on port " <> int.to_string(port),
+    None,
+  )
   let assert Ok(_) =
     fn(req: Request(Connection)) -> Response(ResponseData) {
       handle_request(req, cognitive, notify, initial_messages)
@@ -164,6 +172,15 @@ fn ws_handler(
         }
         Ok(protocol.UserAnswer(text:)) -> {
           process.send(state.cognitive, agent_types.UserAnswer(answer: text))
+          mist.continue(state)
+        }
+        Ok(protocol.RequestLogData) -> {
+          let entries = slog.load_entries()
+          let _ =
+            mist.send_text_frame(
+              conn,
+              protocol.encode_server_message(protocol.LogData(entries:)),
+            )
           mist.continue(state)
         }
         Error(_) -> mist.continue(state)

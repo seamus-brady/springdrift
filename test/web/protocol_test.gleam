@@ -2,6 +2,7 @@ import gleam/option.{None, Some}
 import gleeunit
 import gleeunit/should
 import llm/types.{Usage}
+import slog
 import web/protocol
 
 pub fn main() -> Nil {
@@ -150,6 +151,47 @@ pub fn format_usage_some_test() {
 
 pub fn format_usage_none_test() {
   protocol.format_usage(None) |> should.equal("")
+}
+
+// ---------------------------------------------------------------------------
+// decode_client_message — RequestLogData
+// ---------------------------------------------------------------------------
+
+pub fn decode_request_log_data_test() {
+  let json = "{\"type\": \"request_log_data\"}"
+  let result = protocol.decode_client_message(json)
+  result |> should.be_ok
+  let assert Ok(protocol.RequestLogData) = result
+}
+
+// ---------------------------------------------------------------------------
+// encode_server_message — LogData
+// ---------------------------------------------------------------------------
+
+pub fn encode_log_data_test() {
+  let entries = [
+    slog.LogEntry(
+      timestamp: "2026-03-05T10:30:00",
+      level: slog.Info,
+      module: "test",
+      function: "fn",
+      message: "hello",
+      cycle_id: Some("abc-123"),
+    ),
+  ]
+  let msg = protocol.LogData(entries:)
+  let json_str = protocol.encode_server_message(msg)
+  json_str |> should_contain("\"type\":\"log_data\"")
+  json_str |> should_contain("\"entries\":")
+  json_str |> should_contain("\"module\":\"test\"")
+  json_str |> should_contain("\"level\":\"info\"")
+}
+
+pub fn encode_log_data_empty_test() {
+  let msg = protocol.LogData(entries: [])
+  let json_str = protocol.encode_server_message(msg)
+  json_str |> should_contain("\"type\":\"log_data\"")
+  json_str |> should_contain("\"entries\":[]")
 }
 
 // ---------------------------------------------------------------------------
