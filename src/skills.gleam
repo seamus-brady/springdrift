@@ -3,9 +3,12 @@
 //// A skill is a directory containing a SKILL.md file with YAML frontmatter
 //// (name + description) followed by Markdown instructions.
 
+import gleam/int
 import gleam/list
+import gleam/option
 import gleam/string
 import simplifile
+import slog
 
 // ---------------------------------------------------------------------------
 // Types
@@ -29,8 +32,20 @@ fn get_env(name: String) -> Result(String, Nil)
 /// Scan each directory for subdirs containing a SKILL.md file.
 /// Returns only skills whose frontmatter parses successfully.
 pub fn discover(dirs: List(String)) -> List(SkillMeta) {
-  dirs
-  |> list.flat_map(discover_in_dir)
+  let results =
+    dirs
+    |> list.flat_map(discover_in_dir)
+  slog.info(
+    "skills",
+    "discover",
+    "Searched "
+      <> int.to_string(list.length(dirs))
+      <> " dirs, found "
+      <> int.to_string(list.length(results))
+      <> " skills",
+    option.None,
+  )
+  results
 }
 
 /// Build the <available_skills> XML block for injection into the system prompt.

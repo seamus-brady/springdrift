@@ -10,10 +10,12 @@ import gleam/dynamic/decode
 import gleam/int
 import gleam/json
 import gleam/list
+import gleam/option.{None, Some}
 import gleam/string
 import llm/provider.{type Provider}
 import llm/request
 import llm/response
+import slog
 
 /// Score all features against an instruction and context.
 /// Uses the LLM to evaluate discrepancy magnitudes.
@@ -27,6 +29,12 @@ pub fn score_features(
   cycle_id: String,
   verbose: Bool,
 ) -> List(Forecast) {
+  slog.debug(
+    "dprime/scorer",
+    "score_features",
+    "Scoring " <> int.to_string(list.length(features)) <> " features via LLM",
+    Some(cycle_id),
+  )
   let prompt = build_scoring_prompt(instruction, context, features)
   let req =
     request.new(model, 512)
@@ -48,8 +56,22 @@ pub fn score_features(
       }
       let text = response.text(resp)
       case parse_forecasts(text) {
-        Ok(forecasts) -> forecasts
+        Ok(forecasts) -> {
+          slog.debug(
+            "dprime/scorer",
+            "score_features",
+            "Successfully parsed forecasts",
+            Some(cycle_id),
+          )
+          forecasts
+        }
         Error(_) -> {
+          slog.warn(
+            "dprime/scorer",
+            "score_features",
+            "JSON parse failed, falling back to all-zero",
+            Some(cycle_id),
+          )
           cycle_log.log_dprime_scorer_fallback(
             cycle_id,
             "JSON parse failed",
@@ -60,6 +82,12 @@ pub fn score_features(
       }
     }
     Error(_) -> {
+      slog.warn(
+        "dprime/scorer",
+        "score_features",
+        "LLM error, falling back to all-zero",
+        Some(cycle_id),
+      )
       cycle_log.log_dprime_scorer_fallback(
         cycle_id,
         "LLM error",

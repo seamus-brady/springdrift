@@ -21,6 +21,7 @@ import llm/provider.{type Provider}
 import sandbox
 import simplifile
 import skills
+import slog
 import storage
 import tui
 import web/gui as web_gui
@@ -180,6 +181,10 @@ fn print_help() -> Nil {
 }
 
 fn run(cfg: AppConfig) -> Nil {
+  let verbose = option.unwrap(cfg.log_verbose, False)
+  slog.init(verbose)
+  slog.info("springdrift", "run", "Starting springdrift", option.None)
+
   let base_system =
     option.unwrap(
       cfg.system_prompt,
@@ -192,7 +197,6 @@ fn run(cfg: AppConfig) -> Nil {
     _ -> base_system <> "\n\n" <> skills.to_system_prompt_xml(discovered)
   }
   let max_tokens = option.unwrap(cfg.max_tokens, 2048)
-  let verbose = option.unwrap(cfg.log_verbose, False)
   let write_anywhere = option.unwrap(cfg.write_anywhere, False)
 
   let #(p, default_task_model, default_reasoning_model) = select_provider(cfg)
@@ -335,6 +339,12 @@ fn find_sandbox_dir() -> option.Option(String) {
 }
 
 fn select_provider(cfg: AppConfig) -> #(Provider, String, String) {
+  slog.debug(
+    "springdrift",
+    "select_provider",
+    "Selecting provider: " <> option.unwrap(cfg.provider, "none"),
+    option.None,
+  )
   case cfg.provider {
     option.Some("anthropic") -> {
       case anthropic_adapter.provider() {

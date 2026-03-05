@@ -5,7 +5,8 @@
          tui_run/2, throw_tui_exit/0,
          fetch_url/1, http_post/3, check_docker/0, docker_build/1,
          docker_run_container/2, docker_exec/2, docker_stop/1,
-         rescue/1]).
+         rescue/1,
+         log_init/1, log_stdout_enabled/0, log_stderr/1]).
 
 %% Read one line from stdin.
 %% Returns {ok, Binary} (including trailing newline) or {error, nil} on EOF.
@@ -262,6 +263,22 @@ rescue(Fun) ->
     catch
         _Class:Reason -> {error, list_to_binary(io_lib:format("~p", [Reason]))}
     end.
+
+%% ---------------------------------------------------------------------------
+%% Logger FFI
+%% ---------------------------------------------------------------------------
+
+%% Store whether stderr logging is enabled in persistent_term.
+log_init(Enabled) ->
+    persistent_term:put(springdrift_log_stdout, Enabled).
+
+%% Read the stderr logging flag. Defaults to false if not set.
+log_stdout_enabled() ->
+    persistent_term:get(springdrift_log_stdout, false).
+
+%% Write a line to stderr (avoids corrupting TUI alternate-screen output).
+log_stderr(Text) ->
+    io:format(standard_error, "~ts~n", [Text]).
 
 %% Stop and remove the container.
 docker_stop(ContainerId) ->

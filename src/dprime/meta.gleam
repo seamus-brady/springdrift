@@ -7,8 +7,11 @@ import dprime/types.{
   type DprimeState, type GateDecision, type GateResult, DprimeHistoryEntry,
   DprimeState,
 }
+import gleam/float
 import gleam/int
 import gleam/list
+import gleam/option.{None}
+import slog
 
 /// Record a D' evaluation result in the history ring buffer.
 /// Prepends to history and trims to max_history.
@@ -27,6 +30,16 @@ pub fn record(
     )
   let history = [entry, ..state.history]
   let trimmed = list.take(history, state.config.max_history)
+  slog.debug(
+    "dprime/meta",
+    "record",
+    "Recorded D' history entry (score: "
+      <> float.to_string(result.dprime_score)
+      <> ", history size: "
+      <> int.to_string(list.length(trimmed))
+      <> ")",
+    None,
+  )
   DprimeState(..state, history: trimmed)
 }
 
@@ -49,10 +62,21 @@ pub fn should_tighten(state: DprimeState) -> Bool {
 /// Tighten both thresholds by 10% (multiply by 0.9).
 /// Thresholds only ever tighten, never loosen.
 pub fn tighten_thresholds(state: DprimeState) -> DprimeState {
+  let new_modify = state.current_modify_threshold *. 0.9
+  let new_reject = state.current_reject_threshold *. 0.9
+  slog.info(
+    "dprime/meta",
+    "tighten_thresholds",
+    "Tightening thresholds: modify "
+      <> float.to_string(new_modify)
+      <> ", reject "
+      <> float.to_string(new_reject),
+    None,
+  )
   DprimeState(
     ..state,
-    current_modify_threshold: state.current_modify_threshold *. 0.9,
-    current_reject_threshold: state.current_reject_threshold *. 0.9,
+    current_modify_threshold: new_modify,
+    current_reject_threshold: new_reject,
   )
 }
 
@@ -64,10 +88,17 @@ pub fn maybe_escalate(
 ) -> GateDecision {
   case should_tighten(state) {
     False -> decision
-    True ->
+    True -> {
+      slog.warn(
+        "dprime/meta",
+        "maybe_escalate",
+        "Stall detected, escalating MODIFY → REJECT",
+        None,
+      )
       case decision {
         types.Modify -> types.Reject
         other -> other
       }
+    }
   }
 }

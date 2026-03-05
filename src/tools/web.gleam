@@ -1,11 +1,13 @@
 /// Web tool: fetch_url.
 import gleam/dynamic/decode
 import gleam/json
+import gleam/option
 import gleam/string
 import llm/tool
 import llm/types.{
   type Tool, type ToolCall, type ToolResult, ToolFailure, ToolSuccess,
 }
+import slog
 
 // ---------------------------------------------------------------------------
 // Tool definitions
@@ -33,6 +35,7 @@ fn fetch_url_tool() -> Tool {
 // ---------------------------------------------------------------------------
 
 pub fn execute(call: ToolCall) -> ToolResult {
+  slog.debug("web", "execute", "tool=" <> call.name, option.None)
   case call.name {
     "fetch_url" -> run_fetch_url(call)
     _ -> ToolFailure(tool_use_id: call.id, error: "Unknown tool: " <> call.name)

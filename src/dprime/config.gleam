@@ -5,8 +5,12 @@ import dprime/types.{
   Low, Medium,
 }
 import gleam/dynamic/decode
+import gleam/int
 import gleam/json
+import gleam/list
+import gleam/option.{None}
 import simplifile
+import slog
 
 // ---------------------------------------------------------------------------
 // Defaults
@@ -77,12 +81,39 @@ pub fn initial_state(config: DprimeConfig) -> DprimeState {
 
 /// Load D' config from a JSON file. Falls back to default() on any error.
 pub fn load(path: String) -> DprimeConfig {
+  slog.debug("dprime/config", "load", "Loading D' config from " <> path, None)
   case simplifile.read(path) {
-    Error(_) -> default()
+    Error(_) -> {
+      slog.info(
+        "dprime/config",
+        "load",
+        "Config file not found, using defaults",
+        None,
+      )
+      default()
+    }
     Ok(contents) ->
       case json.parse(contents, config_decoder()) {
-        Ok(cfg) -> cfg
-        Error(_) -> default()
+        Ok(cfg) -> {
+          slog.info(
+            "dprime/config",
+            "load",
+            "Loaded D' config with "
+              <> int.to_string(list.length(cfg.features))
+              <> " features",
+            None,
+          )
+          cfg
+        }
+        Error(_) -> {
+          slog.warn(
+            "dprime/config",
+            "load",
+            "Config parse failed, using defaults",
+            None,
+          )
+          default()
+        }
       }
   }
 }

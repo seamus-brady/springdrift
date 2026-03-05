@@ -11,6 +11,7 @@ import gleam/list
 import gleam/option.{None, Some}
 import llm/types.{type Message, Assistant, TextContent, User}
 import mist.{type Connection, type ResponseData}
+import slog
 import web/html
 import web/protocol
 
@@ -47,6 +48,12 @@ pub fn start(
   initial_messages: List(Message),
   port: Int,
 ) -> Nil {
+  slog.info(
+    "gui",
+    "start",
+    "Starting web GUI on port " <> int.to_string(port),
+    None,
+  )
   let assert Ok(_) =
     fn(req: Request(Connection)) -> Response(ResponseData) {
       handle_request(req, cognitive, notify, initial_messages)
@@ -169,10 +176,12 @@ fn ws_handler(
           mist.continue(state)
         }
         Ok(protocol.RequestLogData) -> {
-          let cycles = protocol.load_cycle_data_json()
-          let msg = protocol.LogData(cycles:)
+          let entries = slog.load_entries()
           let _ =
-            mist.send_text_frame(conn, protocol.encode_server_message(msg))
+            mist.send_text_frame(
+              conn,
+              protocol.encode_server_message(protocol.LogData(entries:)),
+            )
           mist.continue(state)
         }
         Ok(protocol.RequestRewind(index:)) -> {

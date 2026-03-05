@@ -2,6 +2,7 @@ import gleam/option.{None, Some}
 import gleeunit
 import gleeunit/should
 import llm/types.{Usage}
+import slog
 import web/protocol
 
 pub fn main() -> Nil {
@@ -175,32 +176,30 @@ pub fn decode_request_rewind_test() {
 // encode_server_message — LogData
 // ---------------------------------------------------------------------------
 
-pub fn encode_log_data_empty_test() {
-  let msg = protocol.LogData(cycles: [])
+pub fn encode_log_data_test() {
+  let entries = [
+    slog.LogEntry(
+      timestamp: "2026-03-05T10:30:00",
+      level: slog.Info,
+      module: "test",
+      function: "fn",
+      message: "hello",
+      cycle_id: Some("abc-123"),
+    ),
+  ]
+  let msg = protocol.LogData(entries:)
   let json_str = protocol.encode_server_message(msg)
   json_str |> should_contain("\"type\":\"log_data\"")
-  json_str |> should_contain("\"cycles\":[]")
+  json_str |> should_contain("\"entries\":")
+  json_str |> should_contain("\"module\":\"test\"")
+  json_str |> should_contain("\"level\":\"info\"")
 }
 
-pub fn encode_log_data_with_cycle_test() {
-  let cycle =
-    protocol.CycleDataJson(
-      cycle_id: "c1",
-      timestamp: "2026-03-04T12:00:00Z",
-      human_input: "hello",
-      tool_names: ["read_file"],
-      response_text: "hi there",
-      input_tokens: 100,
-      output_tokens: 50,
-      thinking_tokens: 0,
-      complexity: "simple",
-    )
-  let msg = protocol.LogData(cycles: [cycle])
+pub fn encode_log_data_empty_test() {
+  let msg = protocol.LogData(entries: [])
   let json_str = protocol.encode_server_message(msg)
   json_str |> should_contain("\"type\":\"log_data\"")
-  json_str |> should_contain("\"cycle_id\":\"c1\"")
-  json_str |> should_contain("\"human_input\":\"hello\"")
-  json_str |> should_contain("\"input_tokens\":100")
+  json_str |> should_contain("\"entries\":[]")
 }
 
 // ---------------------------------------------------------------------------

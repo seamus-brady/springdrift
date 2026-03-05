@@ -9,10 +9,12 @@
 
 import cycle_log
 import dprime/types.{type ProbeResult, ProbeResult}
+import gleam/option.{Some}
 import gleam/string
 import llm/provider.{type Provider}
 import llm/request
 import llm/response
+import slog
 
 @external(erlang, "springdrift_ffi", "generate_uuid")
 fn generate_token() -> String
@@ -26,6 +28,12 @@ pub fn run_probes(
   cycle_id: String,
   verbose: Bool,
 ) -> ProbeResult {
+  slog.debug(
+    "dprime/canary",
+    "run_probes",
+    "Running hijack + leakage probes",
+    Some(cycle_id),
+  )
   let hijack_token = generate_token()
   let leakage_token = generate_token()
 
@@ -48,11 +56,29 @@ pub fn run_probes(
       verbose,
     )
 
-  ProbeResult(
-    hijack_detected: hijack_result,
-    leakage_detected: leakage_result,
-    details: build_details(hijack_result, leakage_result),
-  )
+  let result =
+    ProbeResult(
+      hijack_detected: hijack_result,
+      leakage_detected: leakage_result,
+      details: build_details(hijack_result, leakage_result),
+    )
+  case hijack_result || leakage_result {
+    True ->
+      slog.warn(
+        "dprime/canary",
+        "run_probes",
+        "Probe detected: " <> result.details,
+        Some(cycle_id),
+      )
+    False ->
+      slog.debug(
+        "dprime/canary",
+        "run_probes",
+        "Probes passed: no issues",
+        Some(cycle_id),
+      )
+  }
+  result
 }
 
 /// Run just the hijack probe (public for testing).

@@ -40,6 +40,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 import simplifile
+import slog
 import tom
 
 // ---------------------------------------------------------------------------
@@ -162,6 +163,7 @@ pub fn load_file() -> AppConfig {
 
 /// Resolve the full config: file config merged with CLI args (CLI wins).
 pub fn resolve() -> AppConfig {
+  slog.debug("config", "resolve", "Resolving config", None)
   let file_cfg = load_file()
   let cli_cfg = from_args(get_args())
   merge(file_cfg, cli_cfg)

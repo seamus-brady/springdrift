@@ -11,13 +11,12 @@
 ////   { "type": "notification", "kind": "tool_calling", "name": "..." }
 ////   { "type": "notification", "kind": "save_warning", "message": "..." }
 
-import cycle_log
 import gleam/dynamic/decode
 import gleam/int
 import gleam/json
-import gleam/list
 import gleam/option.{type Option, None, Some}
 import llm/types.{type Usage, Usage}
+import slog
 
 // ---------------------------------------------------------------------------
 // Types
@@ -37,7 +36,7 @@ pub type ServerMessage {
   ToolNotification(name: String)
   SaveNotification(message: String)
   SafetyNotification(decision: String, score: Float, explanation: String)
-  LogData(cycles: List(CycleDataJson))
+  LogData(entries: List(slog.LogEntry))
 }
 
 pub type CycleDataJson {
@@ -137,46 +136,28 @@ pub fn encode_server_message(msg: ServerMessage) -> String {
       ])
       |> json.to_string
 
-    LogData(cycles:) ->
+    LogData(entries:) ->
       json.object([
         #("type", json.string("log_data")),
-        #("cycles", json.array(cycles, encode_cycle_data)),
+        #(
+          "entries",
+          json.array(entries, fn(entry) {
+            json.object([
+              #("timestamp", json.string(entry.timestamp)),
+              #("level", json.string(slog.level_to_string(entry.level))),
+              #("module", json.string(entry.module)),
+              #("function", json.string(entry.function)),
+              #("message", json.string(entry.message)),
+              #("cycle_id", case entry.cycle_id {
+                None -> json.null()
+                Some(id) -> json.string(id)
+              }),
+            ])
+          }),
+        ),
       ])
       |> json.to_string
   }
-}
-
-fn encode_cycle_data(c: CycleDataJson) -> json.Json {
-  json.object([
-    #("cycle_id", json.string(c.cycle_id)),
-    #("timestamp", json.string(c.timestamp)),
-    #("human_input", json.string(c.human_input)),
-    #("tool_names", json.array(c.tool_names, json.string)),
-    #("response_text", json.string(c.response_text)),
-    #("input_tokens", json.int(c.input_tokens)),
-    #("output_tokens", json.int(c.output_tokens)),
-    #("thinking_tokens", json.int(c.thinking_tokens)),
-    #("complexity", json.string(c.complexity)),
-  ])
-}
-
-pub fn cycle_data_to_json(c: cycle_log.CycleData) -> CycleDataJson {
-  CycleDataJson(
-    cycle_id: c.cycle_id,
-    timestamp: c.timestamp,
-    human_input: c.human_input,
-    tool_names: c.tool_names,
-    response_text: c.response_text,
-    input_tokens: c.input_tokens,
-    output_tokens: c.output_tokens,
-    thinking_tokens: c.thinking_tokens,
-    complexity: option.unwrap(c.complexity, ""),
-  )
-}
-
-pub fn load_cycle_data_json() -> List(CycleDataJson) {
-  cycle_log.load_cycles()
-  |> list.map(cycle_data_to_json)
 }
 
 fn encode_usage(usage: Option(Usage)) -> json.Json {

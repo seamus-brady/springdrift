@@ -1,10 +1,14 @@
 import gleam/dynamic/decode
+import gleam/int
 import gleam/json
+import gleam/list
+import gleam/option
 import llm/types.{
   type ContentBlock, type Message, type Role, Assistant, ImageContent, Message,
   TextContent, ToolResultContent, ToolUseContent, User,
 }
 import simplifile
+import slog
 
 @external(erlang, "springdrift_ffi", "get_env")
 fn get_env(name: String) -> Result(String, Nil)
@@ -24,6 +28,12 @@ fn session_path() -> String {
 }
 
 pub fn save(messages: List(Message)) -> Result(Nil, String) {
+  slog.debug(
+    "storage",
+    "save",
+    "Saving " <> int.to_string(list.length(messages)) <> " messages",
+    option.None,
+  )
   let dir = config_dir()
   case simplifile.create_directory_all(dir) {
     Error(e) ->
@@ -42,6 +52,7 @@ pub fn save(messages: List(Message)) -> Result(Nil, String) {
 }
 
 pub fn load() -> List(Message) {
+  slog.debug("storage", "load", "Loading session", option.None)
   case simplifile.read(session_path()) {
     Error(_) -> []
     Ok(contents) ->

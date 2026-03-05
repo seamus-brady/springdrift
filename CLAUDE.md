@@ -24,7 +24,8 @@ interface (Chat and Log).
 ```
 src/
 ├── springdrift.gleam          Entry point — config, provider selection, skills, wiring
-├── springdrift_ffi.erl        Erlang FFI (stdin, env, args, spinner, UUID, datetime)
+├── springdrift_ffi.erl        Erlang FFI (stdin, env, args, spinner, UUID, datetime, logger)
+├── slog.gleam                 System logger — date-rotated JSON-L files + optional stderr
 ├── config.gleam               Three-layer config (CLI flags > local TOML > user TOML)
 ├── storage.gleam              Session persistence — ~/.config/springdrift/session.json
 ├── cycle_log.gleam            Per-cycle JSON-L logging + log reading + rewind helpers
@@ -56,7 +57,7 @@ src/
 │
 ├── tools/builtin.gleam        Built-in tools: calculator, get_current_datetime,
 │                              request_human_input, read_skill
-├── tui.gleam                  Alternate-screen TUI; Chat tab + Log tab with cycle rewind
+├── tui.gleam                  Alternate-screen TUI; Chat tab + Log tab (system log entries)
 │
 ├── web/                       Web chat GUI
 │   ├── gui.gleam              Mist HTTP + WebSocket server, cognitive bridge
@@ -144,7 +145,7 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `max_consecutive_errors` | `--max-errors` | 3 | Tool failure circuit breaker threshold |
 | `max_context_messages` | `--max-context` | unlimited | Sliding-window message cap |
 | `config_path` | `--config` | None | Extra config file path |
-| `log_verbose` | `--verbose` | False | Log full LLM payloads to cycle log |
+| `log_verbose` | `--verbose` | False | Enable stderr log output + full LLM payloads to cycle log |
 | `skills_dirs` | `--skills-dir` (repeatable) | `[~/.config/springdrift/skills, .skills]` | Skill directories |
 | `write_anywhere` | `--allow-write-anywhere` | False | Allow `write_file` outside CWD |
 | `gui` | `--gui` | tui | GUI mode: `tui` (terminal) or `web` (browser on port 8080) |
@@ -187,6 +188,12 @@ full history is always stored in `CognitiveState.messages` and on disk.
 is public and unit-testable (pure function, no I/O). `to_system_prompt_xml` returns `""`
 for an empty list so callers never need to special-case it. The `read_skill` tool
 validates that `path` ends with `SKILL.md` before reading.
+
+**System logging** — `slog` provides `debug`, `info`, `warn`, `log_error` functions.
+All take `(module, function, message, cycle_id)`. Logs write to `logs/YYYY-MM-DD.jsonl`
+(date-rotated JSON-L). When `--verbose` is set, formatted lines also go to stderr. Use
+`slog.load_entries()` to read back entries for UI display. Named `slog` (not `logger`)
+to avoid collision with Erlang's built-in `logger` module.
 
 ## Config file format
 

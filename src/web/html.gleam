@@ -84,6 +84,36 @@ pub fn page() -> String {
     min-width: 0;
   }
 
+  /* ── Tab bar ──────────────────────────────────────── */
+  #tab-bar {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    padding: 0 24px;
+  }
+  .tab-btn {
+    padding: 10px 20px;
+    border: none;
+    background: none;
+    font-family: inherit;
+    font-size: 15px;
+    color: var(--text-dim);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    font-weight: 600;
+  }
+
+  /* ── Tab content ─────────────────────────────────── */
+  .tab-content { display: none; flex: 1; flex-direction: column; min-height: 0; }
+  .tab-content.active { display: flex; }
+
   /* ── Hidden scrollbar ────────────────────────────── */
   #messages {
     scrollbar-width: none;
@@ -355,75 +385,40 @@ pub fn page() -> String {
   #log-container {
     flex: 1;
     overflow-y: auto;
-    padding: 24px;
-    max-width: 720px;
-    width: 100%;
-    margin: 0 auto;
+    padding: 16px 24px;
+    font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+    font-size: 13px;
     scrollbar-width: none;
     -ms-overflow-style: none;
   }
   #log-container::-webkit-scrollbar { display: none; }
-  .cycle-card {
-    background: var(--surface);
+  .log-entry {
+    padding: 3px 0;
+    display: flex;
+    gap: 8px;
+    line-height: 1.4;
+  }
+  .log-time { color: var(--text-dim); white-space: nowrap; }
+  .log-level { font-weight: 600; white-space: nowrap; min-width: 36px; }
+  .log-level.debug { color: var(--text-dim); }
+  .log-level.info { color: #007aff; }
+  .log-level.warn { color: #ff9500; }
+  .log-level.error { color: #ff3b30; }
+  .log-mod { color: var(--text-secondary); white-space: nowrap; }
+  .log-msg { color: var(--text); word-break: break-all; }
+  .log-cycle { color: var(--text-dim); white-space: nowrap; }
+  #log-refresh {
+    padding: 6px 14px;
+    margin: 12px 24px;
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    padding: 14px 18px;
-    margin-bottom: 12px;
-    cursor: pointer;
-    transition: border-color 0.15s, box-shadow 0.15s;
-  }
-  .cycle-card:hover {
-    border-color: var(--accent);
-    box-shadow: 0 2px 8px rgba(218,126,55,0.1);
-  }
-  .cycle-card .cycle-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 8px;
-  }
-  .cycle-card .cycle-time {
+    border-radius: 8px;
+    background: var(--surface);
+    font-family: inherit;
     font-size: 13px;
-    color: var(--text-dim);
-  }
-  .cycle-card .cycle-tokens {
-    font-size: 12px;
-    color: var(--text-dim);
-    font-family: 'SF Mono', 'Menlo', monospace;
-  }
-  .cycle-card .cycle-input {
-    font-size: 15px;
-    color: var(--text);
-    margin-bottom: 6px;
-  }
-  .cycle-card .cycle-response {
-    font-size: 14px;
     color: var(--text-secondary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    cursor: pointer;
   }
-  .cycle-card .cycle-tools {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-    margin-top: 8px;
-  }
-  .tool-badge {
-    font-size: 11px;
-    background: var(--code-bg);
-    border: 1px solid var(--code-border);
-    border-radius: 6px;
-    padding: 2px 8px;
-    font-family: 'SF Mono', 'Menlo', monospace;
-    color: var(--text-secondary);
-  }
-  .log-empty {
-    text-align: center;
-    color: var(--text-dim);
-    padding: 40px 0;
-    font-size: 15px;
-  }
+  #log-refresh:hover { background: var(--code-bg); }
 </style>
 </head>
 <body>
@@ -450,7 +445,8 @@ pub fn page() -> String {
     </div>
   </div>
   <div id=\"log-tab\" class=\"tab-content\">
-    <div id=\"log-container\"><div class=\"log-empty\">Click to load log data</div></div>
+    <button id=\"log-refresh\">Refresh</button>
+    <div id=\"log-container\">Loading...</div>
   </div>
 </div>
 <script>
@@ -460,6 +456,7 @@ pub fn page() -> String {
   const input = document.getElementById('chat-input');
   const status = document.getElementById('status');
   const statusDot = document.getElementById('status-dot');
+  const logContainer = document.getElementById('log-container');
   let ws = null;
   let thinkingEl = null;
   let questionEl = null;
@@ -477,6 +474,51 @@ pub fn page() -> String {
     } catch(e) {
       return escapeHtml(text);
     }
+  }
+
+  // ── Tab switching ──
+  document.querySelectorAll('.tab-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+      document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
+      btn.classList.add('active');
+      var tabId = btn.getAttribute('data-tab') + '-tab';
+      document.getElementById(tabId).classList.add('active');
+      if (btn.getAttribute('data-tab') === 'log') {
+        requestLogData();
+      }
+    });
+  });
+
+  document.getElementById('log-refresh').addEventListener('click', requestLogData);
+
+  function requestLogData() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'request_log_data' }));
+    }
+  }
+
+  function renderLogEntries(entries) {
+    if (!entries || entries.length === 0) {
+      logContainer.innerHTML = '<div style=\"color:var(--text-dim);padding:20px;\">No log entries today.</div>';
+      return;
+    }
+    var html = '';
+    entries.forEach(function(e) {
+      var time = (e.timestamp || '').substring(11, 19);
+      var lvl = e.level || 'debug';
+      var badge = lvl.toUpperCase().substring(0, 3);
+      var cycleHtml = e.cycle_id ? '<span class=\"log-cycle\">' + escapeHtml(e.cycle_id.substring(0, 8)) + '</span>' : '';
+      html += '<div class=\"log-entry\">' +
+        '<span class=\"log-time\">' + escapeHtml(time) + '</span>' +
+        '<span class=\"log-level ' + lvl + '\">' + badge + '</span>' +
+        '<span class=\"log-mod\">' + escapeHtml(e.module + '::' + e.function) + '</span>' +
+        '<span class=\"log-msg\">' + escapeHtml(e.message) + '</span>' +
+        cycleHtml +
+        '</div>';
+    });
+    logContainer.innerHTML = html;
+    logContainer.scrollTop = logContainer.scrollHeight;
   }
 
   function connect() {
@@ -529,7 +571,7 @@ pub fn page() -> String {
         }
         break;
       case 'log_data':
-        renderLogData(data.cycles);
+        renderLogEntries(data.entries);
         break;
     }
   }
@@ -640,72 +682,6 @@ pub fn page() -> String {
     e.preventDefault();
     sendMessage();
   });
-
-  // ── Tab switching ──────────────────────────────────
-  document.querySelectorAll('.tab-btn').forEach(function(btn) {
-    btn.addEventListener('click', function() {
-      document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
-      document.querySelectorAll('.tab-content').forEach(function(t) { t.classList.remove('active'); });
-      btn.classList.add('active');
-      var tabId = btn.getAttribute('data-tab') + '-tab';
-      document.getElementById(tabId).classList.add('active');
-      if (btn.getAttribute('data-tab') === 'log') {
-        requestLogData();
-      }
-    });
-  });
-
-  function requestLogData() {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'request_log_data' }));
-    }
-  }
-
-  function truncate(text, max) {
-    if (!text) return '';
-    return text.length > max ? text.substring(0, max) + '...' : text;
-  }
-
-  function renderLogData(cycles) {
-    var container = document.getElementById('log-container');
-    if (!cycles || cycles.length === 0) {
-      container.innerHTML = '<div class=\"log-empty\">No cycle data yet</div>';
-      return;
-    }
-    var html = '';
-    for (var i = 0; i < cycles.length; i++) {
-      var c = cycles[i];
-      var tools = '';
-      if (c.tool_names && c.tool_names.length > 0) {
-        tools = '<div class=\"cycle-tools\">';
-        for (var j = 0; j < c.tool_names.length; j++) {
-          tools += '<span class=\"tool-badge\">' + escapeHtml(c.tool_names[j]) + '</span>';
-        }
-        tools += '</div>';
-      }
-      var tokens = c.input_tokens + ' in / ' + c.output_tokens + ' out';
-      if (c.thinking_tokens > 0) tokens += ' / ' + c.thinking_tokens + ' think';
-      html += '<div class=\"cycle-card\" data-index=\"' + i + '\">'
-        + '<div class=\"cycle-header\">'
-        + '<span class=\"cycle-time\">' + escapeHtml(c.timestamp) + (c.complexity ? ' [' + c.complexity + ']' : '') + '</span>'
-        + '<span class=\"cycle-tokens\">' + tokens + '</span>'
-        + '</div>'
-        + '<div class=\"cycle-input\">' + escapeHtml(truncate(c.human_input, 120)) + '</div>'
-        + '<div class=\"cycle-response\">' + escapeHtml(truncate(c.response_text, 200)) + '</div>'
-        + tools
-        + '</div>';
-    }
-    container.innerHTML = html;
-    container.querySelectorAll('.cycle-card').forEach(function(card) {
-      card.addEventListener('click', function() {
-        var idx = parseInt(card.getAttribute('data-index'));
-        if (confirm('Rewind to cycle ' + (idx + 1) + '?')) {
-          ws.send(JSON.stringify({ type: 'request_rewind', index: idx }));
-          document.querySelector('.tab-btn[data-tab=\"chat\"]').click();
-        }
-      });
-    });
-  }
 
   connect();
 })();

@@ -29,6 +29,7 @@ import llm/response
 import llm/tool
 import llm/types as llm_types
 import query_complexity
+import slog
 import storage
 import tools/builtin
 
@@ -142,6 +143,26 @@ fn handle_message(
   state: CognitiveState,
   msg: CognitiveMessage,
 ) -> CognitiveState {
+  slog.debug(
+    "cognitive",
+    "handle_message",
+    case msg {
+      UserInput(..) -> "UserInput"
+      UserAnswer(..) -> "UserAnswer"
+      ThinkComplete(..) -> "ThinkComplete"
+      ThinkError(..) -> "ThinkError"
+      ThinkWorkerDown(..) -> "ThinkWorkerDown"
+      AgentComplete(..) -> "AgentComplete"
+      types.AgentQuestion(..) -> "AgentQuestion"
+      AgentEvent(..) -> "AgentEvent"
+      SaveResult(..) -> "SaveResult"
+      SetModel(..) -> "SetModel"
+      RestoreMessages(..) -> "RestoreMessages"
+      types.ClassifyComplete(..) -> "ClassifyComplete"
+      types.SafetyGateComplete(..) -> "SafetyGateComplete"
+    },
+    state.cycle_id,
+  )
   case msg {
     UserInput(text, reply_to) -> handle_user_input(state, text, reply_to)
     UserAnswer(answer) -> handle_user_answer(state, answer)
@@ -176,6 +197,12 @@ fn handle_user_input(
   text: String,
   reply_to: Subject(CognitiveReply),
 ) -> CognitiveState {
+  slog.debug(
+    "cognitive",
+    "handle_user_input",
+    "Input: " <> string.slice(text, 0, 80),
+    state.cycle_id,
+  )
   // Guard: ignore input if not idle
   case state.status {
     Idle -> {
@@ -212,6 +239,16 @@ fn handle_classify_complete(
   text: String,
   reply_to: Subject(CognitiveReply),
 ) -> CognitiveState {
+  slog.info(
+    "cognitive",
+    "handle_classify_complete",
+    "Complexity: "
+      <> case complexity {
+      query_complexity.Simple -> "simple"
+      query_complexity.Complex -> "complex"
+    },
+    Some(cycle_id),
+  )
   // Only handle if we're still classifying with the matching cycle_id
   case state.status {
     Classifying(current_cycle_id) if current_cycle_id == cycle_id -> {
@@ -257,6 +294,12 @@ fn proceed_with_model(
   cycle_id: String,
   reply_to: Subject(CognitiveReply),
 ) -> CognitiveState {
+  slog.info(
+    "cognitive",
+    "proceed_with_model",
+    "Using model: " <> model,
+    Some(cycle_id),
+  )
   let msg =
     llm_types.Message(role: llm_types.User, content: [
       llm_types.TextContent(text:),
@@ -582,6 +625,18 @@ fn handle_think_error(
   error: String,
   retryable: Bool,
 ) -> CognitiveState {
+  slog.log_error(
+    "cognitive",
+    "handle_think_error",
+    "Error: "
+      <> error
+      <> " retryable="
+      <> case retryable {
+      True -> "true"
+      False -> "false"
+    },
+    state.cycle_id,
+  )
   let cycle_id = option.unwrap(state.cycle_id, task_id)
   cycle_log.log_llm_error(cycle_id, error)
   case dict.get(state.pending, task_id) {
@@ -865,6 +920,18 @@ fn handle_agent_event(
   state: CognitiveState,
   event: types.AgentLifecycleEvent,
 ) -> CognitiveState {
+  slog.debug(
+    "cognitive",
+    "handle_agent_event",
+    case event {
+      types.AgentStarted(name:, ..) -> "AgentStarted: " <> name
+      types.AgentCrashed(name:, ..) -> "AgentCrashed: " <> name
+      types.AgentRestarted(name:, ..) -> "AgentRestarted: " <> name
+      types.AgentRestartFailed(name:, ..) -> "AgentRestartFailed: " <> name
+      types.AgentStopped(name:) -> "AgentStopped: " <> name
+    },
+    state.cycle_id,
+  )
   case event {
     types.AgentStarted(name:, task_subject:) ->
       CognitiveState(
@@ -906,6 +973,15 @@ fn handle_save_result(
   state: CognitiveState,
   error: Option(String),
 ) -> CognitiveState {
+  slog.debug(
+    "cognitive",
+    "handle_save_result",
+    case error {
+      Some(msg) -> "Save error: " <> msg
+      None -> "Save ok"
+    },
+    state.cycle_id,
+  )
   case error {
     Some(msg) -> process.send(state.notify, SaveWarning(message: msg))
     None -> Nil
@@ -966,6 +1042,12 @@ fn spawn_safety_gate(
   calls: List(llm_types.ToolCall),
   reply_to: Subject(CognitiveReply),
 ) -> CognitiveState {
+  slog.info(
+    "cognitive",
+    "spawn_safety_gate",
+    "Spawning D' safety evaluation",
+    state.cycle_id,
+  )
   let assert Some(dprime_st) = state.dprime_state
   let self = state.self
   let provider = state.provider
@@ -1027,16 +1109,26 @@ fn handle_safety_gate_complete(
   reply_to: Subject(CognitiveReply),
 ) -> CognitiveState {
   let cycle_id = option.unwrap(state.cycle_id, task_id)
-
-  // Log the D' evaluation
-  cycle_log.log_dprime_evaluation(cycle_id, result)
-
-  // Send notification
   let decision_str = case result.decision {
     dprime_types.Accept -> "ACCEPT"
     dprime_types.Modify -> "MODIFY"
     dprime_types.Reject -> "REJECT"
   }
+  slog.info(
+    "cognitive",
+    "handle_safety_gate_complete",
+    "D' result: "
+      <> decision_str
+      <> " (score: "
+      <> float.to_string(result.dprime_score)
+      <> ")",
+    Some(cycle_id),
+  )
+
+  // Log the D' evaluation
+  cycle_log.log_dprime_evaluation(cycle_id, result)
+
+  // Send notification
   process.send(
     state.notify,
     SafetyGateNotice(

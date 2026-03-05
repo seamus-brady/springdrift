@@ -15,9 +15,11 @@ import dprime/types.{
   type DprimeState, type GateResult, Accept, Deliberative, GateResult,
   MetaManagement, Modify, Reactive, Reject,
 }
+import gleam/float
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import llm/provider.{type Provider}
+import slog
 
 /// Evaluate an instruction through all three H-CogAff layers.
 /// Returns a GateResult with the final decision, score, and layer info.
@@ -30,9 +32,21 @@ pub fn evaluate(
   cycle_id: String,
   verbose: Bool,
 ) -> GateResult {
+  slog.info(
+    "dprime/gate",
+    "evaluate",
+    "Starting D' safety evaluation",
+    Some(cycle_id),
+  )
   // Layer 0: Canary probes (if enabled)
   case state.config.canary_enabled {
     True -> {
+      slog.debug(
+        "dprime/gate",
+        "evaluate",
+        "Running canary probes",
+        Some(cycle_id),
+      )
       let probe_result =
         canary.run_probes(instruction, provider, model, cycle_id, verbose)
       cycle_log.log_dprime_canary(
@@ -43,6 +57,12 @@ pub fn evaluate(
       )
       case probe_result.hijack_detected || probe_result.leakage_detected {
         True -> {
+          slog.warn(
+            "dprime/gate",
+            "evaluate",
+            "Canary probe FAILED: " <> probe_result.details,
+            Some(cycle_id),
+          )
           cycle_log.log_dprime_layer(
             cycle_id,
             "reactive",
@@ -100,6 +120,12 @@ fn evaluate_reactive(
   cycle_id: String,
   verbose: Bool,
 ) -> GateResult {
+  slog.debug(
+    "dprime/gate",
+    "evaluate_reactive",
+    "Layer 1: reactive evaluation",
+    Some(cycle_id),
+  )
   let critical = engine.critical_features(state.config.features)
   case critical {
     // No critical features → skip to deliberative
@@ -128,6 +154,12 @@ fn evaluate_reactive(
       case engine.all_zero(forecasts) {
         // Fast accept — no critical concerns
         True -> {
+          slog.info(
+            "dprime/gate",
+            "evaluate_reactive",
+            "Fast ACCEPT: no critical discrepancies",
+            Some(cycle_id),
+          )
           cycle_log.log_dprime_layer(
             cycle_id,
             "reactive",
@@ -198,6 +230,12 @@ fn evaluate_deliberative(
   cycle_id: String,
   verbose: Bool,
 ) -> GateResult {
+  slog.debug(
+    "dprime/gate",
+    "evaluate_deliberative",
+    "Layer 2: deliberative evaluation",
+    Some(cycle_id),
+  )
   let forecasts =
     scorer.score_features(
       instruction,
@@ -210,6 +248,12 @@ fn evaluate_deliberative(
     )
   let score =
     engine.compute_dprime(forecasts, state.config.features, state.config.tiers)
+  slog.info(
+    "dprime/gate",
+    "evaluate_deliberative",
+    "D' score: " <> float.to_string(score),
+    Some(cycle_id),
+  )
   let decision =
     engine.gate_decision(
       score,
@@ -220,6 +264,12 @@ fn evaluate_deliberative(
   // Layer 3: Meta-management — may escalate MODIFY → REJECT
   let final_decision = case decision {
     Modify -> {
+      slog.debug(
+        "dprime/gate",
+        "evaluate_deliberative",
+        "Checking meta-management for MODIFY escalation",
+        Some(cycle_id),
+      )
       let escalated = meta.maybe_escalate(state, decision)
       escalated
     }
@@ -271,6 +321,19 @@ fn evaluate_deliberative(
     decision_to_string(final_decision),
     score,
     explanation,
+  )
+
+  slog.info(
+    "dprime/gate",
+    "evaluate_deliberative",
+    "Final decision: "
+      <> decision_to_string(final_decision)
+      <> " (layer: "
+      <> layer_str
+      <> ", score: "
+      <> float.to_string(score)
+      <> ")",
+    Some(cycle_id),
   )
 
   GateResult(

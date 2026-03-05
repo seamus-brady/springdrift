@@ -6,8 +6,10 @@ import agent/types.{
   StopChild, Temporary, Transient,
 }
 import gleam/erlang/process.{type ExitMessage, type Pid, type Subject}
+import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
+import slog
 
 // ---------------------------------------------------------------------------
 // Internal types
@@ -44,6 +46,7 @@ pub fn start(
   cognitive: Subject(CognitiveMessage),
   max_restarts: Int,
 ) -> Subject(SupervisorMessage) {
+  slog.info("supervisor", "start", "Starting supervisor", None)
   let setup = process.new_subject()
   process.spawn_unlinked(fn() {
     process.trap_exits(True)
@@ -73,6 +76,16 @@ fn supervisor_loop(state: SupervisorState) -> Nil {
 }
 
 fn handle_external(state: SupervisorState, msg: SupervisorMessage) -> Nil {
+  slog.debug(
+    "supervisor",
+    "handle_external",
+    case msg {
+      StartChild(spec:, ..) -> "StartChild: " <> spec.name
+      StopChild(name:) -> "StopChild: " <> name
+      ShutdownAll -> "ShutdownAll"
+    },
+    None,
+  )
   case msg {
     StartChild(spec:, reply_to:) -> {
       case framework.start_agent(spec) {
@@ -136,6 +149,15 @@ fn handle_child_exit(state: SupervisorState, exit_msg: ExitMessage) -> Nil {
         }
 
         True -> {
+          slog.info(
+            "supervisor",
+            "restart_child",
+            "Restarting "
+              <> child.spec.name
+              <> " attempt "
+              <> int.to_string(child.restart_count + 1),
+            None,
+          )
           notify(
             state.cognitive,
             AgentCrashed(name: child.spec.name, reason: reason_str),

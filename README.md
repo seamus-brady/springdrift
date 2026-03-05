@@ -86,11 +86,21 @@ logged. Events carry `parent_id` to chain cycles in order.
 The `--verbose` flag enables logging of full `llm_request` and `llm_response`
 payloads (off by default to keep log files small).
 
-### Log tab with cycle browser and rewind
-Press **Tab** in the TUI to open the Log tab. Use `↑`/`↓` to browse past
-cycles. Each entry shows timestamp, tools used, token counts, and truncated
-input/response text. Press **Enter** to rewind the conversation to that cycle —
-the service state is restored and you continue from that point.
+### System logging
+Springdrift has a system-level logger (`slog`) with three output sinks:
+
+1. **Date-rotated files** — `logs/YYYY-MM-DD.jsonl` (JSON-L, one entry per line).
+   Every module instruments key functions with `slog.debug` / `slog.info` /
+   `slog.warn` / `slog.log_error` calls.
+2. **Stderr** — when `--verbose` is set, formatted log lines are written to
+   stderr (not stdout, to avoid corrupting TUI alternate-screen output).
+3. **UI log tabs** — both the TUI Log tab and the Web GUI Log tab load and
+   display entries from today's log file.
+
+### Log tab (TUI and Web GUI)
+Press **Tab** in the TUI to open the Log tab. Each entry shows timestamp,
+colored level badge, module::function, message, and optional cycle ID. Use
+`↑`/`↓` to scroll. The Web GUI has a separate Log tab with a refresh button.
 
 ### Context window management
 Set `--max-context <n>` to cap the number of messages passed to the LLM per
@@ -173,8 +183,7 @@ gleam run -- --print-config
 | Enter | Send message (or answer agent question) |
 | Tab | Switch between Chat and Log tabs |
 | PgUp / PgDn | Scroll message history |
-| ↑ / ↓ | (Log tab) Select cycle |
-| Enter | (Log tab) Rewind to selected cycle |
+| ↑ / ↓ | (Log tab) Scroll log entries |
 | Ctrl-C / Ctrl-D | Exit |
 
 ### Slash commands
@@ -268,6 +277,7 @@ instructions.
 
 ```
 springdrift.gleam         Entry point — config, provider selection, wiring
+├── slog.gleam            System logger — date-rotated JSON-L files + optional stderr
 ├── config.gleam          3-layer config (CLI flags > .springdrift.toml > ~/.config/springdrift/config.toml)
 ├── storage.gleam         Session save/load  (~/.config/springdrift/session.json)
 ├── skills.gleam          Skill discovery, frontmatter parsing, XML injection
@@ -295,7 +305,7 @@ springdrift.gleam         Entry point — config, provider selection, wiring
 │   ├── web.gleam         fetch_url
 │   └── shell.gleam       run_shell (delegates to sandbox)
 │
-├── tui.gleam             Alternate-screen TUI — Chat + Log tabs
+├── tui.gleam             Alternate-screen TUI — Chat + Log tabs (system log entries)
 │
 └── llm/
     ├── types.gleam        Shared types: Message, ContentBlock, LlmRequest/Response/Error, Tool
