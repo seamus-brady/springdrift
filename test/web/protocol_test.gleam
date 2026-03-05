@@ -153,6 +153,57 @@ pub fn format_usage_none_test() {
 }
 
 // ---------------------------------------------------------------------------
+// decode_client_message — RequestLogData / RequestRewind
+// ---------------------------------------------------------------------------
+
+pub fn decode_request_log_data_test() {
+  let json = "{\"type\": \"request_log_data\"}"
+  let result = protocol.decode_client_message(json)
+  result |> should.be_ok
+  let assert Ok(protocol.RequestLogData) = result
+}
+
+pub fn decode_request_rewind_test() {
+  let json = "{\"type\": \"request_rewind\", \"index\": 3}"
+  let result = protocol.decode_client_message(json)
+  result |> should.be_ok
+  let assert Ok(protocol.RequestRewind(index:)) = result
+  index |> should.equal(3)
+}
+
+// ---------------------------------------------------------------------------
+// encode_server_message — LogData
+// ---------------------------------------------------------------------------
+
+pub fn encode_log_data_empty_test() {
+  let msg = protocol.LogData(cycles: [])
+  let json_str = protocol.encode_server_message(msg)
+  json_str |> should_contain("\"type\":\"log_data\"")
+  json_str |> should_contain("\"cycles\":[]")
+}
+
+pub fn encode_log_data_with_cycle_test() {
+  let cycle =
+    protocol.CycleDataJson(
+      cycle_id: "c1",
+      timestamp: "2026-03-04T12:00:00Z",
+      human_input: "hello",
+      tool_names: ["read_file"],
+      response_text: "hi there",
+      input_tokens: 100,
+      output_tokens: 50,
+      thinking_tokens: 0,
+      complexity: "simple",
+    )
+  let msg = protocol.LogData(cycles: [cycle])
+  let json_str = protocol.encode_server_message(msg)
+  json_str |> should_contain("\"type\":\"log_data\"")
+  json_str |> should_contain("\"cycle_id\":\"c1\"")
+  json_str |> should_contain("\"human_input\":\"hello\"")
+  json_str |> should_contain("\"input_tokens\":100")
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

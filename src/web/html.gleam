@@ -322,6 +322,108 @@ pub fn page() -> String {
     color: var(--text-dim);
     margin-top: 8px;
   }
+
+  /* ── Tab bar ──────────────────────────────────────── */
+  #tab-bar {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+    padding: 0 24px;
+    background: var(--surface);
+  }
+  .tab-btn {
+    padding: 10px 20px;
+    border: none;
+    background: none;
+    color: var(--text-dim);
+    font-family: inherit;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+  .tab-content { display: none; flex: 1; flex-direction: column; min-height: 0; }
+  .tab-content.active { display: flex; }
+
+  /* ── Log tab ──────────────────────────────────────── */
+  #log-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px;
+    max-width: 720px;
+    width: 100%;
+    margin: 0 auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  #log-container::-webkit-scrollbar { display: none; }
+  .cycle-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 14px 18px;
+    margin-bottom: 12px;
+    cursor: pointer;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .cycle-card:hover {
+    border-color: var(--accent);
+    box-shadow: 0 2px 8px rgba(218,126,55,0.1);
+  }
+  .cycle-card .cycle-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+  }
+  .cycle-card .cycle-time {
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  .cycle-card .cycle-tokens {
+    font-size: 12px;
+    color: var(--text-dim);
+    font-family: 'SF Mono', 'Menlo', monospace;
+  }
+  .cycle-card .cycle-input {
+    font-size: 15px;
+    color: var(--text);
+    margin-bottom: 6px;
+  }
+  .cycle-card .cycle-response {
+    font-size: 14px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .cycle-card .cycle-tools {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+  .tool-badge {
+    font-size: 11px;
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-family: 'SF Mono', 'Menlo', monospace;
+    color: var(--text-secondary);
+  }
+  .log-empty {
+    text-align: center;
+    color: var(--text-dim);
+    padding: 40px 0;
+    font-size: 15px;
+  }
 </style>
 </head>
 <body>
@@ -333,13 +435,22 @@ pub fn page() -> String {
   </div>
 </div>
 <div id=\"main\">
-  <div id=\"messages\"></div>
-  <div id=\"input-area\">
-    <form id=\"chat-form\">
-      <input id=\"chat-input\" type=\"text\" placeholder=\"Message springdrift...\" autocomplete=\"off\" autofocus>
-      <button type=\"submit\" aria-label=\"Send\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><line x1=\"22\" y1=\"2\" x2=\"11\" y2=\"13\"/><polygon points=\"22 2 15 22 11 13 2 9 22 2\"/></svg></button>
-    </form>
-    <div id=\"input-hint\">Press Enter to send</div>
+  <div id=\"tab-bar\">
+    <button class=\"tab-btn active\" data-tab=\"chat\">Chat</button>
+    <button class=\"tab-btn\" data-tab=\"log\">Log</button>
+  </div>
+  <div id=\"chat-tab\" class=\"tab-content active\">
+    <div id=\"messages\"></div>
+    <div id=\"input-area\">
+      <form id=\"chat-form\">
+        <input id=\"chat-input\" type=\"text\" placeholder=\"Message springdrift...\" autocomplete=\"off\" autofocus>
+        <button type=\"submit\" aria-label=\"Send\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><line x1=\"22\" y1=\"2\" x2=\"11\" y2=\"13\"/><polygon points=\"22 2 15 22 11 13 2 9 22 2\"/></svg></button>
+      </form>
+      <div id=\"input-hint\">Press Enter to send</div>
+    </div>
+  </div>
+  <div id=\"log-tab\" class=\"tab-content\">
+    <div id=\"log-container\"><div class=\"log-empty\">Click to load log data</div></div>
   </div>
 </div>
 <script>
@@ -412,7 +523,13 @@ pub fn page() -> String {
           addNotification('Using tool: ' + data.name);
         } else if (data.kind === 'save_warning') {
           addNotification(data.message);
+        } else if (data.kind === 'safety') {
+          var badge = data.decision === 'ACCEPT' ? '\\u2705' : data.decision === 'REJECT' ? '\\u274C' : '\\u26A0\\uFE0F';
+          addNotification(badge + ' D\\' ' + data.decision + ' (score: ' + data.score.toFixed(2) + ')');
         }
+        break;
+      case 'log_data':
+        renderLogData(data.cycles);
         break;
     }
   }
@@ -523,6 +640,72 @@ pub fn page() -> String {
     e.preventDefault();
     sendMessage();
   });
+
+  // ── Tab switching ──────────────────────────────────
+  document.querySelectorAll('.tab-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+      document.querySelectorAll('.tab-content').forEach(function(t) { t.classList.remove('active'); });
+      btn.classList.add('active');
+      var tabId = btn.getAttribute('data-tab') + '-tab';
+      document.getElementById(tabId).classList.add('active');
+      if (btn.getAttribute('data-tab') === 'log') {
+        requestLogData();
+      }
+    });
+  });
+
+  function requestLogData() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'request_log_data' }));
+    }
+  }
+
+  function truncate(text, max) {
+    if (!text) return '';
+    return text.length > max ? text.substring(0, max) + '...' : text;
+  }
+
+  function renderLogData(cycles) {
+    var container = document.getElementById('log-container');
+    if (!cycles || cycles.length === 0) {
+      container.innerHTML = '<div class=\"log-empty\">No cycle data yet</div>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < cycles.length; i++) {
+      var c = cycles[i];
+      var tools = '';
+      if (c.tool_names && c.tool_names.length > 0) {
+        tools = '<div class=\"cycle-tools\">';
+        for (var j = 0; j < c.tool_names.length; j++) {
+          tools += '<span class=\"tool-badge\">' + escapeHtml(c.tool_names[j]) + '</span>';
+        }
+        tools += '</div>';
+      }
+      var tokens = c.input_tokens + ' in / ' + c.output_tokens + ' out';
+      if (c.thinking_tokens > 0) tokens += ' / ' + c.thinking_tokens + ' think';
+      html += '<div class=\"cycle-card\" data-index=\"' + i + '\">'
+        + '<div class=\"cycle-header\">'
+        + '<span class=\"cycle-time\">' + escapeHtml(c.timestamp) + (c.complexity ? ' [' + c.complexity + ']' : '') + '</span>'
+        + '<span class=\"cycle-tokens\">' + tokens + '</span>'
+        + '</div>'
+        + '<div class=\"cycle-input\">' + escapeHtml(truncate(c.human_input, 120)) + '</div>'
+        + '<div class=\"cycle-response\">' + escapeHtml(truncate(c.response_text, 200)) + '</div>'
+        + tools
+        + '</div>';
+    }
+    container.innerHTML = html;
+    container.querySelectorAll('.cycle-card').forEach(function(card) {
+      card.addEventListener('click', function() {
+        var idx = parseInt(card.getAttribute('data-index'));
+        if (confirm('Rewind to cycle ' + (idx + 1) + '?')) {
+          ws.send(JSON.stringify({ type: 'request_rewind', index: idx }));
+          document.querySelector('.tab-btn[data-tab=\"chat\"]').click();
+        }
+      });
+    });
+  }
 
   connect();
 })();

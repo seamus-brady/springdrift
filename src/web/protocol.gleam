@@ -11,9 +11,11 @@
 ////   { "type": "notification", "kind": "tool_calling", "name": "..." }
 ////   { "type": "notification", "kind": "save_warning", "message": "..." }
 
+import cycle_log
 import gleam/dynamic/decode
 import gleam/int
 import gleam/json
+import gleam/list
 import gleam/option.{type Option, None, Some}
 import llm/types.{type Usage, Usage}
 
@@ -24,6 +26,8 @@ import llm/types.{type Usage, Usage}
 pub type ClientMessage {
   UserMessage(text: String)
   UserAnswer(text: String)
+  RequestLogData
+  RequestRewind(index: Int)
 }
 
 pub type ServerMessage {
@@ -32,6 +36,22 @@ pub type ServerMessage {
   Question(text: String, source: String)
   ToolNotification(name: String)
   SaveNotification(message: String)
+  SafetyNotification(decision: String, score: Float, explanation: String)
+  LogData(cycles: List(CycleDataJson))
+}
+
+pub type CycleDataJson {
+  CycleDataJson(
+    cycle_id: String,
+    timestamp: String,
+    human_input: String,
+    tool_names: List(String),
+    response_text: String,
+    input_tokens: Int,
+    output_tokens: Int,
+    thinking_tokens: Int,
+    complexity: String,
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -49,6 +69,11 @@ pub fn decode_client_message(json_string: String) -> Result(ClientMessage, Nil) 
       "user_answer" -> {
         use text <- decode.field("text", decode.string)
         decode.success(UserAnswer(text:))
+      }
+      "request_log_data" -> decode.success(RequestLogData)
+      "request_rewind" -> {
+        use index <- decode.field("index", decode.int)
+        decode.success(RequestRewind(index:))
       }
       _ -> decode.failure(UserMessage(""), "Unknown client message type")
     }
@@ -101,7 +126,57 @@ pub fn encode_server_message(msg: ServerMessage) -> String {
         #("message", json.string(message)),
       ])
       |> json.to_string
+
+    SafetyNotification(decision:, score:, explanation:) ->
+      json.object([
+        #("type", json.string("notification")),
+        #("kind", json.string("safety")),
+        #("decision", json.string(decision)),
+        #("score", json.float(score)),
+        #("explanation", json.string(explanation)),
+      ])
+      |> json.to_string
+
+    LogData(cycles:) ->
+      json.object([
+        #("type", json.string("log_data")),
+        #("cycles", json.array(cycles, encode_cycle_data)),
+      ])
+      |> json.to_string
   }
+}
+
+fn encode_cycle_data(c: CycleDataJson) -> json.Json {
+  json.object([
+    #("cycle_id", json.string(c.cycle_id)),
+    #("timestamp", json.string(c.timestamp)),
+    #("human_input", json.string(c.human_input)),
+    #("tool_names", json.array(c.tool_names, json.string)),
+    #("response_text", json.string(c.response_text)),
+    #("input_tokens", json.int(c.input_tokens)),
+    #("output_tokens", json.int(c.output_tokens)),
+    #("thinking_tokens", json.int(c.thinking_tokens)),
+    #("complexity", json.string(c.complexity)),
+  ])
+}
+
+pub fn cycle_data_to_json(c: cycle_log.CycleData) -> CycleDataJson {
+  CycleDataJson(
+    cycle_id: c.cycle_id,
+    timestamp: c.timestamp,
+    human_input: c.human_input,
+    tool_names: c.tool_names,
+    response_text: c.response_text,
+    input_tokens: c.input_tokens,
+    output_tokens: c.output_tokens,
+    thinking_tokens: c.thinking_tokens,
+    complexity: option.unwrap(c.complexity, ""),
+  )
+}
+
+pub fn load_cycle_data_json() -> List(CycleDataJson) {
+  cycle_log.load_cycles()
+  |> list.map(cycle_data_to_json)
 }
 
 fn encode_usage(usage: Option(Usage)) -> json.Json {
