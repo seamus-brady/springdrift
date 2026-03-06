@@ -237,7 +237,7 @@ fn execute_tool(
   }
 }
 
-fn parse_human_input_question(input_json: String) -> String {
+pub fn parse_human_input_question(input_json: String) -> String {
   let decoder = {
     use question <- decode.field("question", decode.string)
     decode.success(question)

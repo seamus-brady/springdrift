@@ -5,7 +5,7 @@
          tui_run/2, throw_tui_exit/0,
          fetch_url/1, http_post/3, check_docker/0, docker_build/1,
          docker_run_container/2, docker_exec/2, docker_stop/1,
-         rescue/1,
+         rescue/1, sha256_hex/1,
          log_init/1, log_stdout_enabled/0, log_stderr/1]).
 
 %% Read one line from stdin.
@@ -263,6 +263,11 @@ rescue(Fun) ->
     catch
         _Class:Reason -> {error, list_to_binary(io_lib:format("~p", [Reason]))}
     end.
+
+%% SHA-256 hex digest of a binary string.
+sha256_hex(Input) ->
+    Hash = crypto:hash(sha256, Input),
+    list_to_binary(lists:flatten([io_lib:format("~2.16.0b", [B]) || <<B>> <= Hash])).
 
 %% ---------------------------------------------------------------------------
 %% Logger FFI

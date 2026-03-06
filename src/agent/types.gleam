@@ -123,6 +123,12 @@ pub type CognitiveMessage {
     text: String,
     reply_to: Subject(CognitiveReply),
   )
+  PostExecutionGateComplete(
+    cycle_id: String,
+    result: dprime_types.GateResult,
+    pre_score: Float,
+    reply_to: Subject(CognitiveReply),
+  )
 }
 
 pub type CognitiveReply {
@@ -153,6 +159,11 @@ pub type CognitiveStatus {
     cycle_id: String,
     model: String,
     text: String,
+    reply_to: Subject(CognitiveReply),
+  )
+  EvaluatingPostExecution(
+    cycle_id: String,
+    pre_score: Float,
     reply_to: Subject(CognitiveReply),
   )
 }

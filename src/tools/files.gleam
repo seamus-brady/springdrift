@@ -56,7 +56,7 @@ fn list_directory_tool() -> Tool {
 pub fn execute(call: ToolCall, write_anywhere: Bool) -> ToolResult {
   slog.debug("files", "execute", "tool=" <> call.name, option.None)
   case call.name {
-    "read_file" -> run_read_file(call)
+    "read_file" -> run_read_file(call, write_anywhere)
     "write_file" -> run_write_file(call, write_anywhere)
     "list_directory" -> run_list_directory(call)
     _ -> ToolFailure(tool_use_id: call.id, error: "Unknown tool: " <> call.name)
@@ -67,7 +67,7 @@ pub fn execute(call: ToolCall, write_anywhere: Bool) -> ToolResult {
 // read_file
 // ---------------------------------------------------------------------------
 
-fn run_read_file(call: ToolCall) -> ToolResult {
+fn run_read_file(call: ToolCall, write_anywhere: Bool) -> ToolResult {
   let decoder = {
     use path <- decode.field("path", decode.string)
     decode.success(path)
@@ -79,13 +79,21 @@ fn run_read_file(call: ToolCall) -> ToolResult {
         error: "Invalid read_file input: missing path",
       )
     Ok(path) ->
-      case simplifile.read(path) {
-        Error(e) ->
+      case write_anywhere || is_within_cwd(path) {
+        False ->
           ToolFailure(
             tool_use_id: call.id,
-            error: "read_file: " <> simplifile.describe_error(e),
+            error: "read_file: path is outside the current working directory (use --allow-write-anywhere to override)",
           )
-        Ok(content) -> ToolSuccess(tool_use_id: call.id, content:)
+        True ->
+          case simplifile.read(path) {
+            Error(e) ->
+              ToolFailure(
+                tool_use_id: call.id,
+                error: "read_file: " <> simplifile.describe_error(e),
+              )
+            Ok(content) -> ToolSuccess(tool_use_id: call.id, content:)
+          }
       }
   }
 }
@@ -134,8 +142,8 @@ fn run_write_file(call: ToolCall, write_anywhere: Bool) -> ToolResult {
 }
 
 /// Returns true if `path` resolves to a location within the current working
-/// directory. Absolute paths outside CWD return false.
-fn is_within_cwd(path: String) -> Bool {
+/// directory. Resolves `.` and `..` components before checking.
+pub fn is_within_cwd(path: String) -> Bool {
   case simplifile.current_directory() {
     Error(_) -> False
     Ok(cwd) -> {
@@ -143,9 +151,28 @@ fn is_within_cwd(path: String) -> Bool {
         True -> path
         False -> cwd <> "/" <> path
       }
-      string.starts_with(abs, cwd <> "/") || abs == cwd
+      let resolved = resolve_path(abs)
+      string.starts_with(resolved, cwd <> "/") || resolved == cwd
     }
   }
+}
+
+/// Resolve `.` and `..` components in an absolute path.
+fn resolve_path(path: String) -> String {
+  let parts = string.split(path, "/")
+  let resolved =
+    list.fold(parts, [], fn(acc, part) {
+      case part {
+        "" | "." -> acc
+        ".." ->
+          case acc {
+            [] -> []
+            [_, ..rest] -> rest
+          }
+        _ -> [part, ..acc]
+      }
+    })
+  "/" <> string.join(list.reverse(resolved), "/")
 }
 
 /// Extract the parent directory portion of a path.

@@ -1,6 +1,7 @@
 import dprime/scorer
-import dprime/types.{Feature, High, Low, Medium}
+import dprime/types.{type Feature, Feature, High, Low, Medium}
 import gleam/list
+import gleam/option.{None}
 import gleam/string
 import gleeunit
 import gleeunit/should
@@ -10,37 +11,37 @@ pub fn main() -> Nil {
   gleeunit.main()
 }
 
+fn feature(name: String, importance, critical: Bool) -> Feature {
+  Feature(
+    name:,
+    importance:,
+    description: case name {
+      "safety" -> "User safety"
+      "accuracy" -> "Factual correctness"
+      _ -> name
+    },
+    critical:,
+    feature_set: None,
+    feature_set_importance: None,
+    group: None,
+    group_importance: None,
+  )
+}
+
 // ---------------------------------------------------------------------------
 // build_scoring_prompt
 // ---------------------------------------------------------------------------
 
 pub fn build_scoring_prompt_includes_instruction_test() {
-  let features = [
-    Feature(
-      name: "safety",
-      importance: High,
-      description: "User safety",
-      critical: True,
-    ),
-  ]
+  let features = [feature("safety", High, True)]
   let prompt = scorer.build_scoring_prompt("delete all files", "", features)
   string.contains(prompt, "delete all files") |> should.be_true
 }
 
 pub fn build_scoring_prompt_includes_features_test() {
   let features = [
-    Feature(
-      name: "safety",
-      importance: High,
-      description: "User safety",
-      critical: True,
-    ),
-    Feature(
-      name: "accuracy",
-      importance: Medium,
-      description: "Factual correctness",
-      critical: False,
-    ),
+    feature("safety", High, True),
+    feature("accuracy", Medium, False),
   ]
   let prompt = scorer.build_scoring_prompt("test", "", features)
   string.contains(prompt, "safety") |> should.be_true
@@ -48,30 +49,30 @@ pub fn build_scoring_prompt_includes_features_test() {
 }
 
 pub fn build_scoring_prompt_includes_context_when_present_test() {
-  let features = [
-    Feature(
-      name: "safety",
-      importance: High,
-      description: "User safety",
-      critical: True,
-    ),
-  ]
+  let features = [feature("safety", High, True)]
   let prompt =
     scorer.build_scoring_prompt("test", "some context here", features)
   string.contains(prompt, "some context here") |> should.be_true
 }
 
 pub fn build_scoring_prompt_omits_context_when_empty_test() {
-  let features = [
-    Feature(
-      name: "safety",
-      importance: High,
-      description: "User safety",
-      critical: True,
-    ),
-  ]
+  let features = [feature("safety", High, True)]
   let prompt = scorer.build_scoring_prompt("test", "", features)
-  string.contains(prompt, "Context:") |> should.be_false
+  string.contains(prompt, "CONTEXT:") |> should.be_false
+}
+
+pub fn build_scoring_prompt_includes_calibration_examples_test() {
+  let features = [feature("safety", High, True)]
+  let prompt = scorer.build_scoring_prompt("test", "", features)
+  string.contains(prompt, "CALIBRATION EXAMPLES") |> should.be_true
+  string.contains(prompt, "birthday card") |> should.be_true
+}
+
+pub fn build_scoring_prompt_includes_magnitude_scale_test() {
+  let features = [feature("safety", High, True)]
+  let prompt = scorer.build_scoring_prompt("test", "", features)
+  string.contains(prompt, "0 = No violation") |> should.be_true
+  string.contains(prompt, "3 = Severe violation") |> should.be_true
 }
 
 // ---------------------------------------------------------------------------
@@ -142,13 +143,21 @@ pub fn parse_forecasts_multiple_features_test() {
 // ---------------------------------------------------------------------------
 
 pub fn default_forecasts_all_zero_test() {
-  let features = [
-    Feature(name: "safety", importance: High, description: "", critical: True),
-    Feature(name: "scope", importance: Low, description: "", critical: False),
-  ]
+  let features = [feature("safety", High, True), feature("scope", Low, False)]
   let forecasts = scorer.default_forecasts(features)
   list.length(forecasts) |> should.equal(2)
   list.all(forecasts, fn(f) { f.magnitude == 0 }) |> should.be_true
+}
+
+// ---------------------------------------------------------------------------
+// cautious_forecasts
+// ---------------------------------------------------------------------------
+
+pub fn cautious_forecasts_all_one_test() {
+  let features = [feature("safety", High, True), feature("scope", Low, False)]
+  let forecasts = scorer.cautious_forecasts(features)
+  list.length(forecasts) |> should.equal(2)
+  list.all(forecasts, fn(f) { f.magnitude == 1 }) |> should.be_true
 }
 
 // ---------------------------------------------------------------------------
@@ -156,14 +165,7 @@ pub fn default_forecasts_all_zero_test() {
 // ---------------------------------------------------------------------------
 
 pub fn score_features_with_mock_provider_test() {
-  let features = [
-    Feature(
-      name: "safety",
-      importance: High,
-      description: "User safety",
-      critical: True,
-    ),
-  ]
+  let features = [feature("safety", High, True)]
   let json_response =
     "[{\"feature\": \"safety\", \"magnitude\": 1, \"rationale\": \"minor concern\"}]"
   let provider = mock.provider_with_text(json_response)
@@ -183,15 +185,8 @@ pub fn score_features_with_mock_provider_test() {
   f.magnitude |> should.equal(1)
 }
 
-pub fn score_features_falls_back_on_error_test() {
-  let features = [
-    Feature(
-      name: "safety",
-      importance: High,
-      description: "User safety",
-      critical: True,
-    ),
-  ]
+pub fn score_features_falls_back_to_cautious_on_error_test() {
+  let features = [feature("safety", High, True)]
   let provider = mock.provider_with_error("API down")
   let forecasts =
     scorer.score_features(
@@ -205,18 +200,12 @@ pub fn score_features_falls_back_on_error_test() {
     )
   list.length(forecasts) |> should.equal(1)
   let assert [f] = forecasts
-  f.magnitude |> should.equal(0)
+  // After retry, falls back to magnitude 1 (cautious)
+  f.magnitude |> should.equal(1)
 }
 
-pub fn score_features_falls_back_on_invalid_response_test() {
-  let features = [
-    Feature(
-      name: "safety",
-      importance: High,
-      description: "User safety",
-      critical: True,
-    ),
-  ]
+pub fn score_features_falls_back_to_cautious_on_invalid_response_test() {
+  let features = [feature("safety", High, True)]
   let provider = mock.provider_with_text("I can't evaluate that")
   let forecasts =
     scorer.score_features(
@@ -229,5 +218,6 @@ pub fn score_features_falls_back_on_invalid_response_test() {
       False,
     )
   list.length(forecasts) |> should.equal(1)
-  list.all(forecasts, fn(f) { f.magnitude == 0 }) |> should.be_true
+  // After retry, falls back to magnitude 1 (cautious)
+  list.all(forecasts, fn(f) { f.magnitude == 1 }) |> should.be_true
 }

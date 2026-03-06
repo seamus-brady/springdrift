@@ -1,12 +1,26 @@
 import dprime/engine
 import dprime/types.{
-  Accept, Feature, Forecast, High, Low, Medium, Modify, Reject,
+  type Feature, Accept, Feature, Forecast, High, Low, Medium, Modify, Reject,
 }
+import gleam/option.{None, Some}
 import gleeunit
 import gleeunit/should
 
 pub fn main() -> Nil {
   gleeunit.main()
+}
+
+fn feature(name: String, importance, critical: Bool) -> Feature {
+  Feature(
+    name:,
+    importance:,
+    description: "",
+    critical:,
+    feature_set: None,
+    feature_set_importance: None,
+    group: None,
+    group_importance: None,
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -42,18 +56,82 @@ pub fn scaling_unit_3_tier_test() {
 }
 
 // ---------------------------------------------------------------------------
+// feature_importance (multi-tier)
+// ---------------------------------------------------------------------------
+
+pub fn feature_importance_1_tier_test() {
+  let f = feature("safety", High, True)
+  engine.feature_importance(f, 1) |> should.equal(3)
+}
+
+pub fn feature_importance_2_tier_test() {
+  let f =
+    Feature(
+      ..feature("safety", High, True),
+      feature_set: Some("core"),
+      feature_set_importance: Some(Medium),
+    )
+  // High(3) × Medium(2) = 6
+  engine.feature_importance(f, 2) |> should.equal(6)
+}
+
+pub fn feature_importance_3_tier_test() {
+  let f =
+    Feature(
+      ..feature("safety", High, True),
+      feature_set: Some("core"),
+      feature_set_importance: Some(Medium),
+      group: Some("stakeholder_a"),
+      group_importance: Some(Low),
+    )
+  // High(3) × Medium(2) × Low(1) = 6
+  engine.feature_importance(f, 3) |> should.equal(6)
+}
+
+pub fn feature_importance_3_tier_all_high_test() {
+  let f =
+    Feature(
+      ..feature("safety", High, True),
+      feature_set: Some("core"),
+      feature_set_importance: Some(High),
+      group: Some("stakeholder_a"),
+      group_importance: Some(High),
+    )
+  // High(3) × High(3) × High(3) = 27
+  engine.feature_importance(f, 3) |> should.equal(27)
+}
+
+pub fn feature_importance_2_tier_no_set_importance_test() {
+  // Missing feature_set_importance defaults to weight 1
+  let f = Feature(..feature("safety", Medium, False), feature_set: Some("misc"))
+  engine.feature_importance(f, 2) |> should.equal(2)
+}
+
+// ---------------------------------------------------------------------------
+// reactive_scaling_unit
+// ---------------------------------------------------------------------------
+
+pub fn reactive_scaling_unit_test() {
+  let critical = [
+    feature("safety", High, True),
+    feature("privacy", High, True),
+  ]
+  // 2 features × 3 × 3 = 18
+  engine.reactive_scaling_unit(critical) |> should.equal(18)
+}
+
+pub fn reactive_scaling_unit_empty_test() {
+  engine.reactive_scaling_unit([]) |> should.equal(0)
+}
+
+// ---------------------------------------------------------------------------
 // compute_dprime
 // ---------------------------------------------------------------------------
 
 pub fn dprime_all_zero_test() {
   let features = [
-    Feature(name: "safety", importance: High, description: "", critical: True),
-    Feature(
-      name: "accuracy",
-      importance: Medium,
-      description: "",
-      critical: False,
-    ),
+    feature("safety", High, True),
+    feature("accuracy", Medium, False),
   ]
   let forecasts = [
     Forecast(feature_name: "safety", magnitude: 0, rationale: ""),
@@ -64,11 +142,7 @@ pub fn dprime_all_zero_test() {
 }
 
 pub fn dprime_single_high_at_max_test() {
-  // Single High feature at magnitude 3 with 1 tier:
-  // D' = (3 * 3) / 9 = 1.0
-  let features = [
-    Feature(name: "safety", importance: High, description: "", critical: True),
-  ]
+  let features = [feature("safety", High, True)]
   let forecasts = [
     Forecast(feature_name: "safety", magnitude: 3, rationale: ""),
   ]
@@ -77,23 +151,15 @@ pub fn dprime_single_high_at_max_test() {
 }
 
 pub fn dprime_mixed_features_test() {
-  // High (weight=3) at magnitude 2, Medium (weight=2) at magnitude 1
-  // D' = (3*2 + 2*1) / 9 = 8/9 ≈ 0.889
   let features = [
-    Feature(name: "safety", importance: High, description: "", critical: True),
-    Feature(
-      name: "accuracy",
-      importance: Medium,
-      description: "",
-      critical: False,
-    ),
+    feature("safety", High, True),
+    feature("accuracy", Medium, False),
   ]
   let forecasts = [
     Forecast(feature_name: "safety", magnitude: 2, rationale: ""),
     Forecast(feature_name: "accuracy", magnitude: 1, rationale: ""),
   ]
   let score = engine.compute_dprime(forecasts, features, 1)
-  // 8/9 ≈ 0.8889
   let diff = case score -. 0.8889 {
     d if d <. 0.0 -> 0.0 -. d
     d -> d
@@ -103,21 +169,13 @@ pub fn dprime_mixed_features_test() {
 
 pub fn dprime_missing_forecast_treated_as_zero_test() {
   let features = [
-    Feature(name: "safety", importance: High, description: "", critical: True),
-    Feature(
-      name: "accuracy",
-      importance: Medium,
-      description: "",
-      critical: False,
-    ),
+    feature("safety", High, True),
+    feature("accuracy", Medium, False),
   ]
-  // Only safety forecast provided; accuracy defaults to 0
   let forecasts = [
     Forecast(feature_name: "safety", magnitude: 1, rationale: ""),
   ]
-  // D' = (3*1 + 2*0) / 9 = 3/9 = 1/3 ≈ 0.333
   let score = engine.compute_dprime(forecasts, features, 1)
-  // 3/9 ≈ 0.3333
   let diff = case score -. 0.3333 {
     d if d <. 0.0 -> 0.0 -. d
     d -> d
@@ -126,33 +184,47 @@ pub fn dprime_missing_forecast_treated_as_zero_test() {
 }
 
 pub fn dprime_magnitude_clamped_to_max_test() {
-  // Magnitude 5 should be clamped to max of 3
-  let features = [
-    Feature(name: "safety", importance: High, description: "", critical: True),
-  ]
+  let features = [feature("safety", High, True)]
   let forecasts = [
     Forecast(feature_name: "safety", magnitude: 5, rationale: ""),
   ]
-  // D' = (3 * 3) / 9 = 1.0 (clamped from 5 to 3)
   let score = engine.compute_dprime(forecasts, features, 1)
   score |> should.equal(1.0)
 }
 
 pub fn dprime_2_tier_scaling_test() {
-  // 2 tiers: scaling_unit = 27, magnitudes clamped to [0,3]
-  let features = [
-    Feature(name: "safety", importance: High, description: "", critical: True),
-  ]
+  let features = [feature("safety", High, True)]
   let forecasts = [
     Forecast(feature_name: "safety", magnitude: 2, rationale: ""),
   ]
-  // D' = (3 * 2) / 27 = 6/27 ≈ 0.222
   let score = engine.compute_dprime(forecasts, features, 2)
   let diff = case score -. 0.2222 {
     d if d <. 0.0 -> 0.0 -. d
     d -> d
   }
   let assert True = diff <. 0.001
+}
+
+// ---------------------------------------------------------------------------
+// compute_reactive_dprime
+// ---------------------------------------------------------------------------
+
+pub fn reactive_dprime_test() {
+  let critical = [
+    feature("safety", High, True),
+    feature("privacy", High, True),
+  ]
+  let forecasts = [
+    Forecast(feature_name: "safety", magnitude: 3, rationale: ""),
+    Forecast(feature_name: "privacy", magnitude: 0, rationale: ""),
+  ]
+  // D' = (3*3 + 3*0) / (2*3*3) = 9/18 = 0.5
+  let score = engine.compute_reactive_dprime(forecasts, critical)
+  score |> should.equal(0.5)
+}
+
+pub fn reactive_dprime_empty_test() {
+  engine.compute_reactive_dprime([], []) |> should.equal(0.0)
 }
 
 // ---------------------------------------------------------------------------
@@ -189,32 +261,20 @@ pub fn gate_decision_modify_at_modify_threshold_test() {
 
 pub fn critical_features_filters_correctly_test() {
   let features = [
-    Feature(name: "safety", importance: High, description: "", critical: True),
-    Feature(
-      name: "accuracy",
-      importance: Medium,
-      description: "",
-      critical: False,
-    ),
-    Feature(name: "privacy", importance: High, description: "", critical: True),
+    feature("safety", High, True),
+    feature("accuracy", Medium, False),
+    feature("privacy", High, True),
   ]
   let critical = engine.critical_features(features)
   critical
   |> should.equal([
-    Feature(name: "safety", importance: High, description: "", critical: True),
-    Feature(name: "privacy", importance: High, description: "", critical: True),
+    feature("safety", High, True),
+    feature("privacy", High, True),
   ])
 }
 
 pub fn critical_features_empty_when_none_critical_test() {
-  let features = [
-    Feature(
-      name: "accuracy",
-      importance: Medium,
-      description: "",
-      critical: False,
-    ),
-  ]
+  let features = [feature("accuracy", Medium, False)]
   engine.critical_features(features) |> should.equal([])
 }
 

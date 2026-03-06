@@ -50,11 +50,51 @@ pub fn read_file_nonexistent_returns_failure_test() {
       name: "read_file",
       input_json: "{\"path\":\"/tmp/springdrift_test_nonexistent_xyz.txt\"}",
     )
-  let result = files.execute(call, False)
+  let result = files.execute(call, True)
   case result {
     ToolFailure(..) -> Nil
     ToolSuccess(..) -> should.fail()
   }
+}
+
+pub fn read_file_outside_cwd_returns_failure_test() {
+  let call =
+    ToolCall(
+      id: "t1b",
+      name: "read_file",
+      input_json: "{\"path\":\"/etc/hostname\"}",
+    )
+  let result = files.execute(call, False)
+  case result {
+    ToolFailure(error: msg, ..) ->
+      string.contains(msg, "outside") |> should.be_true
+    ToolSuccess(..) -> should.fail()
+  }
+}
+
+pub fn read_file_dotdot_traversal_blocked_test() {
+  let call =
+    ToolCall(
+      id: "t1c",
+      name: "read_file",
+      input_json: "{\"path\":\"./subdir/../../etc/passwd\"}",
+    )
+  let result = files.execute(call, False)
+  case result {
+    ToolFailure(error: msg, ..) ->
+      string.contains(msg, "outside") |> should.be_true
+    ToolSuccess(..) -> should.fail()
+  }
+}
+
+pub fn is_within_cwd_rejects_dotdot_traversal_test() {
+  // Paths that use .. to escape CWD should be rejected
+  files.is_within_cwd("./subdir/../../etc/passwd") |> should.be_false
+}
+
+pub fn is_within_cwd_accepts_relative_path_test() {
+  // A simple relative path within CWD should be accepted
+  files.is_within_cwd("src/springdrift.gleam") |> should.be_true
 }
 
 // ---------------------------------------------------------------------------

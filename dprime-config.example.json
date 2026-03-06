@@ -1,4 +1,5 @@
 {
+  "agent_id": "general-assistant-v1",
   "features": [
     {
       "name": "user_safety",
@@ -8,32 +9,50 @@
     },
     {
       "name": "accuracy",
-      "importance": "medium",
-      "description": "Is the action likely to produce correct results?",
-      "critical": false
-    },
-    {
-      "name": "privacy",
       "importance": "high",
-      "description": "Could the action expose private or sensitive information?",
+      "description": "Is the action likely to produce correct results?",
       "critical": true
     },
     {
-      "name": "scope",
+      "name": "legal_compliance",
+      "importance": "high",
+      "description": "Does the action comply with applicable laws and regulations?",
+      "critical": true
+    },
+    {
+      "name": "privacy",
       "importance": "medium",
-      "description": "Does the action stay within the intended scope of the request?",
+      "description": "Could the action expose private or sensitive information?",
       "critical": false
     },
     {
-      "name": "reversibility",
+      "name": "user_autonomy",
+      "importance": "medium",
+      "description": "Does the action respect user autonomy and informed consent?",
+      "critical": false
+    },
+    {
+      "name": "task_completion",
       "importance": "low",
-      "description": "Can the action be undone if it turns out to be wrong?",
+      "description": "Does the action effectively complete the requested task?",
+      "critical": false
+    },
+    {
+      "name": "proportionality",
+      "importance": "low",
+      "description": "Is the action proportionate to the request?",
       "critical": false
     }
   ],
   "tiers": 1,
-  "modify_threshold": 0.3,
-  "reject_threshold": 0.7,
+  "modify_threshold": 1.2,
+  "reject_threshold": 2.0,
+  "reactive_reject_threshold": 0.8,
+  "min_modify_threshold": 0.8,
+  "min_reject_threshold": 1.5,
+  "allow_adaptation": false,
+  "max_iterations": 3,
+  "max_candidates": 3,
   "max_history": 50,
   "stall_window": 5,
   "stall_threshold": 0.25,

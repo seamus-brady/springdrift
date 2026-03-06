@@ -70,8 +70,13 @@ pub fn is_retryable_503_test() {
   |> should.be_true
 }
 
-pub fn is_retryable_429_test() {
+pub fn is_retryable_rate_limit_error_test() {
   retry.is_retryable(llm_types.RateLimitError(message: ""))
+  |> should.be_true
+}
+
+pub fn is_retryable_api_error_429_test() {
+  retry.is_retryable(llm_types.ApiError(status_code: 429, message: ""))
   |> should.be_true
 }
 

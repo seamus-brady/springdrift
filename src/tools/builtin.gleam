@@ -137,11 +137,11 @@ fn run_read_skill(call: ToolCall) -> ToolResult {
         error: "Invalid read_skill input: missing path",
       )
     Ok(path) ->
-      case string.ends_with(path, "SKILL.md") {
+      case string.ends_with(path, "SKILL.md") && !string.contains(path, "..") {
         False ->
           ToolFailure(
             tool_use_id: call.id,
-            error: "read_skill: path must end with SKILL.md",
+            error: "read_skill: path must end with SKILL.md and contain no '..' segments",
           )
         True ->
           case simplifile.read(path) {

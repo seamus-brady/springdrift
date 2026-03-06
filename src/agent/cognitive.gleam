@@ -1,3 +1,4 @@
+import agent/framework
 import agent/registry.{type Registry}
 import agent/types.{
   type AgentOutcome, type CognitiveMessage, type CognitiveReply,
@@ -12,6 +13,7 @@ import agent/types.{
 import agent/worker
 import context
 import cycle_log
+import dprime/audit as dprime_audit
 import dprime/gate
 import dprime/meta
 import dprime/types as dprime_types
@@ -161,6 +163,7 @@ fn handle_message(
       types.ClassifyComplete(..) -> "ClassifyComplete"
       types.SafetyGateComplete(..) -> "SafetyGateComplete"
       types.InputSafetyGateComplete(..) -> "InputSafetyGateComplete"
+      types.PostExecutionGateComplete(..) -> "PostExecutionGateComplete"
     },
     state.cycle_id,
   )
@@ -193,6 +196,14 @@ fn handle_message(
         result,
         model,
         text,
+        reply_to,
+      )
+    types.PostExecutionGateComplete(cycle_id, result, pre_score, reply_to) ->
+      handle_post_execution_gate_complete(
+        state,
+        cycle_id,
+        result,
+        pre_score,
         reply_to,
       )
   }
@@ -426,7 +437,7 @@ fn handle_own_human_input(
   call: llm_types.ToolCall,
   reply_to: Subject(CognitiveReply),
 ) -> CognitiveState {
-  let question = parse_human_input_question(call.input_json)
+  let question = framework.parse_human_input_question(call.input_json)
 
   // Send decoupled notification
   process.send(
@@ -448,17 +459,6 @@ fn handle_own_human_input(
     status: WaitingForUser(question:, context: ctx),
     pending: dict.delete(state.pending, task_id),
   )
-}
-
-fn parse_human_input_question(input_json: String) -> String {
-  let decoder = {
-    use question <- decode.field("question", decode.string)
-    decode.success(question)
-  }
-  case json.parse(input_json, decoder) {
-    Ok(q) -> q
-    Error(_) -> input_json
-  }
 }
 
 fn dispatch_agent_calls(
@@ -538,7 +538,8 @@ fn do_dispatch_agents(
   let cycle_id = option.unwrap(state.cycle_id, task_id)
   let new_pending_agents =
     list.filter_map(agent_calls, fn(call) {
-      let agent_name = string.drop_start(call.name, 6)
+      let agent_prefix_len = string.length("agent_")
+      let agent_name = string.drop_start(call.name, agent_prefix_len)
       case registry.get_task_subject(state.registry, agent_name) {
         None -> Error(Nil)
         Some(task_subject) -> {
@@ -818,9 +819,59 @@ fn handle_agent_complete(
           let user_msg =
             llm_types.Message(role: llm_types.User, content: all_results)
           let messages = list.append(state.messages, [user_msg])
+
+          // Spawn post-execution D' re-check if enabled
+          let result_text =
+            list.filter_map(all_results, fn(block) {
+              case block {
+                llm_types.ToolResultContent(content: c, ..) -> Ok(c)
+                _ -> Error(Nil)
+              }
+            })
+            |> string.join("\n")
+          let new_state_with_messages =
+            CognitiveState(..state, messages:, pending: remaining)
+          case state.dprime_state {
+            Some(dprime_st) -> {
+              let cycle_id = option.unwrap(state.cycle_id, "post-exec")
+              let self = state.self
+              let provider = state.provider
+              let scorer_model = state.task_model
+              let verbose = state.verbose
+              // Get the pre-execution D' score from the most recent history
+              let pre_score = case dprime_st.history {
+                [latest, ..] -> latest.score
+                [] -> 0.0
+              }
+              process.spawn_unlinked(fn() {
+                let post_result =
+                  gate.post_execution_evaluate(
+                    result_text,
+                    "",
+                    dprime_st,
+                    provider,
+                    scorer_model,
+                    cycle_id,
+                    verbose,
+                  )
+                process.send(
+                  self,
+                  types.PostExecutionGateComplete(
+                    cycle_id:,
+                    result: post_result,
+                    pre_score:,
+                    reply_to:,
+                  ),
+                )
+              })
+              Nil
+            }
+            None -> Nil
+          }
+
           let new_task_id = cycle_log.generate_uuid()
           let cycle_id = option.unwrap(state.cycle_id, new_task_id)
-          let req = build_request(state, messages)
+          let req = build_request(new_state_with_messages, messages)
           case state.verbose {
             True -> cycle_log.log_llm_request(cycle_id, req)
             False -> Nil
@@ -1137,6 +1188,24 @@ fn handle_safety_gate_complete(
   // Log the D' evaluation
   cycle_log.log_dprime_evaluation(cycle_id, result)
 
+  // Emit audit record
+  let instruction =
+    list.map(calls, fn(c) { c.name <> ": " <> c.input_json })
+    |> string.join("; ")
+  let audit_record =
+    dprime_audit.build_record(
+      cycle_id,
+      instruction,
+      result,
+      case state.dprime_state {
+        Some(ds) -> ds.config.features
+        None -> []
+      },
+      None,
+      None,
+    )
+  dprime_audit.log_record(audit_record, cycle_id)
+
   // Send notification
   process.send(
     state.notify,
@@ -1416,6 +1485,120 @@ fn handle_input_safety_gate_complete(
         ),
       )
       CognitiveState(..state, status: Idle)
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Post-execution D' re-check
+// ---------------------------------------------------------------------------
+
+fn handle_post_execution_gate_complete(
+  state: CognitiveState,
+  cycle_id: String,
+  result: dprime_types.GateResult,
+  pre_score: Float,
+  _reply_to: Subject(CognitiveReply),
+) -> CognitiveState {
+  let decision_str = case result.decision {
+    dprime_types.Accept -> "ACCEPT"
+    dprime_types.Modify -> "MODIFY"
+    dprime_types.Reject -> "REJECT"
+  }
+  slog.info(
+    "cognitive",
+    "handle_post_execution_gate_complete",
+    "Post-execution D' result: "
+      <> decision_str
+      <> " (score: "
+      <> float.to_string(result.dprime_score)
+      <> ", pre: "
+      <> float.to_string(pre_score)
+      <> ")",
+    Some(cycle_id),
+  )
+
+  // Log the post-execution evaluation
+  cycle_log.log_dprime_evaluation(cycle_id, result)
+
+  // Update D' state history
+  let new_dprime_state = case state.dprime_state {
+    None -> None
+    Some(ds) -> {
+      let updated = meta.record(ds, cycle_id, result, "")
+      Some(updated)
+    }
+  }
+  let state = CognitiveState(..state, dprime_state: new_dprime_state)
+
+  // Check if D' improved (decreased) or worsened
+  case result.dprime_score <=. pre_score {
+    True -> {
+      // D' decreased or held — action was effective, continue normally
+      slog.debug(
+        "cognitive",
+        "handle_post_execution_gate_complete",
+        "D' improved, continuing normally",
+        Some(cycle_id),
+      )
+      state
+    }
+    False -> {
+      // D' increased — action was counterproductive
+      // Check meta-management intervention
+      let intervention = case state.dprime_state {
+        Some(ds) -> meta.should_intervene(ds)
+        None -> dprime_types.NoIntervention
+      }
+      case intervention {
+        dprime_types.AbortMaxIterations -> {
+          slog.warn(
+            "cognitive",
+            "handle_post_execution_gate_complete",
+            "Max iterations reached, aborting",
+            Some(cycle_id),
+          )
+          process.send(
+            state.notify,
+            SafetyGateNotice(
+              decision: "ABORT",
+              score: result.dprime_score,
+              explanation: "Post-execution check: max iterations reached",
+            ),
+          )
+          state
+        }
+        dprime_types.Stalled -> {
+          slog.warn(
+            "cognitive",
+            "handle_post_execution_gate_complete",
+            "D' stalled after execution, tightening thresholds",
+            Some(cycle_id),
+          )
+          let new_ds = case state.dprime_state {
+            Some(ds) -> Some(meta.tighten_thresholds(ds))
+            None -> None
+          }
+          process.send(
+            state.notify,
+            SafetyGateNotice(
+              decision: "STALLED",
+              score: result.dprime_score,
+              explanation: "Post-execution check: D' worsened, thresholds tightened",
+            ),
+          )
+          CognitiveState(..state, dprime_state: new_ds)
+        }
+        dprime_types.NoIntervention -> {
+          slog.info(
+            "cognitive",
+            "handle_post_execution_gate_complete",
+            "D' increased but no intervention needed",
+            Some(cycle_id),
+          )
+          state
+        }
+      }
     }
   }
 }

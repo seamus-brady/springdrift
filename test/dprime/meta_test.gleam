@@ -1,8 +1,9 @@
 import dprime/config as dprime_config
 import dprime/meta
 import dprime/types.{
-  type DprimeConfig, type DprimeState, Accept, DprimeConfig, DprimeHistoryEntry,
-  DprimeState, GateResult, Modify, Reactive, Reject,
+  type DprimeConfig, type DprimeState, AbortMaxIterations, Accept, DprimeConfig,
+  DprimeHistoryEntry, DprimeState, GateResult, Modify, NoIntervention, Reactive,
+  Reject, Stalled,
 }
 import gleam/list
 import gleam/option.{None}
@@ -19,6 +20,7 @@ fn test_config() -> DprimeConfig {
     max_history: 10,
     stall_window: 3,
     stall_threshold: 0.25,
+    allow_adaptation: True,
   )
 }
 
@@ -51,6 +53,13 @@ pub fn record_adds_entry_to_history_test() {
   list.length(new_state.history) |> should.equal(1)
 }
 
+pub fn record_increments_iteration_count_test() {
+  let state = test_state()
+  let result = test_gate_result(0.5, Modify)
+  let new_state = meta.record(state, "cycle-1", result, "2026-03-04T10:00:00Z")
+  new_state.iteration_count |> should.equal(1)
+}
+
 pub fn record_prepends_newest_first_test() {
   let state = test_state()
   let r1 = test_gate_result(0.1, Accept)
@@ -71,11 +80,23 @@ pub fn record_trims_to_max_history_test() {
   let s3 = meta.record(s2, "c3", r, "t3")
   let s4 = meta.record(s3, "c4", r, "t4")
   list.length(s4.history) |> should.equal(3)
-  // Oldest entry (c1) should be dropped
   let assert [h1, h2, h3] = s4.history
   h1.cycle_id |> should.equal("c4")
   h2.cycle_id |> should.equal("c3")
   h3.cycle_id |> should.equal("c2")
+}
+
+// ---------------------------------------------------------------------------
+// reset_iterations
+// ---------------------------------------------------------------------------
+
+pub fn reset_iterations_test() {
+  let state = test_state()
+  let r = test_gate_result(0.1, Accept)
+  let s1 = meta.record(state, "c1", r, "t1")
+  s1.iteration_count |> should.equal(1)
+  let s2 = meta.reset_iterations(s1)
+  s2.iteration_count |> should.equal(0)
 }
 
 // ---------------------------------------------------------------------------
@@ -112,10 +133,10 @@ pub fn should_tighten_false_when_scores_low_test() {
           timestamp: "t3",
         ),
       ],
-      current_modify_threshold: 0.3,
-      current_reject_threshold: 0.7,
+      current_modify_threshold: 1.2,
+      current_reject_threshold: 2.0,
+      iteration_count: 0,
     )
-  // Average = 0.1 < 0.25 stall_threshold
   meta.should_tighten(state) |> should.be_false
 }
 
@@ -144,11 +165,59 @@ pub fn should_tighten_true_when_scores_high_test() {
           timestamp: "t3",
         ),
       ],
-      current_modify_threshold: 0.3,
-      current_reject_threshold: 0.7,
+      current_modify_threshold: 1.2,
+      current_reject_threshold: 2.0,
+      iteration_count: 0,
     )
-  // Average = 0.3 >= 0.25 stall_threshold
   meta.should_tighten(state) |> should.be_true
+}
+
+// ---------------------------------------------------------------------------
+// should_intervene
+// ---------------------------------------------------------------------------
+
+pub fn should_intervene_none_when_fresh_test() {
+  let state = test_state()
+  meta.should_intervene(state) |> should.equal(NoIntervention)
+}
+
+pub fn should_intervene_abort_when_max_iterations_test() {
+  let config = DprimeConfig(..test_config(), max_iterations: 2)
+  let state =
+    DprimeState(..dprime_config.initial_state(config), iteration_count: 2)
+  meta.should_intervene(state) |> should.equal(AbortMaxIterations)
+}
+
+pub fn should_intervene_stalled_when_history_high_test() {
+  let config = test_config()
+  let state =
+    DprimeState(
+      config:,
+      history: [
+        DprimeHistoryEntry(
+          cycle_id: "c1",
+          score: 0.5,
+          decision: Modify,
+          timestamp: "t1",
+        ),
+        DprimeHistoryEntry(
+          cycle_id: "c2",
+          score: 0.5,
+          decision: Modify,
+          timestamp: "t2",
+        ),
+        DprimeHistoryEntry(
+          cycle_id: "c3",
+          score: 0.5,
+          decision: Modify,
+          timestamp: "t3",
+        ),
+      ],
+      current_modify_threshold: 1.2,
+      current_reject_threshold: 2.0,
+      iteration_count: 1,
+    )
+  meta.should_intervene(state) |> should.equal(Stalled)
 }
 
 // ---------------------------------------------------------------------------
@@ -158,18 +227,48 @@ pub fn should_tighten_true_when_scores_high_test() {
 pub fn tighten_thresholds_multiplies_by_0_9_test() {
   let state = test_state()
   let tightened = meta.tighten_thresholds(state)
-  // 0.3 * 0.9 = 0.27
-  let diff_m = case tightened.current_modify_threshold -. 0.27 {
+  // 1.2 * 0.9 = 1.08
+  let diff_m = case tightened.current_modify_threshold -. 1.08 {
     d if d <. 0.0 -> 0.0 -. d
     d -> d
   }
   let assert True = diff_m <. 0.001
-  // 0.7 * 0.9 = 0.63
-  let diff_r = case tightened.current_reject_threshold -. 0.63 {
+  // 2.0 * 0.9 = 1.8
+  let diff_r = case tightened.current_reject_threshold -. 1.8 {
     d if d <. 0.0 -> 0.0 -. d
     d -> d
   }
   let assert True = diff_r <. 0.001
+}
+
+pub fn tighten_thresholds_respects_floor_test() {
+  let config =
+    DprimeConfig(
+      ..test_config(),
+      min_modify_threshold: 1.0,
+      min_reject_threshold: 1.7,
+    )
+  let state =
+    DprimeState(
+      ..dprime_config.initial_state(config),
+      current_modify_threshold: 1.05,
+      current_reject_threshold: 1.75,
+    )
+  let tightened = meta.tighten_thresholds(state)
+  // 1.05 * 0.9 = 0.945 → clamped to floor 1.0
+  let assert True = tightened.current_modify_threshold >=. 1.0
+  // 1.75 * 0.9 = 1.575 → clamped to floor 1.7 (since 1.575 < 1.7)
+  let assert True = tightened.current_reject_threshold >=. 1.7
+}
+
+pub fn tighten_thresholds_noop_when_adaptation_disabled_test() {
+  let config = DprimeConfig(..test_config(), allow_adaptation: False)
+  let state = dprime_config.initial_state(config)
+  let original_modify = state.current_modify_threshold
+  let original_reject = state.current_reject_threshold
+  let tightened = meta.tighten_thresholds(state)
+  tightened.current_modify_threshold |> should.equal(original_modify)
+  tightened.current_reject_threshold |> should.equal(original_reject)
 }
 
 // ---------------------------------------------------------------------------
@@ -201,8 +300,9 @@ pub fn maybe_escalate_modify_to_reject_when_stalled_test() {
           timestamp: "t3",
         ),
       ],
-      current_modify_threshold: 0.3,
-      current_reject_threshold: 0.7,
+      current_modify_threshold: 1.2,
+      current_reject_threshold: 2.0,
+      iteration_count: 0,
     )
   meta.maybe_escalate(state, Modify) |> should.equal(Reject)
 }
@@ -232,8 +332,9 @@ pub fn maybe_escalate_accept_unchanged_when_stalled_test() {
           timestamp: "t3",
         ),
       ],
-      current_modify_threshold: 0.3,
-      current_reject_threshold: 0.7,
+      current_modify_threshold: 1.2,
+      current_reject_threshold: 2.0,
+      iteration_count: 0,
     )
   meta.maybe_escalate(state, Accept) |> should.equal(Accept)
 }

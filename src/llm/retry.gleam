@@ -8,9 +8,10 @@ import llm/types.{
 /// Whether an LLM error is transient and worth retrying.
 pub fn is_retryable(err: LlmError) -> Bool {
   case err {
+    ApiError(status_code: 429, ..) -> True
     ApiError(status_code: 500, ..) -> True
-    ApiError(status_code: 529, ..) -> True
     ApiError(status_code: 503, ..) -> True
+    ApiError(status_code: 529, ..) -> True
     RateLimitError(..) -> True
     NetworkError(..) -> True
     TimeoutError -> True

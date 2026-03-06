@@ -11,6 +11,7 @@ import dprime/types.{
 }
 import gleam/int
 import gleam/list
+import gleam/option.{None, Some}
 
 /// Map importance level to numeric weight.
 pub fn importance_weight(importance: types.Importance) -> Int {
@@ -21,18 +22,53 @@ pub fn importance_weight(importance: types.Importance) -> Int {
   }
 }
 
+/// Compute the effective importance weight for a feature, accounting for
+/// multi-tier hierarchies. For tier 1: base importance only. For tier 2:
+/// base × feature_set_importance. For tier 3: base × set × group.
+pub fn feature_importance(feature: Feature, tiers: Int) -> Int {
+  let base = importance_weight(feature.importance)
+  case tiers {
+    1 -> base
+    2 -> {
+      let set_weight = case feature.feature_set_importance {
+        Some(imp) -> importance_weight(imp)
+        None -> 1
+      }
+      base * set_weight
+    }
+    _ -> {
+      let set_weight = case feature.feature_set_importance {
+        Some(imp) -> importance_weight(imp)
+        None -> 1
+      }
+      let group_weight = case feature.group_importance {
+        Some(imp) -> importance_weight(imp)
+        None -> 1
+      }
+      base * set_weight * group_weight
+    }
+  }
+}
+
 /// Scaling unit: 3^(tiers+1).
 /// For 1 tier: 9, 2 tiers: 27, 3 tiers: 81.
 pub fn scaling_unit(tiers: Int) -> Int {
   pow3(tiers + 1)
 }
 
+/// Reactive scaling unit for critical features only:
+/// num_critical × max_importance × max_magnitude.
+pub fn reactive_scaling_unit(critical_features: List(Feature)) -> Int {
+  let count = list.length(critical_features)
+  count * 3 * 3
+}
+
 /// Compute D' score from forecasts, features, and tier count.
 ///
-/// D' = sum(importance_weight(feature_i) * magnitude_i) / scaling_unit(tiers)
+/// D' = sum(feature_importance(feature_i, tiers) * magnitude_i) / scaling_unit(tiers)
 ///
 /// Features not found in forecasts are treated as magnitude 0.
-/// Magnitudes are clamped to [0, tiers].
+/// Magnitudes are clamped to [0, 3].
 pub fn compute_dprime(
   forecasts: List(Forecast),
   features: List(Feature),
@@ -41,10 +77,29 @@ pub fn compute_dprime(
   let unit = scaling_unit(tiers)
   let sum =
     list.fold(features, 0, fn(acc, feature) {
-      let magnitude = find_magnitude(forecasts, feature.name, tiers)
-      acc + importance_weight(feature.importance) * magnitude
+      let magnitude = find_magnitude(forecasts, feature.name)
+      acc + feature_importance(feature, tiers) * magnitude
     })
   int.to_float(sum) /. int.to_float(unit)
+}
+
+/// Compute D' for reactive layer using critical features and reactive scaling.
+pub fn compute_reactive_dprime(
+  forecasts: List(Forecast),
+  critical: List(Feature),
+) -> Float {
+  let unit = reactive_scaling_unit(critical)
+  case unit {
+    0 -> 0.0
+    _ -> {
+      let sum =
+        list.fold(critical, 0, fn(acc, feature) {
+          let magnitude = find_magnitude(forecasts, feature.name)
+          acc + importance_weight(feature.importance) * magnitude
+        })
+      int.to_float(sum) /. int.to_float(unit)
+    }
+  }
 }
 
 /// Determine gate decision from D' score and thresholds.
@@ -86,11 +141,7 @@ pub fn compute_dprime_for_features(
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-fn find_magnitude(
-  forecasts: List(Forecast),
-  feature_name: String,
-  _tiers: Int,
-) -> Int {
+fn find_magnitude(forecasts: List(Forecast), feature_name: String) -> Int {
   case list.find(forecasts, fn(f) { f.feature_name == feature_name }) {
     Ok(forecast) -> clamp(forecast.magnitude, 0, 3)
     Error(_) -> 0
