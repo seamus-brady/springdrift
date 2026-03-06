@@ -116,6 +116,13 @@ pub type CognitiveMessage {
     calls: List(ToolCall),
     reply_to: Subject(CognitiveReply),
   )
+  InputSafetyGateComplete(
+    cycle_id: String,
+    result: dprime_types.GateResult,
+    model: String,
+    text: String,
+    reply_to: Subject(CognitiveReply),
+  )
 }
 
 pub type CognitiveReply {
@@ -140,6 +147,12 @@ pub type CognitiveStatus {
     task_id: String,
     response: LlmResponse,
     calls: List(ToolCall),
+    reply_to: Subject(CognitiveReply),
+  )
+  EvaluatingInputSafety(
+    cycle_id: String,
+    model: String,
+    text: String,
     reply_to: Subject(CognitiveReply),
   )
 }

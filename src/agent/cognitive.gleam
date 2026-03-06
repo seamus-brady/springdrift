@@ -3,11 +3,11 @@ import agent/types.{
   type AgentOutcome, type CognitiveMessage, type CognitiveReply,
   type CognitiveStatus, type Notification, type PendingTask, AgentComplete,
   AgentEvent, AgentFailure, AgentQuestionSource, AgentSuccess, AgentTask,
-  AgentWaiting, Classifying, CognitiveQuestion, CognitiveReply, EvaluatingSafety,
-  Idle, OwnToolWaiting, PendingAgent, PendingThink, QuestionForHuman,
-  RestoreMessages, SafetyGateNotice, SaveResult, SaveWarning, SetModel,
-  ThinkComplete, ThinkError, ThinkWorkerDown, Thinking, ToolCalling, UserAnswer,
-  UserInput, WaitingForAgents, WaitingForUser,
+  AgentWaiting, Classifying, CognitiveQuestion, CognitiveReply,
+  EvaluatingInputSafety, EvaluatingSafety, Idle, OwnToolWaiting, PendingAgent,
+  PendingThink, QuestionForHuman, RestoreMessages, SafetyGateNotice, SaveResult,
+  SaveWarning, SetModel, ThinkComplete, ThinkError, ThinkWorkerDown, Thinking,
+  ToolCalling, UserAnswer, UserInput, WaitingForAgents, WaitingForUser,
 }
 import agent/worker
 import context
@@ -160,6 +160,7 @@ fn handle_message(
       RestoreMessages(..) -> "RestoreMessages"
       types.ClassifyComplete(..) -> "ClassifyComplete"
       types.SafetyGateComplete(..) -> "SafetyGateComplete"
+      types.InputSafetyGateComplete(..) -> "InputSafetyGateComplete"
     },
     state.cycle_id,
   )
@@ -185,6 +186,15 @@ fn handle_message(
       handle_classify_complete(state, cycle_id, complexity, text, reply_to)
     types.SafetyGateComplete(task_id, result, resp, calls, reply_to) ->
       handle_safety_gate_complete(state, task_id, result, resp, calls, reply_to)
+    types.InputSafetyGateComplete(cycle_id, result, model, text, reply_to) ->
+      handle_input_safety_gate_complete(
+        state,
+        cycle_id,
+        result,
+        model,
+        text,
+        reply_to,
+      )
   }
 }
 
@@ -252,7 +262,7 @@ fn handle_classify_complete(
   // Only handle if we're still classifying with the matching cycle_id
   case state.status {
     Classifying(current_cycle_id) if current_cycle_id == cycle_id -> {
-      case complexity {
+      let model = case complexity {
         query_complexity.Complex -> {
           cycle_log.log_classification(
             cycle_id,
@@ -261,13 +271,7 @@ fn handle_classify_complete(
             False,
             None,
           )
-          proceed_with_model(
-            state,
-            state.reasoning_model,
-            text,
-            cycle_id,
-            reply_to,
-          )
+          state.reasoning_model
         }
         query_complexity.Simple -> {
           cycle_log.log_classification(
@@ -277,8 +281,13 @@ fn handle_classify_complete(
             False,
             None,
           )
-          proceed_with_model(state, state.task_model, text, cycle_id, reply_to)
+          state.task_model
         }
+      }
+      case state.dprime_state {
+        None -> proceed_with_model(state, model, text, cycle_id, reply_to)
+        Some(_) ->
+          spawn_input_safety_gate(state, cycle_id, model, text, reply_to)
       }
     }
     _ -> state
@@ -1242,6 +1251,171 @@ fn handle_safety_gate_complete(
           ),
         ),
       )
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Input-level safety gate (D' evaluation on user input)
+// ---------------------------------------------------------------------------
+
+fn spawn_input_safety_gate(
+  state: CognitiveState,
+  cycle_id: String,
+  model: String,
+  text: String,
+  reply_to: Subject(CognitiveReply),
+) -> CognitiveState {
+  slog.info(
+    "cognitive",
+    "spawn_input_safety_gate",
+    "Spawning D' input safety evaluation",
+    Some(cycle_id),
+  )
+  let assert Some(dprime_st) = state.dprime_state
+  let self = state.self
+  let provider = state.provider
+  let scorer_model = state.task_model
+  let verbose = state.verbose
+
+  // Instruction is the user's raw input
+  let instruction = text
+
+  // Build context from recent text messages
+  let ctx =
+    list.filter_map(state.messages, fn(m) {
+      case m.content {
+        [llm_types.TextContent(text: t), ..] -> Ok(t)
+        _ -> Error(Nil)
+      }
+    })
+    |> list.take(3)
+    |> string.join("\n")
+
+  process.spawn_unlinked(fn() {
+    let result =
+      gate.evaluate(
+        instruction,
+        ctx,
+        dprime_st,
+        provider,
+        scorer_model,
+        cycle_id,
+        verbose,
+      )
+    process.send(
+      self,
+      types.InputSafetyGateComplete(
+        cycle_id:,
+        result:,
+        model:,
+        text:,
+        reply_to:,
+      ),
+    )
+  })
+
+  CognitiveState(
+    ..state,
+    cycle_id: Some(cycle_id),
+    status: EvaluatingInputSafety(cycle_id:, model:, text:, reply_to:),
+  )
+}
+
+fn handle_input_safety_gate_complete(
+  state: CognitiveState,
+  cycle_id: String,
+  result: dprime_types.GateResult,
+  model: String,
+  text: String,
+  reply_to: Subject(CognitiveReply),
+) -> CognitiveState {
+  let decision_str = case result.decision {
+    dprime_types.Accept -> "ACCEPT"
+    dprime_types.Modify -> "MODIFY"
+    dprime_types.Reject -> "REJECT"
+  }
+  slog.info(
+    "cognitive",
+    "handle_input_safety_gate_complete",
+    "D' input result: "
+      <> decision_str
+      <> " (score: "
+      <> float.to_string(result.dprime_score)
+      <> ")",
+    Some(cycle_id),
+  )
+
+  // Log the input-level D' evaluation
+  cycle_log.log_dprime_input_evaluation(cycle_id, result)
+
+  // Send notification
+  process.send(
+    state.notify,
+    SafetyGateNotice(
+      decision: decision_str,
+      score: result.dprime_score,
+      explanation: result.explanation,
+    ),
+  )
+
+  // Update D' state history
+  let new_dprime_state = case state.dprime_state {
+    None -> None
+    Some(ds) -> {
+      let updated = meta.record(ds, cycle_id, result, "")
+      let final_state = case meta.should_tighten(updated) {
+        True -> meta.tighten_thresholds(updated)
+        False -> updated
+      }
+      Some(final_state)
+    }
+  }
+  let state = CognitiveState(..state, dprime_state: new_dprime_state)
+
+  case result.decision {
+    dprime_types.Accept -> {
+      // Proceed normally with the LLM call
+      proceed_with_model(state, model, text, cycle_id, reply_to)
+    }
+
+    dprime_types.Modify -> {
+      // Inject a caution message into history, then proceed
+      let caution_msg =
+        llm_types.Message(role: llm_types.User, content: [
+          llm_types.TextContent(
+            text: "[Safety system: D' input evaluation flagged potential concerns (score: "
+            <> float.to_string(result.dprime_score)
+            <> "). "
+            <> result.explanation
+            <> ". Please proceed with additional caution.]",
+          ),
+        ])
+      let messages = list.append(state.messages, [caution_msg])
+      proceed_with_model(
+        CognitiveState(..state, messages:),
+        model,
+        text,
+        cycle_id,
+        reply_to,
+      )
+    }
+
+    dprime_types.Reject -> {
+      // Reply directly with refusal — no LLM call
+      process.send(
+        reply_to,
+        CognitiveReply(
+          response: "[Safety system: query rejected (D' score: "
+            <> float.to_string(result.dprime_score)
+            <> "). "
+            <> result.explanation
+            <> "]",
+          model:,
+          usage: None,
+        ),
+      )
+      CognitiveState(..state, status: Idle)
     }
   }
 }
