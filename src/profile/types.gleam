@@ -36,7 +36,6 @@ pub type AgentDef {
 pub type DeliveryConfig {
   FileDelivery(directory: String, format: String)
   WebhookDelivery(url: String, method: String, headers: List(#(String, String)))
-  WebSocketDelivery
 }
 
 /// A scheduled task definition from schedule.toml.

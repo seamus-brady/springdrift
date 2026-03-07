@@ -1,8 +1,12 @@
+build/
+.gleam/
 *.beam
 *.ez
-/build
 erl_crash.dump
+prime-narrative/
+*.session.json
+.env
+*.local.json
 _impl_docs/
 cycle-log/
 logs/
-prime-narrative/

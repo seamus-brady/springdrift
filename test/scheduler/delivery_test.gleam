@@ -1,5 +1,5 @@
 import gleeunit/should
-import profile/types.{FileDelivery, WebSocketDelivery, WebhookDelivery}
+import profile/types.{FileDelivery, WebhookDelivery}
 import scheduler/delivery
 import simplifile
 
@@ -30,15 +30,8 @@ pub fn deliver_to_file_json_test() {
   Nil
 }
 
-pub fn deliver_webhook_not_implemented_test() {
-  let config =
-    WebhookDelivery(url: "http://example.com", method: "POST", headers: [])
-  let result = delivery.deliver("report", "webhook-job", config)
-  result |> should.be_error
-}
-
-pub fn deliver_websocket_not_implemented_test() {
-  let config = WebSocketDelivery
-  let result = delivery.deliver("report", "ws-job", config)
+pub fn deliver_webhook_invalid_url_returns_error_test() {
+  let config = WebhookDelivery(url: "not-a-url", method: "POST", headers: [])
+  let result = delivery.deliver("{\"data\": 1}", "test-job", config)
   result |> should.be_error
 }

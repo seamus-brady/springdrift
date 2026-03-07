@@ -2,7 +2,7 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleeunit/should
 import profile
-import profile/types.{FileDelivery, WebSocketDelivery, WebhookDelivery}
+import profile/types.{FileDelivery, WebhookDelivery}
 import simplifile
 
 // ---------------------------------------------------------------------------
@@ -256,25 +256,6 @@ pub fn parse_schedule_webhook_delivery_test() {
       url |> should.equal("https://example.com/hook")
       method |> should.equal("POST")
     }
-    _ -> should.fail()
-  }
-  let _ = simplifile.delete(path)
-  Nil
-}
-
-pub fn parse_schedule_websocket_delivery_test() {
-  let path = "/tmp/springdrift_test_schedule_ws.toml"
-  let _ =
-    simplifile.write(
-      path,
-      "[[tasks]]\nname = \"stream\"\nquery = \"Stream data\"\ninterval = \"30m\"\ndelivery = \"websocket\"\n",
-    )
-  let result = profile.parse_schedule(path)
-  result |> should.be_ok
-  let assert Ok(tasks) = result
-  let assert Ok(task) = list.first(tasks)
-  case task.delivery {
-    WebSocketDelivery -> Nil
     _ -> should.fail()
   }
   let _ = simplifile.delete(path)

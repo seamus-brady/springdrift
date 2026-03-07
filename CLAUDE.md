@@ -2,11 +2,11 @@
 
 ## Project overview
 
-Springdrift is a terminal-UI chatbot written in **Gleam** (compiled to Erlang/OTP).
-It implements a [12-Factor Agents](https://github.com/humanlayer/12-factor-agents)
-style ReAct loop: the LLM reasons, calls tools, observes results, and repeats until
-it can give a final answer. The TUI runs in alternate-screen raw mode with a three-tab
-interface (Chat, Log, and Narrative).
+Springdrift is a knowledge worker agent framework written in **Gleam** (compiled to
+Erlang/OTP). It runs research queries on a schedule, remembers what it found last
+time, and delivers structured reports. It implements a
+[12-Factor Agents](https://github.com/humanlayer/12-factor-agents) style ReAct loop
+and includes an interactive TUI with a three-tab interface (Chat, Log, and Narrative).
 
 ## Stack
 
@@ -25,7 +25,8 @@ interface (Chat, Log, and Narrative).
 src/
 ├── springdrift.gleam          Entry point — config, provider selection, skills, wiring
 ├── springdrift_ffi.erl        Erlang FFI (stdin, env, args, spinner, UUID, datetime, logger,
-│                              file_size, resolve_symlinks, sanitize_json, days_ago_date)
+│                              file_size, resolve_symlinks, sanitize_json, days_ago_date,
+│                              uri_encode, extract_ddg_results)
 ├── slog.gleam                 System logger — date-rotated JSON-L + stderr + log retention
 ├── config.gleam               Three-layer config with key validation + range checking
 ├── storage.gleam              Versioned session persistence with staleness detection
@@ -44,9 +45,9 @@ src/
 │
 ├── agents/                    Specialist agent specs
 │   ├── planner.gleam          Planning agent (no tools, max_turns=3)
-│   ├── researcher.gleam       Research agent (files+web+builtin, max_turns=8)
-│   ├── coder.gleam            Coding agent (files+shell+builtin, max_turns=10)
-│   └── writer.gleam           Writer agent (files+builtin, max_turns=6)
+│   ├── researcher.gleam       Research agent (web+builtin, max_turns=8)
+│   ├── coder.gleam            Coding agent (builtin, max_turns=10)
+│   └── writer.gleam           Writer agent (builtin, max_turns=6)
 │
 ├── dprime/                    D' discrepancy-gated safety system
 │   ├── types.gleam            Feature, Forecast, GateDecision, GateResult, DprimeConfig/State
@@ -73,12 +74,12 @@ src/
 ├── scheduler/                 BEAM-native task scheduler
 │   ├── types.gleam            ScheduledJob, JobStatus, SchedulerMessage
 │   ├── runner.gleam           OTP scheduler process with send_after tick loop
-│   ├── delivery.gleam         Report delivery (file, webhook stub, websocket stub)
+│   ├── delivery.gleam         Report delivery (file, webhook via gleam_httpc)
 │   └── persist.gleam          Atomic checkpoint persistence with reconciliation
 │
 ├── tools/builtin.gleam        Built-in tools: calculator, get_current_datetime,
 │                              request_human_input, read_skill
-├── tools/files.gleam          File tools with symlink-aware path validation + size limits
+├── tools/web.gleam            Web tools: fetch_url (50KB limit), web_search (DuckDuckGo)
 ├── tui.gleam                  Alternate-screen TUI; Chat + Log + Narrative tabs
 │
 ├── web/                       Web chat GUI
@@ -297,7 +298,7 @@ skills_dirs    = ["/path/to/skills"] # Extra skill directories
 
 # D' safety system
 dprime_enabled = false               # Enable D' safety gate before tool dispatch
-dprime_config  = "dprime-config.json" # Path to D' config JSON (omit for built-in defaults)
+dprime_config  = "dprime.json" # Path to D' config JSON (omit for built-in defaults)
 
 # Prime Narrative
 [narrative]

@@ -1,13 +1,11 @@
 import agent/types.{type AgentSpec, AgentSpec, Permanent}
-import gleam/list
 import llm/provider.{type Provider}
 import llm/types as llm_types
 import tools/builtin
-import tools/files
 
 const system_prompt = "You are a writer agent. Your job is to synthesise research findings into structured, well-cited reports.
 
-You have access to: read_file, write_file, list_directory, calculator, get_current_datetime, read_skill.
+You have access to: calculator, get_current_datetime, request_human_input, read_skill.
 
 When writing reports:
 - Structure content with clear sections and headings
@@ -18,12 +16,8 @@ When writing reports:
 
 When you complete your task, respond with the finished report text. Include all citations and confidence assessments."
 
-pub fn spec(
-  provider: Provider,
-  model: String,
-  write_anywhere: Bool,
-) -> AgentSpec {
-  let tools = list.flatten([files.all(), builtin.all()])
+pub fn spec(provider: Provider, model: String) -> AgentSpec {
+  let tools = builtin.all()
 
   AgentSpec(
     name: "writer",
@@ -37,18 +31,10 @@ pub fn spec(
     max_consecutive_errors: 2,
     tools:,
     restart: Permanent,
-    tool_executor: writer_executor(write_anywhere),
+    tool_executor: writer_executor,
   )
 }
 
-fn writer_executor(
-  write_anywhere: Bool,
-) -> fn(llm_types.ToolCall) -> llm_types.ToolResult {
-  fn(call: llm_types.ToolCall) -> llm_types.ToolResult {
-    case call.name {
-      "read_file" | "write_file" | "list_directory" ->
-        files.execute(call, write_anywhere)
-      _ -> builtin.execute(call)
-    }
-  }
+fn writer_executor(call: llm_types.ToolCall) -> llm_types.ToolResult {
+  builtin.execute(call)
 }

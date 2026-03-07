@@ -22,14 +22,12 @@ import llm/provider.{type Provider}
 import llm/types as llm_types
 import profile
 import profile/types as profile_types
-import sandbox
 import scheduler/runner as scheduler_runner
 import simplifile
 import skills
 import slog
 import storage
 import tools/builtin as tools_builtin
-import tools/files as tools_files
 import tools/web as tools_web
 import tui
 import web/gui as web_gui
@@ -133,11 +131,6 @@ fn print_help() -> Nil {
     "  --max-context <n>         Sliding-window message cap (default: unlimited)",
   )
   io.println("")
-  io.println("Tools / sandbox:")
-  io.println(
-    "  --allow-write-anywhere    Allow write_file outside the current working directory",
-  )
-  io.println("")
   io.println("Session / config:")
   io.println(
     "  --gui <tui|web>           GUI mode: tui (default) or web (port 8080)",
@@ -228,30 +221,6 @@ fn run(cfg: AppConfig) -> Nil {
     False -> []
   }
 
-  // Start sandbox (needed for coder agent)
-  let sandbox_dir = find_sandbox_dir()
-  let sandbox_subj = case sandbox_dir {
-    option.None -> {
-      io.println(
-        "Sandbox  : unavailable (sandbox/Dockerfile not found) — coder agent limited",
-      )
-      option.None
-    }
-    option.Some(dir) ->
-      case sandbox.start(dir) {
-        Ok(s) -> {
-          io.println("Sandbox  : Docker container started")
-          option.Some(s)
-        }
-        Error(msg) -> {
-          io.println(
-            "Sandbox  : unavailable (" <> msg <> ") — coder agent limited",
-          )
-          option.None
-        }
-      }
-  }
-
   // Profile system
   let profile_dirs =
     option.unwrap(cfg.profiles_dirs, profile.default_profile_dirs())
@@ -280,16 +249,10 @@ fn run(cfg: AppConfig) -> Nil {
             <> msg
             <> ") — using defaults",
           )
-          #(
-            default_agent_specs(p, task_model, sandbox_subj, write_anywhere),
-            option.None,
-          )
+          #(default_agent_specs(p, task_model), option.None)
         }
       }
-    option.None -> #(
-      default_agent_specs(p, task_model, sandbox_subj, write_anywhere),
-      option.None,
-    )
+    option.None -> #(default_agent_specs(p, task_model), option.None)
   }
 
   // Build agent tools for the cognitive loop
@@ -426,21 +389,7 @@ fn run(cfg: AppConfig) -> Nil {
         narrative_dir,
       )
   }
-  let _ = option.map(sandbox_subj, sandbox.send_shutdown)
   Nil
-}
-
-/// Find the sandbox directory containing the Dockerfile.
-/// Checks ./sandbox/Dockerfile first, then priv/sandbox/Dockerfile.
-fn find_sandbox_dir() -> option.Option(String) {
-  case simplifile.is_file("./sandbox/Dockerfile") {
-    Ok(True) -> option.Some("./sandbox")
-    _ ->
-      case simplifile.is_file("priv/sandbox/Dockerfile") {
-        Ok(True) -> option.Some("priv/sandbox")
-        _ -> option.None
-      }
-  }
 }
 
 fn select_provider(cfg: AppConfig) -> #(Provider, String, String) {
@@ -533,13 +482,11 @@ fn mock_provider() -> Provider {
 fn default_agent_specs(
   provider: Provider,
   task_model: String,
-  sandbox_subj: option.Option(process.Subject(sandbox.SandboxMessage)),
-  write_anywhere: Bool,
 ) -> List(agent_types.AgentSpec) {
   [
     planner.spec(provider, task_model),
     researcher.spec(provider, task_model),
-    coder.spec(provider, task_model, sandbox_subj, write_anywhere),
+    coder.spec(provider, task_model),
   ]
 }
 
@@ -579,7 +526,6 @@ fn resolve_profile_tools(tool_groups: List(String)) -> List(llm_types.Tool) {
   list.flat_map(tool_groups, fn(group) {
     case group {
       "web" -> tools_web.all()
-      "files" -> tools_files.all()
       "builtin" -> tools_builtin.all()
       _ -> []
     }
@@ -588,15 +534,12 @@ fn resolve_profile_tools(tool_groups: List(String)) -> List(llm_types.Tool) {
 
 fn build_profile_tool_executor(
   tool_groups: List(String),
-  write_anywhere: Bool,
+  _write_anywhere: Bool,
 ) -> fn(llm_types.ToolCall) -> llm_types.ToolResult {
   let has_web = list.contains(tool_groups, "web")
-  let has_files = list.contains(tool_groups, "files")
   fn(call: llm_types.ToolCall) -> llm_types.ToolResult {
     case call.name {
       "fetch_url" if has_web -> tools_web.execute(call)
-      "read_file" | "write_file" | "list_directory" if has_files ->
-        tools_files.execute(call, write_anywhere)
       _ -> tools_builtin.execute(call)
     }
   }

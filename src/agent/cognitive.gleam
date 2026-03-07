@@ -40,7 +40,6 @@ import skills
 import slog
 import storage
 import tools/builtin
-import tools/files as tools_files
 import tools/web as tools_web
 
 @external(erlang, "springdrift_ffi", "rescue")
@@ -1932,7 +1931,6 @@ fn resolve_agent_tools(tool_groups: List(String)) -> List(llm_types.Tool) {
   list.flat_map(tool_groups, fn(group) {
     case group {
       "web" -> tools_web.all()
-      "files" -> tools_files.all()
       "builtin" -> builtin.all()
       _ -> []
     }
@@ -1941,15 +1939,12 @@ fn resolve_agent_tools(tool_groups: List(String)) -> List(llm_types.Tool) {
 
 fn build_tool_executor(
   tool_groups: List(String),
-  write_anywhere: Bool,
+  _write_anywhere: Bool,
 ) -> fn(llm_types.ToolCall) -> llm_types.ToolResult {
   let has_web = list.contains(tool_groups, "web")
-  let has_files = list.contains(tool_groups, "files")
   fn(call: llm_types.ToolCall) -> llm_types.ToolResult {
     case call.name {
       "fetch_url" if has_web -> tools_web.execute(call)
-      "read_file" | "write_file" | "list_directory" if has_files ->
-        tools_files.execute(call, write_anywhere)
       _ -> builtin.execute(call)
     }
   }

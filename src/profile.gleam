@@ -11,7 +11,7 @@ import gleam/string
 import profile/types.{
   type AgentDef, type DeliveryConfig, type Profile, type ProfileModels,
   type ScheduleTaskConfig, AgentDef, FileDelivery, Profile, ProfileModels,
-  ScheduleTaskConfig, WebSocketDelivery, WebhookDelivery,
+  ScheduleTaskConfig, WebhookDelivery,
 }
 import simplifile
 import slog
@@ -314,7 +314,6 @@ fn parse_delivery(
       }
       WebhookDelivery(url:, method:, headers: [])
     }
-    "websocket" -> WebSocketDelivery
     _ -> {
       let directory = case
         tom.get_string(toml, ["delivery", "file", "directory"])

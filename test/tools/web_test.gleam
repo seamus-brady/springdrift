@@ -64,3 +64,22 @@ pub fn fetch_url_missing_input_returns_failure_test() {
     _ -> should.fail()
   }
 }
+
+// ---------------------------------------------------------------------------
+// web_search
+// ---------------------------------------------------------------------------
+
+pub fn web_search_tool_defined_test() {
+  let tools = web.all()
+  let names = list.map(tools, fn(t) { t.name })
+  list.contains(names, "web_search") |> should.be_true
+}
+
+pub fn web_search_missing_query_returns_failure_test() {
+  let call = ToolCall(id: "s1", name: "web_search", input_json: "{}")
+  let result = web.execute(call)
+  case result {
+    ToolFailure(..) -> Nil
+    _ -> should.fail()
+  }
+}

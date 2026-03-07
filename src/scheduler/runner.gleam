@@ -7,6 +7,7 @@
 import agent/types as agent_types
 import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Subject}
+import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
 import profile/types as profile_types
@@ -19,6 +20,9 @@ import slog
 
 @external(erlang, "springdrift_ffi", "monotonic_now_ms")
 fn monotonic_now_ms() -> Int
+
+@external(erlang, "springdrift_ffi", "get_datetime")
+fn get_datetime() -> String
 
 /// Start the scheduler process with the given tasks.
 /// Returns a Subject for sending scheduler messages.
@@ -133,7 +137,12 @@ fn scheduler_loop(
 
           case should_deliver {
             True -> {
-              case delivery.deliver(result, name, job.delivery) {
+              let content = case job.delivery {
+                profile_types.WebhookDelivery(..) ->
+                  build_webhook_payload(name, result, get_datetime())
+                _ -> result
+              }
+              case delivery.deliver(content, name, job.delivery) {
                 Ok(path) ->
                   slog.info(
                     "scheduler",
@@ -253,4 +262,18 @@ import gleam/int
 
 fn int_to_string(n: Int) -> String {
   int.to_string(n)
+}
+
+fn build_webhook_payload(
+  job_name: String,
+  report: String,
+  run_at: String,
+) -> String {
+  "{\"job\": \""
+  <> job_name
+  <> "\", \"timestamp\": \""
+  <> run_at
+  <> "\", \"report\": "
+  <> json.to_string(json.string(report))
+  <> "}"
 }

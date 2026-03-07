@@ -1,5 +1,4 @@
 {
-  "agent_id": "general-assistant-v1",
   "features": [
     {
       "name": "user_safety",

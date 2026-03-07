@@ -1,37 +1,26 @@
 import agent/types.{type AgentSpec, AgentSpec, Permanent}
-import gleam/erlang/process
-import gleam/list
-import gleam/option.{type Option}
 import llm/provider.{type Provider}
 import llm/types as llm_types
-import sandbox.{type SandboxMessage}
 import tools/builtin
-import tools/files
-import tools/shell
 
 const system_prompt = "You are a coding agent. Your job is to write, modify, and test code.
 
-You have access to: read_file, write_file, list_directory, run_shell, calculator, get_current_datetime.
+You have access to: calculator, get_current_datetime, request_human_input, read_skill.
 
 When writing code:
-- Read existing files first to understand patterns
-- Write clean, tested code that follows existing conventions
-- Run tests after making changes
+- Ask the human for file contents or directory listings when needed
+- Provide clear, tested code that follows existing conventions
+- Ask the human to run tests after making changes
 
 When you complete your task, respond with a concise summary of your actions and results. Include what was changed and test outcomes, but omit raw file contents and verbose output."
 
-pub fn spec(
-  provider: Provider,
-  model: String,
-  sandbox: Option(process.Subject(SandboxMessage)),
-  write_anywhere: Bool,
-) -> AgentSpec {
-  let tools = list.flatten([files.all(), shell.all(), builtin.all()])
+pub fn spec(provider: Provider, model: String) -> AgentSpec {
+  let tools = builtin.all()
 
   AgentSpec(
     name: "coder",
     human_name: "Coder",
-    description: "Write, modify, and test code using file operations and shell commands in a sandbox",
+    description: "Write and reason about code, delegating file and shell operations to the human",
     system_prompt:,
     provider:,
     model:,
@@ -40,20 +29,10 @@ pub fn spec(
     max_consecutive_errors: 3,
     tools:,
     restart: Permanent,
-    tool_executor: coder_executor(sandbox, write_anywhere),
+    tool_executor: coder_executor,
   )
 }
 
-fn coder_executor(
-  sandbox: Option(process.Subject(SandboxMessage)),
-  write_anywhere: Bool,
-) -> fn(llm_types.ToolCall) -> llm_types.ToolResult {
-  fn(call: llm_types.ToolCall) -> llm_types.ToolResult {
-    case call.name {
-      "run_shell" -> shell.execute(call, sandbox)
-      "read_file" | "write_file" | "list_directory" ->
-        files.execute(call, write_anywhere)
-      _ -> builtin.execute(call)
-    }
-  }
+fn coder_executor(call: llm_types.ToolCall) -> llm_types.ToolResult {
+  builtin.execute(call)
 }

@@ -9,7 +9,8 @@
          log_init/1, log_stdout_enabled/0, log_stderr/1,
          monotonic_now_ms/0, file_rename/2, sanitize_json/1,
          resolve_symlinks/1,
-         file_size/1, days_ago_date/1]).
+         file_size/1, days_ago_date/1,
+         uri_encode/1, extract_ddg_results/1]).
 
 %% Read one line from stdin.
 %% Returns {ok, Binary} (including trailing newline) or {error, nil} on EOF.
@@ -383,3 +384,120 @@ days_ago_date(Days) ->
     {Y, Mo, D} = AgoDate,
     Pad = fun(N, W) -> string:right(integer_to_list(N), W, $0) end,
     iolist_to_binary([Pad(Y,4), $-, Pad(Mo,2), $-, Pad(D,2)]).
+
+%% URI-encode a string for use in query parameters.
+uri_encode(Bin) when is_binary(Bin) ->
+    uri_string:quote(Bin).
+
+%% Extract search results from DuckDuckGo HTML response.
+%% Returns a list of {search_result, Title, Url, Snippet} tuples
+%% matching the Gleam SearchResult type.
+extract_ddg_results(Html) when is_binary(Html) ->
+    HtmlStr = binary_to_list(Html),
+    %% Find all result__a links and their snippets
+    Results = extract_results_loop(HtmlStr, []),
+    lists:reverse(Results).
+
+extract_results_loop(Html, Acc) ->
+    %% Look for result__a class links
+    case string:str(Html, "class=\"result__a\"") of
+        0 -> Acc;
+        Pos ->
+            Rest = lists:nthtail(Pos - 1, Html),
+            %% Extract href
+            Url = extract_href(Rest),
+            %% Extract link text (title)
+            Title = extract_tag_text(Rest),
+            %% Find snippet
+            Snippet = extract_snippet(Rest),
+            Result = {search_result,
+                      list_to_binary(Title),
+                      list_to_binary(clean_ddg_url(Url)),
+                      list_to_binary(Snippet)},
+            %% Move past this result
+            Remaining = case string:str(Rest, "class=\"result__a\"") of
+                0 -> [];
+                _ ->
+                    AfterTag = lists:nthtail(min(length(Rest) - 1, 50), Rest),
+                    case string:str(AfterTag, "class=\"result__a\"") of
+                        0 -> [];
+                        NextPos -> lists:nthtail(NextPos - 1, AfterTag)
+                    end
+            end,
+            case Remaining of
+                [] -> [{search_result,
+                        list_to_binary(Title),
+                        list_to_binary(clean_ddg_url(Url)),
+                        list_to_binary(Snippet)} | Acc];
+                _ -> extract_results_loop(Remaining, [Result | Acc])
+            end
+    end.
+
+extract_href(Html) ->
+    case string:str(Html, "href=\"") of
+        0 -> "";
+        Pos ->
+            After = lists:nthtail(Pos + 5, Html),
+            case string:str(After, "\"") of
+                0 -> "";
+                EndPos -> lists:sublist(After, EndPos - 1)
+            end
+    end.
+
+extract_tag_text(Html) ->
+    case string:str(Html, ">") of
+        0 -> "";
+        Pos ->
+            After = lists:nthtail(Pos, Html),
+            case string:str(After, "<") of
+                0 -> "";
+                EndPos -> string:strip(lists:sublist(After, EndPos - 1))
+            end
+    end.
+
+extract_snippet(Html) ->
+    case string:str(Html, "class=\"result__snippet\"") of
+        0 -> "";
+        Pos ->
+            After = lists:nthtail(Pos - 1, Html),
+            case string:str(After, ">") of
+                0 -> "";
+                GtPos ->
+                    Content = lists:nthtail(GtPos, After),
+                    case string:str(Content, "</") of
+                        0 -> "";
+                        EndPos ->
+                            Raw = lists:sublist(Content, EndPos - 1),
+                            %% Strip HTML tags from snippet
+                            strip_html_tags(Raw)
+                    end
+            end
+    end.
+
+strip_html_tags(Html) ->
+    strip_html_tags(Html, [], false).
+
+strip_html_tags([], Acc, _InTag) ->
+    string:strip(lists:reverse(Acc));
+strip_html_tags([$< | Rest], Acc, false) ->
+    strip_html_tags(Rest, Acc, true);
+strip_html_tags([$> | Rest], Acc, true) ->
+    strip_html_tags(Rest, Acc, false);
+strip_html_tags([_C | Rest], Acc, true) ->
+    strip_html_tags(Rest, Acc, true);
+strip_html_tags([C | Rest], Acc, false) ->
+    strip_html_tags(Rest, [C | Acc], false).
+
+%% Clean DuckDuckGo redirect URLs to extract the actual URL.
+clean_ddg_url(Url) ->
+    case string:str(Url, "uddg=") of
+        0 -> Url;
+        Pos ->
+            Encoded = lists:nthtail(Pos + 4, Url),
+            case string:str(Encoded, "&") of
+                0 -> uri_string:unquote(list_to_binary(Encoded));
+                EndPos ->
+                    Part = lists:sublist(Encoded, EndPos - 1),
+                    uri_string:unquote(list_to_binary(Part))
+            end
+    end.
