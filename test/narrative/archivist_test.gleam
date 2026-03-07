@@ -1,4 +1,5 @@
 import gleam/option.{None, Some}
+import gleam/string
 import gleeunit
 import gleeunit/should
 import llm/adapters/mock
@@ -132,11 +133,11 @@ pub fn generate_completely_invalid_response_falls_back_test() {
   let result = archivist.generate(ctx, provider, "mock-model", False)
   result |> should.be_some
   let assert Some(entry) = result
-  // Fallback entry
-  entry.summary
-  |> should.equal(
-    "I processed a request but the narrative could not be fully generated.",
-  )
+  // Fallback entry — should contain the koan-style message with user input
+  let assert True =
+    string.contains(entry.summary, "ink has run dry")
+  let assert True =
+    string.contains(entry.summary, "hello")
   entry.cycle_id |> should.equal("test-cycle-123")
 }
 

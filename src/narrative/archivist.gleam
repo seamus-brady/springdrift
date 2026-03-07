@@ -82,10 +82,11 @@ pub fn generate(
           slog.warn(
             "narrative/archivist",
             "generate",
-            "Failed to parse archivist response: " <> string.slice(text, 0, 200),
+            "Archivist JSON parse failed (falling back). Raw response: "
+              <> string.slice(text, 0, 300),
             Some(ctx.cycle_id),
           )
-          // Fall back to a minimal entry
+          // Fall back to a minimal entry with context
           Some(fallback_entry(ctx))
         }
       }
@@ -543,13 +544,21 @@ fn lenient_observation_decoder() -> decode.Decoder(types.Observation) {
 }
 
 fn fallback_entry(ctx: ArchivistContext) -> NarrativeEntry {
+  let summary =
+    "I completed a cycle but my Archivist could not render the memory into structured form — like a monk who finishes the day's work but finds the ink has run dry. The user asked: \""
+    <> string.slice(ctx.user_input, 0, 120)
+    <> case string.length(ctx.user_input) > 120 {
+      True -> "..."
+      False -> ""
+    }
+    <> "\". I responded, but this record is reconstructed from fragments rather than narrated properly."
   NarrativeEntry(
     schema_version: 1,
     cycle_id: ctx.cycle_id,
     parent_cycle_id: ctx.parent_cycle_id,
     timestamp: get_datetime(),
     entry_type: Narrative,
-    summary: "I processed a request but the narrative could not be fully generated.",
+    summary: summary,
     intent: Intent(classification: Conversation, description: "", domain: ""),
     outcome: Outcome(
       status: case ctx.final_response {

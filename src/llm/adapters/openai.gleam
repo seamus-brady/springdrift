@@ -83,13 +83,33 @@ pub fn provider_from_openrouter_env() -> Result(Provider, types.LlmError) {
 // ---------------------------------------------------------------------------
 
 fn build_provider(client: gllm.Client) -> Provider {
+  let is_openrouter =
+    string.contains(client.base_url, "openrouter.ai")
   Provider(name: "openai", chat: fn(req) {
+    let model = case is_openrouter {
+      True -> normalize_openrouter_model(req.model)
+      False -> req.model
+    }
     let messages = translate_messages(req)
     let temperature = option.unwrap(req.temperature, 1.0)
-    gllm.completion(client, req.model, messages, temperature)
+    gllm.completion(client, model, messages, temperature)
     |> result.map(translate_response)
     |> result.map_error(translate_error)
   })
+}
+
+/// Normalize model names for OpenRouter. Anthropic model IDs like
+/// "claude-sonnet-4-5-20250514" need the "anthropic/" prefix on OpenRouter.
+fn normalize_openrouter_model(model: String) -> String {
+  case string.contains(model, "/") {
+    // Already has a provider prefix (e.g. "anthropic/claude-...")
+    True -> model
+    False ->
+      case string.starts_with(model, "claude-") {
+        True -> "anthropic/" <> model
+        False -> model
+      }
+  }
 }
 
 // ---------------------------------------------------------------------------

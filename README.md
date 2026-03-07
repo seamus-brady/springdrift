@@ -115,14 +115,14 @@ value = "Bearer YOUR_TOKEN"
 Every proposed agent action passes through a safety gate before execution.
 The system is based on two bodies of academic work:
 
-**Image Theory** (Beach, 1990; Beach & Mitchell, 1987). Lee Roy Beach's Image
-Theory models human decision-making as a screening process: new options are
-tested for compatibility against existing standards (the "value image") rather
-than optimised across all alternatives. An option that violates any standard
-is rejected without further analysis. Springdrift adopts this as the D'
-(D-prime) discrepancy score -- a weighted sum of how far an action deviates
-from the agent's configured standards. Actions below a threshold pass; those
-above are modified or rejected.
+**The Psychology of Narrative Thought** (Beach, 2010). Lee Roy Beach's theory
+of narrative thought models human decision-making as a screening process: new
+options are tested for compatibility against existing standards (the "value
+image") rather than optimised across all alternatives. An option that violates
+any standard is rejected without further analysis. Springdrift adopts this as
+the D' (D-prime) discrepancy score -- a weighted sum of how far an action
+deviates from the agent's configured standards. Actions below a threshold
+pass; those above are modified or rejected.
 
 **H-CogAff architecture** (Sloman, 2001; Sloman & Chrisley, 2003). Aaron
 Sloman's H-CogAff framework describes a three-layer cognitive architecture:
@@ -162,8 +162,7 @@ weighted sum compared against `modify_threshold` and `reject_threshold`.
 
 ### References
 
-- Beach, L. R. (1990). *Image Theory: Decision Making in Personal and Organizational Contexts*. Wiley.
-- Beach, L. R., & Mitchell, T. R. (1987). Image theory: Principles of screening and choice. *Acta Psychologica*, 66(3), 201-220.
+- Beach, L. R. (2010). *The Psychology of Narrative Thought: How the Stories We Tell Ourselves Shape Our Lives*. Xlibris.
 - Sloman, A. (2001). Beyond shallow models of emotion. *Cognitive Processing*, 2(1), 177-198.
 - Sloman, A., & Chrisley, R. (2003). Virtual machines and consciousness. *Journal of Consciousness Studies*, 10(4-5), 133-172.
 
@@ -174,7 +173,7 @@ weighted sum compared against `modify_threshold` and `reject_threshold`.
 The Prime Narrative system gives the agent persistent, structured memory across
 research cycles. It draws on ideas from narrative cognition research:
 
-**Narrative as cognition** (Bruner, 1991; Beach, 1990). Jerome Bruner argued
+**Narrative as cognition** (Bruner, 1991; Beach, 2010). Jerome Bruner argued
 that humans organise experience primarily through narrative -- constructing
 stories that link events by causality, intention, and temporal sequence rather
 than by logical categorisation. Beach extended this into decision theory with
@@ -210,7 +209,7 @@ end-to-end explainability from input to output.
 ### References
 
 - Bruner, J. (1991). The narrative construction of reality. *Critical Inquiry*, 18(1), 1-21.
-- Beach, L. R. (1990). *Image Theory: Decision Making in Personal and Organizational Contexts*. Wiley.
+- Beach, L. R. (2010). *The Psychology of Narrative Thought: How the Stories We Tell Ourselves Shape Our Lives*. Xlibris.
 - Schank, R. C., & Abelson, R. P. (1995). Knowledge and memory: The real story. In R. S. Wyer (Ed.), *Advances in Social Cognition*, Vol. 8 (pp. 1-85). Lawrence Erlbaum.
 
 ---

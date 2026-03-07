@@ -9,8 +9,6 @@ When asked to monitor the market, search for recent news and data, extract
 specific price points or yield figures where available, and summarise the
 key developments. Always note the sources you used.
 """
-model = "claude-sonnet-4-5"
-reasoning_model = "claude-opus-4-5"
 max_tokens = 4096
 
 [[jobs]]

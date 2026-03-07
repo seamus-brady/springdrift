@@ -40,6 +40,7 @@ import skills
 import slog
 import storage
 import tools/builtin
+import tools/memory
 import tools/web as tools_web
 
 @external(erlang, "springdrift_ffi", "rescue")
@@ -109,8 +110,17 @@ pub fn start(
   profile_dirs: List(String),
   write_anywhere: Bool,
 ) -> Subject(CognitiveMessage) {
-  // The cognitive loop gets agent tools + request_human_input
-  let tools = [builtin.human_input_tool(), ..agent_tools]
+  // The cognitive loop gets agent tools + request_human_input + memory tools
+  let memory_tools = case narrative_enabled {
+    True -> memory.all()
+    False -> []
+  }
+  let tools =
+    list.flatten([
+      [builtin.human_input_tool()],
+      memory_tools,
+      agent_tools,
+    ])
   let setup = process.new_subject()
   process.spawn_unlinked(fn() {
     let self = process.new_subject()
@@ -517,7 +527,24 @@ fn dispatch_tool_calls(
   case list.find(calls, fn(c) { c.name == "request_human_input" }) {
     Ok(hi_call) ->
       handle_own_human_input(state, task_id, resp, hi_call, reply_to)
-    Error(_) -> dispatch_agent_calls(state, task_id, resp, calls, reply_to)
+    Error(_) -> {
+      // Check for memory tools — execute synchronously, then re-think
+      let #(memory_calls, remaining_calls) =
+        list.partition(calls, fn(c) { memory.is_memory_tool(c.name) })
+      case memory_calls {
+        [] ->
+          dispatch_agent_calls(state, task_id, resp, remaining_calls, reply_to)
+        _ ->
+          handle_memory_tools(
+            state,
+            task_id,
+            resp,
+            memory_calls,
+            remaining_calls,
+            reply_to,
+          )
+      }
+    }
   }
 }
 
@@ -550,6 +577,140 @@ fn handle_own_human_input(
     status: WaitingForUser(question:, context: ctx),
     pending: dict.delete(state.pending, task_id),
   )
+}
+
+fn handle_memory_tools(
+  state: CognitiveState,
+  task_id: String,
+  resp: llm_types.LlmResponse,
+  memory_calls: List(llm_types.ToolCall),
+  remaining_calls: List(llm_types.ToolCall),
+  reply_to: Subject(CognitiveReply),
+) -> CognitiveState {
+  // Execute memory tools synchronously
+  let memory_results =
+    list.map(memory_calls, fn(call) {
+      let result = memory.execute(call, state.narrative_dir)
+      case result {
+        llm_types.ToolSuccess(tool_use_id: id, content: c) ->
+          llm_types.ToolResultContent(
+            tool_use_id: id,
+            content: c,
+            is_error: False,
+          )
+        llm_types.ToolFailure(tool_use_id: id, error: e) ->
+          llm_types.ToolResultContent(
+            tool_use_id: id,
+            content: e,
+            is_error: True,
+          )
+      }
+    })
+
+  // If there are also agent calls, dispatch those with memory results as initial_results
+  case remaining_calls {
+    [] -> {
+      // Only memory calls — add results to messages and re-think
+      let assistant_msg =
+        llm_types.Message(role: llm_types.Assistant, content: resp.content)
+      let user_msg =
+        llm_types.Message(role: llm_types.User, content: memory_results)
+      let messages = list.append(state.messages, [assistant_msg, user_msg])
+
+      let new_task_id = cycle_log.generate_uuid()
+      let cycle_id = option.unwrap(state.cycle_id, new_task_id)
+      let new_state =
+        CognitiveState(
+          ..state,
+          messages:,
+          pending: dict.delete(state.pending, task_id),
+        )
+      let req = build_request(new_state, messages)
+      case state.verbose {
+        True -> cycle_log.log_llm_request(cycle_id, req)
+        False -> Nil
+      }
+      worker.spawn_think(new_task_id, req, state.provider, state.self)
+
+      CognitiveState(
+        ..new_state,
+        status: Thinking(task_id: new_task_id),
+        pending: dict.insert(
+          dict.delete(state.pending, task_id),
+          new_task_id,
+          PendingThink(
+            task_id: new_task_id,
+            model: state.model,
+            fallback_from: None,
+            reply_to:,
+          ),
+        ),
+      )
+    }
+    agent_remaining -> {
+      // Mix: execute memory tools, pass results as initial, dispatch agents
+      let #(agent_calls, non_agent_calls) =
+        list.partition(agent_remaining, fn(c) {
+          string.starts_with(c.name, "agent_")
+        })
+      let error_blocks =
+        list.map(non_agent_calls, fn(call) {
+          llm_types.ToolResultContent(
+            tool_use_id: call.id,
+            content: "Unknown tool",
+            is_error: True,
+          )
+        })
+      let initial = list.append(memory_results, error_blocks)
+      case agent_calls {
+        [] -> {
+          // No agent calls either — just memory + unknown tools, re-think
+          let assistant_msg =
+            llm_types.Message(role: llm_types.Assistant, content: resp.content)
+          let user_msg =
+            llm_types.Message(role: llm_types.User, content: initial)
+          let messages = list.append(state.messages, [assistant_msg, user_msg])
+          let new_task_id = cycle_log.generate_uuid()
+          let cycle_id = option.unwrap(state.cycle_id, new_task_id)
+          let new_state =
+            CognitiveState(
+              ..state,
+              messages:,
+              pending: dict.delete(state.pending, task_id),
+            )
+          let req = build_request(new_state, messages)
+          case state.verbose {
+            True -> cycle_log.log_llm_request(cycle_id, req)
+            False -> Nil
+          }
+          worker.spawn_think(new_task_id, req, state.provider, state.self)
+          CognitiveState(
+            ..new_state,
+            status: Thinking(task_id: new_task_id),
+            pending: dict.insert(
+              dict.delete(state.pending, task_id),
+              new_task_id,
+              PendingThink(
+                task_id: new_task_id,
+                model: state.model,
+                fallback_from: None,
+                reply_to:,
+              ),
+            ),
+          )
+        }
+        _ ->
+          do_dispatch_agents(
+            state,
+            task_id,
+            resp,
+            agent_calls,
+            initial,
+            reply_to,
+          )
+      }
+    }
+  }
 }
 
 fn dispatch_agent_calls(
