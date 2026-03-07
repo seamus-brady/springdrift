@@ -33,6 +33,11 @@ fn start_cognitive(provider) {
       "mock-model",
       "mock-reasoning",
       None,
+      False,
+      "prime-narrative",
+      "mock-model",
+      [],
+      False,
     )
   #(subj, notify_subj)
 }
@@ -273,6 +278,11 @@ pub fn model_fallback_on_retryable_error_test() {
       "mock-task",
       "mock-reasoning",
       None,
+      False,
+      "prime-narrative",
+      "mock-task",
+      [],
+      False,
     )
 
   // Use a query with complexity keywords so heuristic classifies as Complex,

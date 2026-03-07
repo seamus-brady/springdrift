@@ -351,25 +351,12 @@ fn choice_decoder() -> decode.Decoder(
 }
 
 fn message_decoder() -> decode.Decoder(List(types.ContentBlock)) {
-  use content <- decode.optional_field(
-    "content",
-    None,
-    decode.optional(decode.string),
-  )
+  use content_blocks <- decode.optional_field("content", [], content_decoder())
   use tool_calls_opt <- decode.optional_field(
     "tool_calls",
     None,
     decode.optional(decode.list(tool_call_decoder())),
   )
-
-  let text_blocks = case content {
-    Some(text) ->
-      case text {
-        "" -> []
-        _ -> [types.TextContent(text:)]
-      }
-    None -> []
-  }
 
   let tool_calls = option.unwrap(tool_calls_opt, [])
   let tool_blocks =
@@ -378,7 +365,51 @@ fn message_decoder() -> decode.Decoder(List(types.ContentBlock)) {
       types.ToolUseContent(id:, name:, input_json: arguments)
     })
 
-  decode.success(list.append(text_blocks, tool_blocks))
+  decode.success(list.append(content_blocks, tool_blocks))
+}
+
+/// Decode content field — Mistral can return either a plain string,
+/// an array of content blocks, or null.
+fn content_decoder() -> decode.Decoder(List(types.ContentBlock)) {
+  decode.one_of(
+    // Case 1: plain string
+    decode.map(decode.string, fn(text) {
+      case text {
+        "" -> []
+        _ -> [types.TextContent(text:)]
+      }
+    }),
+    [
+      // Case 2: array of content block objects
+      decode.map(decode.list(content_block_decoder()), fn(blocks) {
+        // Filter out None entries (unknown block types like "reference")
+        list.filter_map(blocks, fn(b) {
+          case b {
+            Some(block) -> Ok(block)
+            None -> Error(Nil)
+          }
+        })
+      }),
+      // Case 3: null
+      decode.map(decode.optional(decode.string), fn(_) { [] }),
+    ],
+  )
+}
+
+/// Decode a single content block from a Mistral array-style content response.
+/// Returns None for unknown block types (e.g. "reference").
+fn content_block_decoder() -> decode.Decoder(Option(types.ContentBlock)) {
+  use block_type <- decode.optional_field("type", "text", decode.string)
+  case block_type {
+    "text" -> {
+      use text <- decode.optional_field("text", "", decode.string)
+      decode.success(case text {
+        "" -> None
+        _ -> Some(types.TextContent(text:))
+      })
+    }
+    _ -> decode.success(None)
+  }
 }
 
 fn tool_call_decoder() -> decode.Decoder(#(String, String, String)) {

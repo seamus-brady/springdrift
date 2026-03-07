@@ -12,6 +12,8 @@ import gleam/string
 import llm/types.{
   type Message, type Usage, Assistant, Message, TextContent, User,
 }
+import narrative/log as narrative_log
+import narrative/types as narrative_types
 import slog.{type LogEntry}
 
 // ---------------------------------------------------------------------------
@@ -21,6 +23,7 @@ import slog.{type LogEntry}
 type Tab {
   ChatTab
   LogTab
+  NarrativeTab
 }
 
 type AgentStatus {
@@ -58,6 +61,9 @@ type TuiState {
     log_entries: List(LogEntry),
     log_scroll: Int,
     last_usage: Option(Usage),
+    narrative_dir: String,
+    narrative_entries: List(narrative_types.NarrativeEntry),
+    narrative_scroll: Int,
   )
 }
 
@@ -88,6 +94,7 @@ pub fn start(
   task_model: String,
   reasoning_model: String,
   initial_messages: List(Message),
+  narrative_dir: String,
 ) -> Nil {
   let size = terminal.window_size()
   let #(w, h) = result.unwrap(size, #(80, 24))
@@ -142,6 +149,9 @@ pub fn start(
       log_entries: [],
       log_scroll: 0,
       last_usage: None,
+      narrative_dir:,
+      narrative_entries: [],
+      narrative_scroll: 0,
     )
   render(state)
   tui_run(fn() { event_loop(state) }, cleanup)
@@ -257,6 +267,10 @@ fn handle_notification(
       }
       continue_loop(TuiState(..state, notice: "  " <> badge))
     }
+    agent_types.ProfileNotification(name:) ->
+      continue_loop(
+        TuiState(..state, notice: style.green("  Profile loaded: " <> name)),
+      )
   }
 }
 
@@ -267,21 +281,25 @@ fn handle_stdin_byte(state: TuiState, byte: String) -> Nil {
     "\r" | "\n" -> handle_enter(state)
     "\u{7F}" | "\u{08}" ->
       case state.tab {
-        LogTab -> event_loop(state)
         ChatTab -> continue_loop(handle_backspace(state))
+        _ -> event_loop(state)
       }
     "\u{1B}" -> handle_escape(state)
     _ ->
       case state.tab {
-        LogTab -> event_loop(state)
         ChatTab ->
           case is_printable(byte) {
             True ->
-              continue_loop(
-                TuiState(..state, input_buf: state.input_buf <> byte),
-              )
+              case string.byte_size(state.input_buf) < 102_400 {
+                True ->
+                  continue_loop(
+                    TuiState(..state, input_buf: state.input_buf <> byte),
+                  )
+                False -> event_loop(state)
+              }
             False -> event_loop(state)
           }
+        _ -> event_loop(state)
       }
   }
 }
@@ -297,11 +315,13 @@ fn handle_escape(state: TuiState) -> Nil {
     Ok(StdinByte("[")), Ok(StdinByte("A")) ->
       case state.tab {
         LogTab -> continue_loop(log_nav_up(state))
+        NarrativeTab -> continue_loop(narrative_nav_up(state))
         ChatTab -> continue_loop(scroll_up(state, 3))
       }
     Ok(StdinByte("[")), Ok(StdinByte("B")) ->
       case state.tab {
         LogTab -> continue_loop(log_nav_down(state))
+        NarrativeTab -> continue_loop(narrative_nav_down(state))
         ChatTab -> continue_loop(scroll_down(state, 3))
       }
     Ok(StdinByte("[")), Ok(StdinByte("5")) -> {
@@ -346,6 +366,24 @@ fn handle_command(state: TuiState, cmd: String) -> Nil {
         ),
       )
     }
+    "/profile " <> name -> {
+      let trimmed = string.trim(name)
+      case trimmed {
+        "" -> {
+          let notice = style.dim("  Usage: /profile <name>")
+          continue_loop(TuiState(..state, notice:))
+        }
+        _ -> {
+          let reply_subj = state.cognitive_reply
+          process.send(
+            state.cognitive,
+            agent_types.LoadProfile(name: trimmed, reply_to: reply_subj),
+          )
+          let notice = style.dim("  Loading profile: " <> trimmed <> "...")
+          continue_loop(TuiState(..state, notice:))
+        }
+      }
+    }
     _ -> {
       let notice = style.dim("  Unknown command: " <> cmd)
       continue_loop(TuiState(..state, notice:))
@@ -356,6 +394,7 @@ fn handle_command(state: TuiState, cmd: String) -> Nil {
 fn handle_enter(state: TuiState) -> Nil {
   case state.tab {
     LogTab -> handle_log_enter(state)
+    NarrativeTab -> continue_loop(TuiState(..state, tab: ChatTab))
     ChatTab -> handle_chat_enter(state)
   }
 }
@@ -454,14 +493,31 @@ fn render(state: TuiState) -> Nil {
       render_input(state)
     }
     LogTab -> render_log(state)
+    NarrativeTab -> render_narrative(state)
   }
   render_footer(state)
 }
 
 fn render_header(state: TuiState) -> Nil {
   let tab_bar = case state.tab {
-    ChatTab -> style.bold("[Chat]") <> "  " <> style.dim("[Log]")
-    LogTab -> style.dim("[Chat]") <> "  " <> style.bold("[Log]")
+    ChatTab ->
+      style.bold("[Chat]")
+      <> "  "
+      <> style.dim("[Log]")
+      <> "  "
+      <> style.dim("[Narrative]")
+    LogTab ->
+      style.dim("[Chat]")
+      <> "  "
+      <> style.bold("[Log]")
+      <> "  "
+      <> style.dim("[Narrative]")
+    NarrativeTab ->
+      style.dim("[Chat]")
+      <> "  "
+      <> style.dim("[Log]")
+      <> "  "
+      <> style.bold("[Narrative]")
   }
   let header =
     style.bold(" Springdrift ")
@@ -576,7 +632,13 @@ fn render_footer(state: TuiState) -> Nil {
   let footer = case state.notice {
     "" ->
       case state.tab {
-        LogTab -> style.dim("  ↑↓: scroll   Enter/Tab: back to chat")
+        LogTab -> style.dim("  ↑↓: scroll   Enter/Tab: switch tab")
+        NarrativeTab ->
+          style.dim(
+            "  ↑↓: scroll   Enter/Tab: switch tab   "
+            <> int.to_string(list.length(state.narrative_entries))
+            <> " entries",
+          )
         ChatTab ->
           case state.status {
             Idle -> {
@@ -883,7 +945,18 @@ fn switch_tab(state: TuiState) -> Nil {
         TuiState(..state, tab: LogTab, log_entries: entries, log_scroll: 0),
       )
     }
-    LogTab -> continue_loop(TuiState(..state, tab: ChatTab))
+    LogTab -> {
+      let entries = narrative_log.load_all(state.narrative_dir)
+      continue_loop(
+        TuiState(
+          ..state,
+          tab: NarrativeTab,
+          narrative_entries: entries,
+          narrative_scroll: 0,
+        ),
+      )
+    }
+    NarrativeTab -> continue_loop(TuiState(..state, tab: ChatTab))
   }
 }
 
@@ -962,4 +1035,95 @@ fn truncate_text(text: String, max_width: Int) -> String {
     True -> string.slice(text, 0, int.max(0, max_width - 1)) <> "\u{2026}"
     False -> text
   }
+}
+
+// ---------------------------------------------------------------------------
+// Narrative tab
+// ---------------------------------------------------------------------------
+
+fn narrative_nav_up(state: TuiState) -> TuiState {
+  TuiState(..state, narrative_scroll: state.narrative_scroll + 3)
+}
+
+fn narrative_nav_down(state: TuiState) -> TuiState {
+  TuiState(..state, narrative_scroll: int.max(0, state.narrative_scroll - 3))
+}
+
+fn render_narrative(state: TuiState) -> Nil {
+  let entries = state.narrative_entries
+  let available = state.height - 3
+  case entries {
+    [] -> {
+      print_at(0, 2, style.dim("  No narrative entries."))
+      clear_rows(3, 2 + available)
+    }
+    _ -> {
+      let lines = build_narrative_lines(entries, state.width)
+      let total = list.length(lines)
+      let end_idx = int.max(0, total - state.narrative_scroll)
+      let start_idx = int.max(0, end_idx - available)
+      let visible =
+        lines
+        |> list.drop(start_idx)
+        |> list.take(available)
+      print_lines(visible, 2)
+      let used = list.length(visible)
+      clear_rows(2 + used, 2 + available)
+    }
+  }
+}
+
+fn build_narrative_lines(
+  entries: List(narrative_types.NarrativeEntry),
+  width: Int,
+) -> List(String) {
+  list.flat_map(entries, fn(entry) { narrative_entry_lines(entry, width) })
+}
+
+fn narrative_entry_lines(
+  entry: narrative_types.NarrativeEntry,
+  width: Int,
+) -> List(String) {
+  let cycle_short = string.slice(entry.cycle_id, 0, 8)
+  let time = case string.length(entry.timestamp) >= 19 {
+    True -> string.slice(entry.timestamp, 0, 19)
+    False -> entry.timestamp
+  }
+  let status_badge = case entry.outcome.status {
+    narrative_types.Success -> style.green("[OK]")
+    narrative_types.Partial -> style.yellow("[~~]")
+    narrative_types.Failure -> style.red("[!!]")
+  }
+  let thread_info = case entry.thread {
+    Some(t) ->
+      style.dim(
+        " [" <> t.thread_name <> " #" <> int.to_string(t.position) <> "]",
+      )
+    None -> ""
+  }
+  let header_line =
+    "  "
+    <> style.cyan(cycle_short)
+    <> " "
+    <> style.dim(time)
+    <> " "
+    <> status_badge
+    <> thread_info
+
+  let summary_max = int.max(20, width - 4)
+  let summary_line = "    " <> truncate_text(entry.summary, summary_max)
+
+  let delegation_lines = case entry.delegation_chain {
+    [] -> []
+    delegations ->
+      list.map(delegations, fn(d) {
+        "    "
+        <> style.dim("\u{2514} ")
+        <> d.agent_human_name
+        <> ": "
+        <> truncate_text(d.outcome, int.max(10, width - 30))
+      })
+  }
+
+  [header_line, summary_line, ..delegation_lines]
 }

@@ -4,8 +4,8 @@
 //// and tightens thresholds when repeated borderline decisions are detected.
 
 import dprime/types.{
-  type DprimeState, type GateDecision, type GateResult, DprimeHistoryEntry,
-  DprimeState,
+  type DprimeState, type GateDecision, type GateResult, type Intervention,
+  AbortMaxIterations, DprimeHistoryEntry, DprimeState, NoIntervention, Stalled,
 }
 import gleam/float
 import gleam/int
@@ -40,7 +40,16 @@ pub fn record(
       <> ")",
     None,
   )
-  DprimeState(..state, history: trimmed)
+  DprimeState(
+    ..state,
+    history: trimmed,
+    iteration_count: state.iteration_count + 1,
+  )
+}
+
+/// Reset iteration count (call at the start of each new user request).
+pub fn reset_iterations(state: DprimeState) -> DprimeState {
+  DprimeState(..state, iteration_count: 0)
 }
 
 /// Check if the recent history indicates stall conditions.
@@ -59,25 +68,55 @@ pub fn should_tighten(state: DprimeState) -> Bool {
   }
 }
 
+/// Determine if meta-management should intervene.
+/// Checks both stall detection and max iteration count.
+pub fn should_intervene(state: DprimeState) -> Intervention {
+  case state.iteration_count >= state.config.max_iterations {
+    True -> AbortMaxIterations
+    False ->
+      case should_tighten(state) {
+        True -> Stalled
+        False -> NoIntervention
+      }
+  }
+}
+
 /// Tighten both thresholds by 10% (multiply by 0.9).
 /// Thresholds only ever tighten, never loosen.
+/// Enforces floor values from config — never goes below min thresholds.
+/// Respects allow_adaptation flag — no-op if adaptation is disabled.
 pub fn tighten_thresholds(state: DprimeState) -> DprimeState {
-  let new_modify = state.current_modify_threshold *. 0.9
-  let new_reject = state.current_reject_threshold *. 0.9
-  slog.info(
-    "dprime/meta",
-    "tighten_thresholds",
-    "Tightening thresholds: modify "
-      <> float.to_string(new_modify)
-      <> ", reject "
-      <> float.to_string(new_reject),
-    None,
-  )
-  DprimeState(
-    ..state,
-    current_modify_threshold: new_modify,
-    current_reject_threshold: new_reject,
-  )
+  case state.config.allow_adaptation {
+    False -> {
+      slog.debug(
+        "dprime/meta",
+        "tighten_thresholds",
+        "Threshold adaptation disabled",
+        None,
+      )
+      state
+    }
+    True -> {
+      let raw_modify = state.current_modify_threshold *. 0.9
+      let raw_reject = state.current_reject_threshold *. 0.9
+      let new_modify = float_max(raw_modify, state.config.min_modify_threshold)
+      let new_reject = float_max(raw_reject, state.config.min_reject_threshold)
+      slog.info(
+        "dprime/meta",
+        "tighten_thresholds",
+        "Tightening thresholds: modify "
+          <> float.to_string(new_modify)
+          <> ", reject "
+          <> float.to_string(new_reject),
+        None,
+      )
+      DprimeState(
+        ..state,
+        current_modify_threshold: new_modify,
+        current_reject_threshold: new_reject,
+      )
+    }
+  }
 }
 
 /// Escalate a decision based on meta-management analysis.
@@ -100,5 +139,12 @@ pub fn maybe_escalate(
         other -> other
       }
     }
+  }
+}
+
+fn float_max(a: Float, b: Float) -> Float {
+  case a >=. b {
+    True -> a
+    False -> b
   }
 }

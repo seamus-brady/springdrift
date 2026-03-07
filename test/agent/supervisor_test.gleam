@@ -19,6 +19,7 @@ fn noop_executor(call: llm_types.ToolCall) -> llm_types.ToolResult {
 fn make_spec(name: String, provider) -> AgentSpec {
   AgentSpec(
     name:,
+    human_name: "Test Agent",
     description: "Test agent",
     system_prompt: "You are a test agent.",
     provider:,

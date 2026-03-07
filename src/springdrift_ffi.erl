@@ -5,8 +5,12 @@
          tui_run/2, throw_tui_exit/0,
          fetch_url/1, http_post/3, check_docker/0, docker_build/1,
          docker_run_container/2, docker_exec/2, docker_stop/1,
-         rescue/1,
-         log_init/1, log_stdout_enabled/0, log_stderr/1]).
+         rescue/1, sha256_hex/1,
+         log_init/1, log_stdout_enabled/0, log_stderr/1,
+         monotonic_now_ms/0, file_rename/2, sanitize_json/1,
+         resolve_symlinks/1,
+         file_size/1, days_ago_date/1,
+         uri_encode/1, extract_ddg_results/1]).
 
 %% Read one line from stdin.
 %% Returns {ok, Binary} (including trailing newline) or {error, nil} on EOF.
@@ -264,6 +268,11 @@ rescue(Fun) ->
         _Class:Reason -> {error, list_to_binary(io_lib:format("~p", [Reason]))}
     end.
 
+%% SHA-256 hex digest of a binary string.
+sha256_hex(Input) ->
+    Hash = crypto:hash(sha256, Input),
+    list_to_binary(lists:flatten([io_lib:format("~2.16.0b", [B]) || <<B>> <= Hash])).
+
 %% ---------------------------------------------------------------------------
 %% Logger FFI
 %% ---------------------------------------------------------------------------
@@ -289,3 +298,206 @@ docker_stop(ContainerId) ->
     os:cmd("docker stop " ++ IdStr ++ " 2>&1"),
     os:cmd("docker rm " ++ IdStr ++ " 2>&1"),
     nil.
+
+monotonic_now_ms() ->
+    erlang:system_time(millisecond).
+
+file_rename(From, To) ->
+    case file:rename(From, To) of
+        ok -> true;
+        {error, _} -> false
+    end.
+
+%% Resolve symlinks in a path by following links at each component.
+resolve_symlinks(Path) when is_binary(Path) ->
+    try
+        list_to_binary(resolve_symlinks_str(binary_to_list(Path)))
+    catch
+        _:_ -> Path
+    end.
+
+resolve_symlinks_str(Path) ->
+    case file:read_link(Path) of
+        {ok, Target} ->
+            Abs = case hd(Target) of
+                $/ -> Target;
+                _ -> filename:join(filename:dirname(Path), Target)
+            end,
+            resolve_symlinks_str(Abs);
+        {error, _} ->
+            %% Not a symlink — check if parent needs resolving
+            case filename:dirname(Path) of
+                Path -> Path;  %% root
+                Dir ->
+                    ResolvedDir = resolve_symlinks_str(Dir),
+                    filename:join(ResolvedDir, filename:basename(Path))
+            end
+    end.
+
+%% Sanitize JSON by escaping unescaped control characters inside string values.
+%% Walks the binary tracking in-string state and escapes literal control chars
+%% (newlines, tabs, etc.) that LLMs sometimes produce.
+sanitize_json(Bin) when is_binary(Bin) ->
+    sanitize_json(Bin, false, false, <<>>).
+
+sanitize_json(<<>>, _InStr, _Esc, Acc) ->
+    Acc;
+%% Previous char was backslash inside a string — this char is already escaped
+sanitize_json(<<C, Rest/binary>>, true, true, Acc) ->
+    sanitize_json(Rest, true, false, <<Acc/binary, C>>);
+%% Backslash inside a string — mark next char as escaped
+sanitize_json(<<$\\, Rest/binary>>, true, false, Acc) ->
+    sanitize_json(Rest, true, true, <<Acc/binary, $\\>>);
+%% Unescaped quote inside string — end of string
+sanitize_json(<<$", Rest/binary>>, true, false, Acc) ->
+    sanitize_json(Rest, false, false, <<Acc/binary, $">>);
+%% Control chars inside a string that need escaping
+sanitize_json(<<$\n, Rest/binary>>, true, false, Acc) ->
+    sanitize_json(Rest, true, false, <<Acc/binary, $\\, $n>>);
+sanitize_json(<<$\r, Rest/binary>>, true, false, Acc) ->
+    sanitize_json(Rest, true, false, <<Acc/binary, $\\, $r>>);
+sanitize_json(<<$\t, Rest/binary>>, true, false, Acc) ->
+    sanitize_json(Rest, true, false, <<Acc/binary, $\\, $t>>);
+%% Other control chars (0x00-0x1F) inside a string — escape as \uXXXX
+sanitize_json(<<C, Rest/binary>>, true, false, Acc) when C < 32 ->
+    Hex = list_to_binary(io_lib:format("\\u~4.16.0B", [C])),
+    sanitize_json(Rest, true, false, <<Acc/binary, Hex/binary>>);
+%% Normal char inside a string
+sanitize_json(<<C, Rest/binary>>, true, false, Acc) ->
+    sanitize_json(Rest, true, false, <<Acc/binary, C>>);
+%% Quote outside a string — start of string
+sanitize_json(<<$", Rest/binary>>, false, _, Acc) ->
+    sanitize_json(Rest, true, false, <<Acc/binary, $">>);
+%% Any char outside a string — pass through
+sanitize_json(<<C, Rest/binary>>, false, _, Acc) ->
+    sanitize_json(Rest, false, false, <<Acc/binary, C>>).
+
+%% Return the size of a file in bytes. Returns 0 if the file does not exist.
+file_size(Path) when is_binary(Path) ->
+    filelib:file_size(binary_to_list(Path)).
+
+%% Return a date string N days ago, e.g. days_ago_date(30) -> "2026-02-05".
+days_ago_date(Days) ->
+    {Date, _} = calendar:local_time(),
+    GregDays = calendar:date_to_gregorian_days(Date),
+    AgoDate = calendar:gregorian_days_to_date(GregDays - Days),
+    {Y, Mo, D} = AgoDate,
+    Pad = fun(N, W) -> string:right(integer_to_list(N), W, $0) end,
+    iolist_to_binary([Pad(Y,4), $-, Pad(Mo,2), $-, Pad(D,2)]).
+
+%% URI-encode a string for use in query parameters.
+uri_encode(Bin) when is_binary(Bin) ->
+    uri_string:quote(Bin).
+
+%% Extract search results from DuckDuckGo HTML response.
+%% Returns a list of {search_result, Title, Url, Snippet} tuples
+%% matching the Gleam SearchResult type.
+extract_ddg_results(Html) when is_binary(Html) ->
+    HtmlStr = binary_to_list(Html),
+    %% Find all result__a links and their snippets
+    Results = extract_results_loop(HtmlStr, []),
+    lists:reverse(Results).
+
+extract_results_loop(Html, Acc) ->
+    %% Look for result__a class links
+    case string:str(Html, "class=\"result__a\"") of
+        0 -> Acc;
+        Pos ->
+            Rest = lists:nthtail(Pos - 1, Html),
+            %% Extract href
+            Url = extract_href(Rest),
+            %% Extract link text (title)
+            Title = extract_tag_text(Rest),
+            %% Find snippet
+            Snippet = extract_snippet(Rest),
+            Result = {search_result,
+                      list_to_binary(Title),
+                      list_to_binary(clean_ddg_url(Url)),
+                      list_to_binary(Snippet)},
+            %% Move past this result
+            Remaining = case string:str(Rest, "class=\"result__a\"") of
+                0 -> [];
+                _ ->
+                    AfterTag = lists:nthtail(min(length(Rest) - 1, 50), Rest),
+                    case string:str(AfterTag, "class=\"result__a\"") of
+                        0 -> [];
+                        NextPos -> lists:nthtail(NextPos - 1, AfterTag)
+                    end
+            end,
+            case Remaining of
+                [] -> [{search_result,
+                        list_to_binary(Title),
+                        list_to_binary(clean_ddg_url(Url)),
+                        list_to_binary(Snippet)} | Acc];
+                _ -> extract_results_loop(Remaining, [Result | Acc])
+            end
+    end.
+
+extract_href(Html) ->
+    case string:str(Html, "href=\"") of
+        0 -> "";
+        Pos ->
+            After = lists:nthtail(Pos + 5, Html),
+            case string:str(After, "\"") of
+                0 -> "";
+                EndPos -> lists:sublist(After, EndPos - 1)
+            end
+    end.
+
+extract_tag_text(Html) ->
+    case string:str(Html, ">") of
+        0 -> "";
+        Pos ->
+            After = lists:nthtail(Pos, Html),
+            case string:str(After, "<") of
+                0 -> "";
+                EndPos -> string:strip(lists:sublist(After, EndPos - 1))
+            end
+    end.
+
+extract_snippet(Html) ->
+    case string:str(Html, "class=\"result__snippet\"") of
+        0 -> "";
+        Pos ->
+            After = lists:nthtail(Pos - 1, Html),
+            case string:str(After, ">") of
+                0 -> "";
+                GtPos ->
+                    Content = lists:nthtail(GtPos, After),
+                    case string:str(Content, "</") of
+                        0 -> "";
+                        EndPos ->
+                            Raw = lists:sublist(Content, EndPos - 1),
+                            %% Strip HTML tags from snippet
+                            strip_html_tags(Raw)
+                    end
+            end
+    end.
+
+strip_html_tags(Html) ->
+    strip_html_tags(Html, [], false).
+
+strip_html_tags([], Acc, _InTag) ->
+    string:strip(lists:reverse(Acc));
+strip_html_tags([$< | Rest], Acc, false) ->
+    strip_html_tags(Rest, Acc, true);
+strip_html_tags([$> | Rest], Acc, true) ->
+    strip_html_tags(Rest, Acc, false);
+strip_html_tags([_C | Rest], Acc, true) ->
+    strip_html_tags(Rest, Acc, true);
+strip_html_tags([C | Rest], Acc, false) ->
+    strip_html_tags(Rest, [C | Acc], false).
+
+%% Clean DuckDuckGo redirect URLs to extract the actual URL.
+clean_ddg_url(Url) ->
+    case string:str(Url, "uddg=") of
+        0 -> Url;
+        Pos ->
+            Encoded = lists:nthtail(Pos + 4, Url),
+            case string:str(Encoded, "&") of
+                0 -> uri_string:unquote(list_to_binary(Encoded));
+                EndPos ->
+                    Part = lists:sublist(Encoded, EndPos - 1),
+                    uri_string:unquote(list_to_binary(Part))
+            end
+    end.

@@ -123,15 +123,25 @@ fn discover_in_dir(dir: String) -> List(SkillMeta) {
 fn skill_to_xml(skill: SkillMeta) -> String {
   "  <skill>\n"
   <> "    <name>"
-  <> skill.name
+  <> xml_escape(skill.name)
   <> "</name>\n"
   <> "    <description>"
-  <> skill.description
+  <> xml_escape(skill.description)
   <> "</description>\n"
   <> "    <location>"
-  <> skill.path
+  <> xml_escape(skill.path)
   <> "</location>\n"
   <> "  </skill>"
+}
+
+/// Escape XML special characters in a string.
+pub fn xml_escape(text: String) -> String {
+  text
+  |> string.replace("&", "&amp;")
+  |> string.replace("<", "&lt;")
+  |> string.replace(">", "&gt;")
+  |> string.replace("\"", "&quot;")
+  |> string.replace("'", "&apos;")
 }
 
 fn parse_kv_line(line: String) -> Result(#(String, String), Nil) {

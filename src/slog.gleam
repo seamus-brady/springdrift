@@ -32,6 +32,15 @@ fn get_datetime() -> String
 @external(erlang, "springdrift_ffi", "get_date")
 fn get_date() -> String
 
+@external(erlang, "springdrift_ffi", "file_size")
+fn file_size(path: String) -> Int
+
+@external(erlang, "springdrift_ffi", "file_rename")
+fn file_rename(from: String, to: String) -> Bool
+
+@external(erlang, "springdrift_ffi", "days_ago_date")
+fn days_ago_date(days: Int) -> String
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -109,6 +118,31 @@ pub fn load_entries() -> List(LogEntry) {
               Ok(entry) -> Ok(entry)
               Error(_) -> Error(Nil)
             }
+        }
+      })
+  }
+}
+
+/// Remove log files older than 30 days from the logs directory.
+pub fn cleanup_old_logs() -> Nil {
+  let dir = log_dir()
+  let cutoff = days_ago_date(30)
+  case simplifile.read_directory(dir) {
+    Error(_) -> Nil
+    Ok(entries) ->
+      list.each(entries, fn(entry) {
+        case string.ends_with(entry, ".jsonl") {
+          True -> {
+            let file_date = string.slice(entry, 0, 10)
+            case string.compare(file_date, cutoff) {
+              order.Lt -> {
+                let _ = simplifile.delete(dir <> "/" <> entry)
+                Nil
+              }
+              _ -> Nil
+            }
+          }
+          False -> Nil
         }
       })
   }
@@ -218,8 +252,16 @@ fn log(
 fn append_to_file(entry: LogEntry) -> Nil {
   let dir = log_dir()
   let _ = simplifile.create_directory_all(dir)
-  let _ =
-    simplifile.append(log_path(), json.to_string(encode_entry(entry)) <> "\n")
+  let path = log_path()
+  // Rotate if file exceeds 10MB
+  case file_size(path) > 10_485_760 {
+    True -> {
+      let _ = file_rename(path, path <> ".1")
+      Nil
+    }
+    False -> Nil
+  }
+  let _ = simplifile.append(path, json.to_string(encode_entry(entry)) <> "\n")
   Nil
 }
 

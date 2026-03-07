@@ -12,17 +12,23 @@ import gleam/int
 import gleam/io
 import gleam/list
 import gleam/option
+import gleam/string
 import llm/adapters/anthropic as anthropic_adapter
 import llm/adapters/local as local_adapter
 import llm/adapters/mistral as mistral_adapter
 import llm/adapters/mock
 import llm/adapters/openai as openai_adapter
 import llm/provider.{type Provider}
-import sandbox
+import llm/types as llm_types
+import profile
+import profile/types as profile_types
+import scheduler/runner as scheduler_runner
 import simplifile
 import skills
 import slog
 import storage
+import tools/builtin as tools_builtin
+import tools/web as tools_web
 import tui
 import web/gui as web_gui
 
@@ -125,11 +131,6 @@ fn print_help() -> Nil {
     "  --max-context <n>         Sliding-window message cap (default: unlimited)",
   )
   io.println("")
-  io.println("Tools / sandbox:")
-  io.println(
-    "  --allow-write-anywhere    Allow write_file outside the current working directory",
-  )
-  io.println("")
   io.println("Session / config:")
   io.println(
     "  --gui <tui|web>           GUI mode: tui (default) or web (port 8080)",
@@ -155,6 +156,15 @@ fn print_help() -> Nil {
   )
   io.println(
     "  --dprime-config <path>    Path to D' config JSON (default: built-in)",
+  )
+  io.println("")
+  io.println("Narrative (Prime Narrative memory):")
+  io.println(
+    "  --narrative               Enable narrative logging after each cycle",
+  )
+  io.println("  --no-narrative            Disable narrative logging (default)")
+  io.println(
+    "  --narrative-dir <path>    Directory for narrative logs (default: prime-narrative)",
   )
   io.println("")
   io.println("Config files (checked in order; local overrides user config):")
@@ -183,6 +193,7 @@ fn print_help() -> Nil {
 fn run(cfg: AppConfig) -> Nil {
   let verbose = option.unwrap(cfg.log_verbose, False)
   slog.init(verbose)
+  slog.cleanup_old_logs()
   slog.info("springdrift", "run", "Starting springdrift", option.None)
 
   let base_system =
@@ -210,36 +221,39 @@ fn run(cfg: AppConfig) -> Nil {
     False -> []
   }
 
-  // Start sandbox (needed for coder agent)
-  let sandbox_dir = find_sandbox_dir()
-  let sandbox_subj = case sandbox_dir {
-    option.None -> {
-      io.println(
-        "Sandbox  : unavailable (sandbox/Dockerfile not found) — coder agent limited",
-      )
-      option.None
-    }
-    option.Some(dir) ->
-      case sandbox.start(dir) {
-        Ok(s) -> {
-          io.println("Sandbox  : Docker container started")
-          option.Some(s)
+  // Profile system
+  let profile_dirs =
+    option.unwrap(cfg.profiles_dirs, profile.default_profile_dirs())
+  let available_profiles = profile.discover(profile_dirs)
+
+  // Build agent specs (default or from profile)
+  let #(agent_specs, _active_profile) = case cfg.default_profile {
+    option.Some(profile_name) ->
+      case profile.load(profile_name, profile_dirs) {
+        Ok(loaded_profile) -> {
+          io.println("Profile  : " <> profile_name)
+          let specs =
+            build_profile_agent_specs(
+              loaded_profile,
+              p,
+              task_model,
+              write_anywhere,
+            )
+          #(specs, option.Some(profile_name))
         }
         Error(msg) -> {
           io.println(
-            "Sandbox  : unavailable (" <> msg <> ") — coder agent limited",
+            "Profile  : '"
+            <> profile_name
+            <> "' failed ("
+            <> msg
+            <> ") — using defaults",
           )
-          option.None
+          #(default_agent_specs(p, task_model), option.None)
         }
       }
+    option.None -> #(default_agent_specs(p, task_model), option.None)
   }
-
-  // Build agent specs
-  let agent_specs = [
-    planner.spec(p, task_model),
-    researcher.spec(p, task_model),
-    coder.spec(p, task_model, sandbox_subj, write_anywhere),
-  ]
 
   // Build agent tools for the cognitive loop
   let agent_tools = list.map(agent_specs, cognitive.agent_to_tool)
@@ -259,6 +273,11 @@ fn run(cfg: AppConfig) -> Nil {
     }
   }
 
+  // Narrative config
+  let narrative_enabled = option.unwrap(cfg.narrative_enabled, False)
+  let narrative_dir = option.unwrap(cfg.narrative_dir, "prime-narrative")
+  let archivist_model = option.unwrap(cfg.archivist_model, task_model)
+
   // Start cognitive loop with empty registry (supervisor will register agents)
   let cognitive_subj =
     cognitive.start(
@@ -274,6 +293,11 @@ fn run(cfg: AppConfig) -> Nil {
       task_model,
       reasoning_model,
       dprime_state,
+      narrative_enabled,
+      narrative_dir,
+      archivist_model,
+      profile_dirs,
+      write_anywhere,
     )
 
   // Start supervisor and register agents via StartChild
@@ -293,7 +317,48 @@ fn run(cfg: AppConfig) -> Nil {
     option.Some(_) -> io.println("D' Safety: enabled")
     option.None -> Nil
   }
-  io.println("Mode     : cognitive (agents: planner, researcher, coder)")
+  case narrative_enabled {
+    True -> io.println("Narrative: enabled (" <> narrative_dir <> ")")
+    False -> Nil
+  }
+  let agent_names =
+    list.map(agent_specs, fn(s) { s.name })
+    |> string.join(", ")
+  io.println("Mode     : cognitive (agents: " <> agent_names <> ")")
+  case available_profiles {
+    [] -> Nil
+    _ -> io.println("Profiles : " <> string.join(available_profiles, ", "))
+  }
+
+  // Start scheduler if profile has a schedule
+  case cfg.default_profile {
+    option.Some(profile_name) ->
+      case profile.load(profile_name, profile_dirs) {
+        Ok(loaded_profile) ->
+          case loaded_profile.schedule_path {
+            option.Some(schedule_path) ->
+              case profile.parse_schedule(schedule_path) {
+                Ok(tasks) ->
+                  case tasks {
+                    [] -> Nil
+                    _ -> {
+                      let _scheduler =
+                        scheduler_runner.start(tasks, cognitive_subj)
+                      io.println(
+                        "Scheduler: "
+                        <> int.to_string(list.length(tasks))
+                        <> " task(s) scheduled",
+                      )
+                    }
+                  }
+                Error(_) -> Nil
+              }
+            option.None -> Nil
+          }
+        Error(_) -> Nil
+      }
+    option.None -> Nil
+  }
 
   // Start GUI
   let gui = option.unwrap(cfg.gui, "tui")
@@ -309,6 +374,8 @@ fn run(cfg: AppConfig) -> Nil {
         reasoning_model,
         initial_messages,
         port,
+        narrative_dir,
+        available_profiles,
       )
     }
     _ ->
@@ -319,23 +386,10 @@ fn run(cfg: AppConfig) -> Nil {
         task_model,
         reasoning_model,
         initial_messages,
+        narrative_dir,
       )
   }
-  let _ = option.map(sandbox_subj, sandbox.send_shutdown)
   Nil
-}
-
-/// Find the sandbox directory containing the Dockerfile.
-/// Checks ./sandbox/Dockerfile first, then priv/sandbox/Dockerfile.
-fn find_sandbox_dir() -> option.Option(String) {
-  case simplifile.is_file("./sandbox/Dockerfile") {
-    Ok(True) -> option.Some("./sandbox")
-    _ ->
-      case simplifile.is_file("priv/sandbox/Dockerfile") {
-        Ok(True) -> option.Some("priv/sandbox")
-        _ -> option.None
-      }
-  }
 }
 
 fn select_provider(cfg: AppConfig) -> #(Provider, String, String) {
@@ -423,4 +477,70 @@ fn mock_provider() -> Provider {
   mock.provider_with_text(
     "I'm a mock assistant. Set a provider in your config file or use --provider to use a real LLM.",
   )
+}
+
+fn default_agent_specs(
+  provider: Provider,
+  task_model: String,
+) -> List(agent_types.AgentSpec) {
+  [
+    planner.spec(provider, task_model),
+    researcher.spec(provider, task_model),
+    coder.spec(provider, task_model),
+  ]
+}
+
+fn build_profile_agent_specs(
+  loaded_profile: profile_types.Profile,
+  provider: Provider,
+  task_model: String,
+  write_anywhere: Bool,
+) -> List(agent_types.AgentSpec) {
+  list.map(loaded_profile.agents, fn(agent_def) {
+    let tools_list = resolve_profile_tools(agent_def.tools)
+    let system_prompt = case agent_def.system_prompt {
+      option.Some(sp) -> sp
+      option.None ->
+        "You are a " <> agent_def.name <> " agent. " <> agent_def.description
+    }
+    let tool_executor =
+      build_profile_tool_executor(agent_def.tools, write_anywhere)
+    agent_types.AgentSpec(
+      name: agent_def.name,
+      human_name: string.capitalise(agent_def.name),
+      description: agent_def.description,
+      system_prompt:,
+      provider:,
+      model: task_model,
+      max_tokens: 4096,
+      max_turns: agent_def.max_turns,
+      max_consecutive_errors: 3,
+      tools: tools_list,
+      restart: agent_types.Permanent,
+      tool_executor:,
+    )
+  })
+}
+
+fn resolve_profile_tools(tool_groups: List(String)) -> List(llm_types.Tool) {
+  list.flat_map(tool_groups, fn(group) {
+    case group {
+      "web" -> tools_web.all()
+      "builtin" -> tools_builtin.all()
+      _ -> []
+    }
+  })
+}
+
+fn build_profile_tool_executor(
+  tool_groups: List(String),
+  _write_anywhere: Bool,
+) -> fn(llm_types.ToolCall) -> llm_types.ToolResult {
+  let has_web = list.contains(tool_groups, "web")
+  fn(call: llm_types.ToolCall) -> llm_types.ToolResult {
+    case call.name {
+      "fetch_url" if has_web -> tools_web.execute(call)
+      _ -> tools_builtin.execute(call)
+    }
+  }
 }

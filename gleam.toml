@@ -1,16 +1,9 @@
 name = "springdrift"
-version = "0.7.0"
-
-# Fill out these fields if you intend to generate HTML documentation or publish
-# your project to the Hex package manager.
-#
-# description = ""
-# licences = ["Apache-2.0"]
-# repository = { type = "github", user = "", repo = "" }
-# links = [{ title = "Website", href = "" }]
-#
-# For a full reference of all the available options, you can have a look at
-# https://gleam.run/writing-gleam/gleam-toml/.
+version = "0.1.0"
+description = "A knowledge worker agent framework for the BEAM. Persistent memory, scheduled research, configurable safety."
+licences = ["MIT"]
+repository = { type = "github", user = "seamus-brady", repo = "springdrift" }
+gleam = ">= 1.5.0"
 
 [dependencies]
 gleam_stdlib = ">= 0.44.0 and < 2.0.0"
@@ -23,6 +16,7 @@ simplifile = ">= 2.0.0 and < 3.0.0"
 tom = ">= 2.0.1 and < 3.0.0"
 mist = ">= 5.0.4 and < 6.0.0"
 gleam_http = ">= 4.3.0 and < 5.0.0"
+gleam_httpc = ">= 5.0.0 and < 6.0.0"
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

@@ -2,12 +2,13 @@
 ////
 //// Single entry point `evaluate` runs the H-CogAff layers sequentially:
 //// 1. Canary probes (if enabled) — hijack/leakage → immediate REJECT
-//// 2. Reactive — critical features only; all-zero → fast ACCEPT
-//// 3. Deliberative — full feature set; compute D' and gate
+//// 2. Reactive — critical features only; all-zero → fast ACCEPT; high → REJECT
+//// 3. Deliberative — situation model, candidate generation, full D' eval
 //// 4. Meta-management — stall detection may escalate MODIFY → REJECT
 
 import cycle_log
 import dprime/canary
+import dprime/deliberative
 import dprime/engine
 import dprime/meta
 import dprime/scorer
@@ -106,8 +107,29 @@ pub fn evaluate(
   }
 }
 
+/// Post-execution D' re-check entry point. Delegates to deliberative module.
+pub fn post_execution_evaluate(
+  result_text: String,
+  original_instruction: String,
+  state: DprimeState,
+  provider: Provider,
+  model: String,
+  cycle_id: String,
+  verbose: Bool,
+) -> GateResult {
+  deliberative.post_execution_check(
+    result_text,
+    original_instruction,
+    state,
+    provider,
+    model,
+    cycle_id,
+    verbose,
+  )
+}
+
 // ---------------------------------------------------------------------------
-// Layer 1: Reactive — critical features only
+// Layer 1: Reactive — critical features only, reactive scaling
 // ---------------------------------------------------------------------------
 
 fn evaluate_reactive(
@@ -137,6 +159,7 @@ fn evaluate_reactive(
         provider,
         model,
         canary_result,
+        0.0,
         cycle_id,
         verbose,
       )
@@ -177,22 +200,28 @@ fn evaluate_reactive(
           )
         }
         False -> {
-          let score =
-            engine.compute_dprime(forecasts, critical, state.config.tiers)
-          case score >=. state.current_reject_threshold {
+          // Use reactive scaling unit per spec §3.3.2
+          let score = engine.compute_reactive_dprime(forecasts, critical)
+          case score >=. state.config.reactive_reject_threshold {
             True -> {
+              slog.info(
+                "dprime/gate",
+                "evaluate_reactive",
+                "Reactive REJECT: D' = " <> float.to_string(score),
+                Some(cycle_id),
+              )
               cycle_log.log_dprime_layer(
                 cycle_id,
                 "reactive",
                 "reject",
                 score,
-                "Reactive reject: critical feature score exceeds threshold",
+                "Reactive reject: critical feature score exceeds reactive threshold",
               )
               GateResult(
                 decision: Reject,
                 dprime_score: score,
                 forecasts:,
-                explanation: "Reactive reject: critical feature score exceeds threshold",
+                explanation: "Reactive reject: critical feature score exceeds reactive threshold",
                 layer: Reactive,
                 canary_result:,
               )
@@ -206,6 +235,7 @@ fn evaluate_reactive(
                 provider,
                 model,
                 canary_result,
+                score,
                 cycle_id,
                 verbose,
               )
@@ -217,7 +247,7 @@ fn evaluate_reactive(
 }
 
 // ---------------------------------------------------------------------------
-// Layer 2: Deliberative — all features
+// Layer 2: Deliberative — situation model, candidates, full D' eval
 // ---------------------------------------------------------------------------
 
 fn evaluate_deliberative(
@@ -227,6 +257,7 @@ fn evaluate_deliberative(
   provider: Provider,
   model: String,
   canary_result: Option(types.ProbeResult),
+  reactive_dprime: Float,
   cycle_id: String,
   verbose: Bool,
 ) -> GateResult {
@@ -236,30 +267,53 @@ fn evaluate_deliberative(
     "Layer 2: deliberative evaluation",
     Some(cycle_id),
   )
-  let forecasts =
-    scorer.score_features(
+
+  // Build situation model
+  let situation_model =
+    deliberative.build_situation_model(
       instruction,
       context,
-      state.config.features,
       provider,
       model,
       cycle_id,
       verbose,
     )
-  let score =
-    engine.compute_dprime(forecasts, state.config.features, state.config.tiers)
+
+  // Determine candidate count based on reactive D' score
+  let n = deliberative.candidate_count(reactive_dprime, state.config)
+
+  // Generate candidates
+  let candidates =
+    deliberative.generate_candidates(
+      situation_model,
+      n,
+      provider,
+      model,
+      cycle_id,
+      verbose,
+    )
+
+  // Evaluate all candidates against full feature set
+  let result =
+    deliberative.evaluate_candidates(
+      candidates,
+      state,
+      canary_result,
+      provider,
+      model,
+      cycle_id,
+      verbose,
+    )
+
+  let score = result.dprime_score
+  let decision = result.decision
+
   slog.info(
     "dprime/gate",
     "evaluate_deliberative",
     "D' score: " <> float.to_string(score),
     Some(cycle_id),
   )
-  let decision =
-    engine.gate_decision(
-      score,
-      state.current_modify_threshold,
-      state.current_reject_threshold,
-    )
 
   // Layer 3: Meta-management — may escalate MODIFY → REJECT
   let final_decision = case decision {
@@ -270,8 +324,7 @@ fn evaluate_deliberative(
         "Checking meta-management for MODIFY escalation",
         Some(cycle_id),
       )
-      let escalated = meta.maybe_escalate(state, decision)
-      escalated
+      meta.maybe_escalate(state, decision)
     }
     other -> other
   }
@@ -281,9 +334,18 @@ fn evaluate_deliberative(
     False -> MetaManagement
   }
 
+  // Generate richer explanation for MODIFY decisions
   let explanation = case final_decision {
     Accept -> "Deliberative accept: D' score below modify threshold"
-    Modify -> "Deliberative modify: D' score between thresholds"
+    Modify ->
+      deliberative.explain_modification(
+        result.forecasts,
+        state.config.features,
+        provider,
+        model,
+        cycle_id,
+        verbose,
+      )
     Reject ->
       case layer {
         MetaManagement ->
@@ -339,7 +401,7 @@ fn evaluate_deliberative(
   GateResult(
     decision: final_decision,
     dprime_score: score,
-    forecasts:,
+    forecasts: result.forecasts,
     explanation:,
     layer:,
     canary_result:,

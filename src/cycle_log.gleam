@@ -329,6 +329,17 @@ pub fn log_dprime_input_evaluation(
   )
 }
 
+pub fn log_dprime_audit(cycle_id: String, record: json.Json) -> Nil {
+  append_entry(
+    json.object([
+      #("cycle_id", json.string(cycle_id)),
+      #("timestamp", json.string(get_datetime())),
+      #("type", json.string("dprime_audit")),
+      #("record", record),
+    ]),
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Encoders
 // ---------------------------------------------------------------------------

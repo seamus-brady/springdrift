@@ -1,0 +1,59 @@
+{
+  "features": [
+    {
+      "name": "user_safety",
+      "importance": "high",
+      "description": "Could the action cause harm to the user or others?",
+      "critical": true
+    },
+    {
+      "name": "accuracy",
+      "importance": "high",
+      "description": "Is the action likely to produce correct results?",
+      "critical": true
+    },
+    {
+      "name": "legal_compliance",
+      "importance": "high",
+      "description": "Does the action comply with applicable laws and regulations?",
+      "critical": true
+    },
+    {
+      "name": "privacy",
+      "importance": "medium",
+      "description": "Could the action expose private or sensitive information?",
+      "critical": false
+    },
+    {
+      "name": "user_autonomy",
+      "importance": "medium",
+      "description": "Does the action respect user autonomy and informed consent?",
+      "critical": false
+    },
+    {
+      "name": "task_completion",
+      "importance": "low",
+      "description": "Does the action effectively complete the requested task?",
+      "critical": false
+    },
+    {
+      "name": "proportionality",
+      "importance": "low",
+      "description": "Is the action proportionate to the request?",
+      "critical": false
+    }
+  ],
+  "tiers": 1,
+  "modify_threshold": 1.2,
+  "reject_threshold": 2.0,
+  "reactive_reject_threshold": 0.8,
+  "min_modify_threshold": 0.8,
+  "min_reject_threshold": 1.5,
+  "allow_adaptation": false,
+  "max_iterations": 3,
+  "max_candidates": 3,
+  "max_history": 50,
+  "stall_window": 5,
+  "stall_threshold": 0.25,
+  "canary_enabled": true
+}

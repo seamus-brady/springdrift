@@ -1,197 +1,318 @@
 # Springdrift
 
-A terminal-UI chatbot written in **Gleam/OTP** that implements the
-[12-Factor Agents](https://github.com/humanlayer/12-factor-agents) principles.
-It runs a ReAct loop — the model reasons, calls tools, observes results, and
-repeats until it can give a final answer — all inside a full alternate-screen
-TUI with a two-tab interface.
+A prototype knowledge worker agent that checks data and generates reports on a
+schedule. Built in [Gleam](https://gleam.run) on the Erlang/OTP runtime.
+
+Springdrift is an experiment in building autonomous research agents with
+safety gates and persistent memory. It runs scheduled queries, scores each
+action against configurable safety dimensions before execution, and maintains
+an immutable narrative log that gives the agent continuity across runs -- and
+gives you a complete audit trail of what it did and why.
 
 ---
 
-## Features
+## Table of Contents
 
-### Multi-provider LLM support
-Anthropic, OpenAI, and OpenRouter are all supported via a thin provider
-abstraction (`src/llm/provider.gleam`). On startup the app auto-detects which
-API key is available (`ANTHROPIC_API_KEY` → `OPENROUTER_API_KEY` →
-`OPENAI_API_KEY`), or you can force a provider with `--provider`. A mock
-provider is available for development and tests.
-
-### ReAct agent loop
-The core control flow is an explicit `react_loop` that iterates up to
-`max_turns` times per user message:
-
-1. Send the conversation (including tool definitions) to the LLM.
-2. If the response contains tool calls, execute them, append results, repeat.
-3. If the response is a final text answer, return it.
-
-Errors surface as visible `[Error: …]` messages — never as silent empty
-responses.
-
-### Built-in tools
-
-| Tool | Description |
-|---|---|
-| `calculator` | Basic arithmetic (`+`, `-`, `*`, `/`) with division-by-zero guard |
-| `get_current_datetime` | Returns the current local date and time as `YYYY-MM-DDTHH:MM:SS` |
-| `request_human_input` | Asks the human a question mid-loop and blocks until they reply |
-| `read_skill` | Loads a `SKILL.md` file from disk (used with the skills system) |
-
-### Agent skills (agentskills.io)
-Springdrift implements the [agentskills.io](https://agentskills.io/) standard for
-giving agents reusable, portable capabilities. At startup it scans configured
-skill directories for subdirectories containing a `SKILL.md` file with YAML
-frontmatter (`name`, `description`). Discovered skills are injected into the
-system prompt as an `<available_skills>` XML block. The model can then call the
-`read_skill` tool to load full instructions for any skill it decides to use.
-
-Default skill directories (checked in order):
-- `~/.config/springdrift/skills`
-- `.skills` (project-local)
-
-Override with `--skills-dir <path>` (repeatable) or `"skills_dirs"` in config.
-
-### Model routing by query complexity
-Each incoming message is classified as **Simple** or **Complex** before the
-main LLM call:
-
-1. A fast call to `task_model` with a one-word-reply classification prompt.
-2. If that call fails, a heuristic fallback (message length, keywords, `?` count,
-   numbered lists).
-
-Simple queries use `task_model`; Complex queries automatically switch to
-`reasoning_model`. The `/model` command lets you toggle between the two models
-manually at any time.
-
-### Automatic model fallback with retry
-When an LLM call fails with a retryable error (500, 503, 529, 429, network,
-timeout), the worker retries up to 3 times with exponential backoff (500ms →
-1s → 2s). If all retries exhaust and the failed model isn't the task model, the
-cognitive loop automatically falls back to `task_model` and prepends a brief
-notice to the response: `[model_x unavailable, used model_y]`. This is
-provider-agnostic — it works with Anthropic, OpenAI, and OpenRouter.
-
-### Session persistence and resume
-After every completed turn the full conversation (including all tool-use and
-tool-result blocks) is saved to `~/.config/springdrift/session.json`. Start with
-`--resume` to reload it.
-
-### Cycle logging
-Every conversation cycle is assigned a UUID and logged to
-`cycle-log/YYYY-MM-DD.jsonl`. Each file is JSON-L (one object per line) and
-contains five event types per cycle: `human_input`, `llm_request`,
-`llm_response`, `tool_call`, `tool_result`. Classification decisions are also
-logged. Events carry `parent_id` to chain cycles in order.
-
-The `--verbose` flag enables logging of full `llm_request` and `llm_response`
-payloads (off by default to keep log files small).
-
-### System logging
-Springdrift has a system-level logger (`slog`) with three output sinks:
-
-1. **Date-rotated files** — `logs/YYYY-MM-DD.jsonl` (JSON-L, one entry per line).
-   Every module instruments key functions with `slog.debug` / `slog.info` /
-   `slog.warn` / `slog.log_error` calls.
-2. **Stderr** — when `--verbose` is set, formatted log lines are written to
-   stderr (not stdout, to avoid corrupting TUI alternate-screen output).
-3. **UI log tabs** — both the TUI Log tab and the Web GUI Log tab load and
-   display entries from today's log file.
-
-### Log tab (TUI and Web GUI)
-Press **Tab** in the TUI to open the Log tab. Each entry shows timestamp,
-colored level badge, module::function, message, and optional cycle ID. Use
-`↑`/`↓` to scroll. The Web GUI has a separate Log tab with a refresh button.
-
-### Context window management
-Set `--max-context <n>` to cap the number of messages passed to the LLM per
-call. The full history is always kept in memory and on disk; trimming only
-happens at request-build time.
-
-### Agent orchestration
-
-The main LLM acts as a cognitive orchestrator managing three specialist sub-agents:
-
-| Agent | Role | Tools |
-|---|---|---|
-| `planner` | Break down complex goals into structured plans | None (text only) |
-| `researcher` | Gather information from files, web, and built-in tools | files, web, builtin |
-| `coder` | Write code, run shell commands in the sandbox | files, shell, builtin |
-
-The cognitive loop only has two kinds of tools: `agent_*` tools (one per
-registered agent) and `request_human_input`. All other tools (calculator, file
-ops, shell, web) are delegated to agents. This keeps the orchestrator focused
-on planning and communication.
-
-The notification channel between the cognitive loop and the TUI is decoupled —
-`Notification` is a pure data type with no process references (`Subject`). This
-means the same cognitive loop could be driven by a websocket handler or any
-other UI without code changes.
-
-### Safety circuit breakers
-- **Max turns** (`--max-turns`, default 5): prevents infinite tool loops.
-- **Consecutive errors** (`--max-errors`, default 3): aborts if the same tool
-  keeps failing without making progress.
-
-### Verbose and diagnostics
-- `--verbose`: log full LLM request/response payloads to the cycle log.
-- `--print-config`: print the resolved config and exit.
-- `--help`: show all flags.
-- Token usage displayed in the footer (last turn) and per cycle in the Log tab.
+- [What it does](#what-it-does)
+- [Quickstart](#quickstart)
+- [Configuring a profile](#configuring-a-profile)
+- [Delivery options](#delivery-options)
+- [D-prime safety system](#d-prime-safety-system)
+- [Prime Narrative -- explainable memory](#prime-narrative----explainable-memory)
+- [Why Gleam on the BEAM](#why-gleam-on-the-beam)
+- [Architecture](#architecture)
+- [Interactive mode](#interactive-mode)
+- [Configuration](#configuration)
+- [Requirements](#requirements)
+- [Development](#development)
+- [License](#license)
 
 ---
 
-## Installation
+## What it does
 
-```sh
-# Install Erlang/OTP and Gleam
-brew install erlang gleam   # macOS
+Define a profile with one or more scheduled research queries. Springdrift runs
+each query on its interval, routes it through the appropriate model (simple
+queries get a fast model, complex ones get a reasoning model), evaluates safety
+before executing any tools, and delivers the result to a file or webhook.
 
+Between runs, the agent remembers what it found. The narrative threading system
+links related research cycles into conversations, so a Monday property market
+report knows what Tuesday's report said -- and flags when data points change.
+
+## Quickstart
+
+```bash
 # Clone and build
 git clone https://github.com/seamus-brady/springdrift
 cd springdrift
 gleam build
+
+# Set your API key
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# Run interactively
+gleam run
+
+# Run with the example profile
+gleam run -- --profile market-monitor --profiles-dir examples
+```
+
+## Configuring a profile
+
+Profiles are TOML files that define what to research, how often, and where to
+deliver results. See `examples/market-monitor/config.toml` for a working example.
+
+A minimal profile:
+
+```toml
+[profile]
+name = "my-monitor"
+
+[agent]
+system_prompt = "You are a research analyst."
+model = "claude-sonnet-4-5"
+
+[[jobs]]
+name = "daily-check"
+query = "Latest news on quantum computing funding rounds."
+interval = "24h"
+
+[jobs.delivery]
+type = "file"
+directory = "./reports"
+format = "markdown"
+```
+
+## Delivery options
+
+**File** -- writes markdown or JSON to a local directory.
+
+```toml
+[jobs.delivery]
+type = "file"
+directory = "./reports"
+format = "markdown"  # or "json"
+```
+
+**Webhook** -- POSTs a JSON payload to any HTTP endpoint.
+
+```toml
+[jobs.delivery]
+type = "webhook"
+url = "https://your-endpoint.com/reports"
+method = "POST"
+
+[[jobs.delivery.headers]]
+name = "Authorization"
+value = "Bearer YOUR_TOKEN"
 ```
 
 ---
 
-## Usage
+## D-prime safety system
 
-```sh
-# Start (auto-detects API key)
-gleam run
+Every proposed agent action passes through a safety gate before execution.
+The system is based on two bodies of academic work:
 
-# Resume previous session
-gleam run -- --resume
+**Image Theory** (Beach, 1990; Beach & Mitchell, 1987). Lee Roy Beach's Image
+Theory models human decision-making as a screening process: new options are
+tested for compatibility against existing standards (the "value image") rather
+than optimised across all alternatives. An option that violates any standard
+is rejected without further analysis. Springdrift adopts this as the D'
+(D-prime) discrepancy score -- a weighted sum of how far an action deviates
+from the agent's configured standards. Actions below a threshold pass; those
+above are modified or rejected.
 
-# Force provider and model
-gleam run -- --provider anthropic --model claude-opus-4-6
+**H-CogAff architecture** (Sloman, 2001; Sloman & Chrisley, 2003). Aaron
+Sloman's H-CogAff framework describes a three-layer cognitive architecture:
+reactive (fast, automatic responses), deliberative (slower, model-based
+reasoning), and meta-management (self-monitoring and adaptation). Springdrift's
+safety gate runs these three layers in sequence:
 
-# Use a config file
-gleam run -- --config /path/to/my.toml
+1. **Reactive** -- canary probes check for prompt injection and data leakage
+   using fresh random tokens. Critical features (e.g. user safety) trigger
+   immediate rejection.
+2. **Deliberative** -- the full D' score is computed across all features with
+   importance weighting. The LLM scores each feature's magnitude (0-3) against
+   calibration examples.
+3. **Meta-management** -- a sliding window tracks recent D' scores. If scores
+   stall above the modify threshold, the system tightens thresholds to escalate
+   borderline cases.
 
-# Start with an extra skill directory
-gleam run -- --skills-dir ~/my-skills
+### Configuration
 
-# Print resolved config and exit
-gleam run -- --print-config
+Copy `dprime.example.json` and adjust thresholds to your risk tolerance:
+
+```json
+{
+  "features": [
+    { "name": "accuracy", "importance": "high", "critical": true },
+    { "name": "legal_compliance", "importance": "high", "critical": true },
+    { "name": "privacy", "importance": "medium", "critical": false }
+  ],
+  "modify_threshold": 1.2,
+  "reject_threshold": 2.0
+}
+```
+
+Features marked `"critical": true` cause immediate rejection if they trigger,
+regardless of the aggregate score. Non-critical features contribute to the
+weighted sum compared against `modify_threshold` and `reject_threshold`.
+
+### References
+
+- Beach, L. R. (1990). *Image Theory: Decision Making in Personal and Organizational Contexts*. Wiley.
+- Beach, L. R., & Mitchell, T. R. (1987). Image theory: Principles of screening and choice. *Acta Psychologica*, 66(3), 201-220.
+- Sloman, A. (2001). Beyond shallow models of emotion. *Cognitive Processing*, 2(1), 177-198.
+- Sloman, A., & Chrisley, R. (2003). Virtual machines and consciousness. *Journal of Consciousness Studies*, 10(4-5), 133-172.
+
+---
+
+## Prime Narrative -- explainable memory
+
+The Prime Narrative system gives the agent persistent, structured memory across
+research cycles. It draws on ideas from narrative cognition research:
+
+**Narrative as cognition** (Bruner, 1991; Beach, 1990). Jerome Bruner argued
+that humans organise experience primarily through narrative -- constructing
+stories that link events by causality, intention, and temporal sequence rather
+than by logical categorisation. Beach extended this into decision theory with
+his "narrative image", where past decisions form a story that constrains future
+ones. Springdrift's narrative log makes this explicit: every cycle is recorded
+as a structured entry with intent, outcome, entities, data points, and
+confidence scores.
+
+**Threading and continuity.** Related research cycles are automatically grouped
+into threads using overlap scoring across locations (weight 3), domains
+(weight 2), and keywords (weight 1). When a new cycle joins an existing thread,
+the system generates a continuity note comparing data points across cycles --
+flagging when values have changed. This gives the agent temporal context that
+pure chat history cannot provide.
+
+Each entry records:
+
+- Intent classification and domain
+- Entities extracted (locations, organisations, data points)
+- Outcome status and confidence
+- Thread assignment and continuity notes
+- Delegation chain (which sub-agents contributed)
+- Performance metrics (tokens, duration, model used)
+
+### Explainability
+
+The narrative log serves as a complete audit trail. Every research cycle
+produces a human-readable record of what the agent did, what it found, how
+confident it was, and which thread of ongoing work it belongs to. Combined
+with D-prime's per-feature safety scores and rationales, the system provides
+end-to-end explainability from input to output.
+
+### References
+
+- Bruner, J. (1991). The narrative construction of reality. *Critical Inquiry*, 18(1), 1-21.
+- Beach, L. R. (1990). *Image Theory: Decision Making in Personal and Organizational Contexts*. Wiley.
+- Schank, R. C., & Abelson, R. P. (1995). Knowledge and memory: The real story. In R. S. Wyer (Ed.), *Advances in Social Cognition*, Vol. 8 (pp. 1-85). Lawrence Erlbaum.
+
+---
+
+## Why Gleam on the BEAM
+
+Gleam is a particularly good fit for building AI agent systems, for reasons
+that compound:
+
+**Type safety without ceremony.** Gleam's type system catches entire
+categories of agent bugs at compile time -- malformed tool calls, missing
+message variants, protocol mismatches between processes. The `Result` type
+makes error paths explicit. There are no runtime type errors, no `undefined
+is not a function`. For agent systems where a single unhandled error can
+derail a multi-step reasoning chain, this matters enormously.
+
+**The BEAM is the best agent runtime.** Erlang's virtual machine was designed
+for systems that must run continuously, handle failures gracefully, and manage
+thousands of concurrent activities -- which is exactly what an agent
+orchestrator does. Each agent is an OTP process. If one crashes, its supervisor
+restarts it. The scheduler preemptively time-slices across agents without
+cooperative yielding. `process.send_after` gives you cron-like scheduling
+with microsecond precision and zero external dependencies. There is no
+garbage collection pause that freezes all agents simultaneously. This is not
+concurrency bolted onto a language -- it is the runtime.
+
+**LLM compatibility.** Claude is exceptionally good at writing Gleam. The
+language is small (the entire syntax fits on one page), consistent (no
+special cases or legacy baggage), and well-documented. This means an LLM
+can generate correct Gleam code reliably, which matters both for the agent's
+own tool use and for the development process. Springdrift itself was largely
+built with Claude Code.
+
+**Immutability by default.** All data in Gleam is immutable. There is no
+shared mutable state between processes. This eliminates data races by
+construction -- agents communicate through typed message channels
+(`Subject(T)`) and nothing else. When you are running multiple agents
+concurrently making LLM calls, file writes, and web requests, the absence
+of shared state is not a nice-to-have. It is a prerequisite for
+correctness.
+
+**Small binaries, fast startup.** A compiled Springdrift release is a
+self-contained BEAM package. Startup time is measured in milliseconds.
+There is no container to build, no interpreter to warm up, no dependency
+tree to resolve at runtime.
+
+---
+
+## Architecture
+
+```
+cognitive loop
+├── query classifier (simple -> task model, complex -> reasoning model)
+├── multi-agent supervisor (OTP)
+│   └── named agents with typed specs, tool sets, restart strategies
+├── tools
+│   ├── web_search (DuckDuckGo, no API key required)
+│   └── fetch_url (HTTP GET with scheme validation)
+├── D-prime safety gate (reactive -> deliberative -> meta-management)
+├── narrative memory (JSONL + thread index)
+└── scheduler
+    ├── persistent job state (JSON checkpoint)
+    └── delivery (file, webhook)
+```
+
+### Concurrency model
+
+| Process | Lifetime | Role |
+|---|---|---|
+| TUI event loop | App | Render, raw stdin, message dispatch |
+| Cognitive loop | App | Orchestrates agents, model switching, fallback |
+| Agent processes | App | Specialist agents with own react loops |
+| Think worker | Per turn | Blocking LLM call with retry + backoff |
+| Archivist | Per turn | Async narrative generation (spawn_unlinked) |
+| Scheduler | App | BEAM-native tick loop via `send_after` |
+
+All cross-process communication uses typed `Subject(T)` channels. No shared
+mutable state, no locks.
+
+---
+
+## Interactive mode
+
+Springdrift also works as a terminal chatbot with a three-tab TUI (Chat, Log,
+Narrative). Use it for ad-hoc research or to interact with running profiles.
+
+```bash
+gleam run                      # Start interactive TUI
+gleam run -- --resume          # Resume previous session
+gleam run -- --gui web         # Start web GUI on port 8080
+gleam run -- --narrative       # Enable narrative memory
+gleam run -- --dprime          # Enable D' safety evaluation
 ```
 
 ### TUI keyboard shortcuts
 
 | Key | Action |
 |---|---|
-| Enter | Send message (or answer agent question) |
-| Tab | Switch between Chat and Log tabs |
+| Enter | Send message |
+| Tab | Cycle tabs: Chat -> Log -> Narrative |
 | PgUp / PgDn | Scroll message history |
-| ↑ / ↓ | (Log tab) Scroll log entries |
-| Ctrl-C / Ctrl-D | Exit |
-
-### Slash commands
-
-| Command | Action |
-|---|---|
-| `/model` | Toggle between task model and reasoning model |
-| `/clear` | Clear the conversation history |
+| Ctrl-C | Exit |
 
 ---
 
@@ -203,182 +324,43 @@ Three-layer merge (highest priority first):
 2. `.springdrift.toml` (current directory)
 3. `~/.config/springdrift/config.toml`
 
-### All config fields
-
 ```toml
-provider               = "anthropic"
-model                  = "claude-sonnet-4-20250514"
-system_prompt          = "You are a helpful assistant."
-max_tokens             = 1024
-max_turns              = 5
-max_consecutive_errors = 3
-max_context_messages   = 50
-task_model             = "claude-haiku-4-5-20251001"
-reasoning_model        = "claude-opus-4-6"
-log_verbose            = false
-write_anywhere         = false
-skills_dirs            = ["/path/to/skills"]
+provider        = "anthropic"
+task_model      = "claude-haiku-4-5-20251001"
+reasoning_model = "claude-opus-4-6"
+system_prompt   = "You are a helpful assistant."
+max_tokens      = 2048
+max_turns       = 5
+log_verbose     = false
+
+# D' safety system
+dprime_enabled = false
+dprime_config  = "dprime.json"
+
+# Prime Narrative
+[narrative]
+enabled          = false
+dir              = "prime-narrative"
+threading        = true
+summaries        = false
+summary_schedule = "weekly"
 ```
 
-### CLI flags
+## Requirements
 
-```
---provider <name>         anthropic | openrouter | openai | mock
---model <name>            Any model identifier
---system <prompt>         System prompt string
---max-tokens <n>          Max output tokens per LLM call (default: 1024)
---max-turns <n>           Max react-loop turns per message (default: 5)
---max-errors <n>          Max consecutive tool failures before abort (default: 3)
---max-context <n>         Max messages in context window (default: unlimited)
---task-model <name>       Model for simple queries
---reasoning-model <name>  Model for complex queries
---config <path>           Load an additional TOML config file
---verbose                 Log full LLM request/response payloads
---skills-dir <path>       Add a skill directory (repeatable)
---allow-write-anywhere    Allow write_file outside the current working directory
---resume                  Reload previous session
---print-config            Print resolved config and exit
---help, -h                Show help
-```
-
----
-
-## Agent Skills
-
-Create a skill by making a directory with a `SKILL.md` file:
-
-```
-.skills/
-└── my-skill/
-    └── SKILL.md
-```
-
-`SKILL.md` format (frontmatter + instructions):
-
-```markdown
----
-name: my-skill
-description: A one-line summary of what this skill does.
----
-
-# My Skill
-
-Full instructions for the agent here. The model reads this file
-when it decides to use the skill.
-```
-
-During a session, the model will see `<available_skills>` in its system
-prompt and can call `read_skill` with the listed path to load the full
-instructions.
-
----
-
-## Architecture
-
-```
-springdrift.gleam         Entry point — config, provider selection, wiring
-├── slog.gleam            System logger — date-rotated JSON-L files + optional stderr
-├── config.gleam          3-layer config (CLI flags > .springdrift.toml > ~/.config/springdrift/config.toml)
-├── storage.gleam         Session save/load  (~/.config/springdrift/session.json)
-├── skills.gleam          Skill discovery, frontmatter parsing, XML injection
-│
-├── agent/                Agent substrate
-│   ├── types.gleam       Notification, QuestionSource, WaitingContext, CognitiveMessage, etc.
-│   ├── cognitive.gleam   Cognitive loop — orchestrates agents, model switching, request_human_input
-│   ├── framework.gleam   Gen-server wrapper for agent specs → running agent processes
-│   ├── supervisor.gleam  Restart strategies (Permanent/Transient/Temporary)
-│   ├── registry.gleam    Pure data structure tracking agent status + task subjects
-│   └── worker.gleam      Unlinked think workers with monitor forwarding
-│
-├── agents/               Specialist agent specs
-│   ├── planner.gleam     Planning agent (no tools, max_turns=3)
-│   ├── researcher.gleam  Research agent (files+web+builtin, max_turns=8)
-│   └── coder.gleam       Coding agent (files+shell+builtin, max_turns=10)
-│
-├── query_complexity.gleam  LLM-based + heuristic query classifier (Simple | Complex)
-├── context.gleam           Sliding-window context trim helper
-├── cycle_log.gleam         Per-cycle JSON-L logging + log reading + rewind helpers
-│
-├── tools/
-│   ├── builtin.gleam     calculator, get_current_datetime, request_human_input, read_skill
-│   ├── files.gleam       read_file, write_file, list_directory
-│   ├── web.gleam         fetch_url
-│   └── shell.gleam       run_shell (delegates to sandbox)
-│
-├── tui.gleam             Alternate-screen TUI — Chat + Log tabs (system log entries)
-│
-└── llm/
-    ├── types.gleam        Shared types: Message, ContentBlock, LlmRequest/Response/Error, Tool
-    ├── request.gleam      Pipe-friendly request builder
-    ├── response.gleam     Response helpers (text, needs_tool_execution, tool_calls)
-    ├── tool.gleam         Tool definition builder
-    ├── provider.gleam     Provider abstraction (name + chat function)
-    └── adapters/
-        ├── anthropic.gleam  Anthropic SDK translation
-        ├── openai.gleam     OpenAI / OpenRouter translation
-        └── mock.gleam       Test/fallback provider with injectable responses
-```
-
-### Concurrency model
-
-| Process | Lifetime | Role |
-|---|---|---|
-| Main / TUI event loop | App | Render, raw stdin, message dispatch |
-| Cognitive loop | App | Orchestrates agents, model switching, handles `request_human_input` |
-| Stdin reader | App | Blocking `read_char` loop → `StdinByte` to selector |
-| Think worker | Per turn | Blocking LLM call for the cognitive loop |
-| Agent processes | App | Each specialist agent runs its own react loop |
-
-All cross-process communication uses typed `Subject(T)` channels — no shared
-mutable state, no locks. The cognitive loop's notification channel uses pure
-data types (`Notification`) with no embedded `Subject` references, enabling
-non-OTP consumers (e.g. websocket handlers).
-
-### Message flow
-
-```
-User input → TUI
-  → cognitive.UserInput(text, reply_to)
-  → Cognitive loop classifies query complexity, picks model
-  → Spawns think worker (LLM call)
-  → Think worker completes:
-      → If agent_* tool call: dispatch to agent, wait for AgentComplete
-      → If request_human_input: send QuestionForHuman notification, wait for UserAnswer
-      → If final text: send CognitiveReply to TUI
-  → TUI renders response
-```
-
----
-
-## 12-Factor Agents compliance
-
-| Factor | Status | Implementation |
-|---|---|---|
-| 1 — Natural language to tool calls | ✓ | ReAct loop with typed `ToolCall` / `ToolResult` |
-| 2 — Own your prompts | ✓ | System prompt fully in config; skills injected as XML |
-| 3 — Own your context window | ✓ | `context.trim` applied at request-build time |
-| 4 — Tools as structured outputs | ✓ | All tools use `gleam_json` decoders on typed input |
-| 5 — Unify execution and business state | ✓ | `ChatState.messages` is the only state; saved verbatim |
-| 6 — Launch / pause / resume | ✓ | `--resume` reloads from `session.json`; Log tab rewinds |
-| 7 — Contact humans via tools | ✓ | `request_human_input` blocks worker via OTP channel |
-| 8 — Own your control flow | ✓ | Explicit `max_turns` limit + visible error on exhaustion |
-| 9 — Compact errors into context | ✓ | Consecutive-error circuit breaker; errors shown in TUI |
-| 10 — Small focused agents | ✓ | Cognitive mode: planner, researcher, coder agents with focused tool sets |
-| 11 — Trigger from anywhere | Partial | Decoupled `Notification` channel enables non-TUI consumers |
-| 12 — Stateless reducer | ✓ | `react_loop` returns full accumulated message list |
-
----
+- Erlang/OTP 26+
+- Gleam 1.5+
+- An Anthropic API key (or configure a different provider via the LLM adapter)
 
 ## Development
 
 ```sh
-gleam run             # Run the application
-gleam run -- --resume # Resume previous session
-gleam test            # Run the test suite
+gleam build           # Compile
+gleam test            # Run the test suite (~486 tests)
 gleam format          # Format all source files
-gleam build           # Compile only
+gleam run             # Run the application
 ```
 
-Tests live in `test/`. The `mock.gleam` adapter is the primary tool for
-testing LLM-dependent behaviour without network calls. All tests must pass
-and all code must be formatted before a change is complete.
+## License
+
+MIT

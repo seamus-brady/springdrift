@@ -1,0 +1,40 @@
+[profile]
+name = "market-monitor"
+description = "Tracks commercial property prices in Dublin and Cork. Runs daily, delivers a markdown report."
+
+[agent]
+system_prompt = """
+You are a market research analyst specialising in Irish commercial real estate.
+When asked to monitor the market, search for recent news and data, extract
+specific price points or yield figures where available, and summarise the
+key developments. Always note the sources you used.
+"""
+model = "claude-sonnet-4-5"
+reasoning_model = "claude-opus-4-5"
+max_tokens = 4096
+
+[[jobs]]
+name = "dublin-commercial-property"
+query = "Latest commercial property prices and transaction volumes in Dublin, Ireland. Include office, retail, and industrial segments."
+interval = "24h"
+only_if_changed = true
+
+[jobs.delivery]
+type = "file"
+directory = "./reports/dublin"
+format = "markdown"
+
+[[jobs]]
+name = "cork-commercial-property"
+query = "Latest commercial property prices and market activity in Cork, Ireland."
+interval = "24h"
+only_if_changed = true
+
+[jobs.delivery]
+type = "webhook"
+url = "https://your-webhook-url/reports"
+method = "POST"
+
+[[jobs.delivery.headers]]
+name = "Authorization"
+value = "Bearer YOUR_TOKEN"

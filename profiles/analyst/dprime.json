@@ -1,0 +1,57 @@
+{
+  "tool_gate": {
+    "features": [
+      {
+        "name": "external_url_fetch",
+        "importance": "low",
+        "description": "Fetching data from external URLs",
+        "critical": false
+      },
+      {
+        "name": "filesystem_write",
+        "importance": "medium",
+        "description": "Writing files to the local filesystem",
+        "critical": false
+      }
+    ],
+    "tiers": 3,
+    "modify_threshold": 0.4,
+    "reject_threshold": 0.7,
+    "canary_enabled": false
+  },
+  "output_gate": {
+    "features": [
+      {
+        "name": "unsourced_claim",
+        "importance": "high",
+        "description": "Factual assertion without source citation",
+        "critical": true
+      },
+      {
+        "name": "causal_overreach",
+        "importance": "high",
+        "description": "Causal inference drawn from correlational data",
+        "critical": true
+      },
+      {
+        "name": "stale_data",
+        "importance": "medium",
+        "description": "Source data older than freshness threshold",
+        "critical": false
+      },
+      {
+        "name": "certainty_overstatement",
+        "importance": "medium",
+        "description": "Presenting uncertain or partial data as definitive",
+        "critical": false
+      }
+    ],
+    "tiers": 5,
+    "modify_threshold": 0.3,
+    "reject_threshold": 0.6,
+    "canary_enabled": true
+  },
+  "max_history": 50,
+  "stall_window": 5,
+  "stall_threshold": 0.8
+}

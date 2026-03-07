@@ -1520,3 +1520,315 @@ Added a second tab to the web interface:
 | `persistent_term` for flag | Global read-heavy flag checked on every log call. `persistent_term` is optimized for exactly this: very fast reads, rare writes. |
 | JSON-L (not structured logs) | Consistent with `cycle_log.gleam` pattern. One entry per line, easy to grep, easy to parse back. |
 | `load_entries()` reads full file | Simple and sufficient for single-day files. No index or database needed. |
+
+---
+
+### Prime Narrative — Agent Memory System (Mar 6)
+
+**Files added:** `src/narrative/types.gleam`, `src/narrative/log.gleam`,
+`src/narrative/archivist.gleam`, `src/narrative/threading.gleam`,
+`src/narrative/summary.gleam`, `src/narrative/cycle_tree.gleam`
+
+**Files modified:** `src/agent/types.gleam`, `src/agent/framework.gleam`,
+`src/agent/cognitive.gleam`, `src/config.gleam`, `src/springdrift.gleam`,
+`src/tui.gleam`, `src/agents/planner.gleam`, `src/agents/researcher.gleam`,
+`src/agents/coder.gleam`
+
+Implemented in 11 steps following the dependency order from the Prime Narrative spec.
+
+#### Agent identity and completion tracking (Steps 1-3)
+
+Added `AgentIdentity` (human_name + GUID → agent_id like `researcher_e5f67890`) to
+`agent/types.gleam`. The framework generates identity at startup and propagates
+`agent_cycle_id` through outcomes. `AgentCompletionRecord` captures per-agent results
+for the Archivist.
+
+`AgentOutcome` gained three new fields: `agent_id`, `agent_human_name`, `agent_cycle_id`.
+All three agent specs (`planner`, `researcher`, `coder`) now carry `human_name`.
+
+Config extended with 6 narrative fields: `narrative_enabled`, `narrative_dir`,
+`archivist_model`, `narrative_threading`, `narrative_summaries`,
+`narrative_summary_schedule`. CLI flags: `--narrative`, `--no-narrative`, `--narrative-dir`.
+TOML: `[narrative]` section.
+
+#### NarrativeEntry schema (Step 4)
+
+`narrative/types.gleam` defines the complete entry schema: `NarrativeEntry` with 16
+fields covering `schema_version`, `cycle_id`, `parent_cycle_id`, `timestamp`,
+`entry_type` (Narrative/Amendment/Summary/Observation), `summary`, `intent`
+(9 classifications), `outcome` (Success/Partial/Failure + confidence),
+`delegation_chain` (per-agent steps with tools/tokens/duration), `decisions`,
+`keywords`, `entities` (locations/organisations/data_points/temporal_references),
+`sources`, `thread`, `metrics`, and `observations`.
+
+Thread state types (`ThreadState`, `ThreadIndex`) track active narrative threads
+for overlap-based assignment.
+
+#### Append-only log (Step 5)
+
+`narrative/log.gleam` implements append-only JSON-L storage with full encode/decode
+for every type in the schema. Query functions: `load_date`, `load_entries` (date
+range via string comparison), `load_thread`, `search` (case-insensitive keyword
+match against summary + keywords), `thread_heads` (latest entry per thread),
+`load_all`. Thread index persisted as `thread_index.json` with atomic write
+(temp file + rename).
+
+#### Archivist (Step 6)
+
+`narrative/archivist.gleam` generates a `NarrativeEntry` from an `ArchivistContext`
+via a single LLM call. The system prompt enforces first-person past tense with
+controlled vocabulary. Parse failure falls back to a minimal entry built directly
+from `AgentCompletionRecords`. `spawn()` runs via `process.spawn_unlinked` — the
+Archivist is never visible to the user and cannot crash the conversation.
+
+#### Cognitive loop integration (Step 7)
+
+`CognitiveState` gained 5 new fields: `narrative_enabled`, `narrative_dir`,
+`archivist_model`, `agent_completions` (accumulated per cycle), `last_user_input`.
+`handle_user_input` resets completions; `handle_agent_complete` builds an
+`AgentCompletionRecord` from each `AgentOutcome`. `maybe_spawn_archivist` fires
+after the main final-reply path in `handle_think_complete`.
+
+`cognitive.start()` now takes 15 parameters (was 12). `springdrift.gleam` resolves
+narrative config and passes it through. Startup prints narrative status.
+
+#### Thread assignment (Step 8)
+
+`narrative/threading.gleam` implements overlap scoring with configurable weights:
+location=3, domain=2, keyword=1, threshold=4. `do_assign` is pure (no I/O) for
+testing. `assign_thread` loads the thread index, assigns, and persists.
+
+When an entry matches an existing thread above threshold, it joins with a continuity
+note that mentions shared locations and compares data points (e.g. "Temperature
+changed from 12 to 15"). New threads are named from domain + location.
+
+Thread state merges keywords, locations, and domains incrementally (capped at 20
+keywords). The Archivist calls `threading.assign_thread` between generation and
+append.
+
+#### Session summaries (Step 9)
+
+`narrative/summary.gleam` generates Summary-type entries by feeding recent narratives
+to the LLM for distillation. `weekly_range`/`monthly_range` compute date ranges with
+proper month/year boundary handling. Aggregates metrics (tokens, tool calls,
+delegations) across entries. Fallback summary on LLM parse failure.
+
+#### CycleTree (Step 10)
+
+`narrative/cycle_tree.gleam` builds a forest of `CycleNode` trees from flat entries
+using `parent_cycle_id` links. Orphans (parent not in set) become roots. Supports
+`flatten` (pre-order traversal), `depth`, and `find` by cycle ID.
+
+#### Narrative tab (Step 11)
+
+Added `NarrativeTab` to the TUI's tab cycle (Chat → Log → Narrative → Chat). The
+narrative tab loads all entries via `narrative_log.load_all` and renders each with:
+cycle ID (8-char), timestamp, status badge (green OK / yellow ~~ / red !!), thread
+info, summary text, and delegation chain with agent names and outcomes.
+
+`tui.start` gained a `narrative_dir` parameter. `springdrift.gleam` passes it through.
+
+#### Design decisions
+
+| Decision | Rationale |
+|---|---|
+| `spawn_unlinked` for Archivist | Archivist failure must never affect the user's conversation. Fire-and-forget is the correct model. |
+| Single LLM call (not multi-turn) | Narrative generation is a summarization task, not a reasoning task. One call with a good system prompt suffices. |
+| Overlap scoring (not LLM classification) | Thread assignment runs on every cycle. LLM calls would add latency and cost. Simple weighted overlap is fast and deterministic. |
+| Threshold=4 | Matches "1 location + 1 keyword" or "1 domain + 2 keywords" — reasonable for grouping related queries. |
+| JSON-L (not SQLite) | Consistent with cycle_log pattern. Append-only, grep-friendly, no external dependencies. |
+| Pure `do_assign` + I/O `assign_thread` | Testable core logic separated from file I/O. All 14 threading tests are pure. |
+| `AgentCompletionRecord` with zeros | Framework doesn't currently track per-agent tokens/duration. Zeros are acceptable placeholders; the Archivist still gets useful data from agent_id, human_name, and result. |
+| Tab cycle (not numbered tabs) | Three tabs still fit a simple Tab-key cycle. F-key shortcuts would add complexity without value at this scale. |
+
+---
+
+### Profile System + Knowledge Agent (Mar 7)
+
+**Files added:** `src/profile.gleam`, `src/profile/types.gleam`, `src/agents/writer.gleam`,
+`profiles/analyst/config.toml`, `profiles/analyst/dprime.json`,
+`profiles/analyst/skills/{cite-sources,fact-check,summarize}/SKILL.md`
+
+**Files modified:** `src/config.gleam`, `src/agent/types.gleam`, `src/agent/cognitive.gleam`,
+`src/springdrift.gleam`, `src/tui.gleam`, `src/web/gui.gleam`, `src/web/html.gleam`,
+`src/web/protocol.gleam`
+
+#### Profile types and discovery
+
+`profile/types.gleam` defines the complete profile schema:
+- `Profile` — name, description, dir, models, agents, dprime_path, schedule_path, skills_dir
+- `ProfileModels` — optional task_model and reasoning_model overrides
+- `AgentDef` — name, description, tools, max_turns, system_prompt
+- `DeliveryConfig` — FileDelivery | WebhookDelivery | WebSocketDelivery
+- `ScheduleTaskConfig` — name, query, interval_ms, start_at, delivery, only_if_changed
+
+`profile.gleam` handles discovery (`discover/1`), loading (`load/2`), and schedule
+parsing (`parse_schedule/1`). Profiles are TOML-based. Schedule tasks use human-friendly
+interval parsing (e.g. `"1h"`, `"30m"`, `"2d"`).
+
+#### Hot-swappable profile loading
+
+`CognitiveMessage` gained `LoadProfile(name, reply_to)` variant. The cognitive loop
+handles it via `do_load_profile`, which swaps models, D' state, and output gate state
+at runtime. `ProfileNotification(name)` signals the UI.
+
+#### Dual-gate D' config
+
+`dprime/config.gleam` gained `load_dual/1` — tries dual-gate format first
+(`{"tool_gate": {...}, "output_gate": {...}}`), falls back to single-gate.
+Returns `#(DprimeConfig, Option(DprimeConfig))`.
+
+---
+
+### D' Output Gate (Mar 7)
+
+**Files added:** `src/dprime/output_gate.gleam`
+
+**Files modified:** `src/agent/cognitive.gleam`
+
+Second evaluation point checking finished reports for quality before delivery.
+Uses same D' scoring infrastructure but with output-focused prompts targeting:
+unsourced claims, causal overreach, stale data, certainty overstatement.
+
+`evaluate/7` runs the full D' pipeline (scorer → engine → gate_decision) with
+output-specific features. `build_output_scoring_prompt` uses calibration examples
+tuned for report quality rather than tool safety.
+
+Cognitive loop integration: `handle_think_complete` checks `output_dprime_state`;
+if Some, spawns output gate instead of replying immediately. `OutputGateComplete`
+message carries result + report text + modification count. Bounded modification
+loop (max 2 iterations) — Accept delivers, Modify re-prompts, Reject returns error.
+
+---
+
+### BEAM-Native Task Scheduler (Mar 7)
+
+**Files added:** `src/scheduler/types.gleam`, `src/scheduler/runner.gleam`,
+`src/scheduler/delivery.gleam`, `src/scheduler/persist.gleam`
+
+#### Scheduler process
+
+`scheduler/runner.gleam` implements an OTP process that:
+1. Converts `ScheduleTaskConfig` list to `ScheduledJob` state
+2. Schedules initial ticks via `process.send_after`
+3. Event loop handles: `Tick` → spawn job, `JobComplete` → deliver + reschedule,
+   `JobFailed` → increment error count + reschedule, `StopAll`, `GetStatus`
+
+Named `runner.gleam` (not `scheduler.gleam`) to avoid collision with Erlang's built-in
+`scheduler` module.
+
+#### Delivery
+
+`scheduler/delivery.gleam` handles report delivery:
+- **File**: creates directory, generates timestamped filename (sanitized), writes content
+- **Webhook/WebSocket**: stubs returning Error (not yet implemented)
+
+#### Checkpoint persistence
+
+`scheduler/persist.gleam` provides atomic state persistence:
+- `save/2` — encodes jobs as JSON, writes to tmp file, renames atomically via FFI
+- `load/1` — decodes checkpoint with full status serialization
+- `reconcile/2` — aligns checkpoint jobs with current config names (removes obsolete,
+  preserves run state for matching jobs)
+
+#### Design decisions
+
+| Decision | Rationale |
+|---|---|
+| `process.send_after` not cron | BEAM-native timing avoids external dependencies. Jobs fire at interval after completion, not wall-clock aligned. |
+| Atomic checkpoint writes | tmp + rename prevents half-written state on crash. Uses existing `file_rename` FFI. |
+| `reconcile` not merge | Config is source of truth. Checkpoint preserves run counts/status but config defines what jobs exist. |
+| Module name `runner` | Gleam compiles to Erlang; `scheduler.gleam` would collide with Erlang's `scheduler` module. |
+
+---
+
+### Production Hardening (Mar 7)
+
+Implemented recommendations from commercial evaluation review. 503 tests, zero warnings.
+
+#### Input boundary protection
+
+- **TUI input buffer**: capped at 100KB (102,400 bytes) in `handle_stdin_byte`. Characters
+  silently dropped at limit. Prevents paste-bombing memory exhaustion.
+- **read_file size limit**: 10MB max via `file_size` FFI (`filelib:file_size/1`). Pre-read
+  check returns `ToolFailure` before loading content into memory.
+- **WebSocket message limit**: 1MB max on incoming `mist.Text` frames. Oversized messages
+  silently dropped with `mist.continue`.
+
+#### Config file validation
+
+`parse_config_toml` now calls `validate_toml_keys` and `validate_config_values` after
+successful TOML parsing. Validation is warning-only — configs still load, but issues
+are logged via `slog.warn`:
+
+- Unknown top-level TOML keys flagged (catches typos like `provder`)
+- Unknown `[narrative]` sub-keys flagged
+- Numeric values range-checked (max_tokens, max_turns, etc. must be positive)
+- Provider validated against known options (anthropic, openrouter, openai, mistral, local, mock)
+- GUI mode validated against tui/web
+- `load_from_path` logs warning on TOML parse failure (was silent)
+
+#### Session integrity and versioning
+
+`storage.save` wraps messages in a JSON envelope:
+```json
+{"version": 1, "saved_at": "2026-03-07T14:30:00", "messages": [...]}
+```
+
+`storage.load` tries envelope format first, falls back to legacy plain-array format
+(backward compatible). Staleness detection: logs info message when resuming sessions
+from a different date. Corruption detection: logs warning and returns empty list.
+
+#### XML escaping in skills
+
+`skills.xml_escape` escapes `& < > " '` before injecting skill names, descriptions,
+and paths into the `<available_skills>` XML block. Prevents XML injection from
+untrusted skill metadata.
+
+#### Symlink resolution in path validation
+
+`is_within_cwd` in `tools/files.gleam` now resolves symlinks via `resolve_symlinks`
+FFI before checking CWD boundaries. The FFI function (`springdrift_ffi:resolve_symlinks/1`)
+recursively walks path components, following symlinks via `file:read_link/1` at each
+level. Both the target path and CWD are resolved, preventing symlink-based escape.
+
+#### Log retention policies
+
+- **Size rotation**: `slog.append_to_file` checks file size before appending. Files
+  exceeding 10MB are renamed to `.1` suffix before writing.
+- **Age cleanup**: `slog.cleanup_old_logs` removes `.jsonl` files older than 30 days.
+  Called once at startup after `slog.init`. Uses `days_ago_date` FFI for proper
+  calendar arithmetic.
+
+#### Web GUI authentication
+
+Bearer token authentication gated by `SPRINGDRIFT_WEB_TOKEN` environment variable:
+- If set: all HTTP requests and WebSocket upgrades must authenticate
+- Supports `Authorization: Bearer <token>` header or `?token=<token>` query parameter
+- WebSocket connection URL auto-includes token from page URL parameters
+- If unset: no auth required (suitable for localhost-only use)
+- Unauthenticated requests receive HTTP 401
+
+#### JSON sanitization (from prior session)
+
+`sanitize_json` FFI function in `springdrift_ffi.erl` fixes LLM-generated JSON with
+unescaped control characters inside string values. Binary pattern matching walks the
+JSON tracking in-string and escape state:
+- `\n` → `\\n`, `\r` → `\\r`, `\t` → `\\t` inside strings
+- Other control chars (< 0x20) → `\\uXXXX` escape
+- Already-escaped sequences preserved (no double-escaping)
+- Characters outside strings pass through unchanged
+
+Applied in both `narrative/archivist.gleam` (narrative entry parsing) and
+`dprime/scorer.gleam` (forecast parsing).
+
+#### Design decisions
+
+| Decision | Rationale |
+|---|---|
+| Warning-only config validation | Breaking on unknown keys would be hostile to users experimenting with config. Logging warnings lets them see the issue without being blocked. |
+| Envelope session format | Version field enables future migrations. `saved_at` enables staleness detection. Legacy fallback ensures smooth upgrade. |
+| Pre-read file size check | Checking after read still loads the file into memory. FFI `filelib:file_size` is O(1) stat call. |
+| Silent drop on buffer overflow | Alert noise (beep, error message) would be worse than silently stopping input at a reasonable limit. |
+| Query param auth for WebSocket | Browsers don't support custom headers on WebSocket upgrade requests. Query param is the standard workaround. |
+| 30-day log retention | Balances disk space with reasonable audit trail. Date arithmetic via Erlang `calendar` module for correctness. |

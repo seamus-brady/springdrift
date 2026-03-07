@@ -3,6 +3,7 @@ import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option
+import gleam/string
 import llm/types.{
   type ContentBlock, type Message, type Role, Assistant, ImageContent, Message,
   TextContent, ToolResultContent, ToolUseContent, User,
@@ -12,6 +13,17 @@ import slog
 
 @external(erlang, "springdrift_ffi", "get_env")
 fn get_env(name: String) -> Result(String, Nil)
+
+@external(erlang, "springdrift_ffi", "get_datetime")
+fn get_datetime() -> String
+
+@external(erlang, "springdrift_ffi", "get_date")
+fn get_date() -> String
+
+/// Session envelope with version and timestamp.
+type Session {
+  Session(version: Int, saved_at: String, messages: List(Message))
+}
 
 fn config_dir() -> String {
   case get_env("HOME") {
@@ -25,6 +37,11 @@ fn session_path() -> String {
     Ok(home) -> home <> "/.config/springdrift/session.json"
     Error(_) -> ".springdrift_session.json"
   }
+}
+
+/// Expose session path for test use only.
+pub fn session_path_for_test() -> String {
+  session_path()
 }
 
 pub fn save(messages: List(Message)) -> Result(Nil, String) {
@@ -41,7 +58,14 @@ pub fn save(messages: List(Message)) -> Result(Nil, String) {
         "Could not create config directory: " <> simplifile.describe_error(e),
       )
     Ok(_) -> {
-      let json_str = json.to_string(encode_messages(messages))
+      let json_str =
+        json.to_string(
+          json.object([
+            #("version", json.int(1)),
+            #("saved_at", json.string(get_datetime())),
+            #("messages", encode_messages(messages)),
+          ]),
+        )
       case simplifile.write(session_path(), json_str) {
         Error(e) ->
           Error("Could not write session: " <> simplifile.describe_error(e))
@@ -56,9 +80,26 @@ pub fn load() -> List(Message) {
   case simplifile.read(session_path()) {
     Error(_) -> []
     Ok(contents) ->
-      case json.parse(contents, decode.list(message_decoder())) {
-        Error(_) -> []
-        Ok(msgs) -> msgs
+      // Try envelope format first (version + saved_at + messages)
+      case json.parse(contents, session_decoder()) {
+        Ok(session) -> {
+          check_staleness(session.saved_at)
+          session.messages
+        }
+        Error(_) ->
+          // Fall back to legacy format (plain array of messages)
+          case json.parse(contents, decode.list(message_decoder())) {
+            Ok(msgs) -> msgs
+            Error(_) -> {
+              slog.warn(
+                "storage",
+                "load",
+                "Session file corrupted, starting fresh",
+                option.None,
+              )
+              []
+            }
+          }
       }
   }
 }
@@ -68,6 +109,28 @@ pub fn clear() -> Result(Nil, String) {
     Error(e) ->
       Error("Could not clear session: " <> simplifile.describe_error(e))
     Ok(_) -> Ok(Nil)
+  }
+}
+
+fn session_decoder() -> decode.Decoder(Session) {
+  use version <- decode.field("version", decode.int)
+  use saved_at <- decode.field("saved_at", decode.string)
+  use messages <- decode.field("messages", decode.list(message_decoder()))
+  decode.success(Session(version:, saved_at:, messages:))
+}
+
+fn check_staleness(saved_at: String) -> Nil {
+  let today = get_date()
+  let session_date = string.slice(saved_at, 0, 10)
+  case session_date == today {
+    True -> Nil
+    False ->
+      slog.info(
+        "storage",
+        "load",
+        "Resuming session from " <> session_date <> " (not today)",
+        option.None,
+      )
   }
 }
 
