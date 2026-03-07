@@ -65,6 +65,49 @@ pub fn to_system_prompt_xml_single_skill_test() {
   |> should.be_true
 }
 
+// ---------------------------------------------------------------------------
+// xml_escape
+// ---------------------------------------------------------------------------
+
+pub fn xml_escape_ampersand_test() {
+  skills.xml_escape("R&D") |> should.equal("R&amp;D")
+}
+
+pub fn xml_escape_angle_brackets_test() {
+  skills.xml_escape("<script>alert(1)</script>")
+  |> should.equal("&lt;script&gt;alert(1)&lt;/script&gt;")
+}
+
+pub fn xml_escape_quotes_test() {
+  skills.xml_escape("say \"hello\" & 'goodbye'")
+  |> should.equal("say &quot;hello&quot; &amp; &apos;goodbye&apos;")
+}
+
+pub fn xml_escape_no_special_chars_test() {
+  skills.xml_escape("plain text") |> should.equal("plain text")
+}
+
+pub fn xml_escape_all_special_chars_test() {
+  skills.xml_escape("&<>\"'")
+  |> should.equal("&amp;&lt;&gt;&quot;&apos;")
+}
+
+pub fn to_system_prompt_xml_escapes_special_chars_test() {
+  let skill =
+    SkillMeta(
+      name: "R&D <tool>",
+      description: "Does \"stuff\" & 'things'",
+      path: "/path/to/SKILL.md",
+    )
+  let xml = skills.to_system_prompt_xml([skill])
+  string.contains(xml, "<name>R&amp;D &lt;tool&gt;</name>") |> should.be_true
+  string.contains(
+    xml,
+    "<description>Does &quot;stuff&quot; &amp; &apos;things&apos;</description>",
+  )
+  |> should.be_true
+}
+
 pub fn to_system_prompt_xml_multiple_skills_test() {
   let skill1 =
     SkillMeta(

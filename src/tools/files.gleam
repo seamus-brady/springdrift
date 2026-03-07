@@ -1,5 +1,6 @@
 /// Filesystem tools: read_file, write_file, list_directory.
 import gleam/dynamic/decode
+import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option
@@ -10,6 +11,9 @@ import llm/types.{
 }
 import simplifile
 import slog
+
+@external(erlang, "springdrift_ffi", "file_size")
+fn file_size(path: String) -> Int
 
 // ---------------------------------------------------------------------------
 // Tool definitions
@@ -86,13 +90,23 @@ fn run_read_file(call: ToolCall, write_anywhere: Bool) -> ToolResult {
             error: "read_file: path is outside the current working directory (use --allow-write-anywhere to override)",
           )
         True ->
-          case simplifile.read(path) {
-            Error(e) ->
+          case file_size(path) > 10_485_760 {
+            True ->
               ToolFailure(
                 tool_use_id: call.id,
-                error: "read_file: " <> simplifile.describe_error(e),
+                error: "read_file: file is too large ("
+                  <> int.to_string(file_size(path))
+                  <> " bytes, limit is 10 MB)",
               )
-            Ok(content) -> ToolSuccess(tool_use_id: call.id, content:)
+            False ->
+              case simplifile.read(path) {
+                Error(e) ->
+                  ToolFailure(
+                    tool_use_id: call.id,
+                    error: "read_file: " <> simplifile.describe_error(e),
+                  )
+                Ok(content) -> ToolSuccess(tool_use_id: call.id, content:)
+              }
           }
       }
   }
@@ -141,8 +155,11 @@ fn run_write_file(call: ToolCall, write_anywhere: Bool) -> ToolResult {
   }
 }
 
+@external(erlang, "springdrift_ffi", "resolve_symlinks")
+pub fn resolve_symlinks(path: String) -> String
+
 /// Returns true if `path` resolves to a location within the current working
-/// directory. Resolves `.` and `..` components before checking.
+/// directory. Resolves `.` and `..` components and symlinks before checking.
 pub fn is_within_cwd(path: String) -> Bool {
   case simplifile.current_directory() {
     Error(_) -> False
@@ -151,8 +168,10 @@ pub fn is_within_cwd(path: String) -> Bool {
         True -> path
         False -> cwd <> "/" <> path
       }
-      let resolved = resolve_path(abs)
-      string.starts_with(resolved, cwd <> "/") || resolved == cwd
+      let resolved = resolve_symlinks(resolve_path(abs))
+      let resolved_cwd = resolve_symlinks(cwd)
+      string.starts_with(resolved, resolved_cwd <> "/")
+      || resolved == resolved_cwd
     }
   }
 }

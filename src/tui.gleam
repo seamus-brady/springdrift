@@ -290,9 +290,13 @@ fn handle_stdin_byte(state: TuiState, byte: String) -> Nil {
         ChatTab ->
           case is_printable(byte) {
             True ->
-              continue_loop(
-                TuiState(..state, input_buf: state.input_buf <> byte),
-              )
+              case string.byte_size(state.input_buf) < 102_400 {
+                True ->
+                  continue_loop(
+                    TuiState(..state, input_buf: state.input_buf <> byte),
+                  )
+                False -> event_loop(state)
+              }
             False -> event_loop(state)
           }
         _ -> event_loop(state)

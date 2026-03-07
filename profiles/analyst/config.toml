@@ -1,0 +1,25 @@
+[profile]
+name = "analyst"
+description = "Knowledge research and report generation"
+
+[models]
+task_model    = "claude-haiku-4-5-20251001"
+reasoning_model = "claude-sonnet-4-20250514"
+
+[[agents]]
+name         = "planner"
+description  = "Decomposes research questions into steps"
+tools        = []
+max_turns    = 3
+
+[[agents]]
+name         = "researcher"
+description  = "Gathers data from web and file sources"
+tools        = ["web", "files", "builtin"]
+max_turns    = 10
+
+[[agents]]
+name         = "writer"
+description  = "Produces structured reports from research"
+tools        = ["files", "builtin"]
+max_turns    = 5

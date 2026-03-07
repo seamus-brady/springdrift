@@ -200,6 +200,7 @@ fn print_help() -> Nil {
 fn run(cfg: AppConfig) -> Nil {
   let verbose = option.unwrap(cfg.log_verbose, False)
   slog.init(verbose)
+  slog.cleanup_old_logs()
   slog.info("springdrift", "run", "Starting springdrift", option.None)
 
   let base_system =

@@ -745,7 +745,10 @@ pub fn page() -> String {
 
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(proto + '//' + location.host + '/ws');
+    const params = new URLSearchParams(location.search);
+    const token = params.get('token');
+    const tokenParam = token ? '?token=' + encodeURIComponent(token) : '';
+    ws = new WebSocket(proto + '//' + location.host + '/ws' + tokenParam);
 
     ws.onopen = function() {
       status.textContent = 'connected';

@@ -1,0 +1,642 @@
+//// Archivist — generates NarrativeEntry from cycle context via LLM.
+////
+//// Runs asynchronously after the reply is sent to the user. If it fails,
+//// the cycle completes normally — the Archivist is never visible to the user.
+//// Produces a complete NarrativeEntry JSON response in a single LLM call.
+
+import agent/types as agent_types
+import gleam/dynamic/decode
+import gleam/erlang/process
+import gleam/int
+import gleam/json
+import gleam/list
+import gleam/option.{type Option, None, Some}
+import gleam/string
+import llm/provider.{type Provider}
+import llm/request
+import llm/response
+import narrative/log as narrative_log
+import narrative/threading
+import narrative/types.{
+  type Entities, type NarrativeEntry, Conversation, Entities, Failure, Intent,
+  Metrics, Narrative, NarrativeEntry, Outcome, Success,
+}
+import slog
+
+@external(erlang, "springdrift_ffi", "get_datetime")
+fn get_datetime() -> String
+
+// ---------------------------------------------------------------------------
+// Archivist context — everything the Archivist needs
+// ---------------------------------------------------------------------------
+
+pub type ArchivistContext {
+  ArchivistContext(
+    cycle_id: String,
+    parent_cycle_id: Option(String),
+    user_input: String,
+    final_response: String,
+    agent_completions: List(agent_types.AgentCompletionRecord),
+    model_used: String,
+    classification: String,
+    total_input_tokens: Int,
+    total_output_tokens: Int,
+    tool_calls: Int,
+    dprime_decisions: List(String),
+    thread_index_json: String,
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Generate
+// ---------------------------------------------------------------------------
+
+/// Generate a NarrativeEntry from the Archivist context.
+/// Returns None if the LLM call fails (silent failure).
+pub fn generate(
+  ctx: ArchivistContext,
+  provider: Provider,
+  model: String,
+  _verbose: Bool,
+) -> Option(NarrativeEntry) {
+  let prompt = build_prompt(ctx)
+  let req =
+    request.new(model, 2048)
+    |> request.with_system(archivist_system_prompt())
+    |> request.with_user_message(prompt)
+
+  case provider.chat(req) {
+    Ok(resp) -> {
+      let text = response.text(resp)
+      case parse_narrative_entry(text, ctx) {
+        Ok(entry) -> {
+          slog.info(
+            "narrative/archivist",
+            "generate",
+            "Generated narrative for cycle " <> ctx.cycle_id,
+            Some(ctx.cycle_id),
+          )
+          Some(entry)
+        }
+        Error(_) -> {
+          slog.warn(
+            "narrative/archivist",
+            "generate",
+            "Failed to parse archivist response: " <> string.slice(text, 0, 200),
+            Some(ctx.cycle_id),
+          )
+          // Fall back to a minimal entry
+          Some(fallback_entry(ctx))
+        }
+      }
+    }
+    Error(_) -> {
+      slog.warn(
+        "narrative/archivist",
+        "generate",
+        "LLM call failed, skipping narrative",
+        Some(ctx.cycle_id),
+      )
+      None
+    }
+  }
+}
+
+/// Spawn the Archivist asynchronously. Does not block the caller.
+pub fn spawn(
+  ctx: ArchivistContext,
+  provider: Provider,
+  model: String,
+  narrative_dir: String,
+  verbose: Bool,
+) -> Nil {
+  let _ =
+    process.spawn_unlinked(fn() {
+      case generate(ctx, provider, model, verbose) {
+        Some(entry) -> {
+          let threaded = threading.assign_thread(entry, narrative_dir)
+          narrative_log.append(narrative_dir, threaded)
+        }
+        None -> Nil
+      }
+    })
+  Nil
+}
+
+// ---------------------------------------------------------------------------
+// Prompt
+// ---------------------------------------------------------------------------
+
+fn archivist_system_prompt() -> String {
+  "You are the Archivist for an AI agent called Springdrift. Your job is to write a first-person narrative record of what just happened in a conversation cycle.
+
+RULES:
+- Write in first person, past tense: 'I was asked...', 'I delegated...', 'I found...'
+- Be honest about confidence and limitations
+- Use the controlled vocabulary for intent classification
+- Extract entities, keywords, and sources from the context
+- Respond with ONLY valid JSON matching the NarrativeEntry schema. No preamble, no markdown.
+
+INTENT CLASSIFICATIONS: data_report, data_query, comparison, trend_analysis, monitoring_check, exploration, clarification, system_command, conversation
+
+OUTCOME STATUS: success, partial, failure
+
+JSON SCHEMA (respond with exactly this structure):
+{
+  \"cycle_id\": \"<copy from CYCLE ID above>\",
+  \"timestamp\": \"<copy from TIMESTAMP above>\",
+  \"summary\": \"First-person 2-5 sentence narrative\",
+  \"intent\": {\"classification\": \"...\", \"description\": \"...\", \"domain\": \"...\"},
+  \"outcome\": {\"status\": \"...\", \"confidence\": 0.0-1.0, \"assessment\": \"...\"},
+  \"delegation_chain\": [{\"agent\": \"...\", \"instruction\": \"...\", \"outcome\": \"...\", \"contribution\": \"...\"}],
+  \"decisions\": [{\"point\": \"...\", \"choice\": \"...\", \"rationale\": \"...\"}],
+  \"keywords\": [\"...\"],
+  \"entities\": {\"locations\": [], \"organisations\": [], \"data_points\": [], \"temporal_references\": []},
+  \"sources\": [{\"type\": \"...\", \"name\": \"...\"}],
+  \"metrics\": {\"total_duration_ms\": 0, \"input_tokens\": 0, \"output_tokens\": 0, \"thinking_tokens\": 0, \"tool_calls\": 0, \"agent_delegations\": 0, \"dprime_evaluations\": 0, \"model_used\": \"...\"},
+  \"observations\": [{\"type\": \"...\", \"severity\": \"info|warning|error\", \"detail\": \"...\"}]
+}"
+}
+
+fn build_prompt(ctx: ArchivistContext) -> String {
+  let agents_text = case ctx.agent_completions {
+    [] -> "No agents were delegated to."
+    completions ->
+      "AGENT DELEGATIONS:\n"
+      <> string.join(
+        list.map(completions, fn(c) {
+          "- "
+          <> c.agent_human_name
+          <> " (id: "
+          <> c.agent_id
+          <> "): "
+          <> case c.result {
+            Ok(r) -> "SUCCESS — " <> string.slice(r, 0, 200)
+            Error(e) -> "FAILED — " <> e
+          }
+          <> " [tokens: "
+          <> int.to_string(c.input_tokens)
+          <> "+"
+          <> int.to_string(c.output_tokens)
+          <> ", "
+          <> int.to_string(c.duration_ms)
+          <> "ms]"
+        }),
+        "\n",
+      )
+  }
+
+  let dprime_text = case ctx.dprime_decisions {
+    [] -> "No D' evaluations."
+    decisions -> "D' DECISIONS:\n" <> string.join(decisions, "\n")
+  }
+
+  let timestamp = get_datetime()
+  "CYCLE ID: "
+  <> ctx.cycle_id
+  <> "\nTIMESTAMP: "
+  <> timestamp
+  <> "\nMODEL: "
+  <> ctx.model_used
+  <> "\nCLASSIFICATION: "
+  <> ctx.classification
+  <> "\n\nUSER INPUT:\n"
+  <> ctx.user_input
+  <> "\n\nFINAL RESPONSE:\n"
+  <> string.slice(ctx.final_response, 0, 2000)
+  <> "\n\n"
+  <> agents_text
+  <> "\n\n"
+  <> dprime_text
+  <> "\n\nTOTAL TOKENS: "
+  <> int.to_string(ctx.total_input_tokens)
+  <> " in + "
+  <> int.to_string(ctx.total_output_tokens)
+  <> " out"
+  <> "\nTOOL CALLS: "
+  <> int.to_string(ctx.tool_calls)
+}
+
+// ---------------------------------------------------------------------------
+// Parse LLM response into NarrativeEntry
+// ---------------------------------------------------------------------------
+
+fn parse_narrative_entry(
+  text: String,
+  ctx: ArchivistContext,
+) -> Result(NarrativeEntry, Nil) {
+  let extracted = extract_json_object(string.trim(text))
+  // Sanitize control characters that LLMs sometimes leave unescaped in JSON strings
+  let cleaned = sanitize_json_string(extracted)
+  // Use the lenient decoder that defaults missing required fields
+  case json.parse(cleaned, lenient_entry_decoder()) {
+    Ok(partial) ->
+      // Override fields the Archivist shouldn't control
+      Ok(
+        NarrativeEntry(
+          ..partial,
+          schema_version: 1,
+          cycle_id: ctx.cycle_id,
+          parent_cycle_id: ctx.parent_cycle_id,
+          timestamp: case partial.timestamp {
+            "" -> get_datetime()
+            ts -> ts
+          },
+          entry_type: Narrative,
+        ),
+      )
+    Error(_) -> Error(Nil)
+  }
+}
+
+/// Sanitize a JSON string by escaping unescaped control characters inside
+/// string values. LLMs often produce JSON with literal newlines, tabs, or
+/// other control chars inside quoted strings, which breaks JSON parsers.
+@external(erlang, "springdrift_ffi", "sanitize_json")
+pub fn sanitize_json_string(json_text: String) -> String
+
+/// Lenient decoder for archivist LLM output — all fields optional with defaults.
+fn lenient_entry_decoder() -> decode.Decoder(NarrativeEntry) {
+  use cycle_id <- decode.optional_field("cycle_id", "", decode.string)
+  use timestamp <- decode.optional_field("timestamp", "", decode.string)
+  use summary <- decode.optional_field("summary", "", decode.string)
+  use intent <- decode.optional_field(
+    "intent",
+    Intent(classification: Conversation, description: "", domain: ""),
+    lenient_intent_decoder(),
+  )
+  use outcome <- decode.optional_field(
+    "outcome",
+    Outcome(status: Success, confidence: 0.5, assessment: ""),
+    lenient_outcome_decoder(),
+  )
+  use delegation_chain <- decode.optional_field(
+    "delegation_chain",
+    [],
+    decode.list(lenient_delegation_decoder()),
+  )
+  use decisions <- decode.optional_field(
+    "decisions",
+    [],
+    decode.list(lenient_decision_decoder()),
+  )
+  use keywords <- decode.optional_field(
+    "keywords",
+    [],
+    decode.list(decode.string),
+  )
+  use entities <- decode.optional_field(
+    "entities",
+    Entities(
+      locations: [],
+      organisations: [],
+      data_points: [],
+      temporal_references: [],
+    ),
+    lenient_entities_decoder(),
+  )
+  use sources <- decode.optional_field(
+    "sources",
+    [],
+    decode.list(lenient_source_decoder()),
+  )
+  use metrics <- decode.optional_field(
+    "metrics",
+    Metrics(
+      total_duration_ms: 0,
+      input_tokens: 0,
+      output_tokens: 0,
+      thinking_tokens: 0,
+      tool_calls: 0,
+      agent_delegations: 0,
+      dprime_evaluations: 0,
+      model_used: "",
+    ),
+    lenient_metrics_decoder(),
+  )
+  use observations <- decode.optional_field(
+    "observations",
+    [],
+    decode.list(lenient_observation_decoder()),
+  )
+  decode.success(NarrativeEntry(
+    schema_version: 1,
+    cycle_id:,
+    parent_cycle_id: None,
+    timestamp:,
+    entry_type: Narrative,
+    summary:,
+    intent:,
+    outcome:,
+    delegation_chain:,
+    decisions:,
+    keywords:,
+    entities:,
+    sources:,
+    thread: None,
+    metrics:,
+    observations:,
+  ))
+}
+
+fn lenient_intent_decoder() -> decode.Decoder(types.Intent) {
+  use classification_str <- decode.optional_field(
+    "classification",
+    "conversation",
+    decode.string,
+  )
+  use description <- decode.optional_field("description", "", decode.string)
+  use domain <- decode.optional_field("domain", "", decode.string)
+  let classification = case classification_str {
+    "data_report" -> types.DataReport
+    "data_query" -> types.DataQuery
+    "comparison" -> types.Comparison
+    "trend_analysis" -> types.TrendAnalysis
+    "monitoring_check" -> types.MonitoringCheck
+    "exploration" -> types.Exploration
+    "clarification" -> types.Clarification
+    "system_command" -> types.SystemCommand
+    _ -> Conversation
+  }
+  decode.success(Intent(classification:, description:, domain:))
+}
+
+fn lenient_outcome_decoder() -> decode.Decoder(types.Outcome) {
+  use status_str <- decode.optional_field("status", "success", decode.string)
+  use confidence <- decode.optional_field("confidence", 0.5, decode.float)
+  use assessment <- decode.optional_field("assessment", "", decode.string)
+  let status = case status_str {
+    "partial" -> types.Partial
+    "failure" -> Failure
+    _ -> Success
+  }
+  decode.success(Outcome(status:, confidence:, assessment:))
+}
+
+fn lenient_delegation_decoder() -> decode.Decoder(types.DelegationStep) {
+  use agent <- decode.optional_field("agent", "", decode.string)
+  use agent_id <- decode.optional_field("agent_id", "", decode.string)
+  use agent_human_name <- decode.optional_field(
+    "agent_human_name",
+    "",
+    decode.string,
+  )
+  use agent_cycle_id <- decode.optional_field(
+    "agent_cycle_id",
+    "",
+    decode.string,
+  )
+  use instruction <- decode.optional_field("instruction", "", decode.string)
+  use outcome <- decode.optional_field("outcome", "", decode.string)
+  use contribution <- decode.optional_field("contribution", "", decode.string)
+  use tools_used <- decode.optional_field(
+    "tools_used",
+    [],
+    decode.list(decode.string),
+  )
+  use sources_accessed <- decode.optional_field(
+    "sources_accessed",
+    0,
+    decode.int,
+  )
+  use input_tokens <- decode.optional_field("input_tokens", 0, decode.int)
+  use output_tokens <- decode.optional_field("output_tokens", 0, decode.int)
+  use duration_ms <- decode.optional_field("duration_ms", 0, decode.int)
+  decode.success(types.DelegationStep(
+    agent:,
+    agent_id:,
+    agent_human_name:,
+    agent_cycle_id:,
+    instruction:,
+    outcome:,
+    contribution:,
+    tools_used:,
+    sources_accessed:,
+    input_tokens:,
+    output_tokens:,
+    duration_ms:,
+  ))
+}
+
+fn lenient_decision_decoder() -> decode.Decoder(types.Decision) {
+  use point <- decode.optional_field("point", "", decode.string)
+  use choice <- decode.optional_field("choice", "", decode.string)
+  use rationale <- decode.optional_field("rationale", "", decode.string)
+  use score <- decode.optional_field(
+    "score",
+    None,
+    decode.optional(decode.float),
+  )
+  decode.success(types.Decision(point:, choice:, rationale:, score:))
+}
+
+fn lenient_entities_decoder() -> decode.Decoder(Entities) {
+  use locations <- decode.optional_field(
+    "locations",
+    [],
+    decode.list(decode.string),
+  )
+  use organisations <- decode.optional_field(
+    "organisations",
+    [],
+    decode.list(decode.string),
+  )
+  use data_points <- decode.optional_field(
+    "data_points",
+    [],
+    decode.list(lenient_data_point_decoder()),
+  )
+  use temporal_references <- decode.optional_field(
+    "temporal_references",
+    [],
+    decode.list(decode.string),
+  )
+  decode.success(Entities(
+    locations:,
+    organisations:,
+    data_points:,
+    temporal_references:,
+  ))
+}
+
+fn lenient_data_point_decoder() -> decode.Decoder(types.DataPoint) {
+  use label <- decode.optional_field("label", "", decode.string)
+  use value <- decode.optional_field("value", "", decode.string)
+  use unit <- decode.optional_field("unit", "", decode.string)
+  use period <- decode.optional_field("period", "", decode.string)
+  use source <- decode.optional_field("source", "", decode.string)
+  decode.success(types.DataPoint(label:, value:, unit:, period:, source:))
+}
+
+fn lenient_source_decoder() -> decode.Decoder(types.Source) {
+  use source_type <- decode.optional_field("type", "", decode.string)
+  use url <- decode.optional_field("url", None, decode.optional(decode.string))
+  use path <- decode.optional_field(
+    "path",
+    None,
+    decode.optional(decode.string),
+  )
+  use name <- decode.optional_field("name", "", decode.string)
+  use accessed_at <- decode.optional_field(
+    "accessed_at",
+    None,
+    decode.optional(decode.string),
+  )
+  use data_date <- decode.optional_field(
+    "data_date",
+    None,
+    decode.optional(decode.string),
+  )
+  decode.success(types.Source(
+    source_type:,
+    url:,
+    path:,
+    name:,
+    accessed_at:,
+    data_date:,
+  ))
+}
+
+fn lenient_metrics_decoder() -> decode.Decoder(types.Metrics) {
+  use total_duration_ms <- decode.optional_field(
+    "total_duration_ms",
+    0,
+    decode.int,
+  )
+  use input_tokens <- decode.optional_field("input_tokens", 0, decode.int)
+  use output_tokens <- decode.optional_field("output_tokens", 0, decode.int)
+  use thinking_tokens <- decode.optional_field("thinking_tokens", 0, decode.int)
+  use tool_calls <- decode.optional_field("tool_calls", 0, decode.int)
+  use agent_delegations <- decode.optional_field(
+    "agent_delegations",
+    0,
+    decode.int,
+  )
+  use dprime_evaluations <- decode.optional_field(
+    "dprime_evaluations",
+    0,
+    decode.int,
+  )
+  use model_used <- decode.optional_field("model_used", "", decode.string)
+  decode.success(Metrics(
+    total_duration_ms:,
+    input_tokens:,
+    output_tokens:,
+    thinking_tokens:,
+    tool_calls:,
+    agent_delegations:,
+    dprime_evaluations:,
+    model_used:,
+  ))
+}
+
+fn lenient_observation_decoder() -> decode.Decoder(types.Observation) {
+  use observation_type <- decode.optional_field("type", "", decode.string)
+  use severity_str <- decode.optional_field("severity", "info", decode.string)
+  use detail <- decode.optional_field("detail", "", decode.string)
+  let severity = case severity_str {
+    "warning" -> types.Warning
+    "error" -> types.ErrorSeverity
+    _ -> types.Info
+  }
+  decode.success(types.Observation(observation_type:, severity:, detail:))
+}
+
+fn fallback_entry(ctx: ArchivistContext) -> NarrativeEntry {
+  NarrativeEntry(
+    schema_version: 1,
+    cycle_id: ctx.cycle_id,
+    parent_cycle_id: ctx.parent_cycle_id,
+    timestamp: get_datetime(),
+    entry_type: Narrative,
+    summary: "I processed a request but the narrative could not be fully generated.",
+    intent: Intent(classification: Conversation, description: "", domain: ""),
+    outcome: Outcome(
+      status: case ctx.final_response {
+        "" -> Failure
+        _ -> Success
+      },
+      confidence: 0.5,
+      assessment: "Fallback entry — archivist parse failed",
+    ),
+    delegation_chain: list.map(ctx.agent_completions, fn(c) {
+      types.DelegationStep(
+        agent: c.agent_human_name,
+        agent_id: c.agent_id,
+        agent_human_name: c.agent_human_name,
+        agent_cycle_id: c.agent_cycle_id,
+        instruction: "",
+        outcome: case c.result {
+          Ok(_) -> "success"
+          Error(_) -> "failure"
+        },
+        contribution: "",
+        tools_used: c.tools_used,
+        sources_accessed: 0,
+        input_tokens: c.input_tokens,
+        output_tokens: c.output_tokens,
+        duration_ms: c.duration_ms,
+      )
+    }),
+    decisions: [],
+    keywords: [],
+    entities: Entities(
+      locations: [],
+      organisations: [],
+      data_points: [],
+      temporal_references: [],
+    ),
+    sources: [],
+    thread: None,
+    metrics: Metrics(
+      total_duration_ms: 0,
+      input_tokens: ctx.total_input_tokens,
+      output_tokens: ctx.total_output_tokens,
+      thinking_tokens: 0,
+      tool_calls: ctx.tool_calls,
+      agent_delegations: list.length(ctx.agent_completions),
+      dprime_evaluations: list.length(ctx.dprime_decisions),
+      model_used: ctx.model_used,
+    ),
+    observations: [],
+  )
+}
+
+/// Extract a JSON object from text that may contain markdown fences,
+/// preamble, or trailing content. Finds the first '{' and last '}'.
+pub fn extract_json_object(text: String) -> String {
+  let graphemes = string.to_graphemes(text)
+  let first_brace = find_index(graphemes, "{", 0)
+  let last_brace = find_last_index(graphemes, "}", 0, -1)
+  case first_brace >= 0 && last_brace > first_brace {
+    True -> string.slice(text, first_brace, last_brace - first_brace + 1)
+    False -> text
+  }
+}
+
+fn find_index(graphemes: List(String), target: String, idx: Int) -> Int {
+  case graphemes {
+    [] -> -1
+    [g, ..rest] ->
+      case g == target {
+        True -> idx
+        False -> find_index(rest, target, idx + 1)
+      }
+  }
+}
+
+fn find_last_index(
+  graphemes: List(String),
+  target: String,
+  idx: Int,
+  last: Int,
+) -> Int {
+  case graphemes {
+    [] -> last
+    [g, ..rest] ->
+      case g == target {
+        True -> find_last_index(rest, target, idx + 1, idx)
+        False -> find_last_index(rest, target, idx + 1, last)
+      }
+  }
+}

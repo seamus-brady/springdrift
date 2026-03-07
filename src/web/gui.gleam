@@ -9,7 +9,8 @@ import gleam/http/response.{type Response}
 import gleam/int
 import gleam/json
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{type Option, None, Some}
+import gleam/string
 import llm/types.{type Message, Assistant, TextContent, User}
 import mist.{type Connection, type ResponseData}
 import narrative/log as narrative_log
@@ -40,6 +41,43 @@ type WsState {
 }
 
 // ---------------------------------------------------------------------------
+// FFI
+// ---------------------------------------------------------------------------
+
+@external(erlang, "springdrift_ffi", "get_env")
+fn get_env(name: String) -> Result(String, Nil)
+
+// ---------------------------------------------------------------------------
+// Auth helpers
+// ---------------------------------------------------------------------------
+
+fn get_auth_token() -> Option(String) {
+  case get_env("SPRINGDRIFT_WEB_TOKEN") {
+    Ok(token) -> Some(token)
+    Error(_) -> None
+  }
+}
+
+fn check_auth(req: Request(Connection), token: Option(String)) -> Bool {
+  case token {
+    None -> True
+    Some(expected) ->
+      case request.get_header(req, "authorization") {
+        Ok(header) -> header == "Bearer " <> expected
+        Error(_) ->
+          case request.get_query(req) {
+            Ok(params) ->
+              case list.key_find(params, "token") {
+                Ok(t) -> t == expected
+                Error(_) -> False
+              }
+            Error(_) -> False
+          }
+      }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -54,6 +92,7 @@ pub fn start(
   narrative_dir: String,
   available_profiles: List(String),
 ) -> Nil {
+  let auth_token = get_auth_token()
   slog.info(
     "gui",
     "start",
@@ -69,6 +108,7 @@ pub fn start(
         initial_messages,
         narrative_dir,
         available_profiles,
+        auth_token,
       )
     }
     |> mist.new
@@ -89,35 +129,46 @@ fn handle_request(
   initial_messages: List(Message),
   narrative_dir: String,
   available_profiles: List(String),
+  auth_token: Option(String),
 ) -> Response(ResponseData) {
-  case request.path_segments(req) {
-    // Serve the HTML page
-    [] ->
-      response.new(200)
-      |> response.set_header("content-type", "text/html; charset=utf-8")
-      |> response.set_body(mist.Bytes(bytes_tree.from_string(html.page())))
-
-    // WebSocket upgrade
-    ["ws"] ->
-      mist.websocket(
-        request: req,
-        on_init: fn(_conn) {
-          ws_on_init(
-            cognitive,
-            notify,
-            initial_messages,
-            narrative_dir,
-            available_profiles,
-          )
-        },
-        on_close: fn(_state) { Nil },
-        handler: ws_handler,
+  case check_auth(req, auth_token) {
+    False ->
+      response.new(401)
+      |> response.set_body(
+        mist.Bytes(bytes_tree.from_string(
+          "Unauthorized — provide token via ?token= query parameter or Authorization: Bearer header",
+        )),
       )
+    True ->
+      case request.path_segments(req) {
+        // Serve the HTML page
+        [] ->
+          response.new(200)
+          |> response.set_header("content-type", "text/html; charset=utf-8")
+          |> response.set_body(mist.Bytes(bytes_tree.from_string(html.page())))
 
-    // 404 for everything else
-    _ ->
-      response.new(404)
-      |> response.set_body(mist.Bytes(bytes_tree.new()))
+        // WebSocket upgrade
+        ["ws"] ->
+          mist.websocket(
+            request: req,
+            on_init: fn(_conn) {
+              ws_on_init(
+                cognitive,
+                notify,
+                initial_messages,
+                narrative_dir,
+                available_profiles,
+              )
+            },
+            on_close: fn(_state) { Nil },
+            handler: ws_handler,
+          )
+
+        // 404 for everything else
+        _ ->
+          response.new(404)
+          |> response.set_body(mist.Bytes(bytes_tree.new()))
+      }
   }
 }
 
@@ -186,82 +237,92 @@ fn ws_handler(
   case message {
     // Client sent a text frame
     mist.Text(json_str) -> {
-      case protocol.decode_client_message(json_str) {
-        Ok(protocol.UserMessage(text:)) -> {
-          // Send thinking indicator
-          let _ =
-            mist.send_text_frame(
-              conn,
-              protocol.encode_server_message(protocol.Thinking),
-            )
-          // Dispatch to cognitive loop
-          process.send(
-            state.cognitive,
-            agent_types.UserInput(text:, reply_to: state.reply_subject),
-          )
-          mist.continue(state)
-        }
-        Ok(protocol.UserAnswer(text:)) -> {
-          process.send(state.cognitive, agent_types.UserAnswer(answer: text))
-          mist.continue(state)
-        }
-        Ok(protocol.RequestLogData) -> {
-          let entries = slog.load_entries()
-          let _ =
-            mist.send_text_frame(
-              conn,
-              protocol.encode_server_message(protocol.LogData(entries:)),
-            )
-          mist.continue(state)
-        }
-        Ok(protocol.RequestNarrativeData) -> {
-          let entries = narrative_log.load_all(state.narrative_dir)
-          let entries_json =
-            json.to_string(json.array(entries, narrative_log.encode_entry))
-          let _ =
-            mist.send_text_frame(
-              conn,
-              protocol.encode_server_message(protocol.NarrativeData(
-                entries_json:,
-              )),
-            )
-          mist.continue(state)
-        }
-        Ok(protocol.RequestLoadProfile(name:)) -> {
-          // Send thinking indicator
-          let _ =
-            mist.send_text_frame(
-              conn,
-              protocol.encode_server_message(protocol.Thinking),
-            )
-          process.send(
-            state.cognitive,
-            agent_types.LoadProfile(name:, reply_to: state.reply_subject),
-          )
-          mist.continue(state)
-        }
-        Ok(protocol.RequestRewind(index:)) -> {
-          let cycles = cycle_log.load_cycles()
-          let messages = cycle_log.messages_for_rewind(cycles, index)
-          process.send(state.cognitive, agent_types.RestoreMessages(messages:))
-          let confirmation =
-            protocol.AssistantMessage(
-              text: "[Rewound to cycle "
-                <> int.to_string(index + 1)
-                <> " of "
-                <> int.to_string(list.length(cycles))
-                <> "]",
-              model: "system",
-              usage: None,
-            )
-          let _ =
-            mist.send_text_frame(
-              conn,
-              protocol.encode_server_message(confirmation),
-            )
-          mist.continue(state)
-        }
-        Error(_) -> mist.continue(state)
+      case string.byte_size(json_str) > 1_048_576 {
+        True -> mist.continue(state)
+        False ->
+          case protocol.decode_client_message(json_str) {
+            Ok(protocol.UserMessage(text:)) -> {
+              // Send thinking indicator
+              let _ =
+                mist.send_text_frame(
+                  conn,
+                  protocol.encode_server_message(protocol.Thinking),
+                )
+              // Dispatch to cognitive loop
+              process.send(
+                state.cognitive,
+                agent_types.UserInput(text:, reply_to: state.reply_subject),
+              )
+              mist.continue(state)
+            }
+            Ok(protocol.UserAnswer(text:)) -> {
+              process.send(
+                state.cognitive,
+                agent_types.UserAnswer(answer: text),
+              )
+              mist.continue(state)
+            }
+            Ok(protocol.RequestLogData) -> {
+              let entries = slog.load_entries()
+              let _ =
+                mist.send_text_frame(
+                  conn,
+                  protocol.encode_server_message(protocol.LogData(entries:)),
+                )
+              mist.continue(state)
+            }
+            Ok(protocol.RequestNarrativeData) -> {
+              let entries = narrative_log.load_all(state.narrative_dir)
+              let entries_json =
+                json.to_string(json.array(entries, narrative_log.encode_entry))
+              let _ =
+                mist.send_text_frame(
+                  conn,
+                  protocol.encode_server_message(protocol.NarrativeData(
+                    entries_json:,
+                  )),
+                )
+              mist.continue(state)
+            }
+            Ok(protocol.RequestLoadProfile(name:)) -> {
+              // Send thinking indicator
+              let _ =
+                mist.send_text_frame(
+                  conn,
+                  protocol.encode_server_message(protocol.Thinking),
+                )
+              process.send(
+                state.cognitive,
+                agent_types.LoadProfile(name:, reply_to: state.reply_subject),
+              )
+              mist.continue(state)
+            }
+            Ok(protocol.RequestRewind(index:)) -> {
+              let cycles = cycle_log.load_cycles()
+              let messages = cycle_log.messages_for_rewind(cycles, index)
+              process.send(
+                state.cognitive,
+                agent_types.RestoreMessages(messages:),
+              )
+              let confirmation =
+                protocol.AssistantMessage(
+                  text: "[Rewound to cycle "
+                    <> int.to_string(index + 1)
+                    <> " of "
+                    <> int.to_string(list.length(cycles))
+                    <> "]",
+                  model: "system",
+                  usage: None,
+                )
+              let _ =
+                mist.send_text_frame(
+                  conn,
+                  protocol.encode_server_message(confirmation),
+                )
+              mist.continue(state)
+            }
+            Error(_) -> mist.continue(state)
+          }
       }
     }
 

@@ -7,7 +7,9 @@
          docker_run_container/2, docker_exec/2, docker_stop/1,
          rescue/1, sha256_hex/1,
          log_init/1, log_stdout_enabled/0, log_stderr/1,
-         monotonic_now_ms/0, file_rename/2, sanitize_json/1]).
+         monotonic_now_ms/0, file_rename/2, sanitize_json/1,
+         resolve_symlinks/1,
+         file_size/1, days_ago_date/1]).
 
 %% Read one line from stdin.
 %% Returns {ok, Binary} (including trailing newline) or {error, nil} on EOF.
@@ -305,6 +307,32 @@ file_rename(From, To) ->
         {error, _} -> false
     end.
 
+%% Resolve symlinks in a path by following links at each component.
+resolve_symlinks(Path) when is_binary(Path) ->
+    try
+        list_to_binary(resolve_symlinks_str(binary_to_list(Path)))
+    catch
+        _:_ -> Path
+    end.
+
+resolve_symlinks_str(Path) ->
+    case file:read_link(Path) of
+        {ok, Target} ->
+            Abs = case hd(Target) of
+                $/ -> Target;
+                _ -> filename:join(filename:dirname(Path), Target)
+            end,
+            resolve_symlinks_str(Abs);
+        {error, _} ->
+            %% Not a symlink — check if parent needs resolving
+            case filename:dirname(Path) of
+                Path -> Path;  %% root
+                Dir ->
+                    ResolvedDir = resolve_symlinks_str(Dir),
+                    filename:join(ResolvedDir, filename:basename(Path))
+            end
+    end.
+
 %% Sanitize JSON by escaping unescaped control characters inside string values.
 %% Walks the binary tracking in-string state and escapes literal control chars
 %% (newlines, tabs, etc.) that LLMs sometimes produce.
@@ -342,3 +370,16 @@ sanitize_json(<<$", Rest/binary>>, false, _, Acc) ->
 %% Any char outside a string — pass through
 sanitize_json(<<C, Rest/binary>>, false, _, Acc) ->
     sanitize_json(Rest, false, false, <<Acc/binary, C>>).
+
+%% Return the size of a file in bytes. Returns 0 if the file does not exist.
+file_size(Path) when is_binary(Path) ->
+    filelib:file_size(binary_to_list(Path)).
+
+%% Return a date string N days ago, e.g. days_ago_date(30) -> "2026-02-05".
+days_ago_date(Days) ->
+    {Date, _} = calendar:local_time(),
+    GregDays = calendar:date_to_gregorian_days(Date),
+    AgoDate = calendar:gregorian_days_to_date(GregDays - Days),
+    {Y, Mo, D} = AgoDate,
+    Pad = fun(N, W) -> string:right(integer_to_list(N), W, $0) end,
+    iolist_to_binary([Pad(Y,4), $-, Pad(Mo,2), $-, Pad(D,2)]).

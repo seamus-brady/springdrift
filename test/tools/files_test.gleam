@@ -98,6 +98,22 @@ pub fn is_within_cwd_accepts_relative_path_test() {
 }
 
 // ---------------------------------------------------------------------------
+// resolve_symlinks
+// ---------------------------------------------------------------------------
+
+pub fn resolve_symlinks_normal_path_unchanged_test() {
+  // A normal path with no symlinks should be returned as-is
+  files.resolve_symlinks("/usr/local/bin")
+  |> should.equal("/usr/local/bin")
+}
+
+pub fn resolve_symlinks_nonexistent_path_unchanged_test() {
+  // A nonexistent path should be returned unchanged
+  files.resolve_symlinks("/nonexistent/path/to/file")
+  |> should.equal("/nonexistent/path/to/file")
+}
+
+// ---------------------------------------------------------------------------
 // write_file
 // ---------------------------------------------------------------------------
 

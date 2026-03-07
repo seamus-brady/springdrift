@@ -37,7 +37,6 @@ import gleam/dict
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import gleam/result
 import gleam/string
 import simplifile
 import slog
@@ -188,10 +187,16 @@ pub fn from_args(args: List(String)) -> AppConfig {
 }
 
 /// Parse a TOML string into an AppConfig. Returns Error(Nil) on parse failure.
+/// Logs warnings for unknown keys and invalid values via slog.
 pub fn parse_config_toml(input: String) -> Result(AppConfig, Nil) {
   case tom.parse(input) {
     Error(_) -> Error(Nil)
-    Ok(toml) -> Ok(toml_to_config(toml))
+    Ok(toml) -> {
+      validate_toml_keys(toml)
+      let cfg = toml_to_config(toml)
+      validate_config_values(cfg)
+      Ok(cfg)
+    }
   }
 }
 
@@ -467,7 +472,162 @@ fn load_from_path(path: String) -> AppConfig {
   case simplifile.read(path) {
     Error(_) -> default()
     Ok(contents) ->
-      parse_config_toml(contents)
-      |> result.unwrap(default())
+      case parse_config_toml(contents) {
+        Error(_) -> {
+          slog.warn(
+            "config",
+            "load",
+            "Failed to parse config file: " <> path,
+            None,
+          )
+          default()
+        }
+        Ok(cfg) -> cfg
+      }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Validation
+// ---------------------------------------------------------------------------
+
+const known_keys = [
+  "provider", "task_model", "reasoning_model", "system_prompt", "max_tokens",
+  "max_turns", "max_consecutive_errors", "max_context_messages", "log_verbose",
+  "write_anywhere", "skills_dirs", "gui", "dprime_enabled", "dprime_config",
+  "narrative", "profile", "profiles_dirs",
+]
+
+const known_narrative_keys = [
+  "enabled", "directory", "archivist_model", "threading", "summaries",
+  "summary_schedule",
+]
+
+fn validate_toml_keys(table: dict.Dict(String, tom.Toml)) -> Nil {
+  dict.keys(table)
+  |> list.each(fn(key) {
+    case list.contains(known_keys, key) {
+      True -> Nil
+      False ->
+        slog.warn(
+          "config",
+          "validate",
+          "Unknown config key: \"" <> key <> "\" — possible typo?",
+          None,
+        )
+    }
+  })
+  case tom.get_table(table, ["narrative"]) {
+    Ok(narrative_table) ->
+      dict.keys(narrative_table)
+      |> list.each(fn(key) {
+        case list.contains(known_narrative_keys, key) {
+          True -> Nil
+          False ->
+            slog.warn(
+              "config",
+              "validate",
+              "Unknown narrative config key: \"" <> key <> "\" — possible typo?",
+              None,
+            )
+        }
+      })
+    Error(_) -> Nil
+  }
+  Nil
+}
+
+fn validate_config_values(cfg: AppConfig) -> Nil {
+  case cfg.max_tokens {
+    Some(n) ->
+      case n <= 0 {
+        True ->
+          slog.warn(
+            "config",
+            "validate",
+            "max_tokens must be positive, got " <> int.to_string(n),
+            None,
+          )
+        False -> Nil
+      }
+    None -> Nil
+  }
+  case cfg.max_turns {
+    Some(n) ->
+      case n <= 0 {
+        True ->
+          slog.warn(
+            "config",
+            "validate",
+            "max_turns must be positive, got " <> int.to_string(n),
+            None,
+          )
+        False -> Nil
+      }
+    None -> Nil
+  }
+  case cfg.max_consecutive_errors {
+    Some(n) ->
+      case n <= 0 {
+        True ->
+          slog.warn(
+            "config",
+            "validate",
+            "max_consecutive_errors must be positive, got " <> int.to_string(n),
+            None,
+          )
+        False -> Nil
+      }
+    None -> Nil
+  }
+  case cfg.max_context_messages {
+    Some(n) ->
+      case n <= 0 {
+        True ->
+          slog.warn(
+            "config",
+            "validate",
+            "max_context_messages must be positive, got " <> int.to_string(n),
+            None,
+          )
+        False -> Nil
+      }
+    None -> Nil
+  }
+  case cfg.provider {
+    Some(p) ->
+      case
+        list.contains(
+          ["anthropic", "openrouter", "openai", "mistral", "local", "mock"],
+          p,
+        )
+      {
+        True -> Nil
+        False ->
+          slog.warn(
+            "config",
+            "validate",
+            "Unknown provider: \""
+              <> p
+              <> "\". Valid: anthropic, openrouter, openai, mistral, local, mock",
+            None,
+          )
+      }
+    None -> Nil
+  }
+  case cfg.gui {
+    Some(g) ->
+      case list.contains(["tui", "web"], g) {
+        True -> Nil
+        False ->
+          slog.warn(
+            "config",
+            "validate",
+            "Unknown gui mode: \"" <> g <> "\". Valid: tui, web",
+            None,
+          )
+      }
+    None -> Nil
+  }
+  Nil
 }
