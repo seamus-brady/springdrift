@@ -6,7 +6,8 @@
          fetch_url/1, http_post/3, check_docker/0, docker_build/1,
          docker_run_container/2, docker_exec/2, docker_stop/1,
          rescue/1, sha256_hex/1,
-         log_init/1, log_stdout_enabled/0, log_stderr/1]).
+         log_init/1, log_stdout_enabled/0, log_stderr/1,
+         monotonic_now_ms/0, file_rename/2, sanitize_json/1]).
 
 %% Read one line from stdin.
 %% Returns {ok, Binary} (including trailing newline) or {error, nil} on EOF.
@@ -294,3 +295,50 @@ docker_stop(ContainerId) ->
     os:cmd("docker stop " ++ IdStr ++ " 2>&1"),
     os:cmd("docker rm " ++ IdStr ++ " 2>&1"),
     nil.
+
+monotonic_now_ms() ->
+    erlang:system_time(millisecond).
+
+file_rename(From, To) ->
+    case file:rename(From, To) of
+        ok -> true;
+        {error, _} -> false
+    end.
+
+%% Sanitize JSON by escaping unescaped control characters inside string values.
+%% Walks the binary tracking in-string state and escapes literal control chars
+%% (newlines, tabs, etc.) that LLMs sometimes produce.
+sanitize_json(Bin) when is_binary(Bin) ->
+    sanitize_json(Bin, false, false, <<>>).
+
+sanitize_json(<<>>, _InStr, _Esc, Acc) ->
+    Acc;
+%% Previous char was backslash inside a string — this char is already escaped
+sanitize_json(<<C, Rest/binary>>, true, true, Acc) ->
+    sanitize_json(Rest, true, false, <<Acc/binary, C>>);
+%% Backslash inside a string — mark next char as escaped
+sanitize_json(<<$\\, Rest/binary>>, true, false, Acc) ->
+    sanitize_json(Rest, true, true, <<Acc/binary, $\\>>);
+%% Unescaped quote inside string — end of string
+sanitize_json(<<$", Rest/binary>>, true, false, Acc) ->
+    sanitize_json(Rest, false, false, <<Acc/binary, $">>);
+%% Control chars inside a string that need escaping
+sanitize_json(<<$\n, Rest/binary>>, true, false, Acc) ->
+    sanitize_json(Rest, true, false, <<Acc/binary, $\\, $n>>);
+sanitize_json(<<$\r, Rest/binary>>, true, false, Acc) ->
+    sanitize_json(Rest, true, false, <<Acc/binary, $\\, $r>>);
+sanitize_json(<<$\t, Rest/binary>>, true, false, Acc) ->
+    sanitize_json(Rest, true, false, <<Acc/binary, $\\, $t>>);
+%% Other control chars (0x00-0x1F) inside a string — escape as \uXXXX
+sanitize_json(<<C, Rest/binary>>, true, false, Acc) when C < 32 ->
+    Hex = list_to_binary(io_lib:format("\\u~4.16.0B", [C])),
+    sanitize_json(Rest, true, false, <<Acc/binary, Hex/binary>>);
+%% Normal char inside a string
+sanitize_json(<<C, Rest/binary>>, true, false, Acc) ->
+    sanitize_json(Rest, true, false, <<Acc/binary, C>>);
+%% Quote outside a string — start of string
+sanitize_json(<<$", Rest/binary>>, false, _, Acc) ->
+    sanitize_json(Rest, true, false, <<Acc/binary, $">>);
+%% Any char outside a string — pass through
+sanitize_json(<<C, Rest/binary>>, false, _, Acc) ->
+    sanitize_json(Rest, false, false, <<Acc/binary, C>>).

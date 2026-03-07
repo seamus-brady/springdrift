@@ -59,6 +59,27 @@ pub fn page() -> String {
     letter-spacing: -0.2px;
     margin-bottom: 20px;
   }
+  #profile-selector {
+    margin-top: 16px;
+    display: none;
+  }
+  #profile-selector label {
+    font-size: 13px;
+    color: var(--text-secondary);
+    display: block;
+    margin-bottom: 4px;
+  }
+  #profile-selector select {
+    width: 100%;
+    padding: 6px 10px;
+    border: 1px solid var(--sidebar-border);
+    border-radius: 8px;
+    background: var(--surface);
+    font-family: inherit;
+    font-size: 14px;
+    color: var(--text);
+    cursor: pointer;
+  }
   #sidebar .sidebar-status {
     margin-top: auto;
     font-size: 13px;
@@ -82,6 +103,7 @@ pub fn page() -> String {
     display: flex;
     flex-direction: column;
     min-width: 0;
+    position: relative;
   }
 
   /* ── Tab bar ──────────────────────────────────────── */
@@ -381,6 +403,125 @@ pub fn page() -> String {
   .tab-content { display: none; flex: 1; flex-direction: column; min-height: 0; }
   .tab-content.active { display: flex; }
 
+  /* ── Narrative tab ───────────────────────────────── */
+  #narrative-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 24px;
+    max-width: 720px;
+    width: 100%;
+    margin: 0 auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  #narrative-container::-webkit-scrollbar { display: none; }
+  .narrative-entry {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 16px 18px;
+    margin-bottom: 12px;
+    background: var(--surface);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .narrative-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
+  .narrative-cycle {
+    font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+    font-size: 12px;
+    color: #007aff;
+    background: rgba(0,122,255,0.08);
+    padding: 2px 7px;
+    border-radius: 5px;
+  }
+  .narrative-time {
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  .narrative-status {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 5px;
+  }
+  .narrative-status.success { background: rgba(52,199,89,0.12); color: #248a3d; }
+  .narrative-status.partial { background: rgba(255,149,0,0.12); color: #c77c00; }
+  .narrative-status.failure { background: rgba(255,59,48,0.12); color: #d70015; }
+  .narrative-thread {
+    font-size: 13px;
+    color: var(--text-secondary);
+    padding: 2px 8px;
+    background: var(--code-bg);
+    border-radius: 5px;
+  }
+  .narrative-summary {
+    font-size: 16px;
+    line-height: 1.5;
+    margin-bottom: 8px;
+  }
+  .narrative-keywords {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+  }
+  .narrative-keyword {
+    font-size: 12px;
+    color: var(--accent);
+    background: var(--accent-light);
+    padding: 2px 8px;
+    border-radius: 5px;
+  }
+  .narrative-delegation {
+    font-size: 13px;
+    color: var(--text-secondary);
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
+    margin-top: 4px;
+  }
+  .narrative-delegation .agent-name {
+    font-weight: 600;
+    color: var(--text);
+  }
+  .narrative-empty {
+    text-align: center;
+    color: var(--text-dim);
+    padding: 40px 20px;
+    font-size: 15px;
+  }
+  #narrative-refresh {
+    padding: 6px 14px;
+    margin: 12px 24px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+  #narrative-refresh:hover { background: var(--code-bg); }
+
+  /* ── Thinking overlay ──────────────────────────── */
+  #thinking-overlay {
+    display: none;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 10;
+  }
+  #thinking-overlay.active { display: block; }
+  .tab-btn.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
   /* ── Log tab ──────────────────────────────────────── */
   #log-container {
     flex: 1;
@@ -424,6 +565,12 @@ pub fn page() -> String {
 <body>
 <div id=\"sidebar\">
   <h1>Springdrift</h1>
+  <div id=\"profile-selector\">
+    <label>Profile</label>
+    <select id=\"profile-select\">
+      <option value=\"\">Default</option>
+    </select>
+  </div>
   <div class=\"sidebar-status\">
     <span class=\"dot\" id=\"status-dot\"></span>
     <span id=\"status\">connecting...</span>
@@ -432,8 +579,10 @@ pub fn page() -> String {
 <div id=\"main\">
   <div id=\"tab-bar\">
     <button class=\"tab-btn active\" data-tab=\"chat\">Chat</button>
+    <button class=\"tab-btn\" data-tab=\"narrative\">Narrative</button>
     <button class=\"tab-btn\" data-tab=\"log\">Log</button>
   </div>
+  <div id=\"thinking-overlay\"></div>
   <div id=\"chat-tab\" class=\"tab-content active\">
     <div id=\"messages\"></div>
     <div id=\"input-area\">
@@ -443,6 +592,10 @@ pub fn page() -> String {
       </form>
       <div id=\"input-hint\">Press Enter to send</div>
     </div>
+  </div>
+  <div id=\"narrative-tab\" class=\"tab-content\">
+    <button id=\"narrative-refresh\">Refresh</button>
+    <div id=\"narrative-container\"><div class=\"narrative-empty\">Loading narrative entries...</div></div>
   </div>
   <div id=\"log-tab\" class=\"tab-content\">
     <button id=\"log-refresh\">Refresh</button>
@@ -457,9 +610,15 @@ pub fn page() -> String {
   const status = document.getElementById('status');
   const statusDot = document.getElementById('status-dot');
   const logContainer = document.getElementById('log-container');
+  const narrativeContainer = document.getElementById('narrative-container');
+  const thinkingOverlay = document.getElementById('thinking-overlay');
+  const tabBtns = document.querySelectorAll('.tab-btn');
+  const profileSelector = document.getElementById('profile-selector');
+  const profileSelect = document.getElementById('profile-select');
   let ws = null;
   let thinkingEl = null;
   let questionEl = null;
+  let isThinking = false;
   let reconnectDelay = 1000;
 
   // Configure marked for safe rendering
@@ -477,25 +636,88 @@ pub fn page() -> String {
   }
 
   // ── Tab switching ──
-  document.querySelectorAll('.tab-btn').forEach(function(btn) {
+  tabBtns.forEach(function(btn) {
     btn.addEventListener('click', function() {
-      document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+      if (isThinking) return;
+      tabBtns.forEach(function(b) { b.classList.remove('active'); });
       document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
       btn.classList.add('active');
       var tabId = btn.getAttribute('data-tab') + '-tab';
       document.getElementById(tabId).classList.add('active');
       if (btn.getAttribute('data-tab') === 'log') {
         requestLogData();
+      } else if (btn.getAttribute('data-tab') === 'narrative') {
+        requestNarrativeData();
       }
     });
   });
 
   document.getElementById('log-refresh').addEventListener('click', requestLogData);
+  document.getElementById('narrative-refresh').addEventListener('click', requestNarrativeData);
+
+  profileSelect.addEventListener('change', function() {
+    var name = profileSelect.value;
+    if (name && ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'request_load_profile', name: name }));
+    }
+  });
 
   function requestLogData() {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'request_log_data' }));
     }
+  }
+
+  function requestNarrativeData() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'request_narrative_data' }));
+    }
+  }
+
+  function renderNarrativeEntries(entries) {
+    if (!entries || entries.length === 0) {
+      narrativeContainer.innerHTML = '<div class=\"narrative-empty\">No narrative entries yet. Enable narrative logging with --narrative.</div>';
+      return;
+    }
+    var html = '';
+    // Show newest first
+    var sorted = entries.slice().reverse();
+    sorted.forEach(function(e) {
+      var cycleShort = (e.cycle_id || '').substring(0, 8);
+      var time = (e.timestamp || '').substring(0, 19).replace('T', ' ');
+      var status = (e.outcome && e.outcome.status) || 'unknown';
+      var statusClass = status;
+      var statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
+      var threadHtml = '';
+      if (e.thread && e.thread.thread_name) {
+        threadHtml = '<span class=\"narrative-thread\">' + escapeHtml(e.thread.thread_name) + ' #' + (e.thread.position || 0) + '</span>';
+      }
+      var keywordsHtml = '';
+      if (e.keywords && e.keywords.length > 0) {
+        keywordsHtml = '<div class=\"narrative-keywords\">' +
+          e.keywords.map(function(k) { return '<span class=\"narrative-keyword\">' + escapeHtml(k) + '</span>'; }).join('') +
+          '</div>';
+      }
+      var delegationHtml = '';
+      if (e.delegation_chain && e.delegation_chain.length > 0) {
+        var agents = e.delegation_chain.map(function(d) {
+          return '<span class=\"agent-name\">' + escapeHtml(d.agent_human_name || d.agent) + '</span>';
+        }).join(' → ');
+        delegationHtml = '<div class=\"narrative-delegation\">Delegated to: ' + agents + '</div>';
+      }
+      html += '<div class=\"narrative-entry\">' +
+        '<div class=\"narrative-header\">' +
+          '<span class=\"narrative-cycle\">' + escapeHtml(cycleShort) + '</span>' +
+          '<span class=\"narrative-time\">' + escapeHtml(time) + '</span>' +
+          '<span class=\"narrative-status ' + statusClass + '\">' + statusLabel + '</span>' +
+          threadHtml +
+        '</div>' +
+        '<div class=\"narrative-summary\">' + escapeHtml(e.summary || '') + '</div>' +
+        keywordsHtml +
+        delegationHtml +
+        '</div>';
+    });
+    narrativeContainer.innerHTML = html;
   }
 
   function renderLogEntries(entries) {
@@ -573,6 +795,22 @@ pub fn page() -> String {
       case 'log_data':
         renderLogEntries(data.entries);
         break;
+      case 'narrative_data':
+        renderNarrativeEntries(data.entries);
+        break;
+      case 'profiles_available':
+        if (data.profiles && data.profiles.length > 0) {
+          profileSelector.style.display = 'block';
+          var opts = '<option value=\"\">Default</option>';
+          data.profiles.forEach(function(p) {
+            opts += '<option value=\"' + escapeHtml(p) + '\">' + escapeHtml(p) + '</option>';
+          });
+          profileSelect.innerHTML = opts;
+        }
+        break;
+      case 'profile_loaded':
+        addNotification('Profile switched to: ' + data.name);
+        break;
     }
   }
 
@@ -612,6 +850,17 @@ pub fn page() -> String {
     scrollBottom();
   }
 
+  function setThinkingLock(locked) {
+    isThinking = locked;
+    if (locked) {
+      thinkingOverlay.classList.add('active');
+      tabBtns.forEach(function(b) { b.classList.add('disabled'); });
+    } else {
+      thinkingOverlay.classList.remove('active');
+      tabBtns.forEach(function(b) { b.classList.remove('disabled'); });
+    }
+  }
+
   function showThinking() {
     if (thinkingEl) return;
     thinkingEl = document.createElement('div');
@@ -619,10 +868,12 @@ pub fn page() -> String {
     thinkingEl.innerHTML = '<span class=\"dots\"><span>.</span><span>.</span><span>.</span></span> Thinking';
     msgs.appendChild(thinkingEl);
     scrollBottom();
+    setThinkingLock(true);
   }
 
   function removeThinking() {
     if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; }
+    setThinkingLock(false);
   }
 
   function showQuestion(text, source) {
@@ -665,7 +916,7 @@ pub fn page() -> String {
 
   function sendMessage() {
     const text = input.value.trim();
-    if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!text || !ws || ws.readyState !== WebSocket.OPEN || isThinking) return;
     ws.send(JSON.stringify({ type: 'user_message', text: text }));
     addUserMessage(text);
     input.value = '';

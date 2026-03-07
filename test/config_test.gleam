@@ -99,6 +99,14 @@ pub fn merge_override_wins_test() {
       gui: None,
       dprime_enabled: None,
       dprime_config: None,
+      narrative_enabled: None,
+      narrative_dir: None,
+      archivist_model: None,
+      narrative_threading: None,
+      narrative_summaries: None,
+      narrative_summary_schedule: None,
+      profiles_dirs: None,
+      default_profile: None,
     )
   let override =
     AppConfig(
@@ -117,6 +125,14 @@ pub fn merge_override_wins_test() {
       gui: None,
       dprime_enabled: None,
       dprime_config: None,
+      narrative_enabled: None,
+      narrative_dir: None,
+      archivist_model: None,
+      narrative_threading: None,
+      narrative_summaries: None,
+      narrative_summary_schedule: None,
+      profiles_dirs: None,
+      default_profile: None,
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("openai"))
@@ -140,6 +156,14 @@ pub fn merge_base_preserved_when_override_none_test() {
       gui: None,
       dprime_enabled: None,
       dprime_config: None,
+      narrative_enabled: None,
+      narrative_dir: None,
+      archivist_model: None,
+      narrative_threading: None,
+      narrative_summaries: None,
+      narrative_summary_schedule: None,
+      profiles_dirs: None,
+      default_profile: None,
     )
   let override =
     AppConfig(
@@ -158,6 +182,14 @@ pub fn merge_base_preserved_when_override_none_test() {
       gui: None,
       dprime_enabled: None,
       dprime_config: None,
+      narrative_enabled: None,
+      narrative_dir: None,
+      archivist_model: None,
+      narrative_threading: None,
+      narrative_summaries: None,
+      narrative_summary_schedule: None,
+      profiles_dirs: None,
+      default_profile: None,
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("anthropic"))
@@ -181,6 +213,14 @@ pub fn merge_combines_different_fields_test() {
       gui: None,
       dprime_enabled: None,
       dprime_config: None,
+      narrative_enabled: None,
+      narrative_dir: None,
+      archivist_model: None,
+      narrative_threading: None,
+      narrative_summaries: None,
+      narrative_summary_schedule: None,
+      profiles_dirs: None,
+      default_profile: None,
     )
   let override =
     AppConfig(
@@ -199,6 +239,14 @@ pub fn merge_combines_different_fields_test() {
       gui: None,
       dprime_enabled: None,
       dprime_config: None,
+      narrative_enabled: None,
+      narrative_dir: None,
+      archivist_model: None,
+      narrative_threading: None,
+      narrative_summaries: None,
+      narrative_summary_schedule: None,
+      profiles_dirs: None,
+      default_profile: None,
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("anthropic"))
@@ -300,6 +348,14 @@ pub fn merge_new_fields_test() {
       gui: None,
       dprime_enabled: None,
       dprime_config: None,
+      narrative_enabled: None,
+      narrative_dir: None,
+      archivist_model: None,
+      narrative_threading: None,
+      narrative_summaries: None,
+      narrative_summary_schedule: None,
+      profiles_dirs: None,
+      default_profile: None,
     )
   let override =
     AppConfig(
@@ -318,6 +374,14 @@ pub fn merge_new_fields_test() {
       gui: None,
       dprime_enabled: None,
       dprime_config: None,
+      narrative_enabled: None,
+      narrative_dir: None,
+      archivist_model: None,
+      narrative_threading: None,
+      narrative_summaries: None,
+      narrative_summary_schedule: None,
+      profiles_dirs: None,
+      default_profile: None,
     )
   let merged = config.merge(base, override:)
   merged.max_turns |> should.equal(Some(10))
@@ -383,6 +447,14 @@ pub fn merge_model_fields_override_wins_test() {
       gui: None,
       dprime_enabled: None,
       dprime_config: None,
+      narrative_enabled: None,
+      narrative_dir: None,
+      archivist_model: None,
+      narrative_threading: None,
+      narrative_summaries: None,
+      narrative_summary_schedule: None,
+      profiles_dirs: None,
+      default_profile: None,
     )
   let override =
     AppConfig(
@@ -401,6 +473,14 @@ pub fn merge_model_fields_override_wins_test() {
       gui: None,
       dprime_enabled: None,
       dprime_config: None,
+      narrative_enabled: None,
+      narrative_dir: None,
+      archivist_model: None,
+      narrative_threading: None,
+      narrative_summaries: None,
+      narrative_summary_schedule: None,
+      profiles_dirs: None,
+      default_profile: None,
     )
   let merged = config.merge(base, override:)
   merged.task_model |> should.equal(Some("override-task"))
@@ -425,6 +505,14 @@ pub fn merge_model_fields_base_preserved_test() {
       gui: None,
       dprime_enabled: None,
       dprime_config: None,
+      narrative_enabled: None,
+      narrative_dir: None,
+      archivist_model: None,
+      narrative_threading: None,
+      narrative_summaries: None,
+      narrative_summary_schedule: None,
+      profiles_dirs: None,
+      default_profile: None,
     )
   let override =
     AppConfig(
@@ -443,6 +531,14 @@ pub fn merge_model_fields_base_preserved_test() {
       gui: None,
       dprime_enabled: None,
       dprime_config: None,
+      narrative_enabled: None,
+      narrative_dir: None,
+      archivist_model: None,
+      narrative_threading: None,
+      narrative_summaries: None,
+      narrative_summary_schedule: None,
+      profiles_dirs: None,
+      default_profile: None,
     )
   let merged = config.merge(base, override:)
   merged.task_model |> should.equal(Some("haiku"))
@@ -504,6 +600,14 @@ pub fn to_string_fully_set_test() {
       gui: None,
       dprime_enabled: None,
       dprime_config: None,
+      narrative_enabled: None,
+      narrative_dir: None,
+      archivist_model: None,
+      narrative_threading: None,
+      narrative_summaries: None,
+      narrative_summary_schedule: None,
+      profiles_dirs: None,
+      default_profile: None,
     )
   let s = config.to_string(cfg)
   string.contains(s, "provider") |> should.be_true
@@ -617,6 +721,14 @@ pub fn merge_gui_override_wins_test() {
       gui: Some("tui"),
       dprime_enabled: None,
       dprime_config: None,
+      narrative_enabled: None,
+      narrative_dir: None,
+      archivist_model: None,
+      narrative_threading: None,
+      narrative_summaries: None,
+      narrative_summary_schedule: None,
+      profiles_dirs: None,
+      default_profile: None,
     )
   let override =
     AppConfig(
@@ -635,6 +747,14 @@ pub fn merge_gui_override_wins_test() {
       gui: Some("web"),
       dprime_enabled: None,
       dprime_config: None,
+      narrative_enabled: None,
+      narrative_dir: None,
+      archivist_model: None,
+      narrative_threading: None,
+      narrative_summaries: None,
+      narrative_summary_schedule: None,
+      profiles_dirs: None,
+      default_profile: None,
     )
   let merged = config.merge(base, override:)
   merged.gui |> should.equal(Some("web"))
@@ -721,6 +841,14 @@ pub fn merge_dprime_override_wins_test() {
       gui: None,
       dprime_enabled: Some(False),
       dprime_config: Some("/old.json"),
+      narrative_enabled: None,
+      narrative_dir: None,
+      archivist_model: None,
+      narrative_threading: None,
+      narrative_summaries: None,
+      narrative_summary_schedule: None,
+      profiles_dirs: None,
+      default_profile: None,
     )
   let override =
     AppConfig(
@@ -739,6 +867,14 @@ pub fn merge_dprime_override_wins_test() {
       gui: None,
       dprime_enabled: Some(True),
       dprime_config: Some("/new.json"),
+      narrative_enabled: None,
+      narrative_dir: None,
+      archivist_model: None,
+      narrative_threading: None,
+      narrative_summaries: None,
+      narrative_summary_schedule: None,
+      profiles_dirs: None,
+      default_profile: None,
     )
   let merged = config.merge(base, override:)
   merged.dprime_enabled |> should.equal(Some(True))

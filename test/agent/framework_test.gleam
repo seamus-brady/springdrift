@@ -19,6 +19,7 @@ fn noop_executor(call: llm_types.ToolCall) -> llm_types.ToolResult {
 fn make_spec(provider) -> AgentSpec {
   AgentSpec(
     name: "test-agent",
+    human_name: "Test Agent",
     description: "A test agent",
     system_prompt: "You are a test agent.",
     provider:,
@@ -58,7 +59,7 @@ pub fn agent_success_test() {
   case msg {
     AgentComplete(outcome:) ->
       case outcome {
-        AgentSuccess(task_id: tid, agent: name, result: text) -> {
+        AgentSuccess(task_id: tid, agent: name, result: text, ..) -> {
           tid |> should.equal("task-1")
           name |> should.equal("test-agent")
           text |> should.equal("task completed")

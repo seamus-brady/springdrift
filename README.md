@@ -4,7 +4,7 @@ A terminal-UI chatbot written in **Gleam/OTP** that implements the
 [12-Factor Agents](https://github.com/humanlayer/12-factor-agents) principles.
 It runs a ReAct loop — the model reasons, calls tools, observes results, and
 repeats until it can give a final answer — all inside a full alternate-screen
-TUI with a two-tab interface.
+TUI with a three-tab interface (Chat, Log, Narrative).
 
 ---
 
@@ -100,7 +100,9 @@ Springdrift has a system-level logger (`slog`) with three output sinks:
 ### Log tab (TUI and Web GUI)
 Press **Tab** in the TUI to open the Log tab. Each entry shows timestamp,
 colored level badge, module::function, message, and optional cycle ID. Use
-`↑`/`↓` to scroll. The Web GUI has a separate Log tab with a refresh button.
+`↑`/`↓` to scroll. Press **Tab** again for the Narrative tab, which shows
+narrative entries with cycle IDs, status badges, thread info, summaries,
+and delegation chains. The Web GUI has a separate Log tab with a refresh button.
 
 ### Context window management
 Set `--max-context <n>` to cap the number of messages passed to the LLM per
@@ -126,6 +128,27 @@ The notification channel between the cognitive loop and the TUI is decoupled —
 `Notification` is a pure data type with no process references (`Subject`). This
 means the same cognitive loop could be driven by a websocket handler or any
 other UI without code changes.
+
+### Prime Narrative — agent memory
+
+When enabled (`--narrative`), Springdrift writes a first-person narrative record
+after every conversation cycle. The **Archivist** — a single async LLM call
+running in `spawn_unlinked` — generates a `NarrativeEntry` covering what happened,
+why, and how confident the system was. Entries are appended to immutable JSON-L
+files in `prime-narrative/YYYY-MM-DD.jsonl`.
+
+**Threading**: entries are automatically grouped into story arcs by overlap scoring.
+Locations (weight 3), domains (weight 2), and keywords (weight 1) are compared
+against existing threads. If the overlap exceeds a threshold (4), the entry joins
+that thread with a continuity note comparing data points across cycles.
+
+**Summaries**: periodic LLM-generated summaries aggregate entries over weekly or
+monthly ranges.
+
+**Narrative tab**: press Tab twice in the TUI to see narrative entries with
+cycle IDs, timestamps, status badges, thread info, summaries, and delegation chains.
+
+Zero overhead when disabled — no LLM calls, no files written, no Archivist spawned.
 
 ### Safety circuit breakers
 - **Max turns** (`--max-turns`, default 5): prevents infinite tool loops.
@@ -181,9 +204,9 @@ gleam run -- --print-config
 | Key | Action |
 |---|---|
 | Enter | Send message (or answer agent question) |
-| Tab | Switch between Chat and Log tabs |
+| Tab | Cycle tabs: Chat → Log → Narrative → Chat |
 | PgUp / PgDn | Scroll message history |
-| ↑ / ↓ | (Log tab) Scroll log entries |
+| ↑ / ↓ | (Log/Narrative tab) Scroll entries |
 | Ctrl-C / Ctrl-D | Exit |
 
 ### Slash commands
@@ -207,7 +230,6 @@ Three-layer merge (highest priority first):
 
 ```toml
 provider               = "anthropic"
-model                  = "claude-sonnet-4-20250514"
 system_prompt          = "You are a helpful assistant."
 max_tokens             = 1024
 max_turns              = 5
@@ -218,13 +240,25 @@ reasoning_model        = "claude-opus-4-6"
 log_verbose            = false
 write_anywhere         = false
 skills_dirs            = ["/path/to/skills"]
+
+# D' safety system
+dprime_enabled = false
+dprime_config  = "dprime-config.json"
+
+# Prime Narrative
+[narrative]
+enabled          = false
+dir              = "prime-narrative"
+archivist_model  = "claude-haiku-4-5-20251001"
+threading        = true
+summaries        = false
+summary_schedule = "weekly"
 ```
 
 ### CLI flags
 
 ```
---provider <name>         anthropic | openrouter | openai | mock
---model <name>            Any model identifier
+--provider <name>         anthropic | openrouter | openai | mistral | local | mock
 --system <prompt>         System prompt string
 --max-tokens <n>          Max output tokens per LLM call (default: 1024)
 --max-turns <n>           Max react-loop turns per message (default: 5)
@@ -236,8 +270,15 @@ skills_dirs            = ["/path/to/skills"]
 --verbose                 Log full LLM request/response payloads
 --skills-dir <path>       Add a skill directory (repeatable)
 --allow-write-anywhere    Allow write_file outside the current working directory
+--gui <tui|web>           GUI mode (default: tui)
 --resume                  Reload previous session
 --print-config            Print resolved config and exit
+--dprime                  Enable D' safety evaluation
+--no-dprime               Disable D' safety evaluation (default)
+--dprime-config <path>    Path to D' config JSON
+--narrative               Enable narrative logging after each cycle
+--no-narrative            Disable narrative logging (default)
+--narrative-dir <path>    Directory for narrative logs (default: prime-narrative)
 --help, -h                Show help
 ```
 
@@ -299,13 +340,21 @@ springdrift.gleam         Entry point — config, provider selection, wiring
 ├── context.gleam           Sliding-window context trim helper
 ├── cycle_log.gleam         Per-cycle JSON-L logging + log reading + rewind helpers
 │
+├── narrative/              Prime Narrative — immutable first-person agent memory
+│   ├── types.gleam        NarrativeEntry, Intent, Outcome, DelegationStep, Thread, etc.
+│   ├── log.gleam          Append-only JSON-L log, full encode/decode, query functions
+│   ├── archivist.gleam    Async LLM narrative generation after each cycle
+│   ├── threading.gleam    Overlap scoring, thread assignment, continuity notes
+│   ├── summary.gleam      Periodic LLM summaries (weekly/monthly)
+│   └── cycle_tree.gleam   Hierarchical CycleNode tree from parent_cycle_id links
+│
 ├── tools/
 │   ├── builtin.gleam     calculator, get_current_datetime, request_human_input, read_skill
 │   ├── files.gleam       read_file, write_file, list_directory
 │   ├── web.gleam         fetch_url
 │   └── shell.gleam       run_shell (delegates to sandbox)
 │
-├── tui.gleam             Alternate-screen TUI — Chat + Log tabs (system log entries)
+├── tui.gleam             Alternate-screen TUI — Chat + Log + Narrative tabs
 │
 └── llm/
     ├── types.gleam        Shared types: Message, ContentBlock, LlmRequest/Response/Error, Tool
@@ -328,6 +377,7 @@ springdrift.gleam         Entry point — config, provider selection, wiring
 | Stdin reader | App | Blocking `read_char` loop → `StdinByte` to selector |
 | Think worker | Per turn | Blocking LLM call for the cognitive loop |
 | Agent processes | App | Each specialist agent runs its own react loop |
+| Archivist | Per turn | Async narrative generation after reply (spawn_unlinked) |
 
 All cross-process communication uses typed `Subject(T)` channels — no shared
 mutable state, no locks. The cognitive loop's notification channel uses pure
@@ -345,6 +395,10 @@ User input → TUI
       → If agent_* tool call: dispatch to agent, wait for AgentComplete
       → If request_human_input: send QuestionForHuman notification, wait for UserAnswer
       → If final text: send CognitiveReply to TUI
+          → If narrative_enabled: spawn Archivist (async, fire-and-forget)
+              → Archivist generates NarrativeEntry via LLM
+              → Threading assigns/creates thread
+              → Entry appended to prime-narrative/YYYY-MM-DD.jsonl
   → TUI renders response
 ```
 

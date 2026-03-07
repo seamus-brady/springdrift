@@ -1,6 +1,7 @@
 import agent/types.{
-  type AgentOutcome, type AgentSpec, type AgentTask, type CognitiveMessage,
-  AgentComplete, AgentFailure, AgentQuestion, AgentSuccess,
+  type AgentIdentity, type AgentOutcome, type AgentSpec, type AgentTask,
+  type CognitiveMessage, AgentComplete, AgentFailure, AgentIdentity,
+  AgentQuestion, AgentSuccess,
 }
 import cycle_log
 import gleam/dynamic/decode
@@ -9,6 +10,7 @@ import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/string
 import llm/request
 import llm/response
 import llm/retry
@@ -24,12 +26,16 @@ type ActiveTask {
 }
 
 type AgentState {
-  AgentState(active: List(ActiveTask))
+  AgentState(active: List(ActiveTask), identity: AgentIdentity)
 }
 
 type AgentEvent {
   NewTask(AgentTask)
-  TaskDone(task_id: String, result: Result(String, String))
+  TaskDone(
+    task_id: String,
+    agent_cycle_id: String,
+    result: Result(String, String),
+  )
   WorkerExited(ExitMessage)
 }
 
@@ -49,8 +55,9 @@ pub fn start_agent(
       process.trap_exits(True)
       let task_subj = process.new_subject()
       let done_subj = process.new_subject()
+      let identity = make_identity(spec.human_name)
       process.send(setup, Ok(task_subj))
-      agent_loop(spec, task_subj, done_subj, AgentState(active: []))
+      agent_loop(spec, task_subj, done_subj, AgentState(active: [], identity:))
     })
   case process.receive(setup, 5000) {
     Ok(Ok(subj)) -> Ok(#(pid, subj))
@@ -66,13 +73,15 @@ pub fn start_agent(
 fn agent_loop(
   spec: AgentSpec,
   task_subj: Subject(AgentTask),
-  done_subj: Subject(#(String, Result(String, String))),
+  done_subj: Subject(#(String, String, Result(String, String))),
   state: AgentState,
 ) -> Nil {
   let selector =
     process.new_selector()
     |> process.select_map(task_subj, fn(task) { NewTask(task) })
-    |> process.select_map(done_subj, fn(done) { TaskDone(done.0, done.1) })
+    |> process.select_map(done_subj, fn(done) {
+      TaskDone(done.0, done.1, done.2)
+    })
     |> process.select_trapped_exits(WorkerExited)
 
   case process.selector_receive_forever(selector) {
@@ -80,8 +89,12 @@ fn agent_loop(
       let captured_done_subj = done_subj
       let worker_pid =
         process.spawn(fn() {
-          let result = do_react_loop(spec, task)
-          process.send(captured_done_subj, #(task.task_id, result))
+          let #(agent_cycle_id, result) = do_react_loop(spec, task)
+          process.send(captured_done_subj, #(
+            task.task_id,
+            agent_cycle_id,
+            result,
+          ))
         })
       let active_task =
         ActiveTask(
@@ -93,21 +106,28 @@ fn agent_loop(
         spec,
         task_subj,
         done_subj,
-        AgentState(active: [active_task, ..state.active]),
+        AgentState(..state, active: [active_task, ..state.active]),
       )
     }
 
-    TaskDone(task_id, result) -> {
+    TaskDone(task_id, agent_cycle_id, result) -> {
       case find_active(state.active, task_id) {
         None -> agent_loop(spec, task_subj, done_subj, state)
         Some(active) -> {
-          let outcome = outcome_from_result(task_id, spec.name, result)
+          let outcome =
+            outcome_from_result(
+              task_id,
+              spec.name,
+              state.identity,
+              agent_cycle_id,
+              result,
+            )
           process.send(active.reply_to, AgentComplete(outcome:))
           agent_loop(
             spec,
             task_subj,
             done_subj,
-            AgentState(active: remove_active(state.active, task_id)),
+            AgentState(..state, active: remove_active(state.active, task_id)),
           )
         }
       }
@@ -121,6 +141,9 @@ fn agent_loop(
             AgentFailure(
               task_id: active.task_id,
               agent: spec.name,
+              agent_id: state.identity.agent_id,
+              agent_human_name: state.identity.human_name,
+              agent_cycle_id: "",
               error: "Worker crashed",
             )
           process.send(active.reply_to, AgentComplete(outcome:))
@@ -128,7 +151,10 @@ fn agent_loop(
             spec,
             task_subj,
             done_subj,
-            AgentState(active: remove_active(state.active, active.task_id)),
+            AgentState(
+              ..state,
+              active: remove_active(state.active, active.task_id),
+            ),
           )
         }
       }
@@ -140,10 +166,15 @@ fn agent_loop(
 // Inner react loop (runs in task worker process)
 // ---------------------------------------------------------------------------
 
-fn do_react_loop(spec: AgentSpec, task: AgentTask) -> Result(String, String) {
+fn do_react_loop(
+  spec: AgentSpec,
+  task: AgentTask,
+) -> #(String, Result(String, String)) {
   let agent_cycle_id = cycle_log.generate_uuid()
   let req = build_agent_request(spec, task)
-  do_react(req, spec, spec.max_turns, 0, agent_cycle_id, task.reply_to)
+  let result =
+    do_react(req, spec, spec.max_turns, 0, agent_cycle_id, task.reply_to)
+  #(agent_cycle_id, result)
 }
 
 fn do_react(
@@ -270,11 +301,29 @@ fn build_agent_request(spec: AgentSpec, task: AgentTask) -> llm_types.LlmRequest
 fn outcome_from_result(
   task_id: String,
   agent: String,
+  identity: AgentIdentity,
+  agent_cycle_id: String,
   result: Result(String, String),
 ) -> AgentOutcome {
   case result {
-    Ok(text) -> AgentSuccess(task_id:, agent:, result: text)
-    Error(err) -> AgentFailure(task_id:, agent:, error: err)
+    Ok(text) ->
+      AgentSuccess(
+        task_id:,
+        agent:,
+        agent_id: identity.agent_id,
+        agent_human_name: identity.human_name,
+        agent_cycle_id:,
+        result: text,
+      )
+    Error(err) ->
+      AgentFailure(
+        task_id:,
+        agent:,
+        agent_id: identity.agent_id,
+        agent_human_name: identity.human_name,
+        agent_cycle_id:,
+        error: err,
+      )
   }
 }
 
@@ -300,4 +349,74 @@ fn find_active_by_pid(
 
 fn remove_active(tasks: List(ActiveTask), task_id: String) -> List(ActiveTask) {
   list.filter(tasks, fn(t) { t.task_id != task_id })
+}
+
+/// Build an AgentIdentity from a human_name, generating a fresh GUID.
+pub fn make_identity(human_name: String) -> AgentIdentity {
+  let guid = cycle_log.generate_uuid()
+  let agent_id = make_agent_id(human_name, guid)
+  AgentIdentity(human_name:, guid:, agent_id:)
+}
+
+/// Construct agent_id: normalised human_name + first 8 chars of GUID.
+pub fn make_agent_id(human_name: String, guid: String) -> String {
+  let normalised =
+    human_name
+    |> string.lowercase
+    |> string.replace(" ", "-")
+    |> strip_non_alnum_hyphens
+  normalised <> "_" <> string.slice(guid, 0, 8)
+}
+
+fn strip_non_alnum_hyphens(s: String) -> String {
+  string.to_graphemes(s)
+  |> list.filter(fn(c) {
+    case c {
+      "-" -> True
+      _ -> is_alnum(c)
+    }
+  })
+  |> string.join("")
+}
+
+fn is_alnum(c: String) -> Bool {
+  case c {
+    "a"
+    | "b"
+    | "c"
+    | "d"
+    | "e"
+    | "f"
+    | "g"
+    | "h"
+    | "i"
+    | "j"
+    | "k"
+    | "l"
+    | "m"
+    | "n"
+    | "o"
+    | "p"
+    | "q"
+    | "r"
+    | "s"
+    | "t"
+    | "u"
+    | "v"
+    | "w"
+    | "x"
+    | "y"
+    | "z"
+    | "0"
+    | "1"
+    | "2"
+    | "3"
+    | "4"
+    | "5"
+    | "6"
+    | "7"
+    | "8"
+    | "9" -> True
+    _ -> False
+  }
 }

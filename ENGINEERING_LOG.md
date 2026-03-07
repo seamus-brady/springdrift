@@ -1520,3 +1520,123 @@ Added a second tab to the web interface:
 | `persistent_term` for flag | Global read-heavy flag checked on every log call. `persistent_term` is optimized for exactly this: very fast reads, rare writes. |
 | JSON-L (not structured logs) | Consistent with `cycle_log.gleam` pattern. One entry per line, easy to grep, easy to parse back. |
 | `load_entries()` reads full file | Simple and sufficient for single-day files. No index or database needed. |
+
+---
+
+### Prime Narrative — Agent Memory System (Mar 6)
+
+**Files added:** `src/narrative/types.gleam`, `src/narrative/log.gleam`,
+`src/narrative/archivist.gleam`, `src/narrative/threading.gleam`,
+`src/narrative/summary.gleam`, `src/narrative/cycle_tree.gleam`
+
+**Files modified:** `src/agent/types.gleam`, `src/agent/framework.gleam`,
+`src/agent/cognitive.gleam`, `src/config.gleam`, `src/springdrift.gleam`,
+`src/tui.gleam`, `src/agents/planner.gleam`, `src/agents/researcher.gleam`,
+`src/agents/coder.gleam`
+
+Implemented in 11 steps following the dependency order from the Prime Narrative spec.
+
+#### Agent identity and completion tracking (Steps 1-3)
+
+Added `AgentIdentity` (human_name + GUID → agent_id like `researcher_e5f67890`) to
+`agent/types.gleam`. The framework generates identity at startup and propagates
+`agent_cycle_id` through outcomes. `AgentCompletionRecord` captures per-agent results
+for the Archivist.
+
+`AgentOutcome` gained three new fields: `agent_id`, `agent_human_name`, `agent_cycle_id`.
+All three agent specs (`planner`, `researcher`, `coder`) now carry `human_name`.
+
+Config extended with 6 narrative fields: `narrative_enabled`, `narrative_dir`,
+`archivist_model`, `narrative_threading`, `narrative_summaries`,
+`narrative_summary_schedule`. CLI flags: `--narrative`, `--no-narrative`, `--narrative-dir`.
+TOML: `[narrative]` section.
+
+#### NarrativeEntry schema (Step 4)
+
+`narrative/types.gleam` defines the complete entry schema: `NarrativeEntry` with 16
+fields covering `schema_version`, `cycle_id`, `parent_cycle_id`, `timestamp`,
+`entry_type` (Narrative/Amendment/Summary/Observation), `summary`, `intent`
+(9 classifications), `outcome` (Success/Partial/Failure + confidence),
+`delegation_chain` (per-agent steps with tools/tokens/duration), `decisions`,
+`keywords`, `entities` (locations/organisations/data_points/temporal_references),
+`sources`, `thread`, `metrics`, and `observations`.
+
+Thread state types (`ThreadState`, `ThreadIndex`) track active narrative threads
+for overlap-based assignment.
+
+#### Append-only log (Step 5)
+
+`narrative/log.gleam` implements append-only JSON-L storage with full encode/decode
+for every type in the schema. Query functions: `load_date`, `load_entries` (date
+range via string comparison), `load_thread`, `search` (case-insensitive keyword
+match against summary + keywords), `thread_heads` (latest entry per thread),
+`load_all`. Thread index persisted as `thread_index.json` with atomic write
+(temp file + rename).
+
+#### Archivist (Step 6)
+
+`narrative/archivist.gleam` generates a `NarrativeEntry` from an `ArchivistContext`
+via a single LLM call. The system prompt enforces first-person past tense with
+controlled vocabulary. Parse failure falls back to a minimal entry built directly
+from `AgentCompletionRecords`. `spawn()` runs via `process.spawn_unlinked` — the
+Archivist is never visible to the user and cannot crash the conversation.
+
+#### Cognitive loop integration (Step 7)
+
+`CognitiveState` gained 5 new fields: `narrative_enabled`, `narrative_dir`,
+`archivist_model`, `agent_completions` (accumulated per cycle), `last_user_input`.
+`handle_user_input` resets completions; `handle_agent_complete` builds an
+`AgentCompletionRecord` from each `AgentOutcome`. `maybe_spawn_archivist` fires
+after the main final-reply path in `handle_think_complete`.
+
+`cognitive.start()` now takes 15 parameters (was 12). `springdrift.gleam` resolves
+narrative config and passes it through. Startup prints narrative status.
+
+#### Thread assignment (Step 8)
+
+`narrative/threading.gleam` implements overlap scoring with configurable weights:
+location=3, domain=2, keyword=1, threshold=4. `do_assign` is pure (no I/O) for
+testing. `assign_thread` loads the thread index, assigns, and persists.
+
+When an entry matches an existing thread above threshold, it joins with a continuity
+note that mentions shared locations and compares data points (e.g. "Temperature
+changed from 12 to 15"). New threads are named from domain + location.
+
+Thread state merges keywords, locations, and domains incrementally (capped at 20
+keywords). The Archivist calls `threading.assign_thread` between generation and
+append.
+
+#### Session summaries (Step 9)
+
+`narrative/summary.gleam` generates Summary-type entries by feeding recent narratives
+to the LLM for distillation. `weekly_range`/`monthly_range` compute date ranges with
+proper month/year boundary handling. Aggregates metrics (tokens, tool calls,
+delegations) across entries. Fallback summary on LLM parse failure.
+
+#### CycleTree (Step 10)
+
+`narrative/cycle_tree.gleam` builds a forest of `CycleNode` trees from flat entries
+using `parent_cycle_id` links. Orphans (parent not in set) become roots. Supports
+`flatten` (pre-order traversal), `depth`, and `find` by cycle ID.
+
+#### Narrative tab (Step 11)
+
+Added `NarrativeTab` to the TUI's tab cycle (Chat → Log → Narrative → Chat). The
+narrative tab loads all entries via `narrative_log.load_all` and renders each with:
+cycle ID (8-char), timestamp, status badge (green OK / yellow ~~ / red !!), thread
+info, summary text, and delegation chain with agent names and outcomes.
+
+`tui.start` gained a `narrative_dir` parameter. `springdrift.gleam` passes it through.
+
+#### Design decisions
+
+| Decision | Rationale |
+|---|---|
+| `spawn_unlinked` for Archivist | Archivist failure must never affect the user's conversation. Fire-and-forget is the correct model. |
+| Single LLM call (not multi-turn) | Narrative generation is a summarization task, not a reasoning task. One call with a good system prompt suffices. |
+| Overlap scoring (not LLM classification) | Thread assignment runs on every cycle. LLM calls would add latency and cost. Simple weighted overlap is fast and deterministic. |
+| Threshold=4 | Matches "1 location + 1 keyword" or "1 domain + 2 keywords" — reasonable for grouping related queries. |
+| JSON-L (not SQLite) | Consistent with cycle_log pattern. Append-only, grep-friendly, no external dependencies. |
+| Pure `do_assign` + I/O `assign_thread` | Testable core logic separated from file I/O. All 14 threading tests are pure. |
+| `AgentCompletionRecord` with zeros | Framework doesn't currently track per-agent tokens/duration. Zeros are acceptable placeholders; the Archivist still gets useful data from agent_id, human_name, and result. |
+| Tab cycle (not numbered tabs) | Three tabs still fit a simple Tab-key cycle. F-key shortcuts would add complexity without value at this scale. |

@@ -1,6 +1,6 @@
 import dprime/config as dprime_config
 import gleam/list
-import gleam/option.{Some}
+import gleam/option.{None, Some}
 import gleeunit
 import gleeunit/should
 import simplifile
@@ -173,4 +173,71 @@ pub fn load_full_schema_test() {
   let assert [f] = cfg.features
   f.feature_set |> should.equal(Some("core"))
   let _ = simplifile.delete(path)
+}
+
+// ---------------------------------------------------------------------------
+// load_dual — dual-gate config
+// ---------------------------------------------------------------------------
+
+pub fn load_dual_with_both_gates_test() {
+  let json =
+    "{
+  \"tool_gate\": {
+    \"features\": [
+      {\"name\": \"fs_write\", \"importance\": \"medium\"}
+    ],
+    \"modify_threshold\": 0.4,
+    \"reject_threshold\": 0.7,
+    \"canary_enabled\": false
+  },
+  \"output_gate\": {
+    \"features\": [
+      {\"name\": \"unsourced_claim\", \"importance\": \"high\", \"critical\": true},
+      {\"name\": \"stale_data\", \"importance\": \"medium\"}
+    ],
+    \"modify_threshold\": 0.3,
+    \"reject_threshold\": 0.6
+  }
+}"
+  let path = "/tmp/dprime_test_dual.json"
+  let assert Ok(_) = simplifile.write(path, json)
+  let #(tool_cfg, output_cfg) = dprime_config.load_dual(path)
+
+  // Tool gate
+  list.length(tool_cfg.features) |> should.equal(1)
+  tool_cfg.modify_threshold |> should.equal(0.4)
+  tool_cfg.canary_enabled |> should.be_false
+
+  // Output gate
+  output_cfg |> should.not_equal(None)
+  let assert Some(out) = output_cfg
+  list.length(out.features) |> should.equal(2)
+  out.modify_threshold |> should.equal(0.3)
+  out.reject_threshold |> should.equal(0.6)
+
+  let _ = simplifile.delete(path)
+}
+
+pub fn load_dual_single_gate_fallback_test() {
+  let json =
+    "{
+  \"features\": [
+    {\"name\": \"safety\", \"importance\": \"high\", \"critical\": true}
+  ],
+  \"tiers\": 2
+}"
+  let path = "/tmp/dprime_test_dual_single.json"
+  let assert Ok(_) = simplifile.write(path, json)
+  let #(tool_cfg, output_cfg) = dprime_config.load_dual(path)
+  list.length(tool_cfg.features) |> should.equal(1)
+  tool_cfg.tiers |> should.equal(2)
+  output_cfg |> should.equal(None)
+  let _ = simplifile.delete(path)
+}
+
+pub fn load_dual_missing_file_test() {
+  let #(tool_cfg, output_cfg) =
+    dprime_config.load_dual("/tmp/nonexistent_dual.json")
+  tool_cfg |> should.equal(dprime_config.default())
+  output_cfg |> should.equal(None)
 }

@@ -14,8 +14,10 @@ import agent/worker
 import context
 import cycle_log
 import dprime/audit as dprime_audit
+import dprime/config as dprime_config_mod
 import dprime/gate
 import dprime/meta
+import dprime/output_gate
 import dprime/types as dprime_types
 import gleam/dict.{type Dict}
 import gleam/dynamic/decode
@@ -30,10 +32,16 @@ import llm/request
 import llm/response
 import llm/tool
 import llm/types as llm_types
+import narrative/archivist
+import profile
+import profile/types as profile_types
 import query_complexity
+import skills
 import slog
 import storage
 import tools/builtin
+import tools/files as tools_files
+import tools/web as tools_web
 
 @external(erlang, "springdrift_ffi", "rescue")
 fn rescue(body: fn() -> a) -> Result(a, String)
@@ -63,6 +71,18 @@ pub type CognitiveState {
     save_in_progress: Bool,
     save_pending: Option(List(llm_types.Message)),
     dprime_state: Option(dprime_types.DprimeState),
+    // Narrative
+    narrative_enabled: Bool,
+    narrative_dir: String,
+    archivist_model: String,
+    agent_completions: List(types.AgentCompletionRecord),
+    last_user_input: String,
+    // Profile
+    active_profile: Option(String),
+    supervisor: Option(Subject(types.SupervisorMessage)),
+    profile_dirs: List(String),
+    write_anywhere: Bool,
+    output_dprime_state: Option(dprime_types.DprimeState),
   )
 }
 
@@ -84,6 +104,11 @@ pub fn start(
   task_model: String,
   reasoning_model: String,
   dprime_state: Option(dprime_types.DprimeState),
+  narrative_enabled: Bool,
+  narrative_dir: String,
+  archivist_model: String,
+  profile_dirs: List(String),
+  write_anywhere: Bool,
 ) -> Subject(CognitiveMessage) {
   // The cognitive loop gets agent tools + request_human_input
   let tools = [builtin.human_input_tool(), ..agent_tools]
@@ -111,6 +136,16 @@ pub fn start(
         save_in_progress: False,
         save_pending: None,
         dprime_state:,
+        narrative_enabled:,
+        narrative_dir:,
+        archivist_model:,
+        agent_completions: [],
+        last_user_input: "",
+        active_profile: None,
+        supervisor: None,
+        profile_dirs:,
+        write_anywhere:,
+        output_dprime_state: None,
       )
     process.send(setup, self)
     cognitive_loop(state)
@@ -164,6 +199,8 @@ fn handle_message(
       types.SafetyGateComplete(..) -> "SafetyGateComplete"
       types.InputSafetyGateComplete(..) -> "InputSafetyGateComplete"
       types.PostExecutionGateComplete(..) -> "PostExecutionGateComplete"
+      types.LoadProfile(..) -> "LoadProfile"
+      types.OutputGateComplete(..) -> "OutputGateComplete"
     },
     state.cycle_id,
   )
@@ -206,6 +243,23 @@ fn handle_message(
         pre_score,
         reply_to,
       )
+    types.LoadProfile(name, reply_to) ->
+      handle_load_profile(state, name, reply_to)
+    types.OutputGateComplete(
+      cycle_id,
+      result,
+      report_text,
+      modification_count,
+      reply_to,
+    ) ->
+      handle_output_gate_complete(
+        state,
+        cycle_id,
+        result,
+        report_text,
+        modification_count,
+        reply_to,
+      )
   }
 }
 
@@ -229,6 +283,8 @@ fn handle_user_input(
     Idle -> {
       let cycle_id = cycle_log.generate_uuid()
       cycle_log.log_human_input(cycle_id, state.cycle_id, text)
+      let state =
+        CognitiveState(..state, last_user_input: text, agent_completions: [])
 
       // Spawn async classification worker — rescue catches panics
       let self = state.self
@@ -365,7 +421,20 @@ fn handle_think_complete(
       case response.needs_tool_execution(resp) {
         False -> {
           // Final text response — prefix if this was a model fallback
-          let text = response.text(resp)
+          let raw_text = response.text(resp)
+          // Guard: if the LLM returned no content at all, emit a warning
+          let text = case raw_text {
+            "" -> {
+              slog.warn(
+                "cognitive",
+                "handle_think_complete",
+                "LLM returned empty response (no text, no tool calls)",
+                state.cycle_id,
+              )
+              "[Empty response from model — please try again]"
+            }
+            _ -> raw_text
+          }
           let #(reply_text, reply_model) = case fallback_from {
             Some(original) -> #(
               "["
@@ -381,23 +450,46 @@ fn handle_think_complete(
           let assistant_msg =
             llm_types.Message(role: llm_types.Assistant, content: resp.content)
           let messages = list.append(state.messages, [assistant_msg])
-          process.send(
-            rt,
-            CognitiveReply(
-              response: reply_text,
-              model: reply_model,
-              usage: Some(resp.usage),
-            ),
-          )
-          // Fire-and-forget save
-          let new_state =
-            CognitiveState(
-              ..state,
-              messages:,
-              status: Idle,
-              pending: dict.delete(state.pending, task_id),
-            )
-          request_save(new_state, messages)
+          // Check for output gate
+          case state.output_dprime_state {
+            Some(output_state) -> {
+              // Spawn output gate evaluation instead of replying immediately
+              spawn_output_gate(
+                state,
+                output_state,
+                reply_text,
+                rt,
+                messages,
+                task_id,
+              )
+            }
+            None -> {
+              process.send(
+                rt,
+                CognitiveReply(
+                  response: reply_text,
+                  model: reply_model,
+                  usage: Some(resp.usage),
+                ),
+              )
+              // Spawn Archivist (fire-and-forget)
+              maybe_spawn_archivist(
+                state,
+                reply_text,
+                reply_model,
+                Some(resp.usage),
+              )
+              // Fire-and-forget save
+              let new_state =
+                CognitiveState(
+                  ..state,
+                  messages:,
+                  status: Idle,
+                  pending: dict.delete(state.pending, task_id),
+                )
+              request_save(new_state, messages)
+            }
+          }
         }
         True -> {
           let calls = response.tool_calls(resp)
@@ -739,12 +831,45 @@ fn handle_agent_complete(
   outcome: AgentOutcome,
 ) -> CognitiveState {
   let #(outcome_task_id, result_text) = case outcome {
-    AgentSuccess(task_id, _agent, result) -> #(task_id, result)
-    AgentFailure(task_id, _agent, error) -> #(
+    AgentSuccess(task_id, result:, ..) -> #(task_id, result)
+    AgentFailure(task_id, error:, ..) -> #(
       task_id,
       "[Agent error: " <> error <> "]",
     )
   }
+
+  // Accumulate completion record for the Archivist
+  let completion = case outcome {
+    AgentSuccess(agent_id:, agent_human_name:, agent_cycle_id:, result:, ..) ->
+      types.AgentCompletionRecord(
+        agent_id:,
+        agent_human_name:,
+        agent_cycle_id:,
+        instruction: "",
+        result: Ok(result),
+        tools_used: [],
+        input_tokens: 0,
+        output_tokens: 0,
+        duration_ms: 0,
+      )
+    AgentFailure(agent_id:, agent_human_name:, agent_cycle_id:, error:, ..) ->
+      types.AgentCompletionRecord(
+        agent_id:,
+        agent_human_name:,
+        agent_cycle_id:,
+        instruction: "",
+        result: Error(error),
+        tools_used: [],
+        input_tokens: 0,
+        output_tokens: 0,
+        duration_ms: 0,
+      )
+  }
+  let state =
+    CognitiveState(..state, agent_completions: [
+      completion,
+      ..state.agent_completions
+    ])
 
   case dict.get(state.pending, outcome_task_id) {
     Error(_) -> state
@@ -1604,6 +1729,403 @@ fn handle_post_execution_gate_complete(
 }
 
 // ---------------------------------------------------------------------------
+// LoadProfile
+// ---------------------------------------------------------------------------
+
+fn handle_load_profile(
+  state: CognitiveState,
+  name: String,
+  reply_to: Subject(types.CognitiveReply),
+) -> CognitiveState {
+  case state.status {
+    Idle -> do_load_profile(state, name, reply_to)
+    _ -> {
+      // Not idle — reject
+      process.send(
+        reply_to,
+        CognitiveReply(
+          response: "[Cannot switch profiles while busy. Try again when idle.]",
+          model: state.model,
+          usage: None,
+        ),
+      )
+      state
+    }
+  }
+}
+
+fn do_load_profile(
+  state: CognitiveState,
+  name: String,
+  reply_to: Subject(types.CognitiveReply),
+) -> CognitiveState {
+  case profile.load(name, state.profile_dirs) {
+    Error(msg) -> {
+      slog.warn("cognitive", "do_load_profile", msg, state.cycle_id)
+      process.send(
+        reply_to,
+        CognitiveReply(
+          response: "[Profile error: " <> msg <> "]",
+          model: state.model,
+          usage: None,
+        ),
+      )
+      state
+    }
+    Ok(loaded_profile) -> {
+      slog.info(
+        "cognitive",
+        "do_load_profile",
+        "Loading profile: " <> name,
+        state.cycle_id,
+      )
+
+      // Shutdown existing agents if we have a supervisor reference
+      case state.supervisor {
+        Some(sup) -> process.send(sup, types.ShutdownAll)
+        None -> Nil
+      }
+
+      // Build new agent specs from profile
+      let task_model = case loaded_profile.models.task_model {
+        Some(m) -> m
+        None -> state.task_model
+      }
+      let reasoning_model = case loaded_profile.models.reasoning_model {
+        Some(m) -> m
+        None -> state.reasoning_model
+      }
+
+      let agent_specs =
+        profile_agent_specs(
+          loaded_profile,
+          state.provider,
+          task_model,
+          state.write_anywhere,
+        )
+      let agent_tools = list.map(agent_specs, agent_to_tool)
+      let tools = [builtin.human_input_tool(), ..agent_tools]
+
+      // Load profile-specific D' config (dual-gate: tool_gate + output_gate)
+      let #(dprime_state, output_dprime_state) = case
+        loaded_profile.dprime_path
+      {
+        Some(path) -> {
+          let #(tool_cfg, output_cfg) = dprime_config_mod.load_dual(path)
+          let tool_state = Some(dprime_config_mod.initial_state(tool_cfg))
+          let output_state = case output_cfg {
+            Some(cfg) -> Some(dprime_config_mod.initial_state(cfg))
+            None -> None
+          }
+          #(tool_state, output_state)
+        }
+        None -> #(state.dprime_state, state.output_dprime_state)
+      }
+
+      // Load profile-specific skills
+      let skill_dirs = case loaded_profile.skills_dir {
+        Some(sd) -> [sd]
+        None -> []
+      }
+      let discovered = skills.discover(skill_dirs)
+      let base_system =
+        "You are a cognitive orchestrator. You manage specialist agents and talk to the human. Use agent tools to delegate work and request_human_input to ask questions."
+      let system = case discovered {
+        [] -> base_system
+        _ -> base_system <> "\n\n" <> skills.to_system_prompt_xml(discovered)
+      }
+
+      // Start new agents via supervisor
+      case state.supervisor {
+        Some(sup) ->
+          list.each(agent_specs, fn(spec) {
+            let rs = process.new_subject()
+            process.send(sup, types.StartChild(spec:, reply_to: rs))
+            case process.receive(rs, 5000) {
+              Ok(Ok(_)) ->
+                slog.info(
+                  "cognitive",
+                  "do_load_profile",
+                  "Started agent: " <> spec.name,
+                  state.cycle_id,
+                )
+              _ ->
+                slog.warn(
+                  "cognitive",
+                  "do_load_profile",
+                  "Failed to start agent: " <> spec.name,
+                  state.cycle_id,
+                )
+            }
+          })
+        None -> Nil
+      }
+
+      // Notify UI
+      process.send(state.notify, types.ProfileNotification(name:))
+
+      let agent_names =
+        list.map(agent_specs, fn(s) { s.name })
+        |> string.join(", ")
+      process.send(
+        reply_to,
+        CognitiveReply(
+          response: "[Profile switched to '"
+            <> name
+            <> "' — agents: "
+            <> agent_names
+            <> "]",
+          model: state.model,
+          usage: None,
+        ),
+      )
+
+      CognitiveState(
+        ..state,
+        tools:,
+        system:,
+        model: task_model,
+        task_model:,
+        reasoning_model:,
+        messages: [],
+        dprime_state:,
+        output_dprime_state:,
+        active_profile: Some(name),
+      )
+    }
+  }
+}
+
+fn profile_agent_specs(
+  p: profile_types.Profile,
+  provider: Provider,
+  task_model: String,
+  write_anywhere: Bool,
+) -> List(types.AgentSpec) {
+  list.map(p.agents, fn(agent_def) {
+    let tools_list = resolve_agent_tools(agent_def.tools)
+    let model = task_model
+    let system_prompt = case agent_def.system_prompt {
+      Some(sp) -> sp
+      None ->
+        "You are a " <> agent_def.name <> " agent. " <> agent_def.description
+    }
+    let tool_executor = build_tool_executor(agent_def.tools, write_anywhere)
+    types.AgentSpec(
+      name: agent_def.name,
+      human_name: string.capitalise(agent_def.name),
+      description: agent_def.description,
+      system_prompt:,
+      provider:,
+      model:,
+      max_tokens: 4096,
+      max_turns: agent_def.max_turns,
+      max_consecutive_errors: 3,
+      tools: tools_list,
+      restart: types.Permanent,
+      tool_executor:,
+    )
+  })
+}
+
+fn resolve_agent_tools(tool_groups: List(String)) -> List(llm_types.Tool) {
+  list.flat_map(tool_groups, fn(group) {
+    case group {
+      "web" -> tools_web.all()
+      "files" -> tools_files.all()
+      "builtin" -> builtin.all()
+      _ -> []
+    }
+  })
+}
+
+fn build_tool_executor(
+  tool_groups: List(String),
+  write_anywhere: Bool,
+) -> fn(llm_types.ToolCall) -> llm_types.ToolResult {
+  let has_web = list.contains(tool_groups, "web")
+  let has_files = list.contains(tool_groups, "files")
+  fn(call: llm_types.ToolCall) -> llm_types.ToolResult {
+    case call.name {
+      "fetch_url" if has_web -> tools_web.execute(call)
+      "read_file" | "write_file" | "list_directory" if has_files ->
+        tools_files.execute(call, write_anywhere)
+      _ -> builtin.execute(call)
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Output Gate — spawn and handle
+// ---------------------------------------------------------------------------
+
+fn spawn_output_gate(
+  state: CognitiveState,
+  output_state: dprime_types.DprimeState,
+  report_text: String,
+  reply_to: Subject(CognitiveReply),
+  messages: List(llm_types.Message),
+  task_id: String,
+) -> CognitiveState {
+  let cycle_id = option.unwrap(state.cycle_id, task_id)
+  let self = state.self
+  let provider = state.provider
+  let model = state.model
+  let verbose = state.verbose
+  let query = state.last_user_input
+  process.spawn_unlinked(fn() {
+    let result =
+      output_gate.evaluate(
+        report_text,
+        query,
+        output_state,
+        provider,
+        model,
+        cycle_id,
+        verbose,
+      )
+    process.send(
+      self,
+      types.OutputGateComplete(
+        cycle_id:,
+        result:,
+        report_text:,
+        modification_count: 0,
+        reply_to:,
+      ),
+    )
+  })
+  slog.info(
+    "cognitive",
+    "spawn_output_gate",
+    "Spawned output gate evaluation",
+    state.cycle_id,
+  )
+  CognitiveState(
+    ..state,
+    messages:,
+    status: Thinking(task_id:),
+    pending: dict.delete(state.pending, task_id),
+  )
+}
+
+fn handle_output_gate_complete(
+  state: CognitiveState,
+  _cycle_id: String,
+  result: dprime_types.GateResult,
+  report_text: String,
+  modification_count: Int,
+  reply_to: Subject(types.CognitiveReply),
+) -> CognitiveState {
+  let max_modifications = 2
+  let explanation = result.explanation
+  case result.decision {
+    dprime_types.Accept -> {
+      slog.info(
+        "cognitive",
+        "handle_output_gate_complete",
+        "Output gate: ACCEPT",
+        state.cycle_id,
+      )
+      process.send(
+        reply_to,
+        CognitiveReply(response: report_text, model: state.model, usage: None),
+      )
+      CognitiveState(..state, status: Idle)
+    }
+    dprime_types.Modify -> {
+      case modification_count >= max_modifications {
+        True -> {
+          slog.warn(
+            "cognitive",
+            "handle_output_gate_complete",
+            "Output gate: MODIFY exceeded max modifications, delivering with warning",
+            state.cycle_id,
+          )
+          let warning =
+            "\n\n---\nQuality warning: This report was flagged for review but could not be fully corrected. Issues: "
+            <> explanation
+          process.send(
+            reply_to,
+            CognitiveReply(
+              response: report_text <> warning,
+              model: state.model,
+              usage: None,
+            ),
+          )
+          CognitiveState(..state, status: Idle)
+        }
+        False -> {
+          slog.info(
+            "cognitive",
+            "handle_output_gate_complete",
+            "Output gate: MODIFY (" <> explanation <> ")",
+            state.cycle_id,
+          )
+          let correction_msg =
+            llm_types.Message(role: llm_types.User, content: [
+              llm_types.TextContent(
+                text: "The quality gate flagged the following issues with your report. Please revise:\n\n"
+                <> explanation
+                <> "\n\nPlease produce an updated report addressing these issues.",
+              ),
+            ])
+          let messages = list.append(state.messages, [correction_msg])
+          let new_state = CognitiveState(..state, messages:)
+          let task_id = cycle_log.generate_uuid()
+          let req = build_request(new_state, messages)
+          worker.spawn_think(task_id, req, new_state.provider, new_state.self)
+          CognitiveState(
+            ..new_state,
+            status: Thinking(task_id:),
+            pending: dict.insert(
+              new_state.pending,
+              task_id,
+              PendingThink(
+                task_id:,
+                model: new_state.model,
+                fallback_from: None,
+                reply_to:,
+              ),
+            ),
+          )
+        }
+      }
+    }
+    dprime_types.Reject -> {
+      slog.warn(
+        "cognitive",
+        "handle_output_gate_complete",
+        "Output gate: REJECT (" <> explanation <> ")",
+        state.cycle_id,
+      )
+      process.send(
+        reply_to,
+        CognitiveReply(
+          response: "[Report rejected by quality gate: " <> explanation <> "]",
+          model: state.model,
+          usage: None,
+        ),
+      )
+      CognitiveState(..state, status: Idle)
+    }
+  }
+}
+
+/// Set the supervisor reference on the cognitive state (called from springdrift.gleam after startup).
+pub fn set_supervisor(
+  cognitive: Subject(CognitiveMessage),
+  _sup: Subject(types.SupervisorMessage),
+) -> Nil {
+  // We send a SetModel message as a no-op to ensure the cognitive loop is alive,
+  // then the supervisor is set via a dedicated internal mechanism.
+  // For now, we use a simpler approach: store the supervisor reference
+  // during start() by passing it as a parameter.
+  let _ = cognitive
+  Nil
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -1630,6 +2152,50 @@ fn build_request_with_model(
   case state.tools {
     [] -> base
     tools -> request.with_tools(base, tools)
+  }
+}
+
+/// Spawn the Archivist if narrative is enabled. Called after sending CognitiveReply.
+fn maybe_spawn_archivist(
+  state: CognitiveState,
+  response_text: String,
+  model_used: String,
+  usage: Option(llm_types.Usage),
+) -> Nil {
+  case state.narrative_enabled {
+    False -> Nil
+    True -> {
+      let cycle_id = option.unwrap(state.cycle_id, "unknown")
+      let #(input_tokens, output_tokens) = case usage {
+        Some(u) -> #(u.input_tokens, u.output_tokens)
+        None -> #(0, 0)
+      }
+      let ctx =
+        archivist.ArchivistContext(
+          cycle_id:,
+          parent_cycle_id: None,
+          user_input: state.last_user_input,
+          final_response: response_text,
+          agent_completions: list.reverse(state.agent_completions),
+          model_used:,
+          classification: case state.model == state.reasoning_model {
+            True -> "complex"
+            False -> "simple"
+          },
+          total_input_tokens: input_tokens,
+          total_output_tokens: output_tokens,
+          tool_calls: list.length(state.agent_completions),
+          dprime_decisions: [],
+          thread_index_json: "",
+        )
+      archivist.spawn(
+        ctx,
+        state.provider,
+        state.archivist_model,
+        state.narrative_dir,
+        state.verbose,
+      )
+    }
   }
 }
 

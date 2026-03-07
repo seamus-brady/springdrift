@@ -17,6 +17,7 @@ pub fn spec(provider: Provider, model: String) -> AgentSpec {
 
   AgentSpec(
     name: "researcher",
+    human_name: "Researcher",
     description: "Gather information by reading files, browsing directories, fetching URLs, and reading skill docs",
     system_prompt:,
     provider:,

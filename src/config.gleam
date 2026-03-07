@@ -70,6 +70,16 @@ pub type AppConfig {
     // D' safety system
     dprime_enabled: Option(Bool),
     dprime_config: Option(String),
+    // Narrative
+    narrative_enabled: Option(Bool),
+    narrative_dir: Option(String),
+    archivist_model: Option(String),
+    narrative_threading: Option(Bool),
+    narrative_summaries: Option(Bool),
+    narrative_summary_schedule: Option(String),
+    // Profiles
+    profiles_dirs: Option(List(String)),
+    default_profile: Option(String),
   )
 }
 
@@ -105,6 +115,14 @@ pub fn default() -> AppConfig {
     gui: None,
     dprime_enabled: None,
     dprime_config: None,
+    narrative_enabled: None,
+    narrative_dir: None,
+    archivist_model: None,
+    narrative_threading: None,
+    narrative_summaries: None,
+    narrative_summary_schedule: None,
+    profiles_dirs: None,
+    default_profile: None,
   )
 }
 
@@ -135,6 +153,32 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     gui: option.or(override_cfg.gui, base.gui),
     dprime_enabled: option.or(override_cfg.dprime_enabled, base.dprime_enabled),
     dprime_config: option.or(override_cfg.dprime_config, base.dprime_config),
+    narrative_enabled: option.or(
+      override_cfg.narrative_enabled,
+      base.narrative_enabled,
+    ),
+    narrative_dir: option.or(override_cfg.narrative_dir, base.narrative_dir),
+    archivist_model: option.or(
+      override_cfg.archivist_model,
+      base.archivist_model,
+    ),
+    narrative_threading: option.or(
+      override_cfg.narrative_threading,
+      base.narrative_threading,
+    ),
+    narrative_summaries: option.or(
+      override_cfg.narrative_summaries,
+      base.narrative_summaries,
+    ),
+    narrative_summary_schedule: option.or(
+      override_cfg.narrative_summary_schedule,
+      base.narrative_summary_schedule,
+    ),
+    profiles_dirs: option.or(override_cfg.profiles_dirs, base.profiles_dirs),
+    default_profile: option.or(
+      override_cfg.default_profile,
+      base.default_profile,
+    ),
   )
 }
 
@@ -218,6 +262,21 @@ pub fn to_string(cfg: AppConfig) -> String {
       }
     }),
     option.map(cfg.dprime_config, fn(v) { "dprime_config: " <> v }),
+    // Narrative
+    option.map(cfg.narrative_enabled, fn(v) {
+      "narrative_enabled: "
+      <> case v {
+        True -> "true"
+        False -> "false"
+      }
+    }),
+    option.map(cfg.narrative_dir, fn(v) { "narrative_dir: " <> v }),
+    option.map(cfg.archivist_model, fn(v) { "archivist_model: " <> v }),
+    // Profile
+    option.map(cfg.default_profile, fn(v) { "profile: " <> v }),
+    option.map(cfg.profiles_dirs, fn(dirs) {
+      "profiles_dirs: " <> string.join(dirs, ", ")
+    }),
   ]
   |> list.filter_map(fn(x) { option.to_result(x, Nil) })
   |> string.join("\n")
@@ -289,6 +348,26 @@ fn do_parse_args(args: List(String), acc: AppConfig) -> AppConfig {
       do_parse_args(rest, AppConfig(..acc, dprime_enabled: Some(False)))
     ["--dprime-config", path, ..rest] ->
       do_parse_args(rest, AppConfig(..acc, dprime_config: Some(path)))
+    // Narrative
+    ["--narrative", ..rest] ->
+      do_parse_args(rest, AppConfig(..acc, narrative_enabled: Some(True)))
+    ["--no-narrative", ..rest] ->
+      do_parse_args(rest, AppConfig(..acc, narrative_enabled: Some(False)))
+    ["--narrative-dir", path, ..rest] ->
+      do_parse_args(rest, AppConfig(..acc, narrative_dir: Some(path)))
+    // Profiles
+    ["--profile", name, ..rest] ->
+      do_parse_args(rest, AppConfig(..acc, default_profile: Some(name)))
+    ["--profiles-dir", path, ..rest] ->
+      case acc.profiles_dirs {
+        None ->
+          do_parse_args(rest, AppConfig(..acc, profiles_dirs: Some([path])))
+        Some(existing) ->
+          do_parse_args(
+            rest,
+            AppConfig(..acc, profiles_dirs: Some(list.append(existing, [path]))),
+          )
+      }
     [_, ..rest] -> do_parse_args(rest, acc)
   }
 }
@@ -340,6 +419,47 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     gui: get_str("gui"),
     dprime_enabled: get_bool("dprime_enabled"),
     dprime_config: get_str("dprime_config"),
+    narrative_enabled: case tom.get_bool(table, ["narrative", "enabled"]) {
+      Ok(v) -> Some(v)
+      Error(_) -> None
+    },
+    narrative_dir: case tom.get_string(table, ["narrative", "directory"]) {
+      Ok(v) -> Some(v)
+      Error(_) -> None
+    },
+    archivist_model: case
+      tom.get_string(table, ["narrative", "archivist_model"])
+    {
+      Ok(v) -> Some(v)
+      Error(_) -> None
+    },
+    narrative_threading: case tom.get_bool(table, ["narrative", "threading"]) {
+      Ok(v) -> Some(v)
+      Error(_) -> None
+    },
+    narrative_summaries: case tom.get_bool(table, ["narrative", "summaries"]) {
+      Ok(v) -> Some(v)
+      Error(_) -> None
+    },
+    narrative_summary_schedule: case
+      tom.get_string(table, ["narrative", "summary_schedule"])
+    {
+      Ok(v) -> Some(v)
+      Error(_) -> None
+    },
+    default_profile: get_str("profile"),
+    profiles_dirs: case tom.get_array(table, ["profiles_dirs"]) {
+      Error(_) -> None
+      Ok(items) ->
+        Some(
+          list.filter_map(items, fn(item) {
+            case item {
+              tom.String(s) -> Ok(s)
+              _ -> Error(Nil)
+            }
+          }),
+        )
+    },
   )
 }
 

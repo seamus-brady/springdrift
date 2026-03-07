@@ -30,6 +30,7 @@ pub fn spec(
 
   AgentSpec(
     name: "coder",
+    human_name: "Coder",
     description: "Write, modify, and test code using file operations and shell commands in a sandbox",
     system_prompt:,
     provider:,

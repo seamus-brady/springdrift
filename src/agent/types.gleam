@@ -19,12 +19,21 @@ pub type RestartStrategy {
 }
 
 // ---------------------------------------------------------------------------
+// Agent identity — human-readable name + GUID for tracking
+// ---------------------------------------------------------------------------
+
+pub type AgentIdentity {
+  AgentIdentity(human_name: String, guid: String, agent_id: String)
+}
+
+// ---------------------------------------------------------------------------
 // Agent spec — pure data describing how to start an agent
 // ---------------------------------------------------------------------------
 
 pub type AgentSpec {
   AgentSpec(
     name: String,
+    human_name: String,
     description: String,
     system_prompt: String,
     provider: Provider,
@@ -58,8 +67,40 @@ pub type AgentTask {
 // ---------------------------------------------------------------------------
 
 pub type AgentOutcome {
-  AgentSuccess(task_id: String, agent: String, result: String)
-  AgentFailure(task_id: String, agent: String, error: String)
+  AgentSuccess(
+    task_id: String,
+    agent: String,
+    agent_id: String,
+    agent_human_name: String,
+    agent_cycle_id: String,
+    result: String,
+  )
+  AgentFailure(
+    task_id: String,
+    agent: String,
+    agent_id: String,
+    agent_human_name: String,
+    agent_cycle_id: String,
+    error: String,
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Agent completion record — accumulated in cognitive loop for Archivist
+// ---------------------------------------------------------------------------
+
+pub type AgentCompletionRecord {
+  AgentCompletionRecord(
+    agent_id: String,
+    agent_human_name: String,
+    agent_cycle_id: String,
+    instruction: String,
+    result: Result(String, String),
+    tools_used: List(String),
+    input_tokens: Int,
+    output_tokens: Int,
+    duration_ms: Int,
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -127,6 +168,14 @@ pub type CognitiveMessage {
     cycle_id: String,
     result: dprime_types.GateResult,
     pre_score: Float,
+    reply_to: Subject(CognitiveReply),
+  )
+  LoadProfile(name: String, reply_to: Subject(CognitiveReply))
+  OutputGateComplete(
+    cycle_id: String,
+    result: dprime_types.GateResult,
+    report_text: String,
+    modification_count: Int,
     reply_to: Subject(CognitiveReply),
   )
 }
@@ -210,4 +259,5 @@ pub type Notification {
   SaveWarning(message: String)
   ToolCalling(name: String)
   SafetyGateNotice(decision: String, score: Float, explanation: String)
+  ProfileNotification(name: String)
 }

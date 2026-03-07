@@ -14,6 +14,7 @@ When you complete your task, respond with a concise summary of your plan. Includ
 pub fn spec(provider: Provider, model: String) -> AgentSpec {
   AgentSpec(
     name: "planner",
+    human_name: "Planner",
     description: "Break down complex goals into structured, actionable plans with clear steps and dependencies",
     system_prompt:,
     provider:,

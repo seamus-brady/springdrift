@@ -7,10 +7,12 @@ import gleam/erlang/process.{type Selector, type Subject}
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
 import gleam/int
+import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
 import llm/types.{type Message, Assistant, TextContent, User}
 import mist.{type Connection, type ResponseData}
+import narrative/log as narrative_log
 import slog
 import web/html
 import web/protocol
@@ -22,6 +24,7 @@ import web/protocol
 type WsMsg {
   GotReply(agent_types.CognitiveReply)
   GotNotification(agent_types.Notification)
+  SendProfiles(List(String))
 }
 
 // ---------------------------------------------------------------------------
@@ -32,6 +35,7 @@ type WsState {
   WsState(
     cognitive: Subject(agent_types.CognitiveMessage),
     reply_subject: Subject(agent_types.CognitiveReply),
+    narrative_dir: String,
   )
 }
 
@@ -47,6 +51,8 @@ pub fn start(
   _reasoning_model: String,
   initial_messages: List(Message),
   port: Int,
+  narrative_dir: String,
+  available_profiles: List(String),
 ) -> Nil {
   slog.info(
     "gui",
@@ -56,7 +62,14 @@ pub fn start(
   )
   let assert Ok(_) =
     fn(req: Request(Connection)) -> Response(ResponseData) {
-      handle_request(req, cognitive, notify, initial_messages)
+      handle_request(
+        req,
+        cognitive,
+        notify,
+        initial_messages,
+        narrative_dir,
+        available_profiles,
+      )
     }
     |> mist.new
     |> mist.port(port)
@@ -74,6 +87,8 @@ fn handle_request(
   cognitive: Subject(agent_types.CognitiveMessage),
   notify: Subject(agent_types.Notification),
   initial_messages: List(Message),
+  narrative_dir: String,
+  available_profiles: List(String),
 ) -> Response(ResponseData) {
   case request.path_segments(req) {
     // Serve the HTML page
@@ -86,7 +101,15 @@ fn handle_request(
     ["ws"] ->
       mist.websocket(
         request: req,
-        on_init: fn(_conn) { ws_on_init(cognitive, notify, initial_messages) },
+        on_init: fn(_conn) {
+          ws_on_init(
+            cognitive,
+            notify,
+            initial_messages,
+            narrative_dir,
+            available_profiles,
+          )
+        },
         on_close: fn(_state) { Nil },
         handler: ws_handler,
       )
@@ -106,6 +129,8 @@ fn ws_on_init(
   cognitive: Subject(agent_types.CognitiveMessage),
   notify: Subject(agent_types.Notification),
   initial_messages: List(Message),
+  narrative_dir: String,
+  available_profiles: List(String),
 ) -> #(WsState, option.Option(Selector(WsMsg))) {
   // Create a reply subject for this connection
   let reply_subject: Subject(agent_types.CognitiveReply) = process.new_subject()
@@ -116,14 +141,17 @@ fn ws_on_init(
     |> process.select_map(reply_subject, fn(cr) { GotReply(cr) })
     |> process.select_map(notify, fn(n) { GotNotification(n) })
 
-  let state = WsState(cognitive:, reply_subject:)
+  // Internal subject for sending profiles list
+  let profiles_subject: Subject(List(String)) = process.new_subject()
+  let selector =
+    selector
+    |> process.select_map(profiles_subject, fn(names) { SendProfiles(names) })
 
-  // We'll replay initial messages after init via a Custom message hack —
-  // but mist calls on_init before the handler is ready. Instead, we send
-  // initial messages as a side effect that will arrive as GotReply messages.
-  // Actually, the simplest approach: send synthetic replies to the reply_subject
-  // from a spawned process after a brief delay.
+  let state = WsState(cognitive:, reply_subject:, narrative_dir:)
+
+  // Replay initial messages and send profiles after init
   let replay_msgs = initial_messages
+  let profiles = available_profiles
   process.spawn_unlinked(fn() {
     // Small delay to ensure the WS handler is ready to receive Custom messages
     process.sleep(50)
@@ -143,6 +171,8 @@ fn ws_on_init(
         User -> Nil
       }
     })
+    // Send available profiles
+    process.send(profiles_subject, profiles)
   })
 
   #(state, Some(selector))
@@ -184,6 +214,32 @@ fn ws_handler(
             )
           mist.continue(state)
         }
+        Ok(protocol.RequestNarrativeData) -> {
+          let entries = narrative_log.load_all(state.narrative_dir)
+          let entries_json =
+            json.to_string(json.array(entries, narrative_log.encode_entry))
+          let _ =
+            mist.send_text_frame(
+              conn,
+              protocol.encode_server_message(protocol.NarrativeData(
+                entries_json:,
+              )),
+            )
+          mist.continue(state)
+        }
+        Ok(protocol.RequestLoadProfile(name:)) -> {
+          // Send thinking indicator
+          let _ =
+            mist.send_text_frame(
+              conn,
+              protocol.encode_server_message(protocol.Thinking),
+            )
+          process.send(
+            state.cognitive,
+            agent_types.LoadProfile(name:, reply_to: state.reply_subject),
+          )
+          mist.continue(state)
+        }
         Ok(protocol.RequestRewind(index:)) -> {
           let cycles = cycle_log.load_cycles()
           let messages = cycle_log.messages_for_rewind(cycles, index)
@@ -217,6 +273,13 @@ fn ws_handler(
           model: reply.model,
           usage: reply.usage,
         )
+      let _ = mist.send_text_frame(conn, protocol.encode_server_message(msg))
+      mist.continue(state)
+    }
+
+    // Send profiles list to client
+    mist.Custom(SendProfiles(names)) -> {
+      let msg = protocol.ProfilesAvailable(names:)
       let _ = mist.send_text_frame(conn, protocol.encode_server_message(msg))
       mist.continue(state)
     }
@@ -256,6 +319,7 @@ fn notification_to_server_message(
     agent_types.SaveWarning(message:) -> protocol.SaveNotification(message:)
     agent_types.SafetyGateNotice(decision:, score:, explanation:) ->
       protocol.SafetyNotification(decision:, score:, explanation:)
+    agent_types.ProfileNotification(name:) -> protocol.ProfileLoaded(name:)
   }
 }
 

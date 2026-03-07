@@ -8,7 +8,7 @@ import gleam/dynamic/decode
 import gleam/int
 import gleam/json
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{type Option, None, Some}
 import simplifile
 import slog
 
@@ -127,6 +127,72 @@ pub fn initial_state(config: DprimeConfig) -> DprimeState {
 // ---------------------------------------------------------------------------
 // JSON loading
 // ---------------------------------------------------------------------------
+
+/// Load dual-gate D' config from a JSON file.
+/// Returns #(tool_gate_config, output_gate_config_or_none).
+/// If the JSON has "tool_gate" and "output_gate" sections, parses both.
+/// Otherwise treats the entire JSON as a single (tool gate) config.
+pub fn load_dual(path: String) -> #(DprimeConfig, Option(DprimeConfig)) {
+  slog.debug(
+    "dprime/config",
+    "load_dual",
+    "Loading dual-gate D' config from " <> path,
+    None,
+  )
+  case simplifile.read(path) {
+    Error(_) -> {
+      slog.info(
+        "dprime/config",
+        "load_dual",
+        "Config file not found, using defaults (no output gate)",
+        None,
+      )
+      #(default(), None)
+    }
+    Ok(contents) -> {
+      // Try dual-gate format first
+      case json.parse(contents, dual_gate_decoder()) {
+        Ok(#(tool_cfg, output_cfg)) -> {
+          slog.info(
+            "dprime/config",
+            "load_dual",
+            "Loaded dual-gate config: tool_gate ("
+              <> int.to_string(list.length(tool_cfg.features))
+              <> " features), output_gate ("
+              <> int.to_string(list.length(output_cfg.features))
+              <> " features)",
+            None,
+          )
+          #(tool_cfg, Some(output_cfg))
+        }
+        Error(_) ->
+          // Fall back to single-gate format
+          case json.parse(contents, config_decoder()) {
+            Ok(cfg) -> {
+              slog.info(
+                "dprime/config",
+                "load_dual",
+                "Loaded single-gate config with "
+                  <> int.to_string(list.length(cfg.features))
+                  <> " features",
+                None,
+              )
+              #(cfg, None)
+            }
+            Error(_) -> {
+              slog.warn(
+                "dprime/config",
+                "load_dual",
+                "Config parse failed, using defaults",
+                None,
+              )
+              #(default(), None)
+            }
+          }
+      }
+    }
+  }
+}
 
 /// Load D' config from a JSON file. Falls back to default() on any error.
 pub fn load(path: String) -> DprimeConfig {
@@ -308,4 +374,10 @@ fn parse_importance(s: String) -> types.Importance {
     "low" -> Low
     _ -> Medium
   }
+}
+
+fn dual_gate_decoder() -> decode.Decoder(#(DprimeConfig, DprimeConfig)) {
+  use tool_gate <- decode.field("tool_gate", config_decoder())
+  use output_gate <- decode.field("output_gate", config_decoder())
+  decode.success(#(tool_gate, output_gate))
 }

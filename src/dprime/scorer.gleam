@@ -195,13 +195,18 @@ pub fn build_scoring_prompt(
 /// Parse LLM response text into forecasts.
 /// Handles markdown code fences and whitespace.
 pub fn parse_forecasts(text: String) -> Result(List(Forecast), Nil) {
-  let cleaned = strip_markdown_fences(string.trim(text))
+  let cleaned =
+    strip_markdown_fences(string.trim(text))
+    |> sanitize_json
   let decoder = decode.list(forecast_decoder())
   case json.parse(cleaned, decoder) {
     Ok(forecasts) -> Ok(list.map(forecasts, clamp_forecast))
     Error(_) -> Error(Nil)
   }
 }
+
+@external(erlang, "springdrift_ffi", "sanitize_json")
+fn sanitize_json(json_text: String) -> String
 
 /// Generate default (all-zero) forecasts for all features.
 pub fn default_forecasts(features: List(Feature)) -> List(Forecast) {

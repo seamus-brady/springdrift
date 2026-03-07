@@ -5,8 +5,8 @@
 Springdrift is a terminal-UI chatbot written in **Gleam** (compiled to Erlang/OTP).
 It implements a [12-Factor Agents](https://github.com/humanlayer/12-factor-agents)
 style ReAct loop: the LLM reasons, calls tools, observes results, and repeats until
-it can give a final answer. The TUI runs in alternate-screen raw mode with a two-tab
-interface (Chat and Log).
+it can give a final answer. The TUI runs in alternate-screen raw mode with a three-tab
+interface (Chat, Log, and Narrative).
 
 ## Stack
 
@@ -55,9 +55,17 @@ src/
 │   ├── config.gleam           D' config loading from JSON, sensible defaults
 │   └── meta.gleam             History ring buffer, stall detection, threshold tightening
 │
+├── narrative/                 Prime Narrative — immutable first-person agent memory
+│   ├── types.gleam            NarrativeEntry, Intent, Outcome, DelegationStep, Thread, Metrics
+│   ├── log.gleam              Append-only JSON-L log, full encode/decode, query functions
+│   ├── archivist.gleam        Async LLM-based narrative generation after each cycle
+│   ├── threading.gleam        Overlap scoring, thread assignment, continuity notes
+│   ├── summary.gleam          Periodic LLM summaries (weekly/monthly) of narrative entries
+│   └── cycle_tree.gleam       Hierarchical CycleNode tree from parent_cycle_id links
+│
 ├── tools/builtin.gleam        Built-in tools: calculator, get_current_datetime,
 │                              request_human_input, read_skill
-├── tui.gleam                  Alternate-screen TUI; Chat tab + Log tab (system log entries)
+├── tui.gleam                  Alternate-screen TUI; Chat + Log + Narrative tabs
 │
 ├── web/                       Web chat GUI
 │   ├── gui.gleam              Mist HTTP + WebSocket server, cognitive bridge
@@ -125,6 +133,7 @@ Long-lived processes and per-turn workers:
 | Stdin reader | App | Blocking `read_char` loop → `StdinByte` messages to selector |
 | Think worker | Per turn | Blocking LLM call with retry + exponential backoff |
 | Agent processes | App | Each specialist agent runs its own react loop |
+| Archivist | Per turn | Async narrative generation after reply (spawn_unlinked) |
 
 All cross-process communication uses typed `Subject(T)` channels. No shared mutable
 state, no locks. The cognitive loop's notification channel uses pure data types
@@ -151,6 +160,12 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `gui` | `--gui` | tui | GUI mode: `tui` (terminal) or `web` (browser on port 8080) |
 | `dprime_enabled` | `--dprime` / `--no-dprime` | False | Enable D' safety evaluation before tool dispatch |
 | `dprime_config` | `--dprime-config` | built-in defaults | Path to D' config JSON file |
+| `narrative_enabled` | `--narrative` / `--no-narrative` | False | Enable Prime Narrative logging after each cycle |
+| `narrative_dir` | `--narrative-dir` | `prime-narrative` | Directory for narrative JSON-L files |
+| `archivist_model` | — | task_model | Model used by the Archivist for narrative generation |
+| `narrative_threading` | — | True | Enable automatic thread assignment |
+| `narrative_summaries` | — | False | Enable periodic narrative summaries |
+| `narrative_summary_schedule` | — | `"weekly"` | Summary schedule: `"weekly"` or `"monthly"` |
 
 ## Patterns to follow
 
@@ -195,6 +210,14 @@ All take `(module, function, message, cycle_id)`. Logs write to `logs/YYYY-MM-DD
 `slog.load_entries()` to read back entries for UI display. Named `slog` (not `logger`)
 to avoid collision with Erlang's built-in `logger` module.
 
+**Prime Narrative** — when `narrative_enabled` is true, `maybe_spawn_archivist` fires
+after each final reply. The Archivist runs `spawn_unlinked` — failures never affect the
+user. It generates a `NarrativeEntry` via a single LLM call, assigns a thread via
+`threading.assign_thread`, and appends to `prime-narrative/YYYY-MM-DD.jsonl`. Zero
+overhead when disabled. Thread assignment uses overlap scoring (location=3, domain=2,
+keyword=1; threshold=4). `AgentCompletionRecord` accumulates in `CognitiveState` and
+resets each `handle_user_input`.
+
 ## Config file format
 
 Local `.springdrift.toml` (or `~/.config/springdrift/config.toml`). All fields are optional; TOML `#` comments are fully supported:
@@ -220,6 +243,15 @@ skills_dirs    = ["/path/to/skills"] # Extra skill directories
 # D' safety system
 dprime_enabled = false               # Enable D' safety gate before tool dispatch
 dprime_config  = "dprime-config.json" # Path to D' config JSON (omit for built-in defaults)
+
+# Prime Narrative
+[narrative]
+enabled          = false             # Enable narrative logging after each cycle
+dir              = "prime-narrative" # Directory for narrative JSON-L files
+archivist_model  = "claude-haiku-4-5-20251001" # Model for Archivist LLM calls
+threading        = true              # Auto-assign threads by overlap scoring
+summaries        = false             # Enable periodic summaries
+summary_schedule = "weekly"          # "weekly" or "monthly"
 ```
 
 CLI flags override config files. `--skills-dir` is repeatable and appends to the list.
