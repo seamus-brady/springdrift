@@ -1640,3 +1640,195 @@ info, summary text, and delegation chain with agent names and outcomes.
 | Pure `do_assign` + I/O `assign_thread` | Testable core logic separated from file I/O. All 14 threading tests are pure. |
 | `AgentCompletionRecord` with zeros | Framework doesn't currently track per-agent tokens/duration. Zeros are acceptable placeholders; the Archivist still gets useful data from agent_id, human_name, and result. |
 | Tab cycle (not numbered tabs) | Three tabs still fit a simple Tab-key cycle. F-key shortcuts would add complexity without value at this scale. |
+
+---
+
+### Profile System + Knowledge Agent (Mar 7)
+
+**Files added:** `src/profile.gleam`, `src/profile/types.gleam`, `src/agents/writer.gleam`,
+`profiles/analyst/config.toml`, `profiles/analyst/dprime.json`,
+`profiles/analyst/skills/{cite-sources,fact-check,summarize}/SKILL.md`
+
+**Files modified:** `src/config.gleam`, `src/agent/types.gleam`, `src/agent/cognitive.gleam`,
+`src/springdrift.gleam`, `src/tui.gleam`, `src/web/gui.gleam`, `src/web/html.gleam`,
+`src/web/protocol.gleam`
+
+#### Profile types and discovery
+
+`profile/types.gleam` defines the complete profile schema:
+- `Profile` — name, description, dir, models, agents, dprime_path, schedule_path, skills_dir
+- `ProfileModels` — optional task_model and reasoning_model overrides
+- `AgentDef` — name, description, tools, max_turns, system_prompt
+- `DeliveryConfig` — FileDelivery | WebhookDelivery | WebSocketDelivery
+- `ScheduleTaskConfig` — name, query, interval_ms, start_at, delivery, only_if_changed
+
+`profile.gleam` handles discovery (`discover/1`), loading (`load/2`), and schedule
+parsing (`parse_schedule/1`). Profiles are TOML-based. Schedule tasks use human-friendly
+interval parsing (e.g. `"1h"`, `"30m"`, `"2d"`).
+
+#### Hot-swappable profile loading
+
+`CognitiveMessage` gained `LoadProfile(name, reply_to)` variant. The cognitive loop
+handles it via `do_load_profile`, which swaps models, D' state, and output gate state
+at runtime. `ProfileNotification(name)` signals the UI.
+
+#### Dual-gate D' config
+
+`dprime/config.gleam` gained `load_dual/1` — tries dual-gate format first
+(`{"tool_gate": {...}, "output_gate": {...}}`), falls back to single-gate.
+Returns `#(DprimeConfig, Option(DprimeConfig))`.
+
+---
+
+### D' Output Gate (Mar 7)
+
+**Files added:** `src/dprime/output_gate.gleam`
+
+**Files modified:** `src/agent/cognitive.gleam`
+
+Second evaluation point checking finished reports for quality before delivery.
+Uses same D' scoring infrastructure but with output-focused prompts targeting:
+unsourced claims, causal overreach, stale data, certainty overstatement.
+
+`evaluate/7` runs the full D' pipeline (scorer → engine → gate_decision) with
+output-specific features. `build_output_scoring_prompt` uses calibration examples
+tuned for report quality rather than tool safety.
+
+Cognitive loop integration: `handle_think_complete` checks `output_dprime_state`;
+if Some, spawns output gate instead of replying immediately. `OutputGateComplete`
+message carries result + report text + modification count. Bounded modification
+loop (max 2 iterations) — Accept delivers, Modify re-prompts, Reject returns error.
+
+---
+
+### BEAM-Native Task Scheduler (Mar 7)
+
+**Files added:** `src/scheduler/types.gleam`, `src/scheduler/runner.gleam`,
+`src/scheduler/delivery.gleam`, `src/scheduler/persist.gleam`
+
+#### Scheduler process
+
+`scheduler/runner.gleam` implements an OTP process that:
+1. Converts `ScheduleTaskConfig` list to `ScheduledJob` state
+2. Schedules initial ticks via `process.send_after`
+3. Event loop handles: `Tick` → spawn job, `JobComplete` → deliver + reschedule,
+   `JobFailed` → increment error count + reschedule, `StopAll`, `GetStatus`
+
+Named `runner.gleam` (not `scheduler.gleam`) to avoid collision with Erlang's built-in
+`scheduler` module.
+
+#### Delivery
+
+`scheduler/delivery.gleam` handles report delivery:
+- **File**: creates directory, generates timestamped filename (sanitized), writes content
+- **Webhook/WebSocket**: stubs returning Error (not yet implemented)
+
+#### Checkpoint persistence
+
+`scheduler/persist.gleam` provides atomic state persistence:
+- `save/2` — encodes jobs as JSON, writes to tmp file, renames atomically via FFI
+- `load/1` — decodes checkpoint with full status serialization
+- `reconcile/2` — aligns checkpoint jobs with current config names (removes obsolete,
+  preserves run state for matching jobs)
+
+#### Design decisions
+
+| Decision | Rationale |
+|---|---|
+| `process.send_after` not cron | BEAM-native timing avoids external dependencies. Jobs fire at interval after completion, not wall-clock aligned. |
+| Atomic checkpoint writes | tmp + rename prevents half-written state on crash. Uses existing `file_rename` FFI. |
+| `reconcile` not merge | Config is source of truth. Checkpoint preserves run counts/status but config defines what jobs exist. |
+| Module name `runner` | Gleam compiles to Erlang; `scheduler.gleam` would collide with Erlang's `scheduler` module. |
+
+---
+
+### Production Hardening (Mar 7)
+
+Implemented recommendations from commercial evaluation review. 503 tests, zero warnings.
+
+#### Input boundary protection
+
+- **TUI input buffer**: capped at 100KB (102,400 bytes) in `handle_stdin_byte`. Characters
+  silently dropped at limit. Prevents paste-bombing memory exhaustion.
+- **read_file size limit**: 10MB max via `file_size` FFI (`filelib:file_size/1`). Pre-read
+  check returns `ToolFailure` before loading content into memory.
+- **WebSocket message limit**: 1MB max on incoming `mist.Text` frames. Oversized messages
+  silently dropped with `mist.continue`.
+
+#### Config file validation
+
+`parse_config_toml` now calls `validate_toml_keys` and `validate_config_values` after
+successful TOML parsing. Validation is warning-only — configs still load, but issues
+are logged via `slog.warn`:
+
+- Unknown top-level TOML keys flagged (catches typos like `provder`)
+- Unknown `[narrative]` sub-keys flagged
+- Numeric values range-checked (max_tokens, max_turns, etc. must be positive)
+- Provider validated against known options (anthropic, openrouter, openai, mistral, local, mock)
+- GUI mode validated against tui/web
+- `load_from_path` logs warning on TOML parse failure (was silent)
+
+#### Session integrity and versioning
+
+`storage.save` wraps messages in a JSON envelope:
+```json
+{"version": 1, "saved_at": "2026-03-07T14:30:00", "messages": [...]}
+```
+
+`storage.load` tries envelope format first, falls back to legacy plain-array format
+(backward compatible). Staleness detection: logs info message when resuming sessions
+from a different date. Corruption detection: logs warning and returns empty list.
+
+#### XML escaping in skills
+
+`skills.xml_escape` escapes `& < > " '` before injecting skill names, descriptions,
+and paths into the `<available_skills>` XML block. Prevents XML injection from
+untrusted skill metadata.
+
+#### Symlink resolution in path validation
+
+`is_within_cwd` in `tools/files.gleam` now resolves symlinks via `resolve_symlinks`
+FFI before checking CWD boundaries. The FFI function (`springdrift_ffi:resolve_symlinks/1`)
+recursively walks path components, following symlinks via `file:read_link/1` at each
+level. Both the target path and CWD are resolved, preventing symlink-based escape.
+
+#### Log retention policies
+
+- **Size rotation**: `slog.append_to_file` checks file size before appending. Files
+  exceeding 10MB are renamed to `.1` suffix before writing.
+- **Age cleanup**: `slog.cleanup_old_logs` removes `.jsonl` files older than 30 days.
+  Called once at startup after `slog.init`. Uses `days_ago_date` FFI for proper
+  calendar arithmetic.
+
+#### Web GUI authentication
+
+Bearer token authentication gated by `SPRINGDRIFT_WEB_TOKEN` environment variable:
+- If set: all HTTP requests and WebSocket upgrades must authenticate
+- Supports `Authorization: Bearer <token>` header or `?token=<token>` query parameter
+- WebSocket connection URL auto-includes token from page URL parameters
+- If unset: no auth required (suitable for localhost-only use)
+- Unauthenticated requests receive HTTP 401
+
+#### JSON sanitization (from prior session)
+
+`sanitize_json` FFI function in `springdrift_ffi.erl` fixes LLM-generated JSON with
+unescaped control characters inside string values. Binary pattern matching walks the
+JSON tracking in-string and escape state:
+- `\n` → `\\n`, `\r` → `\\r`, `\t` → `\\t` inside strings
+- Other control chars (< 0x20) → `\\uXXXX` escape
+- Already-escaped sequences preserved (no double-escaping)
+- Characters outside strings pass through unchanged
+
+Applied in both `narrative/archivist.gleam` (narrative entry parsing) and
+`dprime/scorer.gleam` (forecast parsing).
+
+#### Design decisions
+
+| Decision | Rationale |
+|---|---|
+| Warning-only config validation | Breaking on unknown keys would be hostile to users experimenting with config. Logging warnings lets them see the issue without being blocked. |
+| Envelope session format | Version field enables future migrations. `saved_at` enables staleness detection. Legacy fallback ensures smooth upgrade. |
+| Pre-read file size check | Checking after read still loads the file into memory. FFI `filelib:file_size` is O(1) stat call. |
+| Silent drop on buffer overflow | Alert noise (beep, error message) would be worse than silently stopping input at a reasonable limit. |
+| Query param auth for WebSocket | Browsers don't support custom headers on WebSocket upgrade requests. Query param is the standard workaround. |
+| 30-day log retention | Balances disk space with reasonable audit trail. Date arithmetic via Erlang `calendar` module for correctness. |

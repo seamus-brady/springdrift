@@ -150,10 +150,71 @@ cycle IDs, timestamps, status badges, thread info, summaries, and delegation cha
 
 Zero overhead when disabled — no LLM calls, no files written, no Archivist spawned.
 
+### Profile system
+
+Profiles are self-contained agent team configurations that can be hot-swapped at
+runtime. Each profile is a directory containing:
+
+```
+profiles/analyst/
+├── config.toml          # Name, description, model overrides, agent definitions
+├── dprime.json          # Optional dual-gate D' config (tool_gate + output_gate)
+├── schedule.toml        # Optional scheduled tasks with delivery config
+└── skills/              # Optional profile-specific skills
+```
+
+Load at startup with `--profile analyst` or switch at runtime via the web GUI's
+profile dropdown. Profile directories are scanned from `~/.config/springdrift/profiles`
+and `./profiles`.
+
+### Output gate (dual D')
+
+When a profile includes a `dprime.json` with an `output_gate` section, finished
+reports are evaluated for quality before delivery. The output gate checks for
+unsourced claims, causal overreach, stale data, and certainty overstatement.
+Reports that fail quality checks can be automatically modified (up to 2 iterations)
+or rejected.
+
+### BEAM-native task scheduler
+
+Profiles can define recurring scheduled tasks in `schedule.toml`. Tasks are executed
+by OTP processes using `process.send_after` for timing. Results are delivered to
+configurable destinations (files with timestamps, webhook, or websocket). Scheduler
+state is persisted atomically to checkpoint files and reconciled on restart.
+
 ### Safety circuit breakers
 - **Max turns** (`--max-turns`, default 5): prevents infinite tool loops.
 - **Consecutive errors** (`--max-errors`, default 3): aborts if the same tool
   keeps failing without making progress.
+
+### Input boundary protection
+- TUI input buffer capped at 100KB — prevents paste-bombing
+- `read_file` tool rejects files over 10MB — prevents memory exhaustion
+- WebSocket messages capped at 1MB — prevents oversized payloads
+
+### Web GUI authentication
+
+Set `SPRINGDRIFT_WEB_TOKEN` to require authentication on all HTTP and WebSocket
+connections. Supports `Authorization: Bearer <token>` header or `?token=<token>`
+query parameter. When unset, no auth is required (suitable for localhost use).
+
+### Config file validation
+
+TOML config files are validated on load. Unknown keys produce warnings (logged via
+`slog`), helping catch typos like `provder` instead of `provider`. Numeric values
+are range-checked (must be positive). Invalid provider or GUI mode values are flagged.
+
+### Session integrity
+
+Sessions are saved with a version number and timestamp. On resume, the system detects
+and warns about stale sessions from previous days. Corrupt session files are detected
+and logged instead of silently returning empty state. Legacy session formats (pre-versioning)
+are loaded transparently.
+
+### Log retention
+
+Daily log files are size-rotated at 10MB (renamed to `.1`). Log files older than
+30 days are automatically cleaned up on startup.
 
 ### Verbose and diagnostics
 - `--verbose`: log full LLM request/response payloads to the cycle log.
@@ -253,6 +314,10 @@ archivist_model  = "claude-haiku-4-5-20251001"
 threading        = true
 summaries        = false
 summary_schedule = "weekly"
+
+# Profiles
+profile      = "analyst"              # Default profile to load at startup
+profiles_dirs = ["./profiles"]        # Profile directories to scan
 ```
 
 ### CLI flags
@@ -279,6 +344,8 @@ summary_schedule = "weekly"
 --narrative               Enable narrative logging after each cycle
 --no-narrative            Disable narrative logging (default)
 --narrative-dir <path>    Directory for narrative logs (default: prime-narrative)
+--profile <name>          Load a profile at startup
+--profiles-dir <path>     Add a profile directory (repeatable)
 --help, -h                Show help
 ```
 
@@ -318,10 +385,10 @@ instructions.
 
 ```
 springdrift.gleam         Entry point — config, provider selection, wiring
-├── slog.gleam            System logger — date-rotated JSON-L files + optional stderr
-├── config.gleam          3-layer config (CLI flags > .springdrift.toml > ~/.config/springdrift/config.toml)
-├── storage.gleam         Session save/load  (~/.config/springdrift/session.json)
-├── skills.gleam          Skill discovery, frontmatter parsing, XML injection
+├── slog.gleam            System logger — date-rotated JSON-L + log retention (10MB/30d)
+├── config.gleam          3-layer config with key validation + range checking
+├── storage.gleam         Versioned session save/load with staleness detection
+├── skills.gleam          Skill discovery, frontmatter parsing, XML-escaped injection
 │
 ├── agent/                Agent substrate
 │   ├── types.gleam       Notification, QuestionSource, WaitingContext, CognitiveMessage, etc.
@@ -334,7 +401,28 @@ springdrift.gleam         Entry point — config, provider selection, wiring
 ├── agents/               Specialist agent specs
 │   ├── planner.gleam     Planning agent (no tools, max_turns=3)
 │   ├── researcher.gleam  Research agent (files+web+builtin, max_turns=8)
-│   └── coder.gleam       Coding agent (files+shell+builtin, max_turns=10)
+│   ├── coder.gleam       Coding agent (files+shell+builtin, max_turns=10)
+│   └── writer.gleam      Writer agent (files+builtin, max_turns=6)
+│
+├── dprime/               D' discrepancy-gated safety system
+│   ├── types.gleam       Feature, Forecast, GateDecision, GateResult, DprimeConfig/State
+│   ├── engine.gleam      Pure D' computation (importance weighting, scaling, gate decision)
+│   ├── scorer.gleam      LLM magnitude scoring with structured prompts + JSON parsing
+│   ├── canary.gleam      Hijack + leakage probes (fail-closed, fresh tokens per request)
+│   ├── gate.gleam        Three-layer H-CogAff orchestrator (reactive → deliberative → meta)
+│   ├── config.gleam      D' config loading, dual-gate support (tool_gate + output_gate)
+│   ├── output_gate.gleam Output quality gate — evaluates reports before delivery
+│   └── meta.gleam        History ring buffer, stall detection, threshold tightening
+│
+├── profile/              Profile system — switchable agent team configurations
+│   └── types.gleam       Profile, ProfileModels, AgentDef, DeliveryConfig, ScheduleTaskConfig
+├── profile.gleam         Profile discovery, parsing, validation, schedule loading
+│
+├── scheduler/            BEAM-native task scheduler
+│   ├── types.gleam       ScheduledJob, JobStatus, SchedulerMessage
+│   ├── runner.gleam      OTP scheduler process with send_after tick loop
+│   ├── delivery.gleam    Report delivery (file, webhook stub, websocket stub)
+│   └── persist.gleam     Atomic checkpoint persistence with reconciliation
 │
 ├── query_complexity.gleam  LLM-based + heuristic query classifier (Simple | Complex)
 ├── context.gleam           Sliding-window context trim helper
@@ -343,18 +431,23 @@ springdrift.gleam         Entry point — config, provider selection, wiring
 ├── narrative/              Prime Narrative — immutable first-person agent memory
 │   ├── types.gleam        NarrativeEntry, Intent, Outcome, DelegationStep, Thread, etc.
 │   ├── log.gleam          Append-only JSON-L log, full encode/decode, query functions
-│   ├── archivist.gleam    Async LLM narrative generation after each cycle
+│   ├── archivist.gleam    Async LLM narrative generation + JSON sanitization
 │   ├── threading.gleam    Overlap scoring, thread assignment, continuity notes
 │   ├── summary.gleam      Periodic LLM summaries (weekly/monthly)
 │   └── cycle_tree.gleam   Hierarchical CycleNode tree from parent_cycle_id links
 │
 ├── tools/
 │   ├── builtin.gleam     calculator, get_current_datetime, request_human_input, read_skill
-│   ├── files.gleam       read_file, write_file, list_directory
-│   ├── web.gleam         fetch_url
+│   ├── files.gleam       read_file (10MB limit), write_file, list_directory + symlink-aware CWD check
+│   ├── web.gleam         fetch_url (50KB limit)
 │   └── shell.gleam       run_shell (delegates to sandbox)
 │
-├── tui.gleam             Alternate-screen TUI — Chat + Log + Narrative tabs
+├── tui.gleam             Alternate-screen TUI — Chat + Log + Narrative tabs (100KB input cap)
+│
+├── web/                  Web chat GUI
+│   ├── gui.gleam         Mist HTTP + WebSocket server with bearer token auth (1MB msg cap)
+│   ├── html.gleam        Embedded HTML/CSS/JS chat page
+│   └── protocol.gleam    WebSocket JSON codec (ClientMessage/ServerMessage)
 │
 └── llm/
     ├── types.gleam        Shared types: Message, ContentBlock, LlmRequest/Response/Error, Tool
@@ -378,6 +471,7 @@ springdrift.gleam         Entry point — config, provider selection, wiring
 | Think worker | Per turn | Blocking LLM call for the cognitive loop |
 | Agent processes | App | Each specialist agent runs its own react loop |
 | Archivist | Per turn | Async narrative generation after reply (spawn_unlinked) |
+| Scheduler | App | BEAM-native task scheduler with `send_after` tick loop |
 
 All cross-process communication uses typed `Subject(T)` channels — no shared
 mutable state, no locks. The cognitive loop's notification channel uses pure
