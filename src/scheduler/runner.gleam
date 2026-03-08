@@ -12,6 +12,7 @@ import gleam/list
 import gleam/option.{None, Some}
 import profile/types as profile_types
 import scheduler/delivery
+import scheduler/persist
 import scheduler/types.{
   type ScheduledJob, type SchedulerMessage, Completed, Failed, GetStatus,
   JobComplete, JobFailed, Pending, Running, ScheduledJob, StopAll, Tick,
@@ -25,38 +26,78 @@ fn monotonic_now_ms() -> Int
 fn get_datetime() -> String
 
 /// Start the scheduler process with the given tasks.
+/// Optionally loads checkpoint state and adjusts initial delays based on elapsed time.
 /// Returns a Subject for sending scheduler messages.
 pub fn start(
   tasks: List(profile_types.ScheduleTaskConfig),
   cognitive: Subject(agent_types.CognitiveMessage),
+  checkpoint_path: String,
 ) -> Subject(SchedulerMessage) {
   let setup = process.new_subject()
   process.spawn_unlinked(fn() {
     let self: Subject(SchedulerMessage) = process.new_subject()
     process.send(setup, self)
 
-    // Build initial job state
+    // Try to load checkpoint for recovery
+    let checkpoint_jobs = case persist.load(checkpoint_path) {
+      Ok(checkpoint) -> {
+        let config_names = list.map(tasks, fn(t) { t.name })
+        persist.reconcile(checkpoint.jobs, config_names)
+      }
+      Error(_) -> []
+    }
+
+    let now = monotonic_now_ms()
+
+    // Build initial job state, restoring from checkpoint where available
     let jobs =
       list.fold(tasks, dict.new(), fn(acc, task) {
-        let job =
-          ScheduledJob(
-            name: task.name,
-            query: task.query,
-            interval_ms: task.interval_ms,
-            delivery: task.delivery,
-            only_if_changed: task.only_if_changed,
-            status: Pending,
-            last_run_ms: None,
-            last_result: None,
-            run_count: 0,
-            error_count: 0,
-          )
+        let restored = list.find(checkpoint_jobs, fn(j) { j.name == task.name })
+        let job = case restored {
+          Ok(saved) ->
+            ScheduledJob(
+              ..saved,
+              query: task.query,
+              interval_ms: task.interval_ms,
+              delivery: task.delivery,
+              only_if_changed: task.only_if_changed,
+            )
+          Error(_) ->
+            ScheduledJob(
+              name: task.name,
+              query: task.query,
+              interval_ms: task.interval_ms,
+              delivery: task.delivery,
+              only_if_changed: task.only_if_changed,
+              status: Pending,
+              last_run_ms: None,
+              last_result: None,
+              run_count: 0,
+              error_count: 0,
+            )
+        }
         dict.insert(acc, task.name, job)
       })
 
-    // Schedule initial ticks
+    // Schedule initial ticks, accounting for elapsed time since last run
     list.each(tasks, fn(task) {
-      let delay = initial_delay(task)
+      let delay = case
+        list.find(checkpoint_jobs, fn(j) { j.name == task.name })
+      {
+        Ok(saved) ->
+          case saved.last_run_ms {
+            Some(last_ms) -> {
+              let elapsed = now - last_ms
+              let remaining = task.interval_ms - elapsed
+              case remaining > 0 {
+                True -> remaining
+                False -> 0
+              }
+            }
+            None -> initial_delay(task)
+          }
+        Error(_) -> initial_delay(task)
+      }
       schedule_tick(self, task.name, delay)
     })
 
@@ -68,7 +109,7 @@ pub fn start(
     )
 
     // Enter event loop
-    scheduler_loop(self, jobs, cognitive)
+    scheduler_loop(self, jobs, cognitive, checkpoint_path)
   })
 
   let assert Ok(subj) = process.receive(setup, 5000)
@@ -79,6 +120,7 @@ fn scheduler_loop(
   self: Subject(SchedulerMessage),
   jobs: Dict(String, ScheduledJob),
   cognitive: Subject(agent_types.CognitiveMessage),
+  checkpoint_path: String,
 ) -> Nil {
   let selector =
     process.new_selector()
@@ -94,12 +136,12 @@ fn scheduler_loop(
     GetStatus(reply_to:) -> {
       let status_list = dict.values(jobs)
       process.send(reply_to, status_list)
-      scheduler_loop(self, jobs, cognitive)
+      scheduler_loop(self, jobs, cognitive, checkpoint_path)
     }
 
     Tick(name:) -> {
       case dict.get(jobs, name) {
-        Error(_) -> scheduler_loop(self, jobs, cognitive)
+        Error(_) -> scheduler_loop(self, jobs, cognitive, checkpoint_path)
         Ok(job) -> {
           slog.info(
             "scheduler",
@@ -114,14 +156,14 @@ fn scheduler_loop(
           // Spawn async query to cognitive loop
           spawn_job(self, cognitive, job)
 
-          scheduler_loop(self, updated_jobs, cognitive)
+          scheduler_loop(self, updated_jobs, cognitive, checkpoint_path)
         }
       }
     }
 
     JobComplete(name:, result:) -> {
       case dict.get(jobs, name) {
-        Error(_) -> scheduler_loop(self, jobs, cognitive)
+        Error(_) -> scheduler_loop(self, jobs, cognitive, checkpoint_path)
         Ok(job) -> {
           let now = monotonic_now_ms()
 
@@ -181,14 +223,17 @@ fn scheduler_loop(
           // Schedule next tick
           schedule_tick(self, name, job.interval_ms)
 
-          scheduler_loop(self, updated_jobs, cognitive)
+          // Save checkpoint after completion
+          let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
+
+          scheduler_loop(self, updated_jobs, cognitive, checkpoint_path)
         }
       }
     }
 
     JobFailed(name:, reason:) -> {
       case dict.get(jobs, name) {
-        Error(_) -> scheduler_loop(self, jobs, cognitive)
+        Error(_) -> scheduler_loop(self, jobs, cognitive, checkpoint_path)
         Ok(job) -> {
           slog.warn(
             "scheduler",
@@ -207,7 +252,10 @@ fn scheduler_loop(
           // Schedule next tick (retry on next interval)
           schedule_tick(self, name, job.interval_ms)
 
-          scheduler_loop(self, updated_jobs, cognitive)
+          // Save checkpoint after failure
+          let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
+
+          scheduler_loop(self, updated_jobs, cognitive, checkpoint_path)
         }
       }
     }

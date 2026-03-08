@@ -17,6 +17,9 @@ import llm/retry
 import llm/types as llm_types
 import slog
 
+@external(erlang, "springdrift_ffi", "monotonic_now_ms")
+fn monotonic_now_ms() -> Int
+
 // ---------------------------------------------------------------------------
 // Internal types
 // ---------------------------------------------------------------------------
@@ -29,12 +32,22 @@ type AgentState {
   AgentState(active: List(ActiveTask), identity: AgentIdentity)
 }
 
+type ReactStats {
+  ReactStats(tools_used: List(String), input_tokens: Int, output_tokens: Int)
+}
+
+type ReactResult {
+  ReactResult(result: Result(String, String), stats: ReactStats)
+}
+
 type AgentEvent {
   NewTask(AgentTask)
   TaskDone(
     task_id: String,
     agent_cycle_id: String,
-    result: Result(String, String),
+    react_result: ReactResult,
+    instruction: String,
+    duration_ms: Int,
   )
   WorkerExited(ExitMessage)
 }
@@ -73,27 +86,31 @@ pub fn start_agent(
 fn agent_loop(
   spec: AgentSpec,
   task_subj: Subject(AgentTask),
-  done_subj: Subject(#(String, String, Result(String, String))),
+  done_subj: Subject(#(String, String, ReactResult, String, Int)),
   state: AgentState,
 ) -> Nil {
   let selector =
     process.new_selector()
     |> process.select_map(task_subj, fn(task) { NewTask(task) })
     |> process.select_map(done_subj, fn(done) {
-      TaskDone(done.0, done.1, done.2)
+      TaskDone(done.0, done.1, done.2, done.3, done.4)
     })
     |> process.select_trapped_exits(WorkerExited)
 
   case process.selector_receive_forever(selector) {
     NewTask(task) -> {
       let captured_done_subj = done_subj
+      let captured_instruction = task.instruction
       let worker_pid =
         process.spawn(fn() {
-          let #(agent_cycle_id, result) = do_react_loop(spec, task)
+          let #(agent_cycle_id, react_result, duration_ms) =
+            do_react_loop(spec, task)
           process.send(captured_done_subj, #(
             task.task_id,
             agent_cycle_id,
-            result,
+            react_result,
+            captured_instruction,
+            duration_ms,
           ))
         })
       let active_task =
@@ -110,7 +127,7 @@ fn agent_loop(
       )
     }
 
-    TaskDone(task_id, agent_cycle_id, result) -> {
+    TaskDone(task_id, agent_cycle_id, react_result, instruction, duration_ms) -> {
       case find_active(state.active, task_id) {
         None -> agent_loop(spec, task_subj, done_subj, state)
         Some(active) -> {
@@ -120,7 +137,9 @@ fn agent_loop(
               spec.name,
               state.identity,
               agent_cycle_id,
-              result,
+              react_result,
+              instruction,
+              duration_ms,
             )
           process.send(active.reply_to, AgentComplete(outcome:))
           agent_loop(
@@ -145,6 +164,11 @@ fn agent_loop(
               agent_human_name: state.identity.human_name,
               agent_cycle_id: "",
               error: "Worker crashed",
+              instruction: "",
+              tools_used: [],
+              input_tokens: 0,
+              output_tokens: 0,
+              duration_ms: 0,
             )
           process.send(active.reply_to, AgentComplete(outcome:))
           agent_loop(
@@ -169,12 +193,24 @@ fn agent_loop(
 fn do_react_loop(
   spec: AgentSpec,
   task: AgentTask,
-) -> #(String, Result(String, String)) {
+) -> #(String, ReactResult, Int) {
   let agent_cycle_id = cycle_log.generate_uuid()
   let req = build_agent_request(spec, task)
-  let result =
-    do_react(req, spec, spec.max_turns, 0, agent_cycle_id, task.reply_to)
-  #(agent_cycle_id, result)
+  let start_ms = monotonic_now_ms()
+  let initial_stats =
+    ReactStats(tools_used: [], input_tokens: 0, output_tokens: 0)
+  let react_result =
+    do_react(
+      req,
+      spec,
+      spec.max_turns,
+      0,
+      agent_cycle_id,
+      task.reply_to,
+      initial_stats,
+    )
+  let duration_ms = monotonic_now_ms() - start_ms
+  #(agent_cycle_id, react_result, duration_ms)
 }
 
 fn do_react(
@@ -184,7 +220,8 @@ fn do_react(
   consecutive_errors: Int,
   cycle_id: String,
   cognitive: Subject(CognitiveMessage),
-) -> Result(String, String) {
+  stats: ReactStats,
+) -> ReactResult {
   slog.debug(
     "framework",
     "do_react",
@@ -192,15 +229,29 @@ fn do_react(
     Some(cycle_id),
   )
   case remaining {
-    0 -> Error("max turns reached")
+    0 -> ReactResult(result: Error("max turns reached"), stats:)
     _ ->
       case retry.call_with_retry(req, spec.provider, 3, 500) {
-        Error(e) -> Error(response.error_message(e))
+        Error(e) ->
+          ReactResult(result: Error(response.error_message(e)), stats:)
         Ok(resp) -> {
+          let updated_stats =
+            ReactStats(
+              ..stats,
+              input_tokens: stats.input_tokens + resp.usage.input_tokens,
+              output_tokens: stats.output_tokens + resp.usage.output_tokens,
+            )
           case response.needs_tool_execution(resp) {
-            False -> Ok(response.text(resp))
+            False ->
+              ReactResult(result: Ok(response.text(resp)), stats: updated_stats)
             True -> {
               let calls = response.tool_calls(resp)
+              let tool_names = list.map(calls, fn(c) { c.name })
+              let stats_with_tools =
+                ReactStats(
+                  ..updated_stats,
+                  tools_used: list.append(updated_stats.tools_used, tool_names),
+                )
               let results =
                 list.map(calls, fn(call) {
                   cycle_log.log_tool_call(cycle_id, call)
@@ -220,7 +271,11 @@ fn do_react(
                 False -> 0
               }
               case new_consecutive >= spec.max_consecutive_errors {
-                True -> Error("too many consecutive tool errors")
+                True ->
+                  ReactResult(
+                    result: Error("too many consecutive tool errors"),
+                    stats: stats_with_tools,
+                  )
                 False -> {
                   let next =
                     request.with_tool_results(req, resp.content, results)
@@ -231,6 +286,7 @@ fn do_react(
                     new_consecutive,
                     cycle_id,
                     cognitive,
+                    stats_with_tools,
                   )
                 }
               }
@@ -303,9 +359,14 @@ fn outcome_from_result(
   agent: String,
   identity: AgentIdentity,
   agent_cycle_id: String,
-  result: Result(String, String),
+  react_result: ReactResult,
+  instruction: String,
+  duration_ms: Int,
 ) -> AgentOutcome {
-  case result {
+  let stats = react_result.stats
+  // Deduplicate tool names
+  let unique_tools = list.unique(stats.tools_used)
+  case react_result.result {
     Ok(text) ->
       AgentSuccess(
         task_id:,
@@ -315,6 +376,11 @@ fn outcome_from_result(
         agent_cycle_id:,
         result: text,
         structured_result: option.None,
+        instruction:,
+        tools_used: unique_tools,
+        input_tokens: stats.input_tokens,
+        output_tokens: stats.output_tokens,
+        duration_ms:,
       )
     Error(err) ->
       AgentFailure(
@@ -324,6 +390,11 @@ fn outcome_from_result(
         agent_human_name: identity.human_name,
         agent_cycle_id:,
         error: err,
+        instruction:,
+        tools_used: unique_tools,
+        input_tokens: stats.input_tokens,
+        output_tokens: stats.output_tokens,
+        duration_ms:,
       )
   }
 }

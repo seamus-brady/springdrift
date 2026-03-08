@@ -30,6 +30,7 @@ import cbr/types as cbr_types
 import facts/log as facts_log
 import facts/types as facts_types
 import gleam/erlang/process.{type Subject}
+import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/order
@@ -368,6 +369,135 @@ pub fn start(
   subj
 }
 
+/// Start a supervised Librarian. If the Librarian crashes, it is automatically
+/// restarted (up to `max_restarts` times). Returns a Subject that always points
+/// to the current Librarian instance via an indirection process.
+pub fn start_supervised(
+  narrative_dir: String,
+  cbr_dir: String,
+  facts_dir: String,
+  max_files: Int,
+  max_restarts: Int,
+) -> Subject(LibrarianMessage) {
+  let proxy_subj: Subject(LibrarianMessage) = process.new_subject()
+  process.spawn_unlinked(fn() {
+    librarian_supervisor_loop(
+      narrative_dir,
+      cbr_dir,
+      facts_dir,
+      max_files,
+      max_restarts,
+      0,
+      proxy_subj,
+    )
+  })
+  proxy_subj
+}
+
+fn librarian_supervisor_loop(
+  narrative_dir: String,
+  cbr_dir: String,
+  facts_dir: String,
+  max_files: Int,
+  max_restarts: Int,
+  restart_count: Int,
+  proxy: Subject(LibrarianMessage),
+) -> Nil {
+  // Start a fresh librarian
+  let librarian = start(narrative_dir, cbr_dir, facts_dir, max_files)
+
+  // Forward messages and monitor the librarian process
+  forward_loop(
+    librarian,
+    proxy,
+    narrative_dir,
+    cbr_dir,
+    facts_dir,
+    max_files,
+    max_restarts,
+    restart_count,
+  )
+}
+
+fn forward_loop(
+  librarian: Subject(LibrarianMessage),
+  proxy: Subject(LibrarianMessage),
+  narrative_dir: String,
+  cbr_dir: String,
+  facts_dir: String,
+  max_files: Int,
+  max_restarts: Int,
+  restart_count: Int,
+) -> Nil {
+  // Select on proxy messages to forward, with a periodic liveness check
+  case process.receive(proxy, 5000) {
+    Ok(msg) -> {
+      process.send(librarian, msg)
+      forward_loop(
+        librarian,
+        proxy,
+        narrative_dir,
+        cbr_dir,
+        facts_dir,
+        max_files,
+        max_restarts,
+        restart_count,
+      )
+    }
+    Error(_) -> {
+      // Timeout — check if librarian is still alive by sending a ping-like query
+      let test_subj: Subject(List(NarrativeEntry)) = process.new_subject()
+      process.send(librarian, QueryRecent(n: 0, reply_to: test_subj))
+      case process.receive(test_subj, 2000) {
+        Ok(_) ->
+          forward_loop(
+            librarian,
+            proxy,
+            narrative_dir,
+            cbr_dir,
+            facts_dir,
+            max_files,
+            max_restarts,
+            restart_count,
+          )
+        Error(_) -> {
+          // Librarian is dead
+          case restart_count < max_restarts {
+            True -> {
+              slog.warn(
+                "librarian",
+                "supervisor",
+                "Librarian unresponsive, restarting (attempt "
+                  <> string.inspect(restart_count + 1)
+                  <> ")",
+                None,
+              )
+              librarian_supervisor_loop(
+                narrative_dir,
+                cbr_dir,
+                facts_dir,
+                max_files,
+                max_restarts,
+                restart_count + 1,
+                proxy,
+              )
+            }
+            False -> {
+              slog.log_error(
+                "librarian",
+                "supervisor",
+                "Librarian max restarts exceeded, giving up",
+                None,
+              )
+              Nil
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Synchronous query helpers — Narrative
 // ---------------------------------------------------------------------------
@@ -382,7 +512,10 @@ pub fn load_entries(
   process.send(librarian, QueryDateRange(from:, to:, reply_to:))
   case process.receive(reply_to, 5000) {
     Ok(entries) -> entries
-    Error(_) -> []
+    Error(_) -> {
+      slog.warn("librarian", "load_entries", "Timeout waiting for reply", None)
+      []
+    }
   }
 }
 
@@ -395,7 +528,10 @@ pub fn search(
   process.send(librarian, QuerySearch(keyword:, reply_to:))
   case process.receive(reply_to, 5000) {
     Ok(entries) -> entries
-    Error(_) -> []
+    Error(_) -> {
+      slog.warn("librarian", "search", "Timeout waiting for reply", None)
+      []
+    }
   }
 }
 
@@ -405,7 +541,15 @@ pub fn load_thread_index(librarian: Subject(LibrarianMessage)) -> ThreadIndex {
   process.send(librarian, QueryThreadIndex(reply_to:))
   case process.receive(reply_to, 5000) {
     Ok(idx) -> idx
-    Error(_) -> ThreadIndex(threads: [])
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "load_thread_index",
+        "Timeout waiting for reply",
+        None,
+      )
+      ThreadIndex(threads: [])
+    }
   }
 }
 
@@ -415,7 +559,10 @@ pub fn load_all(librarian: Subject(LibrarianMessage)) -> List(NarrativeEntry) {
   process.send(librarian, QueryAll(reply_to:))
   case process.receive(reply_to, 5000) {
     Ok(entries) -> entries
-    Error(_) -> []
+    Error(_) -> {
+      slog.warn("librarian", "load_all", "Timeout waiting for reply", None)
+      []
+    }
   }
 }
 
@@ -428,7 +575,10 @@ pub fn load_thread(
   process.send(librarian, QueryThread(thread_id:, reply_to:))
   case process.receive(reply_to, 5000) {
     Ok(entries) -> entries
-    Error(_) -> []
+    Error(_) -> {
+      slog.warn("librarian", "load_thread", "Timeout waiting for reply", None)
+      []
+    }
   }
 }
 
@@ -441,7 +591,10 @@ pub fn get_recent(
   process.send(librarian, QueryRecent(n:, reply_to:))
   case process.receive(reply_to, 5000) {
     Ok(entries) -> entries
-    Error(_) -> []
+    Error(_) -> {
+      slog.warn("librarian", "get_recent", "Timeout waiting for reply", None)
+      []
+    }
   }
 }
 
@@ -453,7 +606,10 @@ pub fn thread_heads(
   process.send(librarian, QueryThreadHeads(reply_to:))
   case process.receive(reply_to, 5000) {
     Ok(entries) -> entries
-    Error(_) -> []
+    Error(_) -> {
+      slog.warn("librarian", "thread_heads", "Timeout waiting for reply", None)
+      []
+    }
   }
 }
 
@@ -494,7 +650,15 @@ pub fn retrieve_cases(
   process.send(librarian, RetrieveCases(query:, reply_to:))
   case process.receive(reply_to, 5000) {
     Ok(results) -> results
-    Error(_) -> []
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "retrieve_cases",
+        "Timeout waiting for reply",
+        None,
+      )
+      []
+    }
   }
 }
 
@@ -506,7 +670,15 @@ pub fn load_all_cases(
   process.send(librarian, QueryAllCases(reply_to:))
   case process.receive(reply_to, 5000) {
     Ok(cases) -> cases
-    Error(_) -> []
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "load_all_cases",
+        "Timeout waiting for reply",
+        None,
+      )
+      []
+    }
   }
 }
 
@@ -531,7 +703,10 @@ pub fn get_fact(
   process.send(librarian, QueryFactByKey(key:, reply_to:))
   case process.receive(reply_to, 5000) {
     Ok(result) -> result
-    Error(_) -> Error(Nil)
+    Error(_) -> {
+      slog.warn("librarian", "get_fact", "Timeout waiting for reply", None)
+      Error(Nil)
+    }
   }
 }
 
@@ -544,7 +719,15 @@ pub fn get_facts_by_cycle(
   process.send(librarian, QueryFactsByCycle(cycle_id:, reply_to:))
   case process.receive(reply_to, 5000) {
     Ok(facts) -> facts
-    Error(_) -> []
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "get_facts_by_cycle",
+        "Timeout waiting for reply",
+        None,
+      )
+      []
+    }
   }
 }
 
@@ -556,7 +739,10 @@ pub fn get_all_facts(
   process.send(librarian, QueryAllFacts(reply_to:))
   case process.receive(reply_to, 5000) {
     Ok(facts) -> facts
-    Error(_) -> []
+    Error(_) -> {
+      slog.warn("librarian", "get_all_facts", "Timeout waiting for reply", None)
+      []
+    }
   }
 }
 
@@ -569,7 +755,10 @@ pub fn search_facts(
   process.send(librarian, QueryFactsByKeyword(keyword:, reply_to:))
   case process.receive(reply_to, 5000) {
     Ok(facts) -> facts
-    Error(_) -> []
+    Error(_) -> {
+      slog.warn("librarian", "search_facts", "Timeout waiting for reply", None)
+      []
+    }
   }
 }
 
@@ -595,7 +784,15 @@ pub fn read_cycle_results(
   process.send(librarian, ReadCycleResults(cycle_id:, reply_to:))
   case process.receive(reply_to, 5000) {
     Ok(results) -> results
-    Error(_) -> []
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "read_cycle_results",
+        "Timeout waiting for reply",
+        None,
+      )
+      []
+    }
   }
 }
 
@@ -619,7 +816,15 @@ pub fn get_thread_count(librarian: Subject(LibrarianMessage)) -> Int {
   process.send(librarian, QueryThreadCount(reply_to:))
   case process.receive(reply_to, 5000) {
     Ok(count) -> count
-    Error(_) -> 0
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "get_thread_count",
+        "Timeout waiting for reply",
+        None,
+      )
+      0
+    }
   }
 }
 
@@ -629,7 +834,15 @@ pub fn get_persistent_fact_count(librarian: Subject(LibrarianMessage)) -> Int {
   process.send(librarian, QueryPersistentFactCount(reply_to:))
   case process.receive(reply_to, 5000) {
     Ok(count) -> count
-    Error(_) -> 0
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "get_persistent_fact_count",
+        "Timeout waiting for reply",
+        None,
+      )
+      0
+    }
   }
 }
 
@@ -639,7 +852,15 @@ pub fn get_case_count(librarian: Subject(LibrarianMessage)) -> Int {
   process.send(librarian, QueryCaseCount(reply_to:))
   case process.receive(reply_to, 5000) {
     Ok(count) -> count
-    Error(_) -> 0
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "get_case_count",
+        "Timeout waiting for reply",
+        None,
+      )
+      0
+    }
   }
 }
 
@@ -902,6 +1123,15 @@ fn do_retrieve_cases(
     })
   let candidates = merge_unique_cases(by_intent, by_keywords)
 
+  // Filter out stale bag entries — only keep cases still in the primary table
+  let candidates =
+    list.filter(candidates, fn(c) {
+      case cbr_lookup(state.cbr_cases, c.case_id) {
+        Ok(_) -> True
+        Error(_) -> False
+      }
+    })
+
   // If no candidates from indices, fall back to all cases
   let candidates = case candidates {
     [] -> cbr_all_values(state.cbr_cases)
@@ -959,9 +1189,9 @@ fn score_case_symbolic(c: cbr_types.CbrCase, query: cbr_types.CbrQuery) -> Float
     False -> 0.0
   }
 
-  // Recency score: not computed here (would need current timestamp).
-  // Default to 0.5 for all cases — Phase 2 will add proper decay.
-  let recency_score = 0.5
+  // Recency score: compare case timestamp against current date.
+  // Recent cases (today) score 1.0, decaying to 0.0 over 30 days.
+  let recency_score = compute_recency(c.timestamp)
 
   { intent_score *. 0.35 }
   +. { keyword_score *. 0.25 }
@@ -982,28 +1212,56 @@ fn jaccard(a: List(String), b: List(String)) -> Float {
       let union_size = list.length(a) + list.length(b) - intersection
       case union_size {
         0 -> 0.0
-        n -> int_to_float(intersection) /. int_to_float(n)
+        n -> int.to_float(intersection) /. int.to_float(n)
       }
     }
   }
 }
 
-fn int_to_float(n: Int) -> Float {
-  case n {
-    0 -> 0.0
-    1 -> 1.0
-    2 -> 2.0
-    3 -> 3.0
-    4 -> 4.0
-    5 -> 5.0
-    _ -> {
-      // For larger numbers, use arithmetic
-      let half = n / 2
-      let remainder = n - half
-      int_to_float(half) +. int_to_float(remainder)
+/// Compute recency score from a timestamp string (ISO 8601 or YYYY-MM-DD prefix).
+/// Returns 1.0 for today, decaying linearly to 0.0 over 30 days.
+fn compute_recency(timestamp: String) -> Float {
+  let case_date = string.slice(timestamp, 0, 10)
+  let today = get_date()
+  case case_date == today {
+    True -> 1.0
+    False -> {
+      // Compare date strings lexicographically as a rough age approximation.
+      // Dates older than 30 days get 0.0; we approximate by checking a few
+      // reference dates via the FFI.
+      let age_days = estimate_age_days(case_date, today)
+      let decay = 1.0 -. { int.to_float(age_days) /. 30.0 }
+      case decay <. 0.0 {
+        True -> 0.0
+        False -> decay
+      }
     }
   }
 }
+
+/// Rough age estimate in days by comparing YYYY-MM-DD date strings.
+fn estimate_age_days(case_date: String, today: String) -> Int {
+  // Parse year, month, day from both dates
+  let cy = parse_int_slice(case_date, 0, 4)
+  let cm = parse_int_slice(case_date, 5, 7)
+  let cd = parse_int_slice(case_date, 8, 10)
+  let ty = parse_int_slice(today, 0, 4)
+  let tm = parse_int_slice(today, 5, 7)
+  let td = parse_int_slice(today, 8, 10)
+  // Approximate: (year_diff * 365) + (month_diff * 30) + day_diff
+  { ty - cy } * 365 + { tm - cm } * 30 + { td - cd }
+}
+
+fn parse_int_slice(s: String, from: Int, to: Int) -> Int {
+  let slice = string.slice(s, from, to - from)
+  case int.parse(slice) {
+    Ok(n) -> n
+    Error(_) -> 0
+  }
+}
+
+@external(erlang, "springdrift_ffi", "get_date")
+fn get_date() -> String
 
 // ---------------------------------------------------------------------------
 // Narrative indexing

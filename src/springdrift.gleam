@@ -270,9 +270,15 @@ fn run(cfg: AppConfig) -> Nil {
   let narrative_dir = option.unwrap(cfg.narrative_dir, paths.narrative_dir())
   let archivist_model = option.unwrap(cfg.archivist_model, task_model)
 
-  // Start the Librarian (narrative ETS query layer)
+  // Start the Librarian (supervised — auto-restarts on crash)
   let librarian_subj =
-    librarian.start(narrative_dir, paths.cbr_dir(), paths.facts_dir(), 0)
+    librarian.start_supervised(
+      narrative_dir,
+      paths.cbr_dir(),
+      paths.facts_dir(),
+      0,
+      5,
+    )
   let lib = option.Some(librarian_subj)
 
   // Start Curator and build identity-aware system prompt
@@ -325,6 +331,9 @@ fn run(cfg: AppConfig) -> Nil {
     }
   })
 
+  // Wire supervisor into cognitive loop so profile switching can manage agents
+  cognitive.set_supervisor(cognitive_subj, sup)
+
   case dprime_state {
     option.Some(_) -> io.println("D' Safety: enabled")
     option.None -> Nil
@@ -351,8 +360,14 @@ fn run(cfg: AppConfig) -> Nil {
                   case tasks {
                     [] -> Nil
                     _ -> {
+                      let checkpoint_path =
+                        ".springdrift/scheduler-checkpoint.json"
                       let _scheduler =
-                        scheduler_runner.start(tasks, cognitive_subj)
+                        scheduler_runner.start(
+                          tasks,
+                          cognitive_subj,
+                          checkpoint_path,
+                        )
                       io.println(
                         "Scheduler: "
                         <> int.to_string(list.length(tasks))

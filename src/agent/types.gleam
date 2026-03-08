@@ -75,6 +75,11 @@ pub type AgentOutcome {
     agent_cycle_id: String,
     result: String,
     structured_result: Option(AgentResult),
+    instruction: String,
+    tools_used: List(String),
+    input_tokens: Int,
+    output_tokens: Int,
+    duration_ms: Int,
   )
   AgentFailure(
     task_id: String,
@@ -83,6 +88,11 @@ pub type AgentOutcome {
     agent_human_name: String,
     agent_cycle_id: String,
     error: String,
+    instruction: String,
+    tools_used: List(String),
+    input_tokens: Int,
+    output_tokens: Int,
+    duration_ms: Int,
   )
 }
 
@@ -220,6 +230,7 @@ pub type CognitiveMessage {
     reply_to: Subject(CognitiveReply),
   )
   LoadProfile(name: String, reply_to: Subject(CognitiveReply))
+  SetSupervisor(supervisor: Subject(SupervisorMessage))
   OutputGateComplete(
     cycle_id: String,
     result: dprime_types.GateResult,
@@ -285,6 +296,8 @@ pub type PendingTask {
     model: String,
     fallback_from: Option(String),
     reply_to: Subject(CognitiveReply),
+    output_gate_count: Int,
+    empty_retried: Bool,
   )
   PendingAgent(
     task_id: String,

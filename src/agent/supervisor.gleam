@@ -11,6 +11,9 @@ import gleam/list
 import gleam/option.{None, Some}
 import slog
 
+@external(erlang, "springdrift_ffi", "monotonic_now_ms")
+fn monotonic_now_ms() -> Int
+
 // ---------------------------------------------------------------------------
 // Internal types
 // ---------------------------------------------------------------------------
@@ -20,7 +23,7 @@ type ChildEntry {
     spec: AgentSpec,
     pid: Pid,
     task_subject: Subject(types.AgentTask),
-    restart_count: Int,
+    restart_timestamps: List(Int),
   )
 }
 
@@ -36,6 +39,16 @@ type SupervisorState {
 type SupervisorEvent {
   External(SupervisorMessage)
   ChildExited(ExitMessage)
+}
+
+/// Sliding restart window duration in milliseconds (60 seconds).
+const restart_window_ms = 60_000
+
+/// Count restarts within the sliding window, pruning old entries.
+fn restarts_in_window(timestamps: List(Int), now: Int) -> #(Int, List(Int)) {
+  let cutoff = now - restart_window_ms
+  let recent = list.filter(timestamps, fn(ts) { ts >= cutoff })
+  #(list.length(recent), recent)
 }
 
 // ---------------------------------------------------------------------------
@@ -90,7 +103,8 @@ fn handle_external(state: SupervisorState, msg: SupervisorMessage) -> Nil {
     StartChild(spec:, reply_to:) -> {
       case framework.start_agent(spec) {
         Ok(#(pid, task_subject)) -> {
-          let entry = ChildEntry(spec:, pid:, task_subject:, restart_count: 0)
+          let entry =
+            ChildEntry(spec:, pid:, task_subject:, restart_timestamps: [])
           let new_state =
             SupervisorState(
               ..state,
@@ -149,21 +163,24 @@ fn handle_child_exit(state: SupervisorState, exit_msg: ExitMessage) -> Nil {
         }
 
         True -> {
+          let now = monotonic_now_ms()
+          let #(recent_count, recent_timestamps) =
+            restarts_in_window(child.restart_timestamps, now)
           slog.info(
             "supervisor",
             "restart_child",
             "Restarting "
               <> child.spec.name
-              <> " attempt "
-              <> int.to_string(child.restart_count + 1),
+              <> " ("
+              <> int.to_string(recent_count + 1)
+              <> " in window)",
             None,
           )
           notify(
             state.cognitive,
             AgentCrashed(name: child.spec.name, reason: reason_str),
           )
-          let new_count = child.restart_count + 1
-          case new_count > state.max_restarts {
+          case recent_count + 1 > state.max_restarts {
             True -> {
               notify(
                 state.cognitive,
@@ -185,7 +202,7 @@ fn handle_child_exit(state: SupervisorState, exit_msg: ExitMessage) -> Nil {
                     state.cognitive,
                     AgentRestarted(
                       name: child.spec.name,
-                      attempt: new_count,
+                      attempt: recent_count + 1,
                       task_subject:,
                     ),
                   )
@@ -194,7 +211,7 @@ fn handle_child_exit(state: SupervisorState, exit_msg: ExitMessage) -> Nil {
                       ..child,
                       pid:,
                       task_subject:,
-                      restart_count: new_count,
+                      restart_timestamps: [now, ..recent_timestamps],
                     )
                   let new_children =
                     list.map(state.children, fn(c) {
