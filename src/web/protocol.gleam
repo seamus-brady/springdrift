@@ -28,7 +28,6 @@ pub type ClientMessage {
   RequestLogData
   RequestRewind(index: Int)
   RequestNarrativeData
-  RequestLoadProfile(name: String)
 }
 
 pub type ServerMessage {
@@ -40,8 +39,6 @@ pub type ServerMessage {
   SafetyNotification(decision: String, score: Float, explanation: String)
   LogData(entries: List(slog.LogEntry))
   NarrativeData(entries_json: String)
-  ProfilesAvailable(names: List(String))
-  ProfileLoaded(name: String)
 }
 
 pub type CycleDataJson {
@@ -80,10 +77,6 @@ pub fn decode_client_message(json_string: String) -> Result(ClientMessage, Nil) 
         decode.success(RequestRewind(index:))
       }
       "request_narrative_data" -> decode.success(RequestNarrativeData)
-      "request_load_profile" -> {
-        use name <- decode.field("name", decode.string)
-        decode.success(RequestLoadProfile(name:))
-      }
       _ -> decode.failure(UserMessage(""), "Unknown client message type")
     }
   }
@@ -170,20 +163,6 @@ pub fn encode_server_message(msg: ServerMessage) -> String {
 
     NarrativeData(entries_json:) ->
       "{\"type\":\"narrative_data\",\"entries\":" <> entries_json <> "}"
-
-    ProfilesAvailable(names:) ->
-      json.object([
-        #("type", json.string("profiles_available")),
-        #("profiles", json.array(names, json.string)),
-      ])
-      |> json.to_string
-
-    ProfileLoaded(name:) ->
-      json.object([
-        #("type", json.string("profile_loaded")),
-        #("name", json.string(name)),
-      ])
-      |> json.to_string
   }
 }
 

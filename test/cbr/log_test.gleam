@@ -2,6 +2,7 @@ import cbr/log as cbr_log
 import cbr/types.{type CbrCase, CbrCase, CbrOutcome, CbrProblem, CbrSolution}
 import gleam/json
 import gleam/list
+import gleam/option.{None}
 import gleeunit/should
 import simplifile
 
@@ -51,6 +52,7 @@ fn make_case(case_id: String, intent: String, domain: String) -> CbrCase {
     ),
     embedding: [],
     source_narrative_id: "cycle-001",
+    profile: None,
   )
 }
 
@@ -145,7 +147,7 @@ pub fn lenient_decoder_null_optional_fields_test() {
   // JSON with optional fields set to null — decoder should use defaults
   let with_nulls =
     "{\"case_id\":\"case-min\",\"timestamp\":\"2026-03-08T10:00:00\","
-    <> "\"schema_version\":null,\"embedding\":null,\"source_narrative_id\":null,"
+    <> "\"schema_version\":null,\"embedding\":null,\"source_narrative_id\":null,\"profile\":null,"
     <> "\"problem\":{\"user_input\":null,\"intent\":null,\"domain\":null,\"entities\":null,\"keywords\":null,\"query_complexity\":null},"
     <> "\"solution\":{\"approach\":null,\"agents_used\":null,\"tools_used\":null,\"steps\":null},"
     <> "\"outcome\":{\"status\":null,\"confidence\":null,\"assessment\":null,\"pitfalls\":null}}"

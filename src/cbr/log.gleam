@@ -111,6 +111,10 @@ pub fn encode_case(c: CbrCase) -> json.Json {
     #("outcome", encode_outcome(c.outcome)),
     #("embedding", json.array(c.embedding, json.float)),
     #("source_narrative_id", json.string(c.source_narrative_id)),
+    #("profile", case c.profile {
+      option.Some(p) -> json.string(p)
+      option.None -> json.null()
+    }),
   ])
 }
 
@@ -166,6 +170,7 @@ pub fn case_decoder() -> decode.Decoder(CbrCase) {
     "source_narrative_id",
     decode.optional(decode.string) |> decode.map(option.unwrap(_, "")),
   )
+  use profile <- decode.field("profile", decode.optional(decode.string))
   decode.success(CbrCase(
     case_id:,
     timestamp:,
@@ -175,6 +180,7 @@ pub fn case_decoder() -> decode.Decoder(CbrCase) {
     outcome:,
     embedding:,
     source_narrative_id:,
+    profile:,
   ))
 }
 

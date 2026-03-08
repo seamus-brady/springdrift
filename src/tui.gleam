@@ -271,10 +271,7 @@ fn handle_notification(
       }
       continue_loop(TuiState(..state, notice: "  " <> badge))
     }
-    agent_types.ProfileNotification(name:) ->
-      continue_loop(
-        TuiState(..state, notice: style.green("  Profile loaded: " <> name)),
-      )
+    agent_types.ProfileNotification(_) -> event_loop(state)
   }
 }
 
@@ -369,24 +366,6 @@ fn handle_command(state: TuiState, cmd: String) -> Nil {
           notice:,
         ),
       )
-    }
-    "/profile " <> name -> {
-      let trimmed = string.trim(name)
-      case trimmed {
-        "" -> {
-          let notice = style.dim("  Usage: /profile <name>")
-          continue_loop(TuiState(..state, notice:))
-        }
-        _ -> {
-          let reply_subj = state.cognitive_reply
-          process.send(
-            state.cognitive,
-            agent_types.LoadProfile(name: trimmed, reply_to: reply_subj),
-          )
-          let notice = style.dim("  Loading profile: " <> trimmed <> "...")
-          continue_loop(TuiState(..state, notice:))
-        }
-      }
     }
     _ -> {
       let notice = style.dim("  Unknown command: " <> cmd)

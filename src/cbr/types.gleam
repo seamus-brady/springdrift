@@ -20,6 +20,7 @@ pub type CbrCase {
     outcome: CbrOutcome,
     embedding: List(Float),
     source_narrative_id: String,
+    profile: Option(String),
   )
 }
 

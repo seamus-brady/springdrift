@@ -20,6 +20,7 @@ import llm/adapters/mock
 import llm/adapters/openai as openai_adapter
 import llm/provider.{type Provider}
 import llm/types as llm_types
+import narrative/curator
 import narrative/librarian
 import paths
 import profile
@@ -223,7 +224,7 @@ fn run(cfg: AppConfig) -> Nil {
   let available_profiles = profile.discover(profile_dirs)
 
   // Build agent specs (default or from profile)
-  let #(agent_specs, _active_profile) = case cfg.default_profile {
+  let #(agent_specs, active_profile) = case cfg.default_profile {
     option.Some(profile_name) ->
       case profile.load(profile_name, profile_dirs) {
         Ok(loaded_profile) -> {
@@ -287,6 +288,26 @@ fn run(cfg: AppConfig) -> Nil {
       ))
     }
     False -> option.None
+  }
+
+  // Start Curator and build identity-aware system prompt if Librarian is running
+  let system = case lib {
+    option.Some(librarian_subj) -> {
+      let cur =
+        curator.start_with_identity(
+          librarian_subj,
+          narrative_dir,
+          paths.cbr_dir(),
+          paths.facts_dir(),
+          paths.default_identity_dirs(),
+          "memory",
+          active_profile,
+        )
+      let prompt = curator.build_system_prompt(cur, system)
+      process.send(cur, curator.Shutdown)
+      prompt
+    }
+    option.None -> system
   }
 
   // Start cognitive loop with empty registry (supervisor will register agents)
@@ -388,7 +409,6 @@ fn run(cfg: AppConfig) -> Nil {
         initial_messages,
         port,
         narrative_dir,
-        available_profiles,
         lib,
       )
     }

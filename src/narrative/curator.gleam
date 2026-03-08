@@ -20,13 +20,15 @@ import facts/types as facts_types
 import gleam/erlang/process.{type Subject}
 import gleam/int
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{type Option, None, Some}
 import gleam/string
+import identity
 import narrative/housekeeping
 import narrative/librarian
 import narrative/virtual_memory.{
   type CbrSlotEntry, type VirtualMemory, ScratchEntry,
 }
+import paths
 import slog
 
 // ---------------------------------------------------------------------------
@@ -59,6 +61,8 @@ pub type CuratorMessage {
   RemoveWorkingMemory(key: String)
   /// Set CBR cases for the current query.
   SetCbrCases(cases: List(CbrSlotEntry))
+  /// Build the system prompt from persona + rendered preamble.
+  BuildSystemPrompt(fallback_prompt: String, reply_to: Subject(String))
   /// Trigger a housekeeping pass (manual or timer-driven).
   RunHousekeeping
   /// Shutdown the Curator.
@@ -78,6 +82,9 @@ type CuratorState {
     facts_dir: String,
     housekeeping_interval_ms: Int,
     vm: VirtualMemory,
+    identity_dirs: List(String),
+    memory_tag: String,
+    active_profile: Option(String),
   )
 }
 
@@ -91,6 +98,27 @@ pub fn start(
   narrative_dir: String,
   cbr_dir: String,
   facts_dir: String,
+) -> Subject(CuratorMessage) {
+  start_with_identity(
+    librarian,
+    narrative_dir,
+    cbr_dir,
+    facts_dir,
+    paths.default_identity_dirs(),
+    "memory",
+    None,
+  )
+}
+
+/// Start the Curator with explicit identity config.
+pub fn start_with_identity(
+  librarian: Subject(librarian.LibrarianMessage),
+  narrative_dir: String,
+  cbr_dir: String,
+  facts_dir: String,
+  identity_dirs: List(String),
+  memory_tag: String,
+  active_profile: Option(String),
 ) -> Subject(CuratorMessage) {
   let setup: Subject(Subject(CuratorMessage)) = process.new_subject()
   process.spawn_unlinked(fn() {
@@ -106,6 +134,9 @@ pub fn start(
         facts_dir:,
         housekeeping_interval_ms: 86_400_000,
         vm: virtual_memory.empty(),
+        identity_dirs:,
+        memory_tag:,
+        active_profile:,
       )
 
     slog.info("narrative/curator", "start", "Curator ready", None)
@@ -198,6 +229,21 @@ pub fn set_cbr_cases(
   cases: List(CbrSlotEntry),
 ) -> Nil {
   process.send(curator, SetCbrCases(cases:))
+}
+
+/// Build the system prompt from identity files + memory state.
+/// Falls back to `fallback_prompt` if no identity files exist.
+/// Blocks until reply.
+pub fn build_system_prompt(
+  curator: Subject(CuratorMessage),
+  fallback_prompt: String,
+) -> String {
+  let reply_to = process.new_subject()
+  process.send(curator, BuildSystemPrompt(fallback_prompt:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(prompt) -> prompt
+    Error(_) -> fallback_prompt
+  }
 }
 
 /// Trigger a housekeeping pass (fire-and-forget).
@@ -293,6 +339,12 @@ fn loop(state: CuratorState) -> Nil {
         SetCbrCases(cases:) -> {
           let updated_vm = virtual_memory.set_cbr_cases(state.vm, cases)
           loop(CuratorState(..state, vm: updated_vm))
+        }
+
+        BuildSystemPrompt(fallback_prompt:, reply_to:) -> {
+          let prompt = do_build_system_prompt(state, fallback_prompt)
+          process.send(reply_to, prompt)
+          loop(state)
         }
 
         RunHousekeeping -> {
@@ -519,3 +571,77 @@ fn do_housekeeping(state: CuratorState) -> Nil {
 
 @external(erlang, "springdrift_ffi", "days_ago_date")
 fn days_ago_date(days: Int) -> String
+
+fn get_today_date() -> String {
+  days_ago_date(0)
+}
+
+// ---------------------------------------------------------------------------
+// System prompt assembly from identity files
+// ---------------------------------------------------------------------------
+
+fn do_build_system_prompt(state: CuratorState, fallback: String) -> String {
+  let persona = identity.load_persona(state.identity_dirs)
+  let template = identity.load_preamble_template(state.identity_dirs)
+
+  case persona, template {
+    None, None -> fallback
+    _, _ -> {
+      let rendered_preamble = case template {
+        None -> None
+        Some(tmpl) -> {
+          let slots = build_preamble_slots(state)
+          let rendered = identity.render_preamble(tmpl, slots)
+          case rendered {
+            "" -> None
+            text -> Some(text)
+          }
+        }
+      }
+      case
+        identity.assemble_system_prompt(
+          persona,
+          rendered_preamble,
+          state.memory_tag,
+        )
+      {
+        Some(prompt) -> prompt
+        None -> fallback
+      }
+    }
+  }
+}
+
+fn build_preamble_slots(state: CuratorState) -> List(identity.SlotValue) {
+  let today = get_today_date()
+
+  // Query Librarian for counts
+  let thread_count = librarian.get_thread_count(state.librarian)
+  let fact_count = librarian.get_persistent_fact_count(state.librarian)
+  let case_count = librarian.get_case_count(state.librarian)
+
+  // Build slot values
+  [
+    identity.SlotValue(key: "session_status", value: "Active session"),
+    identity.SlotValue(key: "last_session_date", value: today),
+    identity.SlotValue(key: "last_session_summary", value: ""),
+    identity.SlotValue(
+      key: "active_thread_count",
+      value: int.to_string(thread_count),
+    ),
+    identity.SlotValue(key: "active_threads", value: ""),
+    identity.SlotValue(
+      key: "persistent_fact_count",
+      value: int.to_string(fact_count),
+    ),
+    identity.SlotValue(key: "recent_fact_sample", value: ""),
+    identity.SlotValue(key: "cbr_case_count", value: int.to_string(case_count)),
+    identity.SlotValue(key: "open_commitments", value: ""),
+    identity.SlotValue(key: "memory_health", value: "Nominal"),
+    identity.SlotValue(key: "active_profile", value: case state.active_profile {
+      Some(name) -> name
+      None -> ""
+    }),
+    identity.SlotValue(key: "profile_agents", value: ""),
+  ]
+}

@@ -6,6 +6,7 @@ import cbr/types as cbr_types
 import facts/types as facts_types
 import gleam/erlang/process
 import gleam/list
+import gleam/option
 import gleam/string
 import gleeunit/should
 import narrative/curator
@@ -411,6 +412,7 @@ fn make_cbr_case(
     ),
     embedding: embedding,
     source_narrative_id: "n-" <> id,
+    profile: option.None,
   )
 }
 
@@ -486,6 +488,45 @@ pub fn curator_housekeeping_deduplicates_similar_cases_test() {
   let assert [kept] = after
   kept.case_id |> should.equal("dup-b")
 
+  process.send(cur, curator.Shutdown)
+  process.send(lib, librarian.Shutdown)
+}
+
+// ---------------------------------------------------------------------------
+// Build system prompt
+// ---------------------------------------------------------------------------
+
+pub fn build_system_prompt_fallback_when_no_identity_test() {
+  let #(lib, cur) = start_both("sysprompt_fallback")
+  let prompt = curator.build_system_prompt(cur, "You are helpful.")
+  prompt |> should.equal("You are helpful.")
+  process.send(cur, curator.Shutdown)
+  process.send(lib, librarian.Shutdown)
+}
+
+pub fn build_system_prompt_with_persona_test() {
+  let dir = test_dir("sysprompt_persona")
+  let identity_dir = dir <> "/identity"
+  let _ = simplifile.create_directory_all(identity_dir)
+  let _ = simplifile.write(identity_dir <> "/persona.md", "I am Springdrift.")
+  let cbr_dir = dir <> "/cbr"
+  let facts_dir = dir <> "/facts"
+  let _ = simplifile.create_directory_all(cbr_dir)
+  let _ = simplifile.create_directory_all(facts_dir)
+  let lib = librarian.start(dir, cbr_dir, facts_dir, 0)
+  let cur =
+    curator.start_with_identity(
+      lib,
+      dir,
+      cbr_dir,
+      facts_dir,
+      [identity_dir],
+      "memory",
+      option.None,
+    )
+  let prompt = curator.build_system_prompt(cur, "fallback")
+  should.be_true(string.contains(prompt, "I am Springdrift."))
+  should.be_true(!string.contains(prompt, "fallback"))
   process.send(cur, curator.Shutdown)
   process.send(lib, librarian.Shutdown)
 }

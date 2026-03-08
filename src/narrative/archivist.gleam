@@ -723,6 +723,7 @@ fn parse_cbr_case(
           schema_version: 1,
           embedding: [],
           source_narrative_id: ctx.cycle_id,
+          profile: option.None,
         ),
       )
     Error(_) -> Error(Nil)
@@ -771,6 +772,7 @@ fn lenient_cbr_decoder() -> decode.Decoder(cbr_types.CbrCase) {
     outcome:,
     embedding: [],
     source_narrative_id: "",
+    profile: option.None,
   ))
 }
 

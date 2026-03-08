@@ -229,6 +229,14 @@ pub type LibrarianMessage {
   /// Clear the scratchpad for a cycle.
   ClearCycleScratchpad(cycle_id: String)
 
+  // --- Count queries ---
+  /// Get the number of active threads.
+  QueryThreadCount(reply_to: Subject(Int))
+  /// Get the number of persistent facts (by key count).
+  QueryPersistentFactCount(reply_to: Subject(Int))
+  /// Get the number of CBR cases.
+  QueryCaseCount(reply_to: Subject(Int))
+
   /// Shutdown
   Shutdown
 }
@@ -605,6 +613,36 @@ pub fn supersede_fact(
 }
 
 /// Clear the scratchpad for a cycle (fire-and-forget).
+/// Get the number of active threads. Blocks until reply.
+pub fn get_thread_count(librarian: Subject(LibrarianMessage)) -> Int {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryThreadCount(reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(count) -> count
+    Error(_) -> 0
+  }
+}
+
+/// Get the number of persistent facts. Blocks until reply.
+pub fn get_persistent_fact_count(librarian: Subject(LibrarianMessage)) -> Int {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryPersistentFactCount(reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(count) -> count
+    Error(_) -> 0
+  }
+}
+
+/// Get the number of CBR cases. Blocks until reply.
+pub fn get_case_count(librarian: Subject(LibrarianMessage)) -> Int {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryCaseCount(reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(count) -> count
+    Error(_) -> 0
+  }
+}
+
 pub fn clear_cycle_scratchpad(
   librarian: Subject(LibrarianMessage),
   cycle_id: String,
@@ -791,6 +829,25 @@ fn loop(state: LibrarianState) -> Nil {
 
         ClearCycleScratchpad(cycle_id:) -> {
           result_delete_key(state.cycle_scratchpad, cycle_id)
+          loop(state)
+        }
+
+        QueryThreadCount(reply_to:) -> {
+          process.send(reply_to, list.length(state.thread_index.threads))
+          loop(state)
+        }
+
+        QueryPersistentFactCount(reply_to:) -> {
+          let all = fact_all_values(state.facts_by_key)
+          let persistent =
+            list.filter(all, fn(f) { f.scope == facts_types.Persistent })
+          process.send(reply_to, list.length(persistent))
+          loop(state)
+        }
+
+        QueryCaseCount(reply_to:) -> {
+          let all = cbr_all_values(state.cbr_cases)
+          process.send(reply_to, list.length(all))
           loop(state)
         }
       }

@@ -74,6 +74,7 @@ fn make_case(
     ),
     embedding: embedding,
     source_narrative_id: "n-" <> id,
+    profile: None,
   )
 }
 
