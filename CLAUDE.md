@@ -63,6 +63,8 @@ src/
 ├── narrative/                 Prime Narrative — immutable first-person agent memory
 │   ├── types.gleam            NarrativeEntry, Intent, Outcome, DelegationStep, Thread, Metrics
 │   ├── log.gleam              Append-only JSON-L log, full encode/decode, query functions
+│   ├── store_ffi.erl          Erlang FFI for ETS table operations (new, insert, lookup, etc.)
+│   ├── librarian.gleam        Supervised actor owning ETS query cache over narrative JSONL
 │   ├── archivist.gleam        Async LLM-based narrative generation after each cycle
 │   ├── threading.gleam        Overlap scoring, thread assignment, continuity notes
 │   ├── summary.gleam          Periodic LLM summaries (weekly/monthly) of narrative entries
@@ -150,6 +152,7 @@ Long-lived processes and per-turn workers:
 | Think worker | Per turn | Blocking LLM call with retry + exponential backoff |
 | Agent processes | App | Each specialist agent runs its own react loop |
 | Archivist | Per turn | Async narrative generation after reply (spawn_unlinked) |
+| Librarian | App | Owns ETS query cache over narrative JSONL, message-based queries |
 | Scheduler | App | BEAM-native task scheduler with `send_after` tick loop |
 
 All cross-process communication uses typed `Subject(T)` channels. No shared mutable
@@ -237,7 +240,10 @@ user. It generates a `NarrativeEntry` via a single LLM call, assigns a thread vi
 `threading.assign_thread`, and appends to `.springdrift/memory/narrative/YYYY-MM-DD.jsonl`. Zero
 overhead when disabled. Thread assignment uses overlap scoring (location=3, domain=2,
 keyword=1; threshold=4). `AgentCompletionRecord` accumulates in `CognitiveState` and
-resets each `handle_user_input`.
+resets each `handle_user_input`. The Librarian actor owns ETS tables as a fast query
+cache over JSONL files (entries, by_thread, by_date, by_keyword, by_recency). All
+callers accept `Option(Subject(LibrarianMessage))` and fall back to direct JSONL reads
+when `None`. The Archivist notifies the Librarian when new entries are written.
 
 **Profiles** — switchable agent team configurations loaded from TOML directories.
 `profile.discover(dirs)` scans for directories with `config.toml`. `profile.load(name, dirs)`
@@ -314,7 +320,7 @@ summary_schedule = "weekly"          # "weekly" or "monthly"
 ### Profile directory format
 
 ```
-profiles/
+.springdrift/profiles/
 └── analyst/
     ├── config.toml          # Required — name, description, models, agents
     ├── dprime.json          # Optional — dual-gate D' config (tool_gate + output_gate)
