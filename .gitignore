@@ -3,10 +3,12 @@ build/
 *.beam
 *.ez
 erl_crash.dump
-prime-narrative/
-*.session.json
+.springdrift/
 .env
 *.local.json
 _impl_docs/
+# Legacy paths (pre-.springdrift/ consolidation)
+prime-narrative/
+*.session.json
 cycle-log/
 logs/

@@ -20,6 +20,7 @@ import llm/adapters/mock
 import llm/adapters/openai as openai_adapter
 import llm/provider.{type Provider}
 import llm/types as llm_types
+import paths
 import profile
 import profile/types as profile_types
 import scheduler/runner as scheduler_runner
@@ -36,14 +37,8 @@ import web/gui as web_gui
 @external(erlang, "erlang", "halt")
 fn do_halt(code: Int) -> Nil
 
-@external(erlang, "springdrift_ffi", "get_env")
-fn get_env(name: String) -> Result(String, Nil)
-
 fn default_skill_dirs() -> List(String) {
-  case get_env("HOME") {
-    Ok(home) -> [home <> "/.config/springdrift/skills", ".skills"]
-    Error(_) -> [".skills"]
-  }
+  paths.default_skills_dirs()
 }
 
 pub fn main() -> Nil {
@@ -138,7 +133,7 @@ fn print_help() -> Nil {
   io.println("  --resume                  Resume previous session from disk")
   io.println("  --skills-dir <path>       Add a skills directory (repeatable)")
   io.println(
-    "                            (default: ~/.config/springdrift/skills and .skills)",
+    "                            (default: ~/.config/springdrift/skills and .springdrift/skills)",
   )
   io.println("  --config <path>           Load an additional TOML config file")
   io.println(
@@ -164,14 +159,14 @@ fn print_help() -> Nil {
   )
   io.println("  --no-narrative            Disable narrative logging (default)")
   io.println(
-    "  --narrative-dir <path>    Directory for narrative logs (default: prime-narrative)",
+    "  --narrative-dir <path>    Directory for narrative logs (default: .springdrift/memory/narrative)",
   )
   io.println("")
   io.println("Config files (checked in order; local overrides user config):")
-  io.println("  .springdrift.toml")
+  io.println("  .springdrift/config.toml")
   io.println("  ~/.config/springdrift/config.toml")
   io.println("")
-  io.println("Example .springdrift.toml (all fields optional):")
+  io.println("Example .springdrift/config.toml (all fields optional):")
   io.println("  # LLM provider and models")
   io.println("  provider        = \"anthropic\"")
   io.println("  task_model      = \"claude-haiku-4-5-20251001\"")
@@ -275,7 +270,7 @@ fn run(cfg: AppConfig) -> Nil {
 
   // Narrative config
   let narrative_enabled = option.unwrap(cfg.narrative_enabled, False)
-  let narrative_dir = option.unwrap(cfg.narrative_dir, "prime-narrative")
+  let narrative_dir = option.unwrap(cfg.narrative_dir, paths.narrative_dir())
   let archivist_model = option.unwrap(cfg.archivist_model, task_model)
 
   // Start cognitive loop with empty registry (supervisor will register agents)

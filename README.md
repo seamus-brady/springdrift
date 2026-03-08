@@ -269,7 +269,7 @@ cognitive loop
 │   ├── web_search (DuckDuckGo, no API key required)
 │   └── fetch_url (HTTP GET with scheme validation)
 ├── D-prime safety gate (reactive -> deliberative -> meta-management)
-├── narrative memory (JSONL + thread index)
+├── narrative memory (.springdrift/memory/narrative/)
 └── scheduler
     ├── persistent job state (JSON checkpoint)
     └── delivery (file, webhook)
@@ -317,11 +317,28 @@ gleam run -- --dprime          # Enable D' safety evaluation
 
 ## Configuration
 
-Three-layer merge (highest priority first):
+All runtime data lives under `.springdrift/` in the project root:
+
+```
+.springdrift/
+├── config.toml          Project config
+├── session.json          Session persistence (auto-generated)
+├── logs/                 System logs (date-rotated JSON-L)
+├── memory/
+│   ├── cycle-log/        Per-cycle request/response logs
+│   └── narrative/        Prime Narrative memory (JSON-L + thread index)
+├── skills/               Local skill definitions
+└── profiles/             Agent profile directories
+```
+
+Copy `.springdrift_example/` to `.springdrift/` to get started. Add `.springdrift/`
+to your `.gitignore` — it contains runtime state and logs.
+
+Config is resolved with a three-layer merge (highest priority first):
 
 1. CLI flags
-2. `.springdrift.toml` (current directory)
-3. `~/.config/springdrift/config.toml`
+2. `.springdrift/config.toml` (project directory)
+3. `~/.config/springdrift/config.toml` (user directory)
 
 ```toml
 provider        = "anthropic"
@@ -339,7 +356,6 @@ dprime_config  = "dprime.json"
 # Prime Narrative
 [narrative]
 enabled          = false
-dir              = "prime-narrative"
 threading        = true
 summaries        = false
 summary_schedule = "weekly"
@@ -355,7 +371,7 @@ summary_schedule = "weekly"
 
 ```sh
 gleam build           # Compile
-gleam test            # Run the test suite (~486 tests)
+gleam test            # Run the test suite (~503 tests)
 gleam format          # Format all source files
 gleam run             # Run the application
 ```

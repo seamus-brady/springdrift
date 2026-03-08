@@ -83,8 +83,7 @@ pub fn provider_from_openrouter_env() -> Result(Provider, types.LlmError) {
 // ---------------------------------------------------------------------------
 
 fn build_provider(client: gllm.Client) -> Provider {
-  let is_openrouter =
-    string.contains(client.base_url, "openrouter.ai")
+  let is_openrouter = string.contains(client.base_url, "openrouter.ai")
   Provider(name: "openai", chat: fn(req) {
     let model = case is_openrouter {
       True -> normalize_openrouter_model(req.model)

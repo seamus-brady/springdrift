@@ -1,0 +1,72 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Springdrift local config — .springdrift/config.toml
+# All fields are optional. CLI flags always take priority.
+# Run `gleam run -- --help` to see all available flags.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── LLM provider and models ─────────────────────────────────────────────────
+
+# "anthropic" | "openrouter" | "openai" | "mistral" | "local" | "mock"
+provider = "mock"
+
+# Model for Simple queries (fast, cheap)
+# task_model = "claude-haiku-4-5-20251001"      # Anthropic
+# task_model = "mistral-small-latest"            # Mistral
+# task_model = "gpt-4o-mini"                     # OpenAI / OpenRouter
+
+# Model for Complex queries (slow, powerful)
+# reasoning_model = "claude-opus-4-6"            # Anthropic
+# reasoning_model = "mistral-large-latest"       # Mistral
+# reasoning_model = "gpt-4o"                     # OpenAI / OpenRouter
+
+# System prompt injected on every request
+system_prompt = "You are a helpful assistant."
+
+# Maximum output tokens per LLM call (default: 2048)
+max_tokens = 2048
+
+# ── Loop control ─────────────────────────────────────────────────────────────
+
+# React-loop iterations per message before giving up (default: 5)
+max_turns = 5
+
+# Consecutive tool failures before the loop aborts (default: 3)
+max_consecutive_errors = 3
+
+# Sliding-window cap on context messages; oldest dropped first (default: unlimited)
+# max_context_messages = 100
+
+# ── GUI ──────────────────────────────────────────────────────────────────────
+
+# GUI mode: "tui" (terminal, default) or "web" (browser on port 8080)
+gui = "tui"
+
+# ── Logging and filesystem ───────────────────────────────────────────────────
+
+# Log full LLM request/response payloads to the cycle log (default: false)
+log_verbose = false
+
+# Allow write_file outside the project directory (default: false)
+write_anywhere = false
+
+# Extra directories to scan for SKILL.md files
+# Default dirs (.springdrift/skills and ~/.config/springdrift/skills) are always included
+# skills_dirs = ["/path/to/my/skills"]
+
+# ── D' safety system ────────────────────────────────────────────────────────
+
+# Enable D' safety evaluation before tool dispatch (default: false)
+dprime_enabled = false
+
+# Path to D' config JSON (default: built-in)
+# dprime_config = "dprime.json"
+
+# ── Prime Narrative ─────────────────────────────────────────────────────────
+
+[narrative]
+enabled = false              # Enable narrative logging after each cycle
+# directory = ".springdrift/memory/narrative"  # Default location
+# archivist_model = ""       # Defaults to task_model
+threading = true             # Auto-assign threads by overlap scoring
+summaries = false            # Enable periodic summaries
+summary_schedule = "weekly"  # "weekly" or "monthly"

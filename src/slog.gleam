@@ -1,5 +1,5 @@
 //// System-level logger with three output sinks:
-//// 1. Date-rotated JSON-L files in logs/
+//// 1. Date-rotated JSON-L files in .springdrift/logs/
 //// 2. Optional stderr output (enabled by --verbose)
 //// 3. Loadable by TUI/Web log tabs
 ////
@@ -11,6 +11,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/order
 import gleam/string
+import paths
 import simplifile
 
 // ---------------------------------------------------------------------------
@@ -222,7 +223,7 @@ pub fn entry_decoder() -> decode.Decoder(LogEntry) {
 // ---------------------------------------------------------------------------
 
 fn log_dir() -> String {
-  "logs"
+  paths.logs_dir()
 }
 
 fn log_path() -> String {

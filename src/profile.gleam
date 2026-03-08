@@ -8,6 +8,7 @@ import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
+import paths
 import profile/types.{
   type AgentDef, type DeliveryConfig, type Profile, type ProfileModels,
   type ScheduleTaskConfig, AgentDef, FileDelivery, Profile, ProfileModels,
@@ -18,22 +19,12 @@ import slog
 import tom
 
 // ---------------------------------------------------------------------------
-// FFI
-// ---------------------------------------------------------------------------
-
-@external(erlang, "springdrift_ffi", "get_env")
-fn get_env(name: String) -> Result(String, Nil)
-
-// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
 /// Default profile directories to scan.
 pub fn default_profile_dirs() -> List(String) {
-  case get_env("HOME") {
-    Ok(home) -> [home <> "/.config/springdrift/profiles", "profiles"]
-    Error(_) -> ["profiles"]
-  }
+  paths.default_profiles_dirs()
 }
 
 /// Discover all valid profiles across the given directories.

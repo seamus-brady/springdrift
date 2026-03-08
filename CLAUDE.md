@@ -27,6 +27,7 @@ src/
 ├── springdrift_ffi.erl        Erlang FFI (stdin, env, args, spinner, UUID, datetime, logger,
 │                              file_size, resolve_symlinks, sanitize_json, days_ago_date,
 │                              uri_encode, extract_ddg_results)
+├── paths.gleam                Centralised path definitions for .springdrift/ directory
 ├── slog.gleam                 System logger — date-rotated JSON-L + stderr + log retention
 ├── config.gleam               Three-layer config with key validation + range checking
 ├── storage.gleam              Versioned session persistence with staleness detection
@@ -171,18 +172,18 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `max_context_messages` | `--max-context` | unlimited | Sliding-window message cap |
 | `config_path` | `--config` | None | Extra config file path |
 | `log_verbose` | `--verbose` | False | Enable stderr log output + full LLM payloads to cycle log |
-| `skills_dirs` | `--skills-dir` (repeatable) | `[~/.config/springdrift/skills, .skills]` | Skill directories |
+| `skills_dirs` | `--skills-dir` (repeatable) | `[~/.config/springdrift/skills, .springdrift/skills]` | Skill directories |
 | `write_anywhere` | `--allow-write-anywhere` | False | Allow `write_file` outside CWD |
 | `gui` | `--gui` | tui | GUI mode: `tui` (terminal) or `web` (browser on port 8080) |
 | `dprime_enabled` | `--dprime` / `--no-dprime` | False | Enable D' safety evaluation before tool dispatch |
 | `dprime_config` | `--dprime-config` | built-in defaults | Path to D' config JSON file |
 | `narrative_enabled` | `--narrative` / `--no-narrative` | False | Enable Prime Narrative logging after each cycle |
-| `narrative_dir` | `--narrative-dir` | `prime-narrative` | Directory for narrative JSON-L files |
+| `narrative_dir` | `--narrative-dir` | `.springdrift/memory/narrative` | Directory for narrative JSON-L files |
 | `archivist_model` | — | task_model | Model used by the Archivist for narrative generation |
 | `narrative_threading` | — | True | Enable automatic thread assignment |
 | `narrative_summaries` | — | False | Enable periodic narrative summaries |
 | `narrative_summary_schedule` | — | `"weekly"` | Summary schedule: `"weekly"` or `"monthly"` |
-| `profiles_dirs` | `--profiles-dir` (repeatable) | `[~/.config/springdrift/profiles, profiles]` | Profile directories |
+| `profiles_dirs` | `--profiles-dir` (repeatable) | `[~/.config/springdrift/profiles, .springdrift/profiles]` | Profile directories |
 | `default_profile` | `--profile` | None | Profile to load at startup |
 
 ## Patterns to follow
@@ -224,7 +225,7 @@ paths are XML-escaped (`&<>"'`) before injection via `xml_escape`. The `read_ski
 validates that `path` ends with `SKILL.md` before reading.
 
 **System logging** — `slog` provides `debug`, `info`, `warn`, `log_error` functions.
-All take `(module, function, message, cycle_id)`. Logs write to `logs/YYYY-MM-DD.jsonl`
+All take `(module, function, message, cycle_id)`. Logs write to `.springdrift/logs/YYYY-MM-DD.jsonl`
 (date-rotated JSON-L). Per-file size limit of 10MB with rotation (renames to `.1`).
 Old logs (>30 days) are cleaned up on startup via `cleanup_old_logs`. When `--verbose`
 is set, formatted lines also go to stderr. Named `slog` (not `logger`) to avoid
@@ -233,7 +234,7 @@ collision with Erlang's built-in `logger` module.
 **Prime Narrative** — when `narrative_enabled` is true, `maybe_spawn_archivist` fires
 after each final reply. The Archivist runs `spawn_unlinked` — failures never affect the
 user. It generates a `NarrativeEntry` via a single LLM call, assigns a thread via
-`threading.assign_thread`, and appends to `prime-narrative/YYYY-MM-DD.jsonl`. Zero
+`threading.assign_thread`, and appends to `.springdrift/memory/narrative/YYYY-MM-DD.jsonl`. Zero
 overhead when disabled. Thread assignment uses overlap scoring (location=3, domain=2,
 keyword=1; threshold=4). `AgentCompletionRecord` accumulates in `CognitiveState` and
 resets each `handle_user_input`.
@@ -276,7 +277,7 @@ parameter. No auth required when the env var is unset.
 
 ## Config file format
 
-Local `.springdrift.toml` (or `~/.config/springdrift/config.toml`). All fields are optional; TOML `#` comments are fully supported:
+`.springdrift/config.toml` (or `~/.config/springdrift/config.toml`). All fields are optional; TOML `#` comments are fully supported:
 
 ```toml
 # LLM provider and models
@@ -303,7 +304,7 @@ dprime_config  = "dprime.json" # Path to D' config JSON (omit for built-in defau
 # Prime Narrative
 [narrative]
 enabled          = false             # Enable narrative logging after each cycle
-dir              = "prime-narrative" # Directory for narrative JSON-L files
+dir              = ".springdrift/memory/narrative" # Default location
 archivist_model  = "claude-haiku-4-5-20251001" # Model for Archivist LLM calls
 threading        = true              # Auto-assign threads by overlap scoring
 summaries        = false             # Enable periodic summaries
@@ -328,7 +329,7 @@ CLI flags override config files. `--skills-dir` is repeatable and appends to the
 ## Skill directory format
 
 ```
-.skills/
+.springdrift/skills/
 └── my-skill/
     └── SKILL.md
 ```

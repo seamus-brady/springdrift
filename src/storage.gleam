@@ -8,11 +8,9 @@ import llm/types.{
   type ContentBlock, type Message, type Role, Assistant, ImageContent, Message,
   TextContent, ToolResultContent, ToolUseContent, User,
 }
+import paths
 import simplifile
 import slog
-
-@external(erlang, "springdrift_ffi", "get_env")
-fn get_env(name: String) -> Result(String, Nil)
 
 @external(erlang, "springdrift_ffi", "get_datetime")
 fn get_datetime() -> String
@@ -26,17 +24,11 @@ type Session {
 }
 
 fn config_dir() -> String {
-  case get_env("HOME") {
-    Ok(home) -> home <> "/.config/springdrift"
-    Error(_) -> "."
-  }
+  paths.project_dir
 }
 
 fn session_path() -> String {
-  case get_env("HOME") {
-    Ok(home) -> home <> "/.config/springdrift/session.json"
-    Error(_) -> ".springdrift_session.json"
-  }
+  paths.session()
 }
 
 /// Expose session path for test use only.

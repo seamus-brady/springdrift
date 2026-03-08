@@ -2,7 +2,7 @@
 ////
 //// Priority (highest to lowest):
 ////   1. CLI flags       (--provider, --task-model, --system, --max-tokens, etc.)
-////   2. Local config    (.springdrift.toml in current directory)
+////   2. Local config    (.springdrift/config.toml in current directory)
 ////   3. User config     (~/.config/springdrift/config.toml)
 ////
 //// All fields are optional. Unset fields fall back to built-in defaults
@@ -38,6 +38,7 @@ import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
+import paths
 import simplifile
 import slog
 import tom
@@ -88,9 +89,6 @@ pub type AppConfig {
 
 @external(erlang, "springdrift_ffi", "get_args")
 fn get_args() -> List(String)
-
-@external(erlang, "springdrift_ffi", "get_env")
-fn get_env(name: String) -> Result(String, Nil)
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -201,12 +199,15 @@ pub fn parse_config_toml(input: String) -> Result(AppConfig, Nil) {
 }
 
 /// Load config from disk: merges user config with local config (local wins).
+/// Also checks legacy .springdrift.toml for backwards compatibility.
 pub fn load_file() -> AppConfig {
-  let local = load_from_path(".springdrift.toml")
-  let user = case get_env("HOME") {
-    Ok(home) -> load_from_path(home <> "/.config/springdrift/config.toml")
-    Error(_) -> default()
+  let local = case simplifile.is_file(paths.local_config()) {
+    Ok(True) -> load_from_path(paths.local_config())
+    _ ->
+      // Legacy fallback: .springdrift.toml in project root
+      load_from_path(".springdrift.toml")
   }
+  let user = load_from_path(paths.user_config())
   merge(user, local)
 }
 

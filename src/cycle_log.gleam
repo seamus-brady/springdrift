@@ -12,6 +12,7 @@ import llm/types.{
   ObjectProperty, StopSequenceReached, StringProperty, TextContent, ToolFailure,
   ToolResultContent, ToolSuccess, ToolUseContent, ToolUseRequested, User,
 }
+import paths
 import simplifile
 
 @external(erlang, "springdrift_ffi", "generate_uuid")
@@ -24,7 +25,7 @@ fn get_datetime() -> String
 fn get_date() -> String
 
 fn cycle_log_dir() -> String {
-  "cycle-log"
+  paths.cycle_log_dir()
 }
 
 fn log_path() -> String {
