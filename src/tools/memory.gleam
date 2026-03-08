@@ -4,15 +4,17 @@
 //// what it worked on yesterday, last week, or for a specific topic.
 
 import gleam/dynamic/decode
+import gleam/erlang/process.{type Subject}
 import gleam/int
 import gleam/json
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{type Option, None, Some}
 import gleam/string
 import llm/tool
 import llm/types.{
   type Tool, type ToolCall, type ToolResult, ToolFailure, ToolSuccess,
 }
+import narrative/librarian.{type LibrarianMessage}
 import narrative/log as narrative_log
 import narrative/types as narrative_types
 import slog
@@ -89,13 +91,18 @@ pub fn is_memory_tool(name: String) -> Bool {
   name == "recall_recent" || name == "recall_search" || name == "recall_threads"
 }
 
-/// Execute a memory tool call. Requires the narrative directory path.
-pub fn execute(call: ToolCall, narrative_dir: String) -> ToolResult {
+/// Execute a memory tool call. Uses the Librarian if available,
+/// otherwise falls back to direct JSONL reads.
+pub fn execute(
+  call: ToolCall,
+  narrative_dir: String,
+  lib: Option(Subject(LibrarianMessage)),
+) -> ToolResult {
   slog.debug("memory", "execute", "tool=" <> call.name, None)
   case call.name {
-    "recall_recent" -> run_recall_recent(call, narrative_dir)
-    "recall_search" -> run_recall_search(call, narrative_dir)
-    "recall_threads" -> run_recall_threads(call, narrative_dir)
+    "recall_recent" -> run_recall_recent(call, narrative_dir, lib)
+    "recall_search" -> run_recall_search(call, narrative_dir, lib)
+    "recall_threads" -> run_recall_threads(call, narrative_dir, lib)
     _ -> ToolFailure(tool_use_id: call.id, error: "Unknown tool: " <> call.name)
   }
 }
@@ -104,7 +111,11 @@ pub fn execute(call: ToolCall, narrative_dir: String) -> ToolResult {
 // recall_recent
 // ---------------------------------------------------------------------------
 
-fn run_recall_recent(call: ToolCall, dir: String) -> ToolResult {
+fn run_recall_recent(
+  call: ToolCall,
+  dir: String,
+  lib: Option(Subject(LibrarianMessage)),
+) -> ToolResult {
   let decoder = {
     use period <- decode.field("period", decode.string)
     use max <- decode.optional_field("max_entries", 20, decode.int)
@@ -119,7 +130,10 @@ fn run_recall_recent(call: ToolCall, dir: String) -> ToolResult {
     Ok(#(period, max_entries)) -> {
       let clamped = int.min(50, int.max(1, max_entries))
       let #(from, to) = date_range_for_period(period)
-      let entries = narrative_log.load_entries(dir, from, to)
+      let entries = case lib {
+        Some(l) -> librarian.load_entries(l, from, to)
+        None -> narrative_log.load_entries(dir, from, to)
+      }
       let limited = take_last(entries, clamped)
       let formatted = format_entries(limited, period)
       ToolSuccess(tool_use_id: call.id, content: formatted)
@@ -156,7 +170,11 @@ fn date_range_for_period(period: String) -> #(String, String) {
 // recall_search
 // ---------------------------------------------------------------------------
 
-fn run_recall_search(call: ToolCall, dir: String) -> ToolResult {
+fn run_recall_search(
+  call: ToolCall,
+  dir: String,
+  lib: Option(Subject(LibrarianMessage)),
+) -> ToolResult {
   let decoder = {
     use query <- decode.field("query", decode.string)
     use max <- decode.optional_field("max_entries", 20, decode.int)
@@ -170,7 +188,10 @@ fn run_recall_search(call: ToolCall, dir: String) -> ToolResult {
       )
     Ok(#(query, max_entries)) -> {
       let clamped = int.min(50, int.max(1, max_entries))
-      let entries = narrative_log.search(dir, query)
+      let entries = case lib {
+        Some(l) -> librarian.search(l, query)
+        None -> narrative_log.search(dir, query)
+      }
       let limited = take_last(entries, clamped)
       case limited {
         [] ->
@@ -202,8 +223,15 @@ fn run_recall_search(call: ToolCall, dir: String) -> ToolResult {
 // recall_threads
 // ---------------------------------------------------------------------------
 
-fn run_recall_threads(call: ToolCall, dir: String) -> ToolResult {
-  let index = narrative_log.load_thread_index(dir)
+fn run_recall_threads(
+  call: ToolCall,
+  dir: String,
+  lib: Option(Subject(LibrarianMessage)),
+) -> ToolResult {
+  let index = case lib {
+    Some(l) -> librarian.load_thread_index(l)
+    None -> narrative_log.load_thread_index(dir)
+  }
   case index.threads {
     [] ->
       ToolSuccess(

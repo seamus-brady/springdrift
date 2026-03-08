@@ -13,6 +13,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/string
 import llm/types.{type Message, Assistant, TextContent, User}
 import mist.{type Connection, type ResponseData}
+import narrative/librarian.{type LibrarianMessage}
 import narrative/log as narrative_log
 import slog
 import web/html
@@ -37,6 +38,7 @@ type WsState {
     cognitive: Subject(agent_types.CognitiveMessage),
     reply_subject: Subject(agent_types.CognitiveReply),
     narrative_dir: String,
+    librarian: Option(Subject(LibrarianMessage)),
   )
 }
 
@@ -91,6 +93,7 @@ pub fn start(
   port: Int,
   narrative_dir: String,
   available_profiles: List(String),
+  lib: Option(Subject(LibrarianMessage)),
 ) -> Nil {
   let auth_token = get_auth_token()
   slog.info(
@@ -109,6 +112,7 @@ pub fn start(
         narrative_dir,
         available_profiles,
         auth_token,
+        lib,
       )
     }
     |> mist.new
@@ -130,6 +134,7 @@ fn handle_request(
   narrative_dir: String,
   available_profiles: List(String),
   auth_token: Option(String),
+  lib: Option(Subject(LibrarianMessage)),
 ) -> Response(ResponseData) {
   case check_auth(req, auth_token) {
     False ->
@@ -158,6 +163,7 @@ fn handle_request(
                 initial_messages,
                 narrative_dir,
                 available_profiles,
+                lib,
               )
             },
             on_close: fn(_state) { Nil },
@@ -182,6 +188,7 @@ fn ws_on_init(
   initial_messages: List(Message),
   narrative_dir: String,
   available_profiles: List(String),
+  lib: Option(Subject(LibrarianMessage)),
 ) -> #(WsState, option.Option(Selector(WsMsg))) {
   // Create a reply subject for this connection
   let reply_subject: Subject(agent_types.CognitiveReply) = process.new_subject()
@@ -198,7 +205,8 @@ fn ws_on_init(
     selector
     |> process.select_map(profiles_subject, fn(names) { SendProfiles(names) })
 
-  let state = WsState(cognitive:, reply_subject:, narrative_dir:)
+  let state =
+    WsState(cognitive:, reply_subject:, narrative_dir:, librarian: lib)
 
   // Replay initial messages and send profiles after init
   let replay_msgs = initial_messages
@@ -272,7 +280,10 @@ fn ws_handler(
               mist.continue(state)
             }
             Ok(protocol.RequestNarrativeData) -> {
-              let entries = narrative_log.load_all(state.narrative_dir)
+              let entries = case state.librarian {
+                Some(l) -> librarian.load_all(l)
+                None -> narrative_log.load_all(state.narrative_dir)
+              }
               let entries_json =
                 json.to_string(json.array(entries, narrative_log.encode_entry))
               let _ =

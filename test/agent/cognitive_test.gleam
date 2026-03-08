@@ -36,6 +36,7 @@ fn start_cognitive(provider) {
       False,
       ".springdrift/memory/narrative",
       "mock-model",
+      None,
       [],
       False,
     )
@@ -281,6 +282,7 @@ pub fn model_fallback_on_retryable_error_test() {
       False,
       ".springdrift/memory/narrative",
       "mock-task",
+      None,
       [],
       False,
     )

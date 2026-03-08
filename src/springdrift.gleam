@@ -20,6 +20,7 @@ import llm/adapters/mock
 import llm/adapters/openai as openai_adapter
 import llm/provider.{type Provider}
 import llm/types as llm_types
+import narrative/librarian
 import paths
 import profile
 import profile/types as profile_types
@@ -273,6 +274,16 @@ fn run(cfg: AppConfig) -> Nil {
   let narrative_dir = option.unwrap(cfg.narrative_dir, paths.narrative_dir())
   let archivist_model = option.unwrap(cfg.archivist_model, task_model)
 
+  // Start the Librarian (narrative ETS query layer) if narrative is enabled
+  let lib = case narrative_enabled {
+    True -> {
+      let max_files = 0
+      // 0 = load all files
+      option.Some(librarian.start(narrative_dir, max_files))
+    }
+    False -> option.None
+  }
+
   // Start cognitive loop with empty registry (supervisor will register agents)
   let cognitive_subj =
     cognitive.start(
@@ -291,6 +302,7 @@ fn run(cfg: AppConfig) -> Nil {
       narrative_enabled,
       narrative_dir,
       archivist_model,
+      lib,
       profile_dirs,
       write_anywhere,
     )
@@ -371,6 +383,7 @@ fn run(cfg: AppConfig) -> Nil {
         port,
         narrative_dir,
         available_profiles,
+        lib,
       )
     }
     _ ->
@@ -382,6 +395,7 @@ fn run(cfg: AppConfig) -> Nil {
         reasoning_model,
         initial_messages,
         narrative_dir,
+        lib,
       )
   }
   Nil

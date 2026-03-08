@@ -33,6 +33,7 @@ import llm/response
 import llm/tool
 import llm/types as llm_types
 import narrative/archivist
+import narrative/librarian.{type LibrarianMessage}
 import profile
 import profile/types as profile_types
 import query_complexity
@@ -75,6 +76,7 @@ pub type CognitiveState {
     narrative_enabled: Bool,
     narrative_dir: String,
     archivist_model: String,
+    librarian: Option(Subject(LibrarianMessage)),
     agent_completions: List(types.AgentCompletionRecord),
     last_user_input: String,
     // Profile
@@ -107,6 +109,7 @@ pub fn start(
   narrative_enabled: Bool,
   narrative_dir: String,
   archivist_model: String,
+  librarian: Option(Subject(LibrarianMessage)),
   profile_dirs: List(String),
   write_anywhere: Bool,
 ) -> Subject(CognitiveMessage) {
@@ -148,6 +151,7 @@ pub fn start(
         narrative_enabled:,
         narrative_dir:,
         archivist_model:,
+        librarian:,
         agent_completions: [],
         last_user_input: "",
         active_profile: None,
@@ -590,7 +594,7 @@ fn handle_memory_tools(
   // Execute memory tools synchronously
   let memory_results =
     list.map(memory_calls, fn(call) {
-      let result = memory.execute(call, state.narrative_dir)
+      let result = memory.execute(call, state.narrative_dir, state.librarian)
       case result {
         llm_types.ToolSuccess(tool_use_id: id, content: c) ->
           llm_types.ToolResultContent(
@@ -2350,6 +2354,7 @@ fn maybe_spawn_archivist(
         state.archivist_model,
         state.narrative_dir,
         state.verbose,
+        state.librarian,
       )
     }
   }

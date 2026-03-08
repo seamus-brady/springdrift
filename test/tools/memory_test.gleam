@@ -1,4 +1,5 @@
 import gleam/list
+import gleam/option.{None}
 import gleeunit
 import gleeunit/should
 import llm/types.{ToolCall, ToolFailure, ToolSuccess}
@@ -65,7 +66,7 @@ pub fn is_memory_tool_agent_test() {
 
 pub fn recall_recent_missing_period_test() {
   let call = ToolCall(id: "m1", name: "recall_recent", input_json: "{}")
-  let result = memory.execute(call, "/nonexistent/dir")
+  let result = memory.execute(call, "/nonexistent/dir", None)
   case result {
     ToolFailure(..) -> Nil
     _ -> should.fail()
@@ -79,7 +80,7 @@ pub fn recall_recent_empty_dir_returns_no_entries_test() {
       name: "recall_recent",
       input_json: "{\"period\": \"today\"}",
     )
-  let result = memory.execute(call, "/nonexistent/narrative/dir")
+  let result = memory.execute(call, "/nonexistent/narrative/dir", None)
   case result {
     ToolSuccess(content: c, ..) -> {
       c |> should.equal("No narrative entries found for today.")
@@ -95,7 +96,7 @@ pub fn recall_recent_yesterday_empty_test() {
       name: "recall_recent",
       input_json: "{\"period\": \"yesterday\"}",
     )
-  let result = memory.execute(call, "/nonexistent/narrative/dir")
+  let result = memory.execute(call, "/nonexistent/narrative/dir", None)
   case result {
     ToolSuccess(content: c, ..) -> {
       c |> should.equal("No narrative entries found for yesterday.")
@@ -111,7 +112,7 @@ pub fn recall_recent_this_week_empty_test() {
       name: "recall_recent",
       input_json: "{\"period\": \"this_week\"}",
     )
-  let result = memory.execute(call, "/nonexistent/narrative/dir")
+  let result = memory.execute(call, "/nonexistent/narrative/dir", None)
   case result {
     ToolSuccess(content: c, ..) -> {
       c |> should.equal("No narrative entries found for this_week.")
@@ -126,7 +127,7 @@ pub fn recall_recent_this_week_empty_test() {
 
 pub fn recall_search_missing_query_test() {
   let call = ToolCall(id: "s1", name: "recall_search", input_json: "{}")
-  let result = memory.execute(call, "/nonexistent/dir")
+  let result = memory.execute(call, "/nonexistent/dir", None)
   case result {
     ToolFailure(..) -> Nil
     _ -> should.fail()
@@ -140,7 +141,7 @@ pub fn recall_search_empty_dir_returns_no_results_test() {
       name: "recall_search",
       input_json: "{\"query\": \"dublin property\"}",
     )
-  let result = memory.execute(call, "/nonexistent/narrative/dir")
+  let result = memory.execute(call, "/nonexistent/narrative/dir", None)
   case result {
     ToolSuccess(content: c, ..) -> {
       c
@@ -158,7 +159,7 @@ pub fn recall_search_empty_dir_returns_no_results_test() {
 
 pub fn recall_threads_empty_dir_test() {
   let call = ToolCall(id: "t1", name: "recall_threads", input_json: "{}")
-  let result = memory.execute(call, "/nonexistent/narrative/dir")
+  let result = memory.execute(call, "/nonexistent/narrative/dir", None)
   case result {
     ToolSuccess(content: c, ..) -> {
       c |> should.equal("No active threads in narrative memory.")
@@ -173,7 +174,7 @@ pub fn recall_threads_empty_dir_test() {
 
 pub fn unknown_memory_tool_test() {
   let call = ToolCall(id: "u1", name: "recall_unknown", input_json: "{}")
-  let result = memory.execute(call, "/tmp")
+  let result = memory.execute(call, "/tmp", None)
   case result {
     ToolFailure(..) -> Nil
     _ -> should.fail()

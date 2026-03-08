@@ -6,7 +6,7 @@
 
 import agent/types as agent_types
 import gleam/dynamic/decode
-import gleam/erlang/process
+import gleam/erlang/process.{type Subject}
 import gleam/int
 import gleam/json
 import gleam/list
@@ -15,6 +15,7 @@ import gleam/string
 import llm/provider.{type Provider}
 import llm/request
 import llm/response
+import narrative/librarian.{type LibrarianMessage}
 import narrative/log as narrative_log
 import narrative/threading
 import narrative/types.{
@@ -104,19 +105,31 @@ pub fn generate(
 }
 
 /// Spawn the Archivist asynchronously. Does not block the caller.
+/// If a Librarian is available, it is notified after the entry is written.
 pub fn spawn(
   ctx: ArchivistContext,
   provider: Provider,
   model: String,
   narrative_dir: String,
   verbose: Bool,
+  lib: Option(Subject(LibrarianMessage)),
 ) -> Nil {
   let _ =
     process.spawn_unlinked(fn() {
       case generate(ctx, provider, model, verbose) {
         Some(entry) -> {
-          let threaded = threading.assign_thread(entry, narrative_dir)
+          let threaded = threading.assign_thread(entry, narrative_dir, lib)
           narrative_log.append(narrative_dir, threaded)
+          // Notify the Librarian to index the new entry
+          case lib {
+            Some(l) -> {
+              librarian.notify_new_entry(l, threaded)
+              // Also update the thread index in the Librarian
+              let idx = narrative_log.load_thread_index(narrative_dir)
+              librarian.notify_thread_index(l, idx)
+            }
+            None -> Nil
+          }
         }
         None -> Nil
       }
