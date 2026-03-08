@@ -1832,3 +1832,155 @@ Applied in both `narrative/archivist.gleam` (narrative entry parsing) and
 | Silent drop on buffer overflow | Alert noise (beep, error message) would be worse than silently stopping input at a reasonable limit. |
 | Query param auth for WebSocket | Browsers don't support custom headers on WebSocket upgrade requests. Query param is the standard workaround. |
 | 30-day log retention | Balances disk space with reasonable audit trail. Date arithmetic via Erlang `calendar` module for correctness. |
+
+---
+
+### Session 8 — CBR Memory Architecture + Identity & Profiles (2026-03-08)
+
+#### CBR (Case-Based Reasoning) memory
+
+Implemented a full CBR subsystem for experience-based learning:
+
+- **`src/cbr/types.gleam`** — `CbrCase` type with problem (user_input, intent, domain,
+  entities, keywords, query_complexity), solution (approach, agents_used, tools_used, steps),
+  outcome (status, confidence, assessment, pitfalls), embedding vector, source_narrative_id,
+  and optional profile field. Also defines `CbrQuery` for retrieval and `CbrMatch` with
+  relevance scoring.
+
+- **`src/cbr/log.gleam`** — Append-only JSON-L persistence (`YYYY-MM-DD.jsonl`). Full
+  encode/decode roundtrip with lenient decoders (null → sensible defaults). Functions:
+  `append`, `load_date`, `load_all`, `encode_case`, `case_decoder`.
+
+- **Librarian CBR integration** — The Librarian actor (`narrative/librarian.gleam`)
+  expanded to index CBR cases in ETS alongside narrative entries. New messages:
+  `IndexCase`, `NotifyNewCase`, `QueryCbrRetrieve`, `LoadAllCases`, `QueryCaseCount`.
+  CBR retrieval uses multi-signal scoring: intent match (0.3), domain match (0.2),
+  keyword Jaccard overlap (0.2), entity Jaccard overlap (0.2), recency bonus (0.1).
+  Threshold filtering at 0.1 minimum score.
+
+- **Archivist CBR generation** — After writing a narrative entry, the Archivist extracts
+  a `CbrCase` from the same cycle data, persists it via `cbr/log.append`, and notifies
+  the Librarian.
+
+#### Facts store
+
+- **`src/facts/types.gleam`** — `MemoryFact` type with `FactScope` (Session/Persistent/Global),
+  `FactOperation` (Write/Delete/Superseded), confidence score, supersedes chain.
+
+- **`src/facts/log.gleam`** — Append-only JSON-L persistence for facts. Encode/decode
+  with full roundtrip fidelity.
+
+- **Librarian facts integration** — ETS-backed fact storage with read/write/delete
+  operations and count queries.
+
+#### Housekeeping
+
+`narrative/housekeeping.gleam` provides three maintenance operations:
+
+- **CBR deduplication** — `find_duplicate_cases` compares embedding vectors via cosine
+  similarity. Pairs above threshold (default 0.92) are flagged; newer case is kept,
+  older superseded.
+
+- **Case pruning** — `find_prunable_cases` identifies old failures (>90 days) with low
+  confidence (<0.4) and no pitfalls. These have no learning value and can be removed.
+
+- **Fact conflict resolution** — `find_fact_conflicts` detects same-key different-value
+  facts. The higher-confidence fact is kept; the other gets a `Superseded` operation.
+
+- **`HousekeepingReport`** — summary type with `format_report` for human-readable output.
+
+- **`make_superseded_fact`** — builder for creating superseded fact entries.
+
+#### Curator system prompt assembly
+
+`narrative/curator.gleam` extended with `BuildSystemPrompt` message:
+
+1. Loads `persona.md` and `session_preamble.md` from identity directories
+2. Queries Librarian for thread count, persistent fact count, and CBR case count
+3. Builds `SlotValue` list for preamble template substitution
+4. Renders preamble with `{{slot}}` replacement and `[OMIT IF]` rule processing
+5. Assembles final system prompt: persona text + `<memory>` wrapped preamble
+6. Falls back to provided fallback prompt when no identity files exist
+
+New state fields: `identity_dirs`, `memory_tag`, `active_profile`.
+New public API: `start_with_identity()`, `build_system_prompt()`.
+
+#### Identity system
+
+`src/identity.gleam` — pure functional module for persona and preamble handling:
+
+- **Persona loading** — `load_persona(dirs)` scans directories for `persona.md`,
+  returns `Some(content)` or `None`.
+
+- **Preamble templating** — `render_preamble(template, slots)` processes two phases:
+  1. `{{slot}}` substitution from `SlotValue` list
+  2. `[OMIT IF X]` rule evaluation — removes lines matching conditions:
+     - `EMPTY` — line value is empty after substitution
+     - `ZERO` — line contains a zero count (starts with "0 " or contains " 0 ")
+     - `NO PROFILE` — no active profile set
+     - `THREADS EXIST` / `FACTS EXIST` — conditional visibility
+
+- **System prompt assembly** — `assemble_system_prompt(persona, preamble, tag)` wraps
+  preamble in configurable XML tags (default `<memory>`), prepends persona text.
+
+- **Relative dates** — `format_relative_date(days_ago)` produces human-friendly strings:
+  today, yesterday, N days ago, last week, 2 weeks ago, ISO date for 30+ days.
+
+- **Slot formatters** — `format_thread_lines` and `format_fact_lines` produce structured
+  text for preamble injection with relative date annotations.
+
+#### Identity paths
+
+`src/paths.gleam` extended with identity directory helpers:
+- `persona_filename`, `preamble_filename` constants
+- `local_identity_dir()`, `user_identity_dir()`, `default_identity_dirs()`
+
+#### CbrCase profile field
+
+Added `profile: Option(String)` to `CbrCase` type as a retrieval hint. The field is:
+- Encoded as JSON string or null in `cbr/log.gleam`
+- Decoded with `decode.optional(decode.string)` for backward compatibility
+- Set to `None` by default in the Archivist
+
+#### Librarian count queries
+
+Three new synchronous query messages for preamble slot population:
+- `QueryThreadCount` → count of active threads in thread index
+- `QueryPersistentFactCount` → count of persistent-scope facts
+- `QueryCaseCount` → count of indexed CBR cases
+
+#### Profile UI cleanup
+
+Removed runtime profile switching from TUI and web GUI since profiles are now
+startup-only ("uniforms not personalities"):
+
+- **TUI** — removed `/profile` command handler and `ProfileNotification` dispatch
+- **Web GUI** — removed `SendProfiles`, `available_profiles` parameter, profile selector
+  HTML/CSS/JS, `RequestLoadProfile` handler
+- **Protocol** — removed `RequestLoadProfile`, `ProfilesAvailable`, `ProfileLoaded`
+  message types and their encoders/decoders
+- **springdrift.gleam** — removed `available_profiles` parameter from `web_gui.start()`
+
+#### Test coverage
+
+675 tests passing. New test files:
+- `test/identity_test.gleam` — 29 tests covering persona loading, slot substitution,
+  preamble rendering with OMIT IF rules, system prompt assembly, relative dates
+- `test/narrative/curator_test.gleam` — extended with 2 identity integration tests
+- `test/narrative/housekeeping_test.gleam` — 18 tests for cosine similarity, CBR dedup,
+  pruning, fact conflicts, report formatting
+- `test/cbr/log_test.gleam` — 7 tests for encode/decode roundtrip, JSONL loading
+- `test/cbr/librarian_cbr_test.gleam` — 9 tests for Librarian CBR indexing and retrieval
+
+#### Design decisions
+
+| Decision | Rationale |
+|---|---|
+| CBR as separate module from narrative | CBR cases are derived artifacts with different lifecycle (dedup, pruning) vs immutable narrative entries |
+| Multi-signal CBR scoring | Single-dimension matching (e.g. just keywords) produces too many false positives. Weighted combination of intent, domain, keywords, entities, and recency gives robust retrieval |
+| Cosine similarity for dedup | Standard approach for vector comparison. Threshold-based (0.92) avoids aggressive merging while catching near-duplicates |
+| OMIT IF rules in preamble | Prevents empty/zero lines from cluttering the system prompt. Rules are inline `[OMIT IF X]` comments — no separate config |
+| Persona + preamble separation | Persona is fixed character text (rarely changes). Preamble is dynamic session context (changes every turn). Separate files enable independent editing |
+| Curator as orchestrator | Single point of coordination for identity + memory → system prompt. Avoids scattering assembly logic across cognitive loop |
+| Profile field on CbrCase | Lightweight retrieval hint — no hard coupling. Optional field with null default for backward compatibility |
+| Startup-only profiles | Runtime switching added complexity with no clear benefit. Profiles configure agent roster + D' — things that shouldn't change mid-conversation |

@@ -7,8 +7,3 @@ erl_crash.dump
 .env
 *.local.json
 _impl_docs/
-# Legacy paths (pre-.springdrift/ consolidation)
-prime-narrative/
-*.session.json
-cycle-log/
-logs/

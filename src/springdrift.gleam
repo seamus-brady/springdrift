@@ -20,6 +20,8 @@ import llm/adapters/mock
 import llm/adapters/openai as openai_adapter
 import llm/provider.{type Provider}
 import llm/types as llm_types
+import narrative/curator
+import narrative/librarian
 import paths
 import profile
 import profile/types as profile_types
@@ -153,11 +155,7 @@ fn print_help() -> Nil {
     "  --dprime-config <path>    Path to D' config JSON (default: built-in)",
   )
   io.println("")
-  io.println("Narrative (Prime Narrative memory):")
-  io.println(
-    "  --narrative               Enable narrative logging after each cycle",
-  )
-  io.println("  --no-narrative            Disable narrative logging (default)")
+  io.println("Narrative (Prime Narrative memory — always enabled):")
   io.println(
     "  --narrative-dir <path>    Directory for narrative logs (default: .springdrift/memory/narrative)",
   )
@@ -222,7 +220,7 @@ fn run(cfg: AppConfig) -> Nil {
   let available_profiles = profile.discover(profile_dirs)
 
   // Build agent specs (default or from profile)
-  let #(agent_specs, _active_profile) = case cfg.default_profile {
+  let #(agent_specs, active_profile) = case cfg.default_profile {
     option.Some(profile_name) ->
       case profile.load(profile_name, profile_dirs) {
         Ok(loaded_profile) -> {
@@ -268,10 +266,34 @@ fn run(cfg: AppConfig) -> Nil {
     }
   }
 
-  // Narrative config
-  let narrative_enabled = option.unwrap(cfg.narrative_enabled, False)
+  // Narrative config (always enabled)
   let narrative_dir = option.unwrap(cfg.narrative_dir, paths.narrative_dir())
   let archivist_model = option.unwrap(cfg.archivist_model, task_model)
+
+  // Start the Librarian (supervised — auto-restarts on crash)
+  let librarian_subj =
+    librarian.start_supervised(
+      narrative_dir,
+      paths.cbr_dir(),
+      paths.facts_dir(),
+      0,
+      5,
+    )
+  let lib = option.Some(librarian_subj)
+
+  // Start Curator and build identity-aware system prompt
+  let cur =
+    curator.start_with_identity(
+      librarian_subj,
+      narrative_dir,
+      paths.cbr_dir(),
+      paths.facts_dir(),
+      paths.default_identity_dirs(),
+      "memory",
+      active_profile,
+    )
+  let system = curator.build_system_prompt(cur, system)
+  process.send(cur, curator.Shutdown)
 
   // Start cognitive loop with empty registry (supervisor will register agents)
   let cognitive_subj =
@@ -288,9 +310,10 @@ fn run(cfg: AppConfig) -> Nil {
       task_model,
       reasoning_model,
       dprime_state,
-      narrative_enabled,
       narrative_dir,
+      paths.cbr_dir(),
       archivist_model,
+      lib,
       profile_dirs,
       write_anywhere,
     )
@@ -308,14 +331,14 @@ fn run(cfg: AppConfig) -> Nil {
     }
   })
 
+  // Wire supervisor into cognitive loop so profile switching can manage agents
+  cognitive.set_supervisor(cognitive_subj, sup)
+
   case dprime_state {
     option.Some(_) -> io.println("D' Safety: enabled")
     option.None -> Nil
   }
-  case narrative_enabled {
-    True -> io.println("Narrative: enabled (" <> narrative_dir <> ")")
-    False -> Nil
-  }
+  io.println("Narrative: " <> narrative_dir)
   let agent_names =
     list.map(agent_specs, fn(s) { s.name })
     |> string.join(", ")
@@ -337,8 +360,14 @@ fn run(cfg: AppConfig) -> Nil {
                   case tasks {
                     [] -> Nil
                     _ -> {
+                      let checkpoint_path =
+                        ".springdrift/scheduler-checkpoint.json"
                       let _scheduler =
-                        scheduler_runner.start(tasks, cognitive_subj)
+                        scheduler_runner.start(
+                          tasks,
+                          cognitive_subj,
+                          checkpoint_path,
+                        )
                       io.println(
                         "Scheduler: "
                         <> int.to_string(list.length(tasks))
@@ -370,7 +399,7 @@ fn run(cfg: AppConfig) -> Nil {
         initial_messages,
         port,
         narrative_dir,
-        available_profiles,
+        lib,
       )
     }
     _ ->
@@ -382,6 +411,7 @@ fn run(cfg: AppConfig) -> Nil {
         reasoning_model,
         initial_messages,
         narrative_dir,
+        lib,
       )
   }
   Nil

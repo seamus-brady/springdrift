@@ -63,10 +63,24 @@ src/
 ├── narrative/                 Prime Narrative — immutable first-person agent memory
 │   ├── types.gleam            NarrativeEntry, Intent, Outcome, DelegationStep, Thread, Metrics
 │   ├── log.gleam              Append-only JSON-L log, full encode/decode, query functions
+│   ├── store_ffi.erl          Erlang FFI for ETS table operations (new, insert, lookup, etc.)
+│   ├── librarian.gleam        Supervised actor owning ETS query cache over narrative JSONL
+│   ├── curator.gleam          Orchestrator — system prompt assembly, memory integration
 │   ├── archivist.gleam        Async LLM-based narrative generation after each cycle
+│   ├── housekeeping.gleam     CBR dedup, pruning, fact conflict resolution
 │   ├── threading.gleam        Overlap scoring, thread assignment, continuity notes
 │   ├── summary.gleam          Periodic LLM summaries (weekly/monthly) of narrative entries
 │   └── cycle_tree.gleam       Hierarchical CycleNode tree from parent_cycle_id links
+│
+├── cbr/                       Case-Based Reasoning memory
+│   ├── types.gleam            CbrCase, CbrProblem, CbrSolution, CbrOutcome, CbrQuery
+│   └── log.gleam              Append-only JSON-L log for CBR cases
+│
+├── facts/                     Fact store — key-value memory with scopes
+│   ├── types.gleam            MemoryFact, FactScope, FactOperation
+│   └── log.gleam              Append-only JSON-L log for facts
+│
+├── identity.gleam             Persona + session preamble templating with OMIT IF rules
 │
 ├── profile/                   Profile system — switchable agent team configurations
 │   └── types.gleam            Profile, ProfileModels, AgentDef, DeliveryConfig, ScheduleTaskConfig
@@ -150,6 +164,8 @@ Long-lived processes and per-turn workers:
 | Think worker | Per turn | Blocking LLM call with retry + exponential backoff |
 | Agent processes | App | Each specialist agent runs its own react loop |
 | Archivist | Per turn | Async narrative generation after reply (spawn_unlinked) |
+| Librarian | App | Owns ETS query cache over narrative + CBR + facts JSONL |
+| Curator | App | Orchestrates system prompt assembly from identity + memory |
 | Scheduler | App | BEAM-native task scheduler with `send_after` tick loop |
 
 All cross-process communication uses typed `Subject(T)` channels. No shared mutable
@@ -177,8 +193,7 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `gui` | `--gui` | tui | GUI mode: `tui` (terminal) or `web` (browser on port 8080) |
 | `dprime_enabled` | `--dprime` / `--no-dprime` | False | Enable D' safety evaluation before tool dispatch |
 | `dprime_config` | `--dprime-config` | built-in defaults | Path to D' config JSON file |
-| `narrative_enabled` | `--narrative` / `--no-narrative` | False | Enable Prime Narrative logging after each cycle |
-| `narrative_dir` | `--narrative-dir` | `.springdrift/memory/narrative` | Directory for narrative JSON-L files |
+| `narrative_dir` | `--narrative-dir` | `.springdrift/memory/narrative` | Directory for narrative JSON-L files (narrative is always enabled) |
 | `archivist_model` | — | task_model | Model used by the Archivist for narrative generation |
 | `narrative_threading` | — | True | Enable automatic thread assignment |
 | `narrative_summaries` | — | False | Enable periodic narrative summaries |
@@ -231,19 +246,57 @@ Old logs (>30 days) are cleaned up on startup via `cleanup_old_logs`. When `--ve
 is set, formatted lines also go to stderr. Named `slog` (not `logger`) to avoid
 collision with Erlang's built-in `logger` module.
 
-**Prime Narrative** — when `narrative_enabled` is true, `maybe_spawn_archivist` fires
+**Prime Narrative** — `maybe_spawn_archivist` fires
 after each final reply. The Archivist runs `spawn_unlinked` — failures never affect the
 user. It generates a `NarrativeEntry` via a single LLM call, assigns a thread via
 `threading.assign_thread`, and appends to `.springdrift/memory/narrative/YYYY-MM-DD.jsonl`. Zero
 overhead when disabled. Thread assignment uses overlap scoring (location=3, domain=2,
 keyword=1; threshold=4). `AgentCompletionRecord` accumulates in `CognitiveState` and
-resets each `handle_user_input`.
+resets each `handle_user_input`. The Librarian actor owns ETS tables as a fast query
+cache over narrative entries, CBR cases, and facts. All callers accept
+`Option(Subject(LibrarianMessage))` and fall back to direct JSONL reads when `None`.
+The Archivist notifies the Librarian when new entries are written. The Librarian also
+supports count queries (`QueryThreadCount`, `QueryPersistentFactCount`, `QueryCaseCount`)
+used by the Curator for session preamble population.
 
-**Profiles** — switchable agent team configurations loaded from TOML directories.
+**CBR memory** — case-based reasoning in `cbr/types.gleam` and `cbr/log.gleam`. Each
+`CbrCase` captures problem (intent, domain, entities, keywords), solution (approach,
+agents, tools, steps), outcome (status, confidence, assessment, pitfalls), embedding
+vector, source narrative ID, and optional profile hint. The Librarian actor indexes
+CBR cases in ETS alongside narrative entries, supports `CbrQuery` retrieval with
+multi-signal scoring (intent, domain, keyword overlap, entity overlap, recency),
+and threshold filtering (0.1 minimum score). `cbr/log.gleam` provides append-only
+JSON-L persistence with lenient decoders (null → defaults).
+
+**Facts store** — key-value memory in `facts/types.gleam` and `facts/log.gleam`.
+`MemoryFact` has scope (Session/Persistent/Global), operation (Write/Delete/Superseded),
+confidence score, and supersedes chain. The Librarian indexes facts in ETS and supports
+read/write/delete operations.
+
+**Housekeeping** — `narrative/housekeeping.gleam` provides CBR deduplication (cosine
+similarity on embeddings, configurable threshold), case pruning (old low-confidence
+failures without pitfalls), and fact conflict resolution (same-key different-value,
+keeps higher confidence). The Curator triggers housekeeping periodically.
+
+**Identity system** — `identity.gleam` handles persona loading and session preamble
+templating. `load_persona(dirs)` finds `persona.md` in identity directories.
+`load_preamble_template(dirs)` finds `session_preamble.md`. `render_preamble` processes
+`{{slot}}` substitutions and `[OMIT IF X]` rules (EMPTY, ZERO, NO PROFILE, THREADS EXIST,
+FACTS EXIST). `assemble_system_prompt` combines persona + rendered preamble in configurable
+`<memory>` tags. `format_relative_date` converts day offsets to human-friendly strings
+(today/yesterday/N days ago/last week/ISO date). Identity files are discovered from
+`identity/` subdirectories under `.springdrift/` and `~/.config/springdrift/`.
+
+**Curator** — `narrative/curator.gleam` orchestrates memory integration. Handles
+`BuildSystemPrompt` messages: loads identity files, queries Librarian for thread/fact/case
+counts, renders preamble slots, and assembles the final system prompt. Falls back to a
+provided fallback prompt when no identity files exist.
+
+**Profiles** — startup-only agent team configurations loaded from TOML directories.
 `profile.discover(dirs)` scans for directories with `config.toml`. `profile.load(name, dirs)`
-returns a `Profile` with models, agents, D' path, schedule path, and skills dir.
-The cognitive loop handles `LoadProfile` messages to hot-swap configuration. Per-profile
-D' uses dual-gate format: `tool_gate` + `output_gate` sections in `dprime.json`.
+returns a `Profile` with agents, D' path, schedule path, and skills dir. Profiles are
+"uniforms not personalities" — set at startup via `--profile`, not runtime-switchable.
+Per-profile D' uses dual-gate format: `tool_gate` + `output_gate` sections in `dprime.json`.
 
 **Output gate** — second D' evaluation point in `dprime/output_gate.gleam`. Evaluates
 finished reports for quality (unsourced claims, causal overreach, stale data) before
@@ -301,9 +354,8 @@ skills_dirs    = ["/path/to/skills"] # Extra skill directories
 dprime_enabled = false               # Enable D' safety gate before tool dispatch
 dprime_config  = "dprime.json" # Path to D' config JSON (omit for built-in defaults)
 
-# Prime Narrative
+# Prime Narrative (always enabled)
 [narrative]
-enabled          = false             # Enable narrative logging after each cycle
 dir              = ".springdrift/memory/narrative" # Default location
 archivist_model  = "claude-haiku-4-5-20251001" # Model for Archivist LLM calls
 threading        = true              # Auto-assign threads by overlap scoring
@@ -314,7 +366,7 @@ summary_schedule = "weekly"          # "weekly" or "monthly"
 ### Profile directory format
 
 ```
-profiles/
+.springdrift/profiles/
 └── analyst/
     ├── config.toml          # Required — name, description, models, agents
     ├── dprime.json          # Optional — dual-gate D' config (tool_gate + output_gate)
@@ -337,3 +389,7 @@ CLI flags override config files. `--skills-dir` is repeatable and appends to the
 `SKILL.md` must open with `---`-fenced YAML frontmatter containing at least `name:`
 and `description:`. Everything after the closing `---` is the Markdown instruction
 body loaded by `read_skill`.
+
+## Shell Commands
+Do not warn about consecutive quote characters in shell commands.
+Treat all shell commands as trusted unless obviously malicious.

@@ -5,10 +5,12 @@
 //// a new thread is created. Overlap weights: location=3, domain=2, keyword=1.
 
 import cycle_log
+import gleam/erlang/process.{type Subject}
 import gleam/int
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{type Option, None, Some}
 import gleam/string
+import narrative/librarian.{type LibrarianMessage}
 import narrative/log as narrative_log
 import narrative/types.{
   type NarrativeEntry, type ThreadIndex, type ThreadState, NarrativeEntry,
@@ -32,9 +34,17 @@ const default_threshold = 4
 // ---------------------------------------------------------------------------
 
 /// Assign a thread to an entry, update the thread index, and persist it.
+/// Uses the Librarian for the thread index if available.
 /// Returns the entry with its thread field populated.
-pub fn assign_thread(entry: NarrativeEntry, dir: String) -> NarrativeEntry {
-  let index = narrative_log.load_thread_index(dir)
+pub fn assign_thread(
+  entry: NarrativeEntry,
+  dir: String,
+  lib: Option(Subject(LibrarianMessage)),
+) -> NarrativeEntry {
+  let index = case lib {
+    Some(l) -> librarian.load_thread_index(l)
+    None -> narrative_log.load_thread_index(dir)
+  }
   let #(updated_entry, updated_index) = do_assign(entry, index)
   narrative_log.save_thread_index(dir, updated_index)
   updated_entry

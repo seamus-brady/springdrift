@@ -33,9 +33,10 @@ fn start_cognitive(provider) {
       "mock-model",
       "mock-reasoning",
       None,
-      False,
       ".springdrift/memory/narrative",
+      ".springdrift/memory/cbr",
       "mock-model",
+      None,
       [],
       False,
     )
@@ -278,9 +279,10 @@ pub fn model_fallback_on_retryable_error_test() {
       "mock-task",
       "mock-reasoning",
       None,
-      False,
       ".springdrift/memory/narrative",
+      ".springdrift/memory/cbr",
       "mock-task",
+      None,
       [],
       False,
     )

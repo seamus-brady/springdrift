@@ -24,3 +24,10 @@ Then edit `.springdrift/config.toml` with your provider and API key.
 
 Add `.springdrift/` to your `.gitignore` — it contains runtime state, logs, and
 potentially sensitive session data that should not be committed.
+
+## Included examples
+
+- **`profiles/market-monitor/`** — example profile that tracks commercial property
+  prices in Dublin and Cork with daily scheduled jobs and report delivery.
+- **`dprime.example.json`** — example D' safety gate configuration with seven
+  features and tuned thresholds.

@@ -4,6 +4,7 @@
 //// reasoning model or the standard model. Falls back to heuristic rules
 //// if the LLM call fails or returns an unrecognised response.
 
+import gleam/erlang/process
 import gleam/int
 import gleam/list
 import gleam/option
@@ -35,6 +36,10 @@ type LlmClassification {
 /// Classify a query using a fast LLM call.
 /// Falls back to heuristic classification if the call fails or the
 /// response is unrecognised.
+/// Classify timeout in milliseconds. Falls back to heuristic if the LLM
+/// call takes longer than this.
+const classify_timeout_ms = 10_000
+
 pub fn classify(query: String, p: Provider, model: String) -> QueryComplexity {
   slog.debug(
     "query_complexity",
@@ -46,9 +51,25 @@ pub fn classify(query: String, p: Provider, model: String) -> QueryComplexity {
     request.new(model, 10)
     |> request.with_system(system_prompt)
     |> request.with_user_message(query)
-  let result = case provider.chat_with(req, p) {
-    Error(_) -> heuristic_classify(query)
-    Ok(resp) ->
+
+  // Run LLM call in a spawned process with a timeout to prevent hangs
+  let reply_subj = process.new_subject()
+  process.spawn_unlinked(fn() {
+    process.send(reply_subj, provider.chat_with(req, p))
+  })
+
+  let result = case process.receive(reply_subj, classify_timeout_ms) {
+    Error(_) -> {
+      slog.warn(
+        "query_complexity",
+        "classify",
+        "LLM timeout — falling back to heuristic",
+        option.None,
+      )
+      heuristic_classify(query)
+    }
+    Ok(Error(_)) -> heuristic_classify(query)
+    Ok(Ok(resp)) ->
       case parse_llm_response(response.text(resp)) {
         LlmSimple -> Simple
         LlmComplex -> Complex

@@ -9,9 +9,14 @@
 ////   ├── config.toml          Local project config
 ////   ├── session.json          Session persistence
 ////   ├── logs/                 System logs (date-rotated JSON-L)
+////   ├── identity/             Local identity overrides
+////   │   ├── persona.md        First-person character text
+////   │   └── session_preamble.md  Template with {{slot}} syntax
 ////   ├── memory/
 ////   │   ├── cycle-log/        Per-cycle JSON-L logs
-////   │   └── narrative/        Prime Narrative JSON-L + thread index
+////   │   ├── narrative/        Prime Narrative JSON-L + thread index
+////   │   ├── cbr/              CBR case JSONL (procedural memory)
+////   │   └── facts/            MemoryFact JSONL (semantic memory)
 ////   ├── skills/               Local skill definitions
 ////   └── profiles/             Local agent profiles
 
@@ -77,6 +82,47 @@ pub fn cycle_log_dir() -> String {
 /// Narrative log directory: .springdrift/memory/narrative/
 pub fn narrative_dir() -> String {
   project_dir <> "/memory/narrative"
+}
+
+/// CBR case directory: .springdrift/memory/cbr/
+pub fn cbr_dir() -> String {
+  project_dir <> "/memory/cbr"
+}
+
+/// Facts directory: .springdrift/memory/facts/
+pub fn facts_dir() -> String {
+  project_dir <> "/memory/facts"
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+/// Persona filename (fixed first-person character text).
+pub const persona_filename = "persona.md"
+
+/// Session preamble filename (Curator-populated {{slot}} template).
+pub const preamble_filename = "session_preamble.md"
+
+/// Local identity directory: .springdrift/identity/
+pub fn local_identity_dir() -> String {
+  project_dir <> "/identity"
+}
+
+/// User-level identity directory: ~/.config/springdrift/identity/
+pub fn user_identity_dir() -> String {
+  user_dir() <> "/identity"
+}
+
+/// Identity directories to search (local first for override precedence).
+pub fn default_identity_dirs() -> List(String) {
+  case get_env("HOME") {
+    Ok(home) -> [
+      project_dir <> "/identity",
+      home <> "/.config/springdrift/identity",
+    ]
+    Error(_) -> [project_dir <> "/identity"]
+  }
 }
 
 // ---------------------------------------------------------------------------

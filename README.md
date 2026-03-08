@@ -54,14 +54,17 @@ export ANTHROPIC_API_KEY=sk-ant-...
 # Run interactively
 gleam run
 
+# Copy the example config to get started
+cp -r .springdrift_example .springdrift
+
 # Run with the example profile
-gleam run -- --profile market-monitor --profiles-dir examples
+gleam run -- --profile market-monitor
 ```
 
 ## Configuring a profile
 
 Profiles are TOML files that define what to research, how often, and where to
-deliver results. See `examples/market-monitor/config.toml` for a working example.
+deliver results. See `.springdrift_example/profiles/market-monitor/config.toml` for a working example.
 
 A minimal profile:
 
@@ -142,7 +145,7 @@ safety gate runs these three layers in sequence:
 
 ### Configuration
 
-Copy `dprime.example.json` and adjust thresholds to your risk tolerance:
+Copy `.springdrift_example/dprime.example.json` and adjust thresholds to your risk tolerance:
 
 ```json
 {
@@ -300,7 +303,6 @@ Narrative). Use it for ad-hoc research or to interact with running profiles.
 gleam run                      # Start interactive TUI
 gleam run -- --resume          # Resume previous session
 gleam run -- --gui web         # Start web GUI on port 8080
-gleam run -- --narrative       # Enable narrative memory
 gleam run -- --dprime          # Enable D' safety evaluation
 ```
 
@@ -371,7 +373,7 @@ summary_schedule = "weekly"
 
 ```sh
 gleam build           # Compile
-gleam test            # Run the test suite (~503 tests)
+gleam test            # Run the test suite (~515 tests)
 gleam format          # Format all source files
 gleam run             # Run the application
 ```

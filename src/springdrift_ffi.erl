@@ -10,7 +10,8 @@
          monotonic_now_ms/0, file_rename/2, sanitize_json/1,
          resolve_symlinks/1,
          file_size/1, days_ago_date/1,
-         uri_encode/1, extract_ddg_results/1]).
+         uri_encode/1, extract_ddg_results/1,
+         http_get/1, cosine_similarity/2]).
 
 %% Read one line from stdin.
 %% Returns {ok, Binary} (including trailing newline) or {error, nil} on EOF.
@@ -487,6 +488,39 @@ strip_html_tags([_C | Rest], Acc, true) ->
     strip_html_tags(Rest, Acc, true);
 strip_html_tags([C | Rest], Acc, false) ->
     strip_html_tags(Rest, [C | Acc], false).
+
+%% HTTP GET request via httpc.
+%% Returns {ok, {StatusCode, Body}} or {error, Reason}.
+http_get(Url) ->
+    application:ensure_all_started(inets),
+    application:ensure_all_started(ssl),
+    UrlStr = case is_binary(Url) of
+        true  -> binary_to_list(Url);
+        false -> Url
+    end,
+    Opts = [{timeout, 5000}],
+    case httpc:request(get, {UrlStr, []}, Opts, [{body_format, binary}]) of
+        {ok, {{_, StatusCode, _}, _, Body}} ->
+            {ok, {StatusCode, Body}};
+        {error, Reason} ->
+            {error, list_to_binary(io_lib:format("~p", [Reason]))}
+    end.
+
+%% Cosine similarity between two float lists.
+%% Returns a float between -1.0 and 1.0.
+%% Returns 0.0 if either list is empty or they differ in length.
+cosine_similarity(A, B) when is_list(A), is_list(B) ->
+    case length(A) =:= length(B) andalso length(A) > 0 of
+        false -> 0.0;
+        true ->
+            Dot = lists:sum([X*Y || {X,Y} <- lists:zip(A, B)]),
+            NormA = math:sqrt(lists:sum([X*X || X <- A])),
+            NormB = math:sqrt(lists:sum([X*X || X <- B])),
+            case NormA * NormB of
+                +0.0 -> +0.0;
+                Denom -> Dot / Denom
+            end
+    end.
 
 %% Clean DuckDuckGo redirect URLs to extract the actual URL.
 clean_ddg_url(Url) ->

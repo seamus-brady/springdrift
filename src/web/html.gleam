@@ -59,27 +59,6 @@ pub fn page() -> String {
     letter-spacing: -0.2px;
     margin-bottom: 20px;
   }
-  #profile-selector {
-    margin-top: 16px;
-    display: none;
-  }
-  #profile-selector label {
-    font-size: 13px;
-    color: var(--text-secondary);
-    display: block;
-    margin-bottom: 4px;
-  }
-  #profile-selector select {
-    width: 100%;
-    padding: 6px 10px;
-    border: 1px solid var(--sidebar-border);
-    border-radius: 8px;
-    background: var(--surface);
-    font-family: inherit;
-    font-size: 14px;
-    color: var(--text);
-    cursor: pointer;
-  }
   #sidebar .sidebar-status {
     margin-top: auto;
     font-size: 13px;
@@ -565,12 +544,6 @@ pub fn page() -> String {
 <body>
 <div id=\"sidebar\">
   <h1>Springdrift</h1>
-  <div id=\"profile-selector\">
-    <label>Profile</label>
-    <select id=\"profile-select\">
-      <option value=\"\">Default</option>
-    </select>
-  </div>
   <div class=\"sidebar-status\">
     <span class=\"dot\" id=\"status-dot\"></span>
     <span id=\"status\">connecting...</span>
@@ -613,8 +586,6 @@ pub fn page() -> String {
   const narrativeContainer = document.getElementById('narrative-container');
   const thinkingOverlay = document.getElementById('thinking-overlay');
   const tabBtns = document.querySelectorAll('.tab-btn');
-  const profileSelector = document.getElementById('profile-selector');
-  const profileSelect = document.getElementById('profile-select');
   let ws = null;
   let thinkingEl = null;
   let questionEl = null;
@@ -655,13 +626,6 @@ pub fn page() -> String {
   document.getElementById('log-refresh').addEventListener('click', requestLogData);
   document.getElementById('narrative-refresh').addEventListener('click', requestNarrativeData);
 
-  profileSelect.addEventListener('change', function() {
-    var name = profileSelect.value;
-    if (name && ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'request_load_profile', name: name }));
-    }
-  });
-
   function requestLogData() {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'request_log_data' }));
@@ -676,7 +640,7 @@ pub fn page() -> String {
 
   function renderNarrativeEntries(entries) {
     if (!entries || entries.length === 0) {
-      narrativeContainer.innerHTML = '<div class=\"narrative-empty\">No narrative entries yet. Enable narrative logging with --narrative.</div>';
+      narrativeContainer.innerHTML = '<div class=\"narrative-empty\">No narrative entries yet. Entries appear after conversations.</div>';
       return;
     }
     var html = '';
@@ -800,19 +764,6 @@ pub fn page() -> String {
         break;
       case 'narrative_data':
         renderNarrativeEntries(data.entries);
-        break;
-      case 'profiles_available':
-        if (data.profiles && data.profiles.length > 0) {
-          profileSelector.style.display = 'block';
-          var opts = '<option value=\"\">Default</option>';
-          data.profiles.forEach(function(p) {
-            opts += '<option value=\"' + escapeHtml(p) + '\">' + escapeHtml(p) + '</option>';
-          });
-          profileSelect.innerHTML = opts;
-        }
-        break;
-      case 'profile_loaded':
-        addNotification('Profile switched to: ' + data.name);
         break;
     }
   }

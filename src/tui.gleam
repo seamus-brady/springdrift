@@ -12,6 +12,7 @@ import gleam/string
 import llm/types.{
   type Message, type Usage, Assistant, Message, TextContent, User,
 }
+import narrative/librarian.{type LibrarianMessage}
 import narrative/log as narrative_log
 import narrative/types as narrative_types
 import slog.{type LogEntry}
@@ -64,6 +65,7 @@ type TuiState {
     narrative_dir: String,
     narrative_entries: List(narrative_types.NarrativeEntry),
     narrative_scroll: Int,
+    librarian: Option(Subject(LibrarianMessage)),
   )
 }
 
@@ -95,6 +97,7 @@ pub fn start(
   reasoning_model: String,
   initial_messages: List(Message),
   narrative_dir: String,
+  lib: Option(Subject(LibrarianMessage)),
 ) -> Nil {
   let size = terminal.window_size()
   let #(w, h) = result.unwrap(size, #(80, 24))
@@ -152,6 +155,7 @@ pub fn start(
       narrative_dir:,
       narrative_entries: [],
       narrative_scroll: 0,
+      librarian: lib,
     )
   render(state)
   tui_run(fn() { event_loop(state) }, cleanup)
@@ -267,10 +271,7 @@ fn handle_notification(
       }
       continue_loop(TuiState(..state, notice: "  " <> badge))
     }
-    agent_types.ProfileNotification(name:) ->
-      continue_loop(
-        TuiState(..state, notice: style.green("  Profile loaded: " <> name)),
-      )
+    agent_types.ProfileNotification(_) -> event_loop(state)
   }
 }
 
@@ -365,24 +366,6 @@ fn handle_command(state: TuiState, cmd: String) -> Nil {
           notice:,
         ),
       )
-    }
-    "/profile " <> name -> {
-      let trimmed = string.trim(name)
-      case trimmed {
-        "" -> {
-          let notice = style.dim("  Usage: /profile <name>")
-          continue_loop(TuiState(..state, notice:))
-        }
-        _ -> {
-          let reply_subj = state.cognitive_reply
-          process.send(
-            state.cognitive,
-            agent_types.LoadProfile(name: trimmed, reply_to: reply_subj),
-          )
-          let notice = style.dim("  Loading profile: " <> trimmed <> "...")
-          continue_loop(TuiState(..state, notice:))
-        }
-      }
     }
     _ -> {
       let notice = style.dim("  Unknown command: " <> cmd)
@@ -946,7 +929,10 @@ fn switch_tab(state: TuiState) -> Nil {
       )
     }
     LogTab -> {
-      let entries = narrative_log.load_all(state.narrative_dir)
+      let entries = case state.librarian {
+        Some(l) -> librarian.load_all(l)
+        None -> narrative_log.load_all(state.narrative_dir)
+      }
       continue_loop(
         TuiState(
           ..state,

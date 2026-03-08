@@ -152,7 +152,7 @@ fn parse_ddg_html(html: String, max_results: Int) -> String {
   }
 }
 
-type SearchResult {
+pub type SearchResult {
   SearchResult(title: String, url: String, snippet: String)
 }
 

@@ -13,6 +13,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/string
 import llm/types.{type Message, Assistant, TextContent, User}
 import mist.{type Connection, type ResponseData}
+import narrative/librarian.{type LibrarianMessage}
 import narrative/log as narrative_log
 import slog
 import web/html
@@ -25,7 +26,20 @@ import web/protocol
 type WsMsg {
   GotReply(agent_types.CognitiveReply)
   GotNotification(agent_types.Notification)
-  SendProfiles(List(String))
+}
+
+// ---------------------------------------------------------------------------
+// Notification relay — main process forwards to per-connection subjects
+// ---------------------------------------------------------------------------
+
+type RelayMsg {
+  Register(Subject(agent_types.Notification))
+  Unregister(Subject(agent_types.Notification))
+}
+
+type ForwardMsg {
+  FwdNotification(agent_types.Notification)
+  FwdRelay(RelayMsg)
 }
 
 // ---------------------------------------------------------------------------
@@ -36,7 +50,10 @@ type WsState {
   WsState(
     cognitive: Subject(agent_types.CognitiveMessage),
     reply_subject: Subject(agent_types.CognitiveReply),
+    notify_subject: Subject(agent_types.Notification),
+    relay: Subject(RelayMsg),
     narrative_dir: String,
+    librarian: Option(Subject(LibrarianMessage)),
   )
 }
 
@@ -90,9 +107,10 @@ pub fn start(
   initial_messages: List(Message),
   port: Int,
   narrative_dir: String,
-  available_profiles: List(String),
+  lib: Option(Subject(LibrarianMessage)),
 ) -> Nil {
   let auth_token = get_auth_token()
+  let relay: Subject(RelayMsg) = process.new_subject()
   slog.info(
     "gui",
     "start",
@@ -104,18 +122,20 @@ pub fn start(
       handle_request(
         req,
         cognitive,
-        notify,
+        relay,
         initial_messages,
         narrative_dir,
-        available_profiles,
         auth_token,
+        lib,
       )
     }
     |> mist.new
     |> mist.port(port)
     |> mist.start
 
-  process.sleep_forever()
+  // Run forwarding loop — receives from `notify` and broadcasts to all
+  // registered WebSocket connections
+  forward_loop(notify, relay, [])
 }
 
 // ---------------------------------------------------------------------------
@@ -125,11 +145,11 @@ pub fn start(
 fn handle_request(
   req: Request(Connection),
   cognitive: Subject(agent_types.CognitiveMessage),
-  notify: Subject(agent_types.Notification),
+  relay: Subject(RelayMsg),
   initial_messages: List(Message),
   narrative_dir: String,
-  available_profiles: List(String),
   auth_token: Option(String),
+  lib: Option(Subject(LibrarianMessage)),
 ) -> Response(ResponseData) {
   case check_auth(req, auth_token) {
     False ->
@@ -152,15 +172,11 @@ fn handle_request(
           mist.websocket(
             request: req,
             on_init: fn(_conn) {
-              ws_on_init(
-                cognitive,
-                notify,
-                initial_messages,
-                narrative_dir,
-                available_profiles,
-              )
+              ws_on_init(cognitive, relay, initial_messages, narrative_dir, lib)
             },
-            on_close: fn(_state) { Nil },
+            on_close: fn(state) {
+              process.send(state.relay, Unregister(state.notify_subject))
+            },
             handler: ws_handler,
           )
 
@@ -178,31 +194,36 @@ fn handle_request(
 
 fn ws_on_init(
   cognitive: Subject(agent_types.CognitiveMessage),
-  notify: Subject(agent_types.Notification),
+  relay: Subject(RelayMsg),
   initial_messages: List(Message),
   narrative_dir: String,
-  available_profiles: List(String),
+  lib: Option(Subject(LibrarianMessage)),
 ) -> #(WsState, option.Option(Selector(WsMsg))) {
-  // Create a reply subject for this connection
+  // Create per-connection subjects (owned by this WebSocket handler process)
   let reply_subject: Subject(agent_types.CognitiveReply) = process.new_subject()
+  let notify_subject: Subject(agent_types.Notification) = process.new_subject()
+
+  // Register with the relay so the main process forwards notifications here
+  process.send(relay, Register(notify_subject))
 
   // Build selector that bridges cognitive replies + notifications into WsMsg
   let selector: Selector(WsMsg) =
     process.new_selector()
     |> process.select_map(reply_subject, fn(cr) { GotReply(cr) })
-    |> process.select_map(notify, fn(n) { GotNotification(n) })
+    |> process.select_map(notify_subject, fn(n) { GotNotification(n) })
 
-  // Internal subject for sending profiles list
-  let profiles_subject: Subject(List(String)) = process.new_subject()
-  let selector =
-    selector
-    |> process.select_map(profiles_subject, fn(names) { SendProfiles(names) })
+  let state =
+    WsState(
+      cognitive:,
+      reply_subject:,
+      notify_subject:,
+      relay:,
+      narrative_dir:,
+      librarian: lib,
+    )
 
-  let state = WsState(cognitive:, reply_subject:, narrative_dir:)
-
-  // Replay initial messages and send profiles after init
+  // Replay initial messages after init
   let replay_msgs = initial_messages
-  let profiles = available_profiles
   process.spawn_unlinked(fn() {
     // Small delay to ensure the WS handler is ready to receive Custom messages
     process.sleep(50)
@@ -222,8 +243,6 @@ fn ws_on_init(
         User -> Nil
       }
     })
-    // Send available profiles
-    process.send(profiles_subject, profiles)
   })
 
   #(state, Some(selector))
@@ -272,7 +291,10 @@ fn ws_handler(
               mist.continue(state)
             }
             Ok(protocol.RequestNarrativeData) -> {
-              let entries = narrative_log.load_all(state.narrative_dir)
+              let entries = case state.librarian {
+                Some(l) -> librarian.load_all(l)
+                None -> narrative_log.load_all(state.narrative_dir)
+              }
               let entries_json =
                 json.to_string(json.array(entries, narrative_log.encode_entry))
               let _ =
@@ -282,19 +304,6 @@ fn ws_handler(
                     entries_json:,
                   )),
                 )
-              mist.continue(state)
-            }
-            Ok(protocol.RequestLoadProfile(name:)) -> {
-              // Send thinking indicator
-              let _ =
-                mist.send_text_frame(
-                  conn,
-                  protocol.encode_server_message(protocol.Thinking),
-                )
-              process.send(
-                state.cognitive,
-                agent_types.LoadProfile(name:, reply_to: state.reply_subject),
-              )
               mist.continue(state)
             }
             Ok(protocol.RequestRewind(index:)) -> {
@@ -338,13 +347,6 @@ fn ws_handler(
       mist.continue(state)
     }
 
-    // Send profiles list to client
-    mist.Custom(SendProfiles(names)) -> {
-      let msg = protocol.ProfilesAvailable(names:)
-      let _ = mist.send_text_frame(conn, protocol.encode_server_message(msg))
-      mist.continue(state)
-    }
-
     // Notification arrived via selector
     mist.Custom(GotNotification(notification)) -> {
       let server_msg = notification_to_server_message(notification)
@@ -358,6 +360,40 @@ fn ws_handler(
 
     // Connection closed
     mist.Closed | mist.Shutdown -> mist.stop()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Notification forwarding loop
+// ---------------------------------------------------------------------------
+
+/// Runs in the main process. Receives notifications from the cognitive loop
+/// (via `notify`) and broadcasts them to all registered WebSocket connections.
+fn forward_loop(
+  notify: Subject(agent_types.Notification),
+  relay: Subject(RelayMsg),
+  connections: List(Subject(agent_types.Notification)),
+) -> Nil {
+  let selector =
+    process.new_selector()
+    |> process.select_map(notify, fn(n) { FwdNotification(n) })
+    |> process.select_map(relay, fn(r) { FwdRelay(r) })
+
+  // Block until a message arrives (infinite timeout)
+  let msg = process.selector_receive_forever(selector)
+  case msg {
+    FwdNotification(notification) -> {
+      list.each(connections, fn(conn_subj) {
+        process.send(conn_subj, notification)
+      })
+      forward_loop(notify, relay, connections)
+    }
+    FwdRelay(Register(subj)) -> {
+      forward_loop(notify, relay, [subj, ..connections])
+    }
+    FwdRelay(Unregister(subj)) -> {
+      forward_loop(notify, relay, list.filter(connections, fn(s) { s != subj }))
+    }
   }
 }
 
@@ -380,7 +416,7 @@ fn notification_to_server_message(
     agent_types.SaveWarning(message:) -> protocol.SaveNotification(message:)
     agent_types.SafetyGateNotice(decision:, score:, explanation:) ->
       protocol.SafetyNotification(decision:, score:, explanation:)
-    agent_types.ProfileNotification(name:) -> protocol.ProfileLoaded(name:)
+    agent_types.ProfileNotification(_) -> protocol.ToolNotification(name: "")
   }
 }
 

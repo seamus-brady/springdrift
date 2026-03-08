@@ -99,7 +99,6 @@ pub fn merge_override_wins_test() {
       gui: None,
       dprime_enabled: None,
       dprime_config: None,
-      narrative_enabled: None,
       narrative_dir: None,
       archivist_model: None,
       narrative_threading: None,
@@ -125,7 +124,6 @@ pub fn merge_override_wins_test() {
       gui: None,
       dprime_enabled: None,
       dprime_config: None,
-      narrative_enabled: None,
       narrative_dir: None,
       archivist_model: None,
       narrative_threading: None,
@@ -156,7 +154,6 @@ pub fn merge_base_preserved_when_override_none_test() {
       gui: None,
       dprime_enabled: None,
       dprime_config: None,
-      narrative_enabled: None,
       narrative_dir: None,
       archivist_model: None,
       narrative_threading: None,
@@ -182,7 +179,6 @@ pub fn merge_base_preserved_when_override_none_test() {
       gui: None,
       dprime_enabled: None,
       dprime_config: None,
-      narrative_enabled: None,
       narrative_dir: None,
       archivist_model: None,
       narrative_threading: None,
@@ -213,7 +209,6 @@ pub fn merge_combines_different_fields_test() {
       gui: None,
       dprime_enabled: None,
       dprime_config: None,
-      narrative_enabled: None,
       narrative_dir: None,
       archivist_model: None,
       narrative_threading: None,
@@ -239,7 +234,6 @@ pub fn merge_combines_different_fields_test() {
       gui: None,
       dprime_enabled: None,
       dprime_config: None,
-      narrative_enabled: None,
       narrative_dir: None,
       archivist_model: None,
       narrative_threading: None,
@@ -348,7 +342,6 @@ pub fn merge_new_fields_test() {
       gui: None,
       dprime_enabled: None,
       dprime_config: None,
-      narrative_enabled: None,
       narrative_dir: None,
       archivist_model: None,
       narrative_threading: None,
@@ -374,7 +367,6 @@ pub fn merge_new_fields_test() {
       gui: None,
       dprime_enabled: None,
       dprime_config: None,
-      narrative_enabled: None,
       narrative_dir: None,
       archivist_model: None,
       narrative_threading: None,
@@ -447,7 +439,6 @@ pub fn merge_model_fields_override_wins_test() {
       gui: None,
       dprime_enabled: None,
       dprime_config: None,
-      narrative_enabled: None,
       narrative_dir: None,
       archivist_model: None,
       narrative_threading: None,
@@ -473,7 +464,6 @@ pub fn merge_model_fields_override_wins_test() {
       gui: None,
       dprime_enabled: None,
       dprime_config: None,
-      narrative_enabled: None,
       narrative_dir: None,
       archivist_model: None,
       narrative_threading: None,
@@ -505,7 +495,6 @@ pub fn merge_model_fields_base_preserved_test() {
       gui: None,
       dprime_enabled: None,
       dprime_config: None,
-      narrative_enabled: None,
       narrative_dir: None,
       archivist_model: None,
       narrative_threading: None,
@@ -531,7 +520,6 @@ pub fn merge_model_fields_base_preserved_test() {
       gui: None,
       dprime_enabled: None,
       dprime_config: None,
-      narrative_enabled: None,
       narrative_dir: None,
       archivist_model: None,
       narrative_threading: None,
@@ -600,7 +588,6 @@ pub fn to_string_fully_set_test() {
       gui: None,
       dprime_enabled: None,
       dprime_config: None,
-      narrative_enabled: None,
       narrative_dir: None,
       archivist_model: None,
       narrative_threading: None,
@@ -721,7 +708,6 @@ pub fn merge_gui_override_wins_test() {
       gui: Some("tui"),
       dprime_enabled: None,
       dprime_config: None,
-      narrative_enabled: None,
       narrative_dir: None,
       archivist_model: None,
       narrative_threading: None,
@@ -747,7 +733,6 @@ pub fn merge_gui_override_wins_test() {
       gui: Some("web"),
       dprime_enabled: None,
       dprime_config: None,
-      narrative_enabled: None,
       narrative_dir: None,
       archivist_model: None,
       narrative_threading: None,
@@ -841,7 +826,6 @@ pub fn merge_dprime_override_wins_test() {
       gui: None,
       dprime_enabled: Some(False),
       dprime_config: Some("/old.json"),
-      narrative_enabled: None,
       narrative_dir: None,
       archivist_model: None,
       narrative_threading: None,
@@ -867,7 +851,6 @@ pub fn merge_dprime_override_wins_test() {
       gui: None,
       dprime_enabled: Some(True),
       dprime_config: Some("/new.json"),
-      narrative_enabled: None,
       narrative_dir: None,
       archivist_model: None,
       narrative_threading: None,
@@ -914,12 +897,12 @@ max_tokens = 2048"
 pub fn parse_config_toml_unknown_narrative_key_still_ok_test() {
   let toml =
     "[narrative]
-enabled = true
+directory = \"my-narrative\"
 bogus_sub_key = \"hello\""
   let result = config.parse_config_toml(toml)
   result |> should.be_ok
   let assert Ok(cfg) = result
-  cfg.narrative_enabled |> should.equal(Some(True))
+  cfg.narrative_dir |> should.equal(Some("my-narrative"))
 }
 
 pub fn parse_config_toml_negative_max_tokens_still_ok_test() {
