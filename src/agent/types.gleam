@@ -74,6 +74,7 @@ pub type AgentOutcome {
     agent_human_name: String,
     agent_cycle_id: String,
     result: String,
+    structured_result: Option(AgentResult),
   )
   AgentFailure(
     task_id: String,
@@ -83,6 +84,54 @@ pub type AgentOutcome {
     agent_cycle_id: String,
     error: String,
   )
+}
+
+// ---------------------------------------------------------------------------
+// Agent result — structured return type from agent work
+// ---------------------------------------------------------------------------
+
+pub type AgentResult {
+  AgentResult(
+    final_text: String,
+    agent_id: String,
+    cycle_id: String,
+    findings: AgentFindings,
+  )
+}
+
+pub type AgentFindings {
+  ResearcherFindings(
+    sources: List(DiscoveredSource),
+    facts: List(ExtractedFact),
+    data_points: List(AgentDataPoint),
+    dead_ends: List(String),
+  )
+  PlannerFindings(
+    plan_steps: List(String),
+    dependencies: List(#(String, String)),
+    complexity: String,
+    risks: List(String),
+  )
+  CoderFindings(
+    files_touched: List(String),
+    patterns_used: List(String),
+    errors_fixed: List(String),
+    libraries: List(String),
+  )
+  WriterFindings(word_count: Int, format: String, sections: List(String))
+  GenericFindings(notes: List(String))
+}
+
+pub type DiscoveredSource {
+  DiscoveredSource(url: String, title: String, relevance: Float)
+}
+
+pub type ExtractedFact {
+  ExtractedFact(label: String, value: String, confidence: Float)
+}
+
+pub type AgentDataPoint {
+  AgentDataPoint(label: String, value: String, unit: String)
 }
 
 // ---------------------------------------------------------------------------

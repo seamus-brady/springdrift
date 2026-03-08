@@ -5,6 +5,8 @@
 //// Produces a complete NarrativeEntry JSON response in a single LLM call.
 
 import agent/types as agent_types
+import cbr/log as cbr_log
+import cbr/types as cbr_types
 import gleam/dynamic/decode
 import gleam/erlang/process.{type Subject}
 import gleam/int
@@ -106,11 +108,13 @@ pub fn generate(
 
 /// Spawn the Archivist asynchronously. Does not block the caller.
 /// If a Librarian is available, it is notified after the entry is written.
+/// After the NarrativeEntry, a second LLM call generates a CbrCase.
 pub fn spawn(
   ctx: ArchivistContext,
   provider: Provider,
   model: String,
   narrative_dir: String,
+  cbr_dir: String,
   verbose: Bool,
   lib: Option(Subject(LibrarianMessage)),
 ) -> Nil {
@@ -127,6 +131,18 @@ pub fn spawn(
               // Also update the thread index in the Librarian
               let idx = narrative_log.load_thread_index(narrative_dir)
               librarian.notify_thread_index(l, idx)
+            }
+            None -> Nil
+          }
+
+          // Step 2: Generate CBR case from the narrative entry
+          case generate_cbr_case(ctx, threaded, provider, model) {
+            Some(cbr_case) -> {
+              cbr_log.append(cbr_dir, cbr_case)
+              case lib {
+                Some(l) -> librarian.notify_new_case(l, cbr_case)
+                None -> Nil
+              }
             }
             None -> Nil
           }
@@ -554,6 +570,275 @@ fn lenient_observation_decoder() -> decode.Decoder(types.Observation) {
     _ -> types.Info
   }
   decode.success(types.Observation(observation_type:, severity:, detail:))
+}
+
+// ---------------------------------------------------------------------------
+// CBR case generation
+// ---------------------------------------------------------------------------
+
+/// Generate a CbrCase from the NarrativeEntry via a second LLM call.
+/// Returns None on failure (silent — CBR is best-effort).
+fn generate_cbr_case(
+  ctx: ArchivistContext,
+  entry: NarrativeEntry,
+  provider: Provider,
+  model: String,
+) -> Option(cbr_types.CbrCase) {
+  let prompt = build_cbr_prompt(ctx, entry)
+  let req =
+    request.new(model, 1024)
+    |> request.with_system(cbr_system_prompt())
+    |> request.with_user_message(prompt)
+
+  case provider.chat(req) {
+    Ok(resp) -> {
+      let text = response.text(resp)
+      case parse_cbr_case(text, ctx, entry) {
+        Ok(cbr_case) -> {
+          slog.info(
+            "narrative/archivist",
+            "generate_cbr",
+            "Generated CBR case for cycle " <> ctx.cycle_id,
+            Some(ctx.cycle_id),
+          )
+          Some(cbr_case)
+        }
+        Error(_) -> {
+          slog.warn(
+            "narrative/archivist",
+            "generate_cbr",
+            "CBR case parse failed, skipping. Raw: "
+              <> string.slice(text, 0, 200),
+            Some(ctx.cycle_id),
+          )
+          None
+        }
+      }
+    }
+    Error(_) -> {
+      slog.warn(
+        "narrative/archivist",
+        "generate_cbr",
+        "CBR LLM call failed, skipping",
+        Some(ctx.cycle_id),
+      )
+      None
+    }
+  }
+}
+
+fn cbr_system_prompt() -> String {
+  "You are the Archivist extracting a Case-Based Reasoning record from a completed cognitive cycle. Your goal is to produce a structured problem/solution/outcome record optimised for future retrieval.
+
+RULES:
+- Focus on retrievability: use clear, specific terms in problem descriptors
+- Capture the approach, not just the result
+- Document pitfalls and what went wrong
+- Respond with ONLY valid JSON matching the CbrCase schema. No preamble, no markdown.
+
+JSON SCHEMA:
+{
+  \"problem\": {
+    \"user_input\": \"<original query, truncated to 500 chars>\",
+    \"intent\": \"<data_report|data_query|comparison|trend_analysis|monitoring_check|exploration|clarification|system_command|conversation>\",
+    \"domain\": \"<domain>\",
+    \"entities\": [\"<locations + organisations>\"],
+    \"keywords\": [\"<key terms>\"],
+    \"query_complexity\": \"<simple|moderate|complex>\"
+  },
+  \"solution\": {
+    \"approach\": \"<1-3 sentence description of how the problem was approached>\",
+    \"agents_used\": [\"<agent names>\"],
+    \"tools_used\": [\"<tool names>\"],
+    \"steps\": [\"<key decision points, in order>\"]
+  },
+  \"outcome\": {
+    \"status\": \"<success|partial|failure>\",
+    \"confidence\": 0.0-1.0,
+    \"assessment\": \"<brief assessment>\",
+    \"pitfalls\": [\"<what went wrong or nearly wrong>\"]
+  }
+}"
+}
+
+fn build_cbr_prompt(ctx: ArchivistContext, entry: NarrativeEntry) -> String {
+  let agents_text = case ctx.agent_completions {
+    [] -> "No agents used."
+    completions ->
+      "AGENTS USED:\n"
+      <> string.join(
+        list.map(completions, fn(c) {
+          "- "
+          <> c.agent_human_name
+          <> ": "
+          <> case c.result {
+            Ok(r) -> "SUCCESS — " <> string.slice(r, 0, 150)
+            Error(e) -> "FAILED — " <> e
+          }
+        }),
+        "\n",
+      )
+  }
+
+  "CYCLE ID: "
+  <> ctx.cycle_id
+  <> "\n\nUSER INPUT:\n"
+  <> string.slice(ctx.user_input, 0, 500)
+  <> "\n\nNARRATIVE SUMMARY:\n"
+  <> entry.summary
+  <> "\n\nINTENT: "
+  <> entry.intent.description
+  <> " (domain: "
+  <> entry.intent.domain
+  <> ")"
+  <> "\n\nOUTCOME: "
+  <> entry.outcome.assessment
+  <> " (confidence: "
+  <> string.inspect(entry.outcome.confidence)
+  <> ")"
+  <> "\n\n"
+  <> agents_text
+  <> "\n\nKEYWORDS: "
+  <> string.join(entry.keywords, ", ")
+  <> "\nENTITIES: "
+  <> string.join(entry.entities.locations, ", ")
+  <> " / "
+  <> string.join(entry.entities.organisations, ", ")
+}
+
+fn parse_cbr_case(
+  text: String,
+  ctx: ArchivistContext,
+  entry: NarrativeEntry,
+) -> Result(cbr_types.CbrCase, Nil) {
+  let extracted = extract_json_object(string.trim(text))
+  let cleaned = sanitize_json_string(extracted)
+  case json.parse(cleaned, lenient_cbr_decoder()) {
+    Ok(partial) ->
+      Ok(
+        cbr_types.CbrCase(
+          ..partial,
+          case_id: ctx.cycle_id,
+          timestamp: entry.timestamp,
+          schema_version: 1,
+          embedding: [],
+          source_narrative_id: ctx.cycle_id,
+        ),
+      )
+    Error(_) -> Error(Nil)
+  }
+}
+
+fn lenient_cbr_decoder() -> decode.Decoder(cbr_types.CbrCase) {
+  use problem <- decode.optional_field(
+    "problem",
+    cbr_types.CbrProblem(
+      user_input: "",
+      intent: "",
+      domain: "",
+      entities: [],
+      keywords: [],
+      query_complexity: "simple",
+    ),
+    lenient_cbr_problem_decoder(),
+  )
+  use solution <- decode.optional_field(
+    "solution",
+    cbr_types.CbrSolution(
+      approach: "",
+      agents_used: [],
+      tools_used: [],
+      steps: [],
+    ),
+    lenient_cbr_solution_decoder(),
+  )
+  use outcome <- decode.optional_field(
+    "outcome",
+    cbr_types.CbrOutcome(
+      status: "success",
+      confidence: 0.5,
+      assessment: "",
+      pitfalls: [],
+    ),
+    lenient_cbr_outcome_decoder(),
+  )
+  decode.success(cbr_types.CbrCase(
+    case_id: "",
+    timestamp: "",
+    schema_version: 1,
+    problem:,
+    solution:,
+    outcome:,
+    embedding: [],
+    source_narrative_id: "",
+  ))
+}
+
+fn lenient_cbr_problem_decoder() -> decode.Decoder(cbr_types.CbrProblem) {
+  use user_input <- decode.optional_field("user_input", "", decode.string)
+  use intent <- decode.optional_field("intent", "", decode.string)
+  use domain <- decode.optional_field("domain", "", decode.string)
+  use entities <- decode.optional_field(
+    "entities",
+    [],
+    decode.list(decode.string),
+  )
+  use keywords <- decode.optional_field(
+    "keywords",
+    [],
+    decode.list(decode.string),
+  )
+  use query_complexity <- decode.optional_field(
+    "query_complexity",
+    "simple",
+    decode.string,
+  )
+  decode.success(cbr_types.CbrProblem(
+    user_input:,
+    intent:,
+    domain:,
+    entities:,
+    keywords:,
+    query_complexity:,
+  ))
+}
+
+fn lenient_cbr_solution_decoder() -> decode.Decoder(cbr_types.CbrSolution) {
+  use approach <- decode.optional_field("approach", "", decode.string)
+  use agents_used <- decode.optional_field(
+    "agents_used",
+    [],
+    decode.list(decode.string),
+  )
+  use tools_used <- decode.optional_field(
+    "tools_used",
+    [],
+    decode.list(decode.string),
+  )
+  use steps <- decode.optional_field("steps", [], decode.list(decode.string))
+  decode.success(cbr_types.CbrSolution(
+    approach:,
+    agents_used:,
+    tools_used:,
+    steps:,
+  ))
+}
+
+fn lenient_cbr_outcome_decoder() -> decode.Decoder(cbr_types.CbrOutcome) {
+  use status <- decode.optional_field("status", "success", decode.string)
+  use confidence <- decode.optional_field("confidence", 0.5, decode.float)
+  use assessment <- decode.optional_field("assessment", "", decode.string)
+  use pitfalls <- decode.optional_field(
+    "pitfalls",
+    [],
+    decode.list(decode.string),
+  )
+  decode.success(cbr_types.CbrOutcome(
+    status:,
+    confidence:,
+    assessment:,
+    pitfalls:,
+  ))
 }
 
 fn fallback_entry(ctx: ArchivistContext) -> NarrativeEntry {

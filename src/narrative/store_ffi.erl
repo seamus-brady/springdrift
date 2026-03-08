@@ -1,6 +1,7 @@
 -module(store_ffi).
--export([new_table/2, insert/3, lookup/2, lookup_bag/2,
-         all_values/1, last_n/2, delete_table/1, table_size/1]).
+-export([new_table/2, new_unique_table/2, insert/3, lookup/2, lookup_bag/2,
+         all_values/1, last_n/2, delete_table/1, table_size/1,
+         delete_key/2]).
 
 %% Create a new ETS table. Type is one of: set, bag, ordered_set.
 %% Returns the table reference (atom name).
@@ -14,6 +15,13 @@ new_table(Name, Type) when is_binary(Name) ->
     end,
     ets:new(AtomName, [TypeAtom, public, named_table, {read_concurrency, true}]),
     AtomName.
+
+%% Create a new ETS table with a unique name (counter-suffixed).
+%% Use this when multiple instances may coexist (e.g. in tests).
+new_unique_table(BaseName, Type) when is_binary(BaseName) ->
+    Counter = erlang:unique_integer([positive]),
+    FullName = <<BaseName/binary, "_", (integer_to_binary(Counter))/binary>>,
+    new_table(FullName, Type).
 
 %% Insert a {Key, Value} tuple into an ETS table.
 insert(Table, Key, Value) when is_atom(Table) ->
@@ -59,6 +67,11 @@ last_n_loop(Table, Key, N, Acc) ->
 %% Delete an ETS table.
 delete_table(Table) when is_atom(Table) ->
     catch ets:delete(Table),
+    nil.
+
+%% Delete all entries for a key from a table.
+delete_key(Table, Key) when is_atom(Table) ->
+    ets:delete(Table, Key),
     nil.
 
 %% Return the number of entries in a table.

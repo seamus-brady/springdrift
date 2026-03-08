@@ -97,7 +97,7 @@ fn make_threaded_entry(
 
 pub fn librarian_starts_with_empty_dir_test() {
   let dir = test_dir("empty")
-  let lib = librarian.start(dir, 0)
+  let lib = librarian.start(dir, dir <> "/cbr", dir <> "/facts", 0)
   let entries = librarian.load_all(lib)
   entries |> should.equal([])
   process.send(lib, librarian.Shutdown)
@@ -112,7 +112,7 @@ pub fn librarian_replays_from_jsonl_test() {
   narrative_log.append(dir, entry2)
 
   // Start Librarian — should replay those entries
-  let lib = librarian.start(dir, 0)
+  let lib = librarian.start(dir, dir <> "/cbr", dir <> "/facts", 0)
   let entries = librarian.load_all(lib)
   list.length(entries) |> should.equal(2)
   process.send(lib, librarian.Shutdown)
@@ -120,7 +120,7 @@ pub fn librarian_replays_from_jsonl_test() {
 
 pub fn librarian_index_entry_test() {
   let dir = test_dir("index")
-  let lib = librarian.start(dir, 0)
+  let lib = librarian.start(dir, dir <> "/cbr", dir <> "/facts", 0)
 
   // Notify Librarian of a new entry
   let entry = make_entry("cycle-100", "Indexed entry")
@@ -138,7 +138,7 @@ pub fn librarian_index_entry_test() {
 
 pub fn librarian_search_by_keyword_test() {
   let dir = test_dir("search")
-  let lib = librarian.start(dir, 0)
+  let lib = librarian.start(dir, dir <> "/cbr", dir <> "/facts", 0)
 
   let entry1 =
     NarrativeEntry(
@@ -171,7 +171,7 @@ pub fn librarian_search_by_keyword_test() {
 
 pub fn librarian_search_case_insensitive_test() {
   let dir = test_dir("search_case")
-  let lib = librarian.start(dir, 0)
+  let lib = librarian.start(dir, dir <> "/cbr", dir <> "/facts", 0)
 
   let entry =
     NarrativeEntry(
@@ -192,7 +192,7 @@ pub fn librarian_search_case_insensitive_test() {
 
 pub fn librarian_thread_query_test() {
   let dir = test_dir("thread")
-  let lib = librarian.start(dir, 0)
+  let lib = librarian.start(dir, dir <> "/cbr", dir <> "/facts", 0)
 
   let entry1 = make_threaded_entry("cycle-t1", "thread-A", "Property Research")
   let entry2 = make_threaded_entry("cycle-t2", "thread-B", "Quantum Computing")
@@ -217,7 +217,7 @@ pub fn librarian_thread_query_test() {
 
 pub fn librarian_date_range_query_test() {
   let dir = test_dir("daterange")
-  let lib = librarian.start(dir, 0)
+  let lib = librarian.start(dir, dir <> "/cbr", dir <> "/facts", 0)
 
   let entry1 =
     NarrativeEntry(
@@ -254,7 +254,7 @@ pub fn librarian_date_range_query_test() {
 
 pub fn librarian_recent_entries_test() {
   let dir = test_dir("recent")
-  let lib = librarian.start(dir, 0)
+  let lib = librarian.start(dir, dir <> "/cbr", dir <> "/facts", 0)
 
   let entry1 =
     NarrativeEntry(
@@ -288,7 +288,7 @@ pub fn librarian_recent_entries_test() {
 
 pub fn librarian_thread_index_test() {
   let dir = test_dir("threadidx")
-  let lib = librarian.start(dir, 0)
+  let lib = librarian.start(dir, dir <> "/cbr", dir <> "/facts", 0)
 
   // Initially empty
   let idx = librarian.load_thread_index(lib)
@@ -328,7 +328,7 @@ pub fn librarian_max_files_limit_test() {
   let _ = simplifile.write(dir <> "/2026-03-08.jsonl", json2 <> "\n")
 
   // Load with max_files=1 — should only load the most recent file
-  let lib = librarian.start(dir, 1)
+  let lib = librarian.start(dir, dir <> "/cbr", dir <> "/facts", 1)
   let entries = librarian.load_all(lib)
   list.length(entries) |> should.equal(1)
   let assert [e] = entries
@@ -339,7 +339,7 @@ pub fn librarian_max_files_limit_test() {
 
 pub fn librarian_thread_heads_test() {
   let dir = test_dir("heads")
-  let lib = librarian.start(dir, 0)
+  let lib = librarian.start(dir, dir <> "/cbr", dir <> "/facts", 0)
 
   let entry1 = make_threaded_entry("cycle-h1", "thread-X", "Thread X")
   let entry2 =
@@ -378,7 +378,7 @@ pub fn librarian_thread_heads_test() {
 
 pub fn librarian_no_results_for_unknown_keyword_test() {
   let dir = test_dir("noresults")
-  let lib = librarian.start(dir, 0)
+  let lib = librarian.start(dir, dir <> "/cbr", dir <> "/facts", 0)
   let results = librarian.search(lib, "nonexistent_topic_xyz")
   results |> should.equal([])
   process.send(lib, librarian.Shutdown)

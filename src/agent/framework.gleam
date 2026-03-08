@@ -314,6 +314,7 @@ fn outcome_from_result(
         agent_human_name: identity.human_name,
         agent_cycle_id:,
         result: text,
+        structured_result: option.None,
       )
     Error(err) ->
       AgentFailure(

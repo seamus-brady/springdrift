@@ -279,7 +279,12 @@ fn run(cfg: AppConfig) -> Nil {
     True -> {
       let max_files = 0
       // 0 = load all files
-      option.Some(librarian.start(narrative_dir, max_files))
+      option.Some(librarian.start(
+        narrative_dir,
+        paths.cbr_dir(),
+        paths.facts_dir(),
+        max_files,
+      ))
     }
     False -> option.None
   }
@@ -301,6 +306,7 @@ fn run(cfg: AppConfig) -> Nil {
       dprime_state,
       narrative_enabled,
       narrative_dir,
+      paths.cbr_dir(),
       archivist_model,
       lib,
       profile_dirs,

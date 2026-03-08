@@ -11,7 +11,9 @@
 ////   ├── logs/                 System logs (date-rotated JSON-L)
 ////   ├── memory/
 ////   │   ├── cycle-log/        Per-cycle JSON-L logs
-////   │   └── narrative/        Prime Narrative JSON-L + thread index
+////   │   ├── narrative/        Prime Narrative JSON-L + thread index
+////   │   ├── cbr/              CBR case JSONL (procedural memory)
+////   │   └── facts/            MemoryFact JSONL (semantic memory)
 ////   ├── skills/               Local skill definitions
 ////   └── profiles/             Local agent profiles
 
@@ -77,6 +79,16 @@ pub fn cycle_log_dir() -> String {
 /// Narrative log directory: .springdrift/memory/narrative/
 pub fn narrative_dir() -> String {
   project_dir <> "/memory/narrative"
+}
+
+/// CBR case directory: .springdrift/memory/cbr/
+pub fn cbr_dir() -> String {
+  project_dir <> "/memory/cbr"
+}
+
+/// Facts directory: .springdrift/memory/facts/
+pub fn facts_dir() -> String {
+  project_dir <> "/memory/facts"
 }
 
 // ---------------------------------------------------------------------------

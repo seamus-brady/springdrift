@@ -34,6 +34,7 @@ import llm/tool
 import llm/types as llm_types
 import narrative/archivist
 import narrative/librarian.{type LibrarianMessage}
+import paths
 import profile
 import profile/types as profile_types
 import query_complexity
@@ -75,6 +76,7 @@ pub type CognitiveState {
     // Narrative
     narrative_enabled: Bool,
     narrative_dir: String,
+    cbr_dir: String,
     archivist_model: String,
     librarian: Option(Subject(LibrarianMessage)),
     agent_completions: List(types.AgentCompletionRecord),
@@ -108,6 +110,7 @@ pub fn start(
   dprime_state: Option(dprime_types.DprimeState),
   narrative_enabled: Bool,
   narrative_dir: String,
+  cbr_dir: String,
   archivist_model: String,
   librarian: Option(Subject(LibrarianMessage)),
   profile_dirs: List(String),
@@ -150,6 +153,7 @@ pub fn start(
         dprime_state:,
         narrative_enabled:,
         narrative_dir:,
+        cbr_dir:,
         archivist_model:,
         librarian:,
         agent_completions: [],
@@ -594,7 +598,17 @@ fn handle_memory_tools(
   // Execute memory tools synchronously
   let memory_results =
     list.map(memory_calls, fn(call) {
-      let result = memory.execute(call, state.narrative_dir, state.librarian)
+      let facts_ctx = case state.cycle_id {
+        Some(cid) ->
+          Some(memory.FactsContext(
+            facts_dir: paths.facts_dir(),
+            cycle_id: cid,
+            agent_id: "cognitive",
+          ))
+        None -> None
+      }
+      let result =
+        memory.execute(call, state.narrative_dir, state.librarian, facts_ctx)
       case result {
         llm_types.ToolSuccess(tool_use_id: id, content: c) ->
           llm_types.ToolResultContent(
@@ -2353,6 +2367,7 @@ fn maybe_spawn_archivist(
         state.provider,
         state.archivist_model,
         state.narrative_dir,
+        state.cbr_dir,
         state.verbose,
         state.librarian,
       )
