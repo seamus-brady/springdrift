@@ -392,11 +392,7 @@ fn forward_loop(
       forward_loop(notify, relay, [subj, ..connections])
     }
     FwdRelay(Unregister(subj)) -> {
-      forward_loop(
-        notify,
-        relay,
-        list.filter(connections, fn(s) { s != subj }),
-      )
+      forward_loop(notify, relay, list.filter(connections, fn(s) { s != subj }))
     }
   }
 }

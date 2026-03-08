@@ -640,7 +640,7 @@ pub fn page() -> String {
 
   function renderNarrativeEntries(entries) {
     if (!entries || entries.length === 0) {
-      narrativeContainer.innerHTML = '<div class=\"narrative-empty\">No narrative entries yet. Enable narrative logging with --narrative.</div>';
+      narrativeContainer.innerHTML = '<div class=\"narrative-empty\">No narrative entries yet. Entries appear after conversations.</div>';
       return;
     }
     var html = '';

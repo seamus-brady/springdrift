@@ -193,8 +193,7 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `gui` | `--gui` | tui | GUI mode: `tui` (terminal) or `web` (browser on port 8080) |
 | `dprime_enabled` | `--dprime` / `--no-dprime` | False | Enable D' safety evaluation before tool dispatch |
 | `dprime_config` | `--dprime-config` | built-in defaults | Path to D' config JSON file |
-| `narrative_enabled` | `--narrative` / `--no-narrative` | False | Enable Prime Narrative logging after each cycle |
-| `narrative_dir` | `--narrative-dir` | `.springdrift/memory/narrative` | Directory for narrative JSON-L files |
+| `narrative_dir` | `--narrative-dir` | `.springdrift/memory/narrative` | Directory for narrative JSON-L files (narrative is always enabled) |
 | `archivist_model` | — | task_model | Model used by the Archivist for narrative generation |
 | `narrative_threading` | — | True | Enable automatic thread assignment |
 | `narrative_summaries` | — | False | Enable periodic narrative summaries |
@@ -247,7 +246,7 @@ Old logs (>30 days) are cleaned up on startup via `cleanup_old_logs`. When `--ve
 is set, formatted lines also go to stderr. Named `slog` (not `logger`) to avoid
 collision with Erlang's built-in `logger` module.
 
-**Prime Narrative** — when `narrative_enabled` is true, `maybe_spawn_archivist` fires
+**Prime Narrative** — `maybe_spawn_archivist` fires
 after each final reply. The Archivist runs `spawn_unlinked` — failures never affect the
 user. It generates a `NarrativeEntry` via a single LLM call, assigns a thread via
 `threading.assign_thread`, and appends to `.springdrift/memory/narrative/YYYY-MM-DD.jsonl`. Zero
@@ -355,9 +354,8 @@ skills_dirs    = ["/path/to/skills"] # Extra skill directories
 dprime_enabled = false               # Enable D' safety gate before tool dispatch
 dprime_config  = "dprime.json" # Path to D' config JSON (omit for built-in defaults)
 
-# Prime Narrative
+# Prime Narrative (always enabled)
 [narrative]
-enabled          = false             # Enable narrative logging after each cycle
 dir              = ".springdrift/memory/narrative" # Default location
 archivist_model  = "claude-haiku-4-5-20251001" # Model for Archivist LLM calls
 threading        = true              # Auto-assign threads by overlap scoring

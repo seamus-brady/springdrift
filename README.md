@@ -303,7 +303,6 @@ Narrative). Use it for ad-hoc research or to interact with running profiles.
 gleam run                      # Start interactive TUI
 gleam run -- --resume          # Resume previous session
 gleam run -- --gui web         # Start web GUI on port 8080
-gleam run -- --narrative       # Enable narrative memory
 gleam run -- --dprime          # Enable D' safety evaluation
 ```
 

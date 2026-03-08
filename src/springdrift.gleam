@@ -155,11 +155,7 @@ fn print_help() -> Nil {
     "  --dprime-config <path>    Path to D' config JSON (default: built-in)",
   )
   io.println("")
-  io.println("Narrative (Prime Narrative memory):")
-  io.println(
-    "  --narrative               Enable narrative logging after each cycle",
-  )
-  io.println("  --no-narrative            Disable narrative logging (default)")
+  io.println("Narrative (Prime Narrative memory — always enabled):")
   io.println(
     "  --narrative-dir <path>    Directory for narrative logs (default: .springdrift/memory/narrative)",
   )
@@ -270,45 +266,28 @@ fn run(cfg: AppConfig) -> Nil {
     }
   }
 
-  // Narrative config
-  let narrative_enabled = option.unwrap(cfg.narrative_enabled, False)
+  // Narrative config (always enabled)
   let narrative_dir = option.unwrap(cfg.narrative_dir, paths.narrative_dir())
   let archivist_model = option.unwrap(cfg.archivist_model, task_model)
 
-  // Start the Librarian (narrative ETS query layer) if narrative is enabled
-  let lib = case narrative_enabled {
-    True -> {
-      let max_files = 0
-      // 0 = load all files
-      option.Some(librarian.start(
-        narrative_dir,
-        paths.cbr_dir(),
-        paths.facts_dir(),
-        max_files,
-      ))
-    }
-    False -> option.None
-  }
+  // Start the Librarian (narrative ETS query layer)
+  let librarian_subj =
+    librarian.start(narrative_dir, paths.cbr_dir(), paths.facts_dir(), 0)
+  let lib = option.Some(librarian_subj)
 
-  // Start Curator and build identity-aware system prompt if Librarian is running
-  let system = case lib {
-    option.Some(librarian_subj) -> {
-      let cur =
-        curator.start_with_identity(
-          librarian_subj,
-          narrative_dir,
-          paths.cbr_dir(),
-          paths.facts_dir(),
-          paths.default_identity_dirs(),
-          "memory",
-          active_profile,
-        )
-      let prompt = curator.build_system_prompt(cur, system)
-      process.send(cur, curator.Shutdown)
-      prompt
-    }
-    option.None -> system
-  }
+  // Start Curator and build identity-aware system prompt
+  let cur =
+    curator.start_with_identity(
+      librarian_subj,
+      narrative_dir,
+      paths.cbr_dir(),
+      paths.facts_dir(),
+      paths.default_identity_dirs(),
+      "memory",
+      active_profile,
+    )
+  let system = curator.build_system_prompt(cur, system)
+  process.send(cur, curator.Shutdown)
 
   // Start cognitive loop with empty registry (supervisor will register agents)
   let cognitive_subj =
@@ -325,7 +304,6 @@ fn run(cfg: AppConfig) -> Nil {
       task_model,
       reasoning_model,
       dprime_state,
-      narrative_enabled,
       narrative_dir,
       paths.cbr_dir(),
       archivist_model,
@@ -351,10 +329,7 @@ fn run(cfg: AppConfig) -> Nil {
     option.Some(_) -> io.println("D' Safety: enabled")
     option.None -> Nil
   }
-  case narrative_enabled {
-    True -> io.println("Narrative: enabled (" <> narrative_dir <> ")")
-    False -> Nil
-  }
+  io.println("Narrative: " <> narrative_dir)
   let agent_names =
     list.map(agent_specs, fn(s) { s.name })
     |> string.join(", ")

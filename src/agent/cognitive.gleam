@@ -73,8 +73,7 @@ pub type CognitiveState {
     save_in_progress: Bool,
     save_pending: Option(List(llm_types.Message)),
     dprime_state: Option(dprime_types.DprimeState),
-    // Narrative
-    narrative_enabled: Bool,
+    // Narrative (always enabled)
     narrative_dir: String,
     cbr_dir: String,
     archivist_model: String,
@@ -108,7 +107,6 @@ pub fn start(
   task_model: String,
   reasoning_model: String,
   dprime_state: Option(dprime_types.DprimeState),
-  narrative_enabled: Bool,
   narrative_dir: String,
   cbr_dir: String,
   archivist_model: String,
@@ -117,14 +115,10 @@ pub fn start(
   write_anywhere: Bool,
 ) -> Subject(CognitiveMessage) {
   // The cognitive loop gets agent tools + request_human_input + memory tools
-  let memory_tools = case narrative_enabled {
-    True -> memory.all()
-    False -> []
-  }
   let tools =
     list.flatten([
       [builtin.human_input_tool()],
-      memory_tools,
+      memory.all(),
       agent_tools,
     ])
   let setup = process.new_subject()
@@ -151,7 +145,6 @@ pub fn start(
         save_in_progress: False,
         save_pending: None,
         dprime_state:,
-        narrative_enabled:,
         narrative_dir:,
         cbr_dir:,
         archivist_model:,
@@ -2329,50 +2322,45 @@ fn build_request_with_model(
   }
 }
 
-/// Spawn the Archivist if narrative is enabled. Called after sending CognitiveReply.
+/// Spawn the Archivist after each reply. Called after sending CognitiveReply.
 fn maybe_spawn_archivist(
   state: CognitiveState,
   response_text: String,
   model_used: String,
   usage: Option(llm_types.Usage),
 ) -> Nil {
-  case state.narrative_enabled {
-    False -> Nil
-    True -> {
-      let cycle_id = option.unwrap(state.cycle_id, "unknown")
-      let #(input_tokens, output_tokens) = case usage {
-        Some(u) -> #(u.input_tokens, u.output_tokens)
-        None -> #(0, 0)
-      }
-      let ctx =
-        archivist.ArchivistContext(
-          cycle_id:,
-          parent_cycle_id: None,
-          user_input: state.last_user_input,
-          final_response: response_text,
-          agent_completions: list.reverse(state.agent_completions),
-          model_used:,
-          classification: case state.model == state.reasoning_model {
-            True -> "complex"
-            False -> "simple"
-          },
-          total_input_tokens: input_tokens,
-          total_output_tokens: output_tokens,
-          tool_calls: list.length(state.agent_completions),
-          dprime_decisions: [],
-          thread_index_json: "",
-        )
-      archivist.spawn(
-        ctx,
-        state.provider,
-        state.archivist_model,
-        state.narrative_dir,
-        state.cbr_dir,
-        state.verbose,
-        state.librarian,
-      )
-    }
+  let cycle_id = option.unwrap(state.cycle_id, "unknown")
+  let #(input_tokens, output_tokens) = case usage {
+    Some(u) -> #(u.input_tokens, u.output_tokens)
+    None -> #(0, 0)
   }
+  let ctx =
+    archivist.ArchivistContext(
+      cycle_id:,
+      parent_cycle_id: None,
+      user_input: state.last_user_input,
+      final_response: response_text,
+      agent_completions: list.reverse(state.agent_completions),
+      model_used:,
+      classification: case state.model == state.reasoning_model {
+        True -> "complex"
+        False -> "simple"
+      },
+      total_input_tokens: input_tokens,
+      total_output_tokens: output_tokens,
+      tool_calls: list.length(state.agent_completions),
+      dprime_decisions: [],
+      thread_index_json: "",
+    )
+  archivist.spawn(
+    ctx,
+    state.provider,
+    state.archivist_model,
+    state.narrative_dir,
+    state.cbr_dir,
+    state.verbose,
+    state.librarian,
+  )
 }
 
 fn parse_agent_params(input_json: String) -> #(String, String) {
