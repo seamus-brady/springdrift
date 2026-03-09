@@ -281,8 +281,8 @@ fn run(cfg: AppConfig) -> Nil {
     )
   let lib = option.Some(librarian_subj)
 
-  // Start Curator and build identity-aware system prompt
-  let cur =
+  // Start Curator (stays alive for dynamic system prompt assembly)
+  let curator_subj =
     curator.start_with_identity(
       librarian_subj,
       narrative_dir,
@@ -292,8 +292,6 @@ fn run(cfg: AppConfig) -> Nil {
       "memory",
       active_profile,
     )
-  let system = curator.build_system_prompt(cur, system)
-  process.send(cur, curator.Shutdown)
 
   // Start cognitive loop with empty registry (supervisor will register agents)
   let cognitive_subj =
@@ -316,6 +314,7 @@ fn run(cfg: AppConfig) -> Nil {
       lib,
       profile_dirs,
       write_anywhere,
+      option.Some(curator_subj),
     )
 
   // Start supervisor and register agents via StartChild

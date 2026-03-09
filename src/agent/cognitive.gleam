@@ -13,6 +13,7 @@ import agent/types.{
 }
 import agent/worker
 import cycle_log
+import dag/types as dag_types
 import dprime/types as dprime_types
 import gleam/dict
 import gleam/erlang/process.{type Subject}
@@ -22,6 +23,7 @@ import gleam/string
 import llm/provider.{type Provider}
 import llm/response
 import llm/types as llm_types
+import narrative/curator
 import narrative/librarian.{type LibrarianMessage}
 import query_complexity
 import slog
@@ -55,6 +57,7 @@ pub fn start(
   librarian: Option(Subject(LibrarianMessage)),
   profile_dirs: List(String),
   write_anywhere: Bool,
+  curator: Option(Subject(curator.CuratorMessage)),
 ) -> Subject(CognitiveMessage) {
   // The cognitive loop gets agent tools + request_human_input + memory tools
   let tools =
@@ -98,6 +101,8 @@ pub fn start(
         profile_dirs:,
         write_anywhere:,
         output_dprime_state: None,
+        dprime_decisions: [],
+        curator:,
       )
     process.send(setup, self)
     cognitive_loop(state)
@@ -244,7 +249,12 @@ fn handle_user_input(
       let cycle_id = cycle_log.generate_uuid()
       cycle_log.log_human_input(cycle_id, state.cycle_id, text)
       let state =
-        CognitiveState(..state, last_user_input: text, agent_completions: [])
+        CognitiveState(
+          ..state,
+          last_user_input: text,
+          agent_completions: [],
+          dprime_decisions: [],
+        )
 
       // Spawn async classification worker — rescue catches panics
       let self = state.self
@@ -440,6 +450,35 @@ fn handle_think_complete(
                   )
                 }
                 None -> {
+                  // Update DAG node with final outcome
+                  case state.librarian {
+                    Some(lib) ->
+                      process.send(
+                        lib,
+                        librarian.UpdateNode(node: dag_types.CycleNode(
+                          cycle_id: option.unwrap(state.cycle_id, task_id),
+                          parent_id: None,
+                          node_type: dag_types.CognitiveCycle,
+                          timestamp: "",
+                          outcome: dag_types.NodeSuccess,
+                          model: reply_model,
+                          complexity: "",
+                          tool_calls: [],
+                          dprime_gates: list.map(state.dprime_decisions, fn(d) {
+                            dag_types.GateSummary(
+                              gate: d.gate,
+                              decision: d.decision,
+                              score: d.score,
+                            )
+                          }),
+                          tokens_in: resp.usage.input_tokens,
+                          tokens_out: resp.usage.output_tokens,
+                          duration_ms: 0,
+                          agent_output: None,
+                        )),
+                      )
+                    None -> Nil
+                  }
                   process.send(
                     rt,
                     CognitiveReply(

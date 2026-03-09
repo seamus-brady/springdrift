@@ -3,13 +3,19 @@ import agent/types.{type CognitiveReply, CognitiveReply, PendingThink, Thinking}
 import agent/worker
 import context
 import cycle_log
+import dag/types as dag_types
 import gleam/dict
 import gleam/erlang/process.{type Subject}
 import gleam/list
 import gleam/option.{None, Some}
 import llm/request
 import llm/types as llm_types
+import narrative/curator
+import narrative/librarian
 import slog
+
+@external(erlang, "springdrift_ffi", "get_datetime")
+fn get_datetime() -> String
 
 /// Build a user message, spawn a think worker with the given model,
 /// and transition to Thinking status.
@@ -26,6 +32,15 @@ pub fn proceed_with_model(
     "Using model: " <> model,
     Some(cycle_id),
   )
+  // Refresh system prompt from Curator if available
+  let state = case state.curator {
+    Some(cur) -> {
+      let prompt = curator.build_system_prompt(cur, state.system)
+      CognitiveState(..state, system: prompt)
+    }
+    None -> state
+  }
+
   let msg =
     llm_types.Message(role: llm_types.User, content: [
       llm_types.TextContent(text:),
@@ -38,6 +53,30 @@ pub fn proceed_with_model(
     True -> cycle_log.log_llm_request(cycle_id, req)
     False -> Nil
   }
+  // Index NodePending in DAG
+  case state.librarian {
+    Some(lib) ->
+      process.send(
+        lib,
+        librarian.IndexNode(node: dag_types.CycleNode(
+          cycle_id: cycle_id,
+          parent_id: None,
+          node_type: dag_types.CognitiveCycle,
+          timestamp: get_datetime(),
+          outcome: dag_types.NodePending,
+          model:,
+          complexity: "",
+          tool_calls: [],
+          dprime_gates: [],
+          tokens_in: 0,
+          tokens_out: 0,
+          duration_ms: 0,
+          agent_output: None,
+        )),
+      )
+    None -> Nil
+  }
+
   worker.spawn_think(task_id, req, state.provider, state.self)
 
   CognitiveState(

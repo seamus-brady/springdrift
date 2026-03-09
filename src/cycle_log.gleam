@@ -496,7 +496,18 @@ type RawEvent {
 // ---------------------------------------------------------------------------
 
 pub fn load_cycles() -> List(CycleData) {
-  case simplifile.read(log_path()) {
+  load_cycles_from_file(log_path())
+}
+
+/// Load cycles from a specific date's JSONL file.
+/// Date should be "YYYY-MM-DD" format.
+pub fn load_cycles_for_date(date: String) -> List(CycleData) {
+  let path = cycle_log_dir() <> "/" <> date <> ".jsonl"
+  load_cycles_from_file(path)
+}
+
+fn load_cycles_from_file(path: String) -> List(CycleData) {
+  case simplifile.read(path) {
     Error(_) -> []
     Ok(contents) -> {
       let events =
@@ -515,6 +526,11 @@ pub fn load_cycles() -> List(CycleData) {
       build_cycles(events)
     }
   }
+}
+
+/// Return the cycle log directory path (for listing available date files).
+pub fn log_directory() -> String {
+  cycle_log_dir()
 }
 
 pub fn messages_for_rewind(

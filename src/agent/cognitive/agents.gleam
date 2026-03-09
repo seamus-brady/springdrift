@@ -10,6 +10,7 @@ import agent/types.{
 }
 import agent/worker
 import cycle_log
+import dag/types as dag_types
 import dprime/gate
 import gleam/dict
 import gleam/dynamic/decode
@@ -20,9 +21,13 @@ import gleam/option.{None, Some}
 import gleam/string
 import llm/response
 import llm/types as llm_types
+import narrative/librarian
 import paths
 import slog
 import tools/memory
+
+@external(erlang, "springdrift_ffi", "get_datetime")
+fn get_datetime() -> String
 
 pub fn dispatch_tool_calls(
   state: CognitiveState,
@@ -331,6 +336,29 @@ fn do_dispatch_agents(
             ),
           )
           process.send(state.notify, ToolCalling(name: call.name))
+          // Index agent cycle as NodePending in DAG
+          case state.librarian {
+            Some(lib) ->
+              process.send(
+                lib,
+                librarian.IndexNode(node: dag_types.CycleNode(
+                  cycle_id: agent_task_id,
+                  parent_id: Some(cycle_id),
+                  node_type: dag_types.AgentCycle,
+                  timestamp: get_datetime(),
+                  outcome: dag_types.NodePending,
+                  model: "",
+                  complexity: "agent",
+                  tool_calls: [],
+                  dprime_gates: [],
+                  tokens_in: 0,
+                  tokens_out: 0,
+                  duration_ms: 0,
+                  agent_output: None,
+                )),
+              )
+            None -> Nil
+          }
           Ok(PendingAgent(
             task_id: agent_task_id,
             tool_use_id: call.id,
@@ -465,6 +493,49 @@ pub fn handle_agent_complete(
       completion,
       ..state.agent_completions
     ])
+
+  // Update DAG node with agent outcome
+  case state.librarian {
+    Some(lib) -> {
+      let node_outcome = case outcome {
+        AgentSuccess(..) -> dag_types.NodeSuccess
+        AgentFailure(error:, ..) -> dag_types.NodeFailure(reason: error)
+      }
+      let tool_summaries =
+        list.map(completion.tools_used, fn(name) {
+          dag_types.ToolSummary(name:, success: True, error: None)
+        })
+      process.send(
+        lib,
+        librarian.UpdateNode(node: dag_types.CycleNode(
+          cycle_id: outcome_task_id,
+          parent_id: state.cycle_id,
+          node_type: dag_types.AgentCycle,
+          timestamp: get_datetime(),
+          outcome: node_outcome,
+          model: "",
+          complexity: "",
+          tool_calls: tool_summaries,
+          dprime_gates: [],
+          tokens_in: completion.input_tokens,
+          tokens_out: completion.output_tokens,
+          duration_ms: completion.duration_ms,
+          agent_output: Some(
+            dag_types.GenericOutput(notes: [
+              "agent="
+                <> case outcome {
+                AgentSuccess(agent:, ..) -> agent
+                AgentFailure(agent:, ..) -> agent
+              },
+              "id=" <> completion.agent_id,
+              "instruction=" <> completion.instruction,
+            ]),
+          ),
+        )),
+      )
+    }
+    None -> Nil
+  }
 
   case dict.get(state.pending, outcome_task_id) {
     Error(_) -> state

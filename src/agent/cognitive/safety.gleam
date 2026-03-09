@@ -6,6 +6,7 @@ import agent/types.{
 }
 import agent/worker
 import cycle_log
+import dag/types as dag_types
 import dprime/audit as dprime_audit
 import dprime/gate
 import dprime/meta
@@ -164,7 +165,22 @@ pub fn handle_safety_gate_complete(
       Some(final_state)
     }
   }
-  let state = CognitiveState(..state, dprime_state: new_dprime_state)
+  let record =
+    dag_types.DprimeDecisionRecord(
+      gate: "tool",
+      decision: case result.decision {
+        dprime_types.Accept -> "accept"
+        dprime_types.Modify -> "modify"
+        dprime_types.Reject -> "reject"
+      },
+      score: result.dprime_score,
+      explanation: result.explanation,
+    )
+  let state =
+    CognitiveState(..state, dprime_state: new_dprime_state, dprime_decisions: [
+      record,
+      ..state.dprime_decisions
+    ])
 
   case result.decision {
     dprime_types.Accept -> {
@@ -378,7 +394,22 @@ pub fn handle_input_safety_gate_complete(
       Some(final_state)
     }
   }
-  let state = CognitiveState(..state, dprime_state: new_dprime_state)
+  let record =
+    dag_types.DprimeDecisionRecord(
+      gate: "input",
+      decision: case result.decision {
+        dprime_types.Accept -> "accept"
+        dprime_types.Modify -> "modify"
+        dprime_types.Reject -> "reject"
+      },
+      score: result.dprime_score,
+      explanation: result.explanation,
+    )
+  let state =
+    CognitiveState(..state, dprime_state: new_dprime_state, dprime_decisions: [
+      record,
+      ..state.dprime_decisions
+    ])
 
   case result.decision {
     dprime_types.Accept -> {
@@ -464,7 +495,22 @@ pub fn handle_post_execution_gate_complete(
       Some(updated)
     }
   }
-  let state = CognitiveState(..state, dprime_state: new_dprime_state)
+  let record =
+    dag_types.DprimeDecisionRecord(
+      gate: "post_execution",
+      decision: case result.decision {
+        dprime_types.Accept -> "accept"
+        dprime_types.Modify -> "modify"
+        dprime_types.Reject -> "reject"
+      },
+      score: result.dprime_score,
+      explanation: result.explanation,
+    )
+  let state =
+    CognitiveState(..state, dprime_state: new_dprime_state, dprime_decisions: [
+      record,
+      ..state.dprime_decisions
+    ])
 
   // Check if D' improved (decreased) or worsened
   case result.dprime_score <=. pre_score {
@@ -596,6 +642,19 @@ pub fn handle_output_gate_complete(
   modification_count: Int,
   reply_to: Subject(CognitiveReply),
 ) -> CognitiveState {
+  let record =
+    dag_types.DprimeDecisionRecord(
+      gate: "output",
+      decision: case result.decision {
+        dprime_types.Accept -> "accept"
+        dprime_types.Modify -> "modify"
+        dprime_types.Reject -> "reject"
+      },
+      score: result.dprime_score,
+      explanation: result.explanation,
+    )
+  let state =
+    CognitiveState(..state, dprime_decisions: [record, ..state.dprime_decisions])
   let max_modifications = 2
   let explanation = result.explanation
   case result.decision {

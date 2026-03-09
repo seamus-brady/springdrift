@@ -1,8 +1,11 @@
 import agent/cognitive_state.{type CognitiveState, CognitiveState}
 import agent/types.{SaveResult, SaveWarning}
+import dag/types as dag_types
 import gleam/erlang/process
+import gleam/float
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/string
 import llm/types as llm_types
 import narrative/archivist
 import storage
@@ -89,7 +92,19 @@ pub fn maybe_spawn_archivist(
       total_input_tokens: input_tokens,
       total_output_tokens: output_tokens,
       tool_calls: list.length(state.agent_completions),
-      dprime_decisions: [],
+      dprime_decisions: list.map(
+        list.reverse(state.dprime_decisions),
+        fn(r: dag_types.DprimeDecisionRecord) {
+          "["
+          <> r.gate
+          <> "] "
+          <> string.uppercase(r.decision)
+          <> " (d'="
+          <> float.to_string(r.score)
+          <> ") — "
+          <> r.explanation
+        },
+      ),
       thread_index_json: "",
     )
   archivist.spawn(

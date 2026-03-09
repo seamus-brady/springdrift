@@ -17,7 +17,7 @@ pub fn main() -> Nil {
 
 pub fn memory_tools_defined_test() {
   let tools = memory.all()
-  tools |> list.length |> should.equal(8)
+  tools |> list.length |> should.equal(10)
 }
 
 pub fn recall_recent_tool_exists_test() {

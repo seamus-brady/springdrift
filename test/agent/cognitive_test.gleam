@@ -39,6 +39,7 @@ fn start_cognitive(provider) {
       None,
       [],
       False,
+      None,
     )
   #(subj, notify_subj)
 }
@@ -285,6 +286,7 @@ pub fn model_fallback_on_retryable_error_test() {
       None,
       [],
       False,
+      None,
     )
 
   // Use a query with complexity keywords so heuristic classifies as Complex,
