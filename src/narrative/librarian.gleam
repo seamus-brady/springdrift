@@ -27,6 +27,8 @@
 import agent/types as agent_types
 import cbr/log as cbr_log
 import cbr/types as cbr_types
+import cycle_log
+import dag/types as dag_types
 import facts/log as facts_log
 import facts/types as facts_types
 import gleam/erlang/process.{type Subject}
@@ -136,6 +138,19 @@ fn result_delete_key(table: EtsTable, key: String) -> Nil
 @external(erlang, "store_ffi", "delete_key")
 fn cbr_delete_key(table: EtsTable, key: String) -> Nil
 
+// DAG-typed operations (CycleNode)
+@external(erlang, "store_ffi", "insert")
+fn dag_insert(table: EtsTable, key: String, value: dag_types.CycleNode) -> Nil
+
+@external(erlang, "store_ffi", "lookup")
+fn dag_lookup(table: EtsTable, key: String) -> Result(dag_types.CycleNode, Nil)
+
+@external(erlang, "store_ffi", "lookup_bag")
+fn dag_lookup_bag(table: EtsTable, key: String) -> List(dag_types.CycleNode)
+
+@external(erlang, "store_ffi", "all_values")
+fn dag_all_values(table: EtsTable) -> List(dag_types.CycleNode)
+
 // ---------------------------------------------------------------------------
 // Messages
 // ---------------------------------------------------------------------------
@@ -238,6 +253,32 @@ pub type LibrarianMessage {
   /// Get the number of CBR cases.
   QueryCaseCount(reply_to: Subject(Int))
 
+  // --- DAG ingestion ---
+  /// Index a new DAG node (cycle start or update).
+  IndexNode(node: dag_types.CycleNode)
+  /// Update an existing DAG node (cycle complete).
+  UpdateNode(node: dag_types.CycleNode)
+
+  // --- DAG queries ---
+  /// Look up a single CycleNode by cycle_id.
+  QueryNode(
+    cycle_id: String,
+    reply_to: Subject(Result(dag_types.CycleNode, Nil)),
+  )
+  /// Get all child nodes for a parent cycle_id.
+  QueryChildren(parent_id: String, reply_to: Subject(List(dag_types.CycleNode)))
+  /// Get root cognitive cycles for a date ("YYYY-MM-DD").
+  QueryDayRoots(date: String, reply_to: Subject(List(dag_types.CycleNode)))
+  /// Get all cycles (roots + agents) for a date.
+  QueryDayAll(date: String, reply_to: Subject(List(dag_types.CycleNode)))
+  /// Get full subtree rooted at a cycle_id.
+  QueryNodeWithDescendants(
+    cycle_id: String,
+    reply_to: Subject(Result(dag_types.DagSubtree, Nil)),
+  )
+  /// Get aggregated stats for a date.
+  QueryDayStats(date: String, reply_to: Subject(dag_types.DayStats))
+
   /// Shutdown
   Shutdown
 }
@@ -269,6 +310,10 @@ type LibrarianState {
     facts_by_cycle: EtsTable,
     // Scratchpad — agent results per cycle (ephemeral, bag)
     cycle_scratchpad: EtsTable,
+    // DAG ETS tables
+    dag_nodes: EtsTable,
+    dag_by_parent: EtsTable,
+    dag_by_date: EtsTable,
   )
 }
 
@@ -310,6 +355,11 @@ pub fn start(
     // Create scratchpad table (bag — multiple results per cycle)
     let scratchpad_table = new_table("cycle_scratchpad", "bag")
 
+    // Create DAG ETS tables
+    let dag_nodes_table = new_table("dag_nodes", "set")
+    let dag_parent_table = new_table("dag_by_parent", "bag")
+    let dag_date_table = new_table("dag_by_date", "bag")
+
     let state =
       LibrarianState(
         self:,
@@ -329,6 +379,9 @@ pub fn start(
         facts_by_key: facts_key_table,
         facts_by_cycle: facts_cycle_table,
         cycle_scratchpad: scratchpad_table,
+        dag_nodes: dag_nodes_table,
+        dag_by_parent: dag_parent_table,
+        dag_by_date: dag_date_table,
       )
 
     // Replay narrative JSONL files
@@ -343,6 +396,9 @@ pub fn start(
 
     // Replay facts from disk
     replay_facts_from_disk(state)
+
+    // Replay DAG from cycle log
+    replay_dag_from_cycle_log(state, max_files)
 
     let narrative_count = ets_table_size(entries_table)
     let cbr_count = cbr_table_size(cbr_cases_table)
@@ -379,8 +435,12 @@ pub fn start_supervised(
   max_files: Int,
   max_restarts: Int,
 ) -> Subject(LibrarianMessage) {
-  let proxy_subj: Subject(LibrarianMessage) = process.new_subject()
+  // The proxy subject must be created inside the spawned process (owner rule),
+  // then sent back to the caller via a setup channel.
+  let setup: Subject(Subject(LibrarianMessage)) = process.new_subject()
   process.spawn_unlinked(fn() {
+    let proxy_subj: Subject(LibrarianMessage) = process.new_subject()
+    process.send(setup, proxy_subj)
     librarian_supervisor_loop(
       narrative_dir,
       cbr_dir,
@@ -391,6 +451,7 @@ pub fn start_supervised(
       proxy_subj,
     )
   })
+  let assert Ok(proxy_subj) = process.receive(setup, 30_000)
   proxy_subj
 }
 
@@ -900,6 +961,10 @@ fn loop(state: LibrarianState) -> Nil {
           ets_delete_table(state.facts_by_cycle)
           // Delete scratchpad
           ets_delete_table(state.cycle_scratchpad)
+          // Delete DAG tables
+          ets_delete_table(state.dag_nodes)
+          ets_delete_table(state.dag_by_parent)
+          ets_delete_table(state.dag_by_date)
           slog.info(
             "narrative/librarian",
             "shutdown",
@@ -1069,6 +1134,57 @@ fn loop(state: LibrarianState) -> Nil {
         QueryCaseCount(reply_to:) -> {
           let all = cbr_all_values(state.cbr_cases)
           process.send(reply_to, list.length(all))
+          loop(state)
+        }
+
+        // --- DAG messages ---
+        IndexNode(node:) -> {
+          index_dag_node(state, node)
+          loop(state)
+        }
+
+        UpdateNode(node:) -> {
+          index_dag_node(state, node)
+          loop(state)
+        }
+
+        QueryNode(cycle_id:, reply_to:) -> {
+          let result = dag_lookup(state.dag_nodes, cycle_id)
+          process.send(reply_to, result)
+          loop(state)
+        }
+
+        QueryChildren(parent_id:, reply_to:) -> {
+          let results = dag_lookup_bag(state.dag_by_parent, parent_id)
+          process.send(reply_to, results)
+          loop(state)
+        }
+
+        QueryDayRoots(date:, reply_to:) -> {
+          let all = do_query_dag_day(state, date)
+          let roots = list.filter(all, fn(n) { option.is_none(n.parent_id) })
+          process.send(reply_to, roots)
+          loop(state)
+        }
+
+        QueryDayAll(date:, reply_to:) -> {
+          let all = do_query_dag_day(state, date)
+          process.send(reply_to, all)
+          loop(state)
+        }
+
+        QueryNodeWithDescendants(cycle_id:, reply_to:) -> {
+          let result = case dag_lookup(state.dag_nodes, cycle_id) {
+            Error(_) -> Error(Nil)
+            Ok(root) -> Ok(build_subtree(state, root))
+          }
+          process.send(reply_to, result)
+          loop(state)
+        }
+
+        QueryDayStats(date:, reply_to:) -> {
+          let stats = compute_day_stats(state, date)
+          process.send(reply_to, stats)
           loop(state)
         }
       }
@@ -1463,4 +1579,159 @@ fn merge_unique_cases(
   let ids = list.map(a, fn(c) { c.case_id })
   let unique_b = list.filter(b, fn(c) { !list.contains(ids, c.case_id) })
   list.append(a, unique_b)
+}
+
+// ---------------------------------------------------------------------------
+// DAG — indexing, querying, replay
+// ---------------------------------------------------------------------------
+
+fn index_dag_node(state: LibrarianState, node: dag_types.CycleNode) -> Nil {
+  // Primary index: cycle_id → CycleNode
+  dag_insert(state.dag_nodes, node.cycle_id, node)
+
+  // Parent edge: parent_id → CycleNode (for traversal)
+  let parent_key = case node.parent_id {
+    Some(pid) -> pid
+    None -> "root"
+  }
+  dag_insert(state.dag_by_parent, parent_key, node)
+
+  // Date index: extract YYYY-MM-DD from timestamp
+  let date_key = string.slice(node.timestamp, 0, 10)
+  dag_insert(state.dag_by_date, date_key, node)
+  Nil
+}
+
+fn do_query_dag_day(
+  state: LibrarianState,
+  date: String,
+) -> List(dag_types.CycleNode) {
+  let results = dag_lookup_bag(state.dag_by_date, date)
+  case results {
+    [] -> {
+      // Lazy load: try loading from cycle log file for this date
+      let cycles = cycle_log.load_cycles_for_date(date)
+      case cycles {
+        [] -> []
+        _ -> {
+          let nodes = list.map(cycles, cycle_data_to_node)
+          list.each(nodes, fn(n) { index_dag_node(state, n) })
+          nodes
+        }
+      }
+    }
+    found -> found
+  }
+}
+
+fn build_subtree(
+  state: LibrarianState,
+  root: dag_types.CycleNode,
+) -> dag_types.DagSubtree {
+  let children = dag_lookup_bag(state.dag_by_parent, root.cycle_id)
+  let child_trees = list.map(children, fn(c) { build_subtree(state, c) })
+  dag_types.DagSubtree(root:, children: child_trees)
+}
+
+fn compute_day_stats(state: LibrarianState, date: String) -> dag_types.DayStats {
+  let all = do_query_dag_day(state, date)
+  let success_count =
+    list.count(all, fn(n) { n.outcome == dag_types.NodeSuccess })
+  let partial_count =
+    list.count(all, fn(n) { n.outcome == dag_types.NodePartial })
+  let failure_count =
+    list.count(all, fn(n) {
+      case n.outcome {
+        dag_types.NodeFailure(_) -> True
+        _ -> False
+      }
+    })
+  let total_tokens_in = list.fold(all, 0, fn(acc, n) { acc + n.tokens_in })
+  let total_tokens_out = list.fold(all, 0, fn(acc, n) { acc + n.tokens_out })
+  let total_duration_ms = list.fold(all, 0, fn(acc, n) { acc + n.duration_ms })
+
+  // Tool failure rate
+  let all_tools = list.flat_map(all, fn(n) { n.tool_calls })
+  let total_tool_calls = list.length(all_tools)
+  let failed_tool_calls = list.count(all_tools, fn(t) { !t.success })
+  let tool_failure_rate = case total_tool_calls {
+    0 -> 0.0
+    n -> int.to_float(failed_tool_calls) /. int.to_float(n)
+  }
+
+  // Unique models
+  let models_used =
+    list.map(all, fn(n) { n.model })
+    |> list.unique()
+
+  // All gate decisions
+  let gate_decisions = list.flat_map(all, fn(n) { n.dprime_gates })
+
+  dag_types.DayStats(
+    date:,
+    total_cycles: list.length(all),
+    success_count:,
+    partial_count:,
+    failure_count:,
+    total_tokens_in:,
+    total_tokens_out:,
+    total_duration_ms:,
+    tool_failure_rate:,
+    models_used:,
+    gate_decisions:,
+  )
+}
+
+fn replay_dag_from_cycle_log(state: LibrarianState, max_files: Int) -> Nil {
+  let dir = cycle_log.log_directory()
+  case simplifile.read_directory(dir) {
+    Error(_) -> Nil
+    Ok(files) -> {
+      let jsonl_files =
+        files
+        |> list.filter(fn(f) { string.ends_with(f, ".jsonl") })
+        |> list.sort(string.compare)
+
+      let limited = limit_files(jsonl_files, max_files)
+
+      list.each(limited, fn(f) {
+        let date = string.drop_end(f, 6)
+        let cycles = cycle_log.load_cycles_for_date(date)
+        list.each(cycles, fn(c) {
+          let node = cycle_data_to_node(c)
+          index_dag_node(state, node)
+        })
+      })
+    }
+  }
+}
+
+fn cycle_data_to_node(c: cycle_log.CycleData) -> dag_types.CycleNode {
+  let outcome = case c.response_text {
+    "" -> dag_types.NodeFailure(reason: "no response")
+    _ -> dag_types.NodeSuccess
+  }
+  let node_type = case c.parent_id {
+    Some(_) -> dag_types.AgentCycle
+    None -> dag_types.CognitiveCycle
+  }
+  let tool_calls =
+    list.map(c.tool_names, fn(name) {
+      dag_types.ToolSummary(name:, success: True, error: None)
+    })
+  dag_types.CycleNode(
+    cycle_id: c.cycle_id,
+    parent_id: c.parent_id,
+    node_type:,
+    timestamp: c.timestamp,
+    outcome:,
+    model: "",
+    complexity: option.unwrap(c.complexity, ""),
+    tool_calls:,
+    dprime_gates: [],
+    tokens_in: c.input_tokens,
+    tokens_out: c.output_tokens,
+    duration_ms: 0,
+    agent_output: None,
+  )
 }

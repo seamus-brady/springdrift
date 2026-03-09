@@ -1,0 +1,825 @@
+import agent/cognitive/llm as cognitive_llm
+import agent/cognitive_state.{type CognitiveState, CognitiveState}
+import agent/framework
+import agent/registry
+import agent/types.{
+  type AgentOutcome, type CognitiveReply, AgentFailure, AgentQuestionSource,
+  AgentSuccess, AgentTask, AgentWaiting, CognitiveQuestion, CognitiveReply, Idle,
+  OwnToolWaiting, PendingAgent, PendingThink, QuestionForHuman, Thinking,
+  ToolCalling, WaitingForAgents, WaitingForUser,
+}
+import agent/worker
+import cycle_log
+import dag/types as dag_types
+import dprime/gate
+import gleam/dict
+import gleam/dynamic/decode
+import gleam/erlang/process.{type Subject}
+import gleam/json
+import gleam/list
+import gleam/option.{None, Some}
+import gleam/string
+import llm/response
+import llm/types as llm_types
+import narrative/librarian
+import paths
+import slog
+import tools/memory
+
+@external(erlang, "springdrift_ffi", "get_datetime")
+fn get_datetime() -> String
+
+pub fn dispatch_tool_calls(
+  state: CognitiveState,
+  task_id: String,
+  resp: llm_types.LlmResponse,
+  calls: List(llm_types.ToolCall),
+  reply_to: Subject(CognitiveReply),
+) -> CognitiveState {
+  // Check for request_human_input first
+  case list.find(calls, fn(c) { c.name == "request_human_input" }) {
+    Ok(hi_call) ->
+      handle_own_human_input(state, task_id, resp, hi_call, reply_to)
+    Error(_) -> {
+      // Check for memory tools — execute synchronously, then re-think
+      let #(memory_calls, remaining_calls) =
+        list.partition(calls, fn(c) { memory.is_memory_tool(c.name) })
+      case memory_calls {
+        [] ->
+          dispatch_agent_calls(state, task_id, resp, remaining_calls, reply_to)
+        _ ->
+          handle_memory_tools(
+            state,
+            task_id,
+            resp,
+            memory_calls,
+            remaining_calls,
+            reply_to,
+          )
+      }
+    }
+  }
+}
+
+fn handle_own_human_input(
+  state: CognitiveState,
+  task_id: String,
+  resp: llm_types.LlmResponse,
+  call: llm_types.ToolCall,
+  reply_to: Subject(CognitiveReply),
+) -> CognitiveState {
+  let question = framework.parse_human_input_question(call.input_json)
+
+  // Send decoupled notification
+  process.send(
+    state.notify,
+    QuestionForHuman(question:, source: CognitiveQuestion),
+  )
+
+  // Add assistant message with tool use content to history
+  let assistant_msg =
+    llm_types.Message(role: llm_types.Assistant, content: resp.content)
+  let messages = list.append(state.messages, [assistant_msg])
+
+  // Stash context so we can resume after the human answers
+  let ctx = OwnToolWaiting(tool_use_id: call.id, reply_to:)
+
+  CognitiveState(
+    ..state,
+    messages:,
+    status: WaitingForUser(question:, context: ctx),
+    pending: dict.delete(state.pending, task_id),
+  )
+}
+
+fn handle_memory_tools(
+  state: CognitiveState,
+  task_id: String,
+  resp: llm_types.LlmResponse,
+  memory_calls: List(llm_types.ToolCall),
+  remaining_calls: List(llm_types.ToolCall),
+  reply_to: Subject(CognitiveReply),
+) -> CognitiveState {
+  // Execute memory tools synchronously
+  let memory_results =
+    list.map(memory_calls, fn(call) {
+      let facts_ctx = case state.cycle_id {
+        Some(cid) ->
+          Some(memory.FactsContext(
+            facts_dir: paths.facts_dir(),
+            cycle_id: cid,
+            agent_id: "cognitive",
+          ))
+        None -> None
+      }
+      let result =
+        memory.execute(call, state.narrative_dir, state.librarian, facts_ctx)
+      case result {
+        llm_types.ToolSuccess(tool_use_id: id, content: c) ->
+          llm_types.ToolResultContent(
+            tool_use_id: id,
+            content: c,
+            is_error: False,
+          )
+        llm_types.ToolFailure(tool_use_id: id, error: e) ->
+          llm_types.ToolResultContent(
+            tool_use_id: id,
+            content: e,
+            is_error: True,
+          )
+      }
+    })
+
+  // If there are also agent calls, dispatch those with memory results as initial_results
+  case remaining_calls {
+    [] -> {
+      // Only memory calls — add results to messages and re-think
+      let assistant_msg =
+        llm_types.Message(role: llm_types.Assistant, content: resp.content)
+      let user_msg =
+        llm_types.Message(role: llm_types.User, content: memory_results)
+      let messages = list.append(state.messages, [assistant_msg, user_msg])
+
+      let new_task_id = cycle_log.generate_uuid()
+      let cycle_id = option.unwrap(state.cycle_id, new_task_id)
+      let new_state =
+        CognitiveState(
+          ..state,
+          messages:,
+          pending: dict.delete(state.pending, task_id),
+        )
+      let req = cognitive_llm.build_request(new_state, messages)
+      case state.verbose {
+        True -> cycle_log.log_llm_request(cycle_id, req)
+        False -> Nil
+      }
+      worker.spawn_think(new_task_id, req, state.provider, state.self)
+
+      CognitiveState(
+        ..new_state,
+        status: Thinking(task_id: new_task_id),
+        pending: dict.insert(
+          dict.delete(state.pending, task_id),
+          new_task_id,
+          PendingThink(
+            task_id: new_task_id,
+            model: state.model,
+            fallback_from: None,
+            reply_to:,
+            output_gate_count: 0,
+            empty_retried: False,
+          ),
+        ),
+      )
+    }
+    agent_remaining -> {
+      // Mix: execute memory tools, pass results as initial, dispatch agents
+      let #(agent_calls, non_agent_calls) =
+        list.partition(agent_remaining, fn(c) {
+          string.starts_with(c.name, "agent_")
+        })
+      let error_blocks =
+        list.map(non_agent_calls, fn(call) {
+          llm_types.ToolResultContent(
+            tool_use_id: call.id,
+            content: "Unknown tool",
+            is_error: True,
+          )
+        })
+      let initial = list.append(memory_results, error_blocks)
+      case agent_calls {
+        [] -> {
+          // No agent calls either — just memory + unknown tools, re-think
+          let assistant_msg =
+            llm_types.Message(role: llm_types.Assistant, content: resp.content)
+          let user_msg =
+            llm_types.Message(role: llm_types.User, content: initial)
+          let messages = list.append(state.messages, [assistant_msg, user_msg])
+          let new_task_id = cycle_log.generate_uuid()
+          let cycle_id = option.unwrap(state.cycle_id, new_task_id)
+          let new_state =
+            CognitiveState(
+              ..state,
+              messages:,
+              pending: dict.delete(state.pending, task_id),
+            )
+          let req = cognitive_llm.build_request(new_state, messages)
+          case state.verbose {
+            True -> cycle_log.log_llm_request(cycle_id, req)
+            False -> Nil
+          }
+          worker.spawn_think(new_task_id, req, state.provider, state.self)
+          CognitiveState(
+            ..new_state,
+            status: Thinking(task_id: new_task_id),
+            pending: dict.insert(
+              dict.delete(state.pending, task_id),
+              new_task_id,
+              PendingThink(
+                task_id: new_task_id,
+                model: state.model,
+                fallback_from: None,
+                reply_to:,
+                output_gate_count: 0,
+                empty_retried: False,
+              ),
+            ),
+          )
+        }
+        _ ->
+          do_dispatch_agents(
+            state,
+            task_id,
+            resp,
+            agent_calls,
+            initial,
+            reply_to,
+          )
+      }
+    }
+  }
+}
+
+fn dispatch_agent_calls(
+  state: CognitiveState,
+  task_id: String,
+  resp: llm_types.LlmResponse,
+  calls: List(llm_types.ToolCall),
+  reply_to: Subject(CognitiveReply),
+) -> CognitiveState {
+  // Separate agent calls from non-agent calls
+  let #(agent_calls, other_calls) =
+    list.partition(calls, fn(call) { string.starts_with(call.name, "agent_") })
+
+  case agent_calls, other_calls {
+    // Only agent calls
+    agent_calls, [] -> {
+      do_dispatch_agents(state, task_id, resp, agent_calls, [], reply_to)
+    }
+
+    // No agent calls — unknown tools, send error
+    [], _other -> {
+      let text = response.text(resp)
+      let reply_text = case text {
+        "" -> "No agent tools matched."
+        t -> t
+      }
+      // Add assistant message to history so it isn't silently lost
+      let assistant_msg =
+        llm_types.Message(role: llm_types.Assistant, content: resp.content)
+      let messages = list.append(state.messages, [assistant_msg])
+      process.send(
+        reply_to,
+        CognitiveReply(
+          response: reply_text,
+          model: state.model,
+          usage: Some(resp.usage),
+        ),
+      )
+      CognitiveState(
+        ..state,
+        messages:,
+        status: Idle,
+        pending: dict.delete(state.pending, task_id),
+      )
+    }
+
+    // Mix of agent and non-agent — error blocks for non-agent, dispatch agents
+    agent_calls, non_agent_calls -> {
+      let error_blocks =
+        list.map(non_agent_calls, fn(call) {
+          llm_types.ToolResultContent(
+            tool_use_id: call.id,
+            content: "Unknown tool",
+            is_error: True,
+          )
+        })
+      do_dispatch_agents(
+        state,
+        task_id,
+        resp,
+        agent_calls,
+        error_blocks,
+        reply_to,
+      )
+    }
+  }
+}
+
+fn do_dispatch_agents(
+  state: CognitiveState,
+  task_id: String,
+  resp: llm_types.LlmResponse,
+  agent_calls: List(llm_types.ToolCall),
+  initial_results: List(llm_types.ContentBlock),
+  reply_to: Subject(CognitiveReply),
+) -> CognitiveState {
+  let cycle_id = option.unwrap(state.cycle_id, task_id)
+  let new_pending_agents =
+    list.filter_map(agent_calls, fn(call) {
+      let agent_prefix_len = string.length("agent_")
+      let agent_name = string.drop_start(call.name, agent_prefix_len)
+      case registry.get_task_subject(state.registry, agent_name) {
+        None -> Error(Nil)
+        Some(task_subject) -> {
+          let agent_task_id = cycle_log.generate_uuid()
+          let #(instruction, ctx) = parse_agent_params(call.input_json)
+          process.send(
+            task_subject,
+            AgentTask(
+              task_id: agent_task_id,
+              tool_use_id: call.id,
+              instruction:,
+              context: ctx,
+              parent_cycle_id: cycle_id,
+              reply_to: state.self,
+            ),
+          )
+          process.send(state.notify, ToolCalling(name: call.name))
+          // Index agent cycle as NodePending in DAG
+          case state.librarian {
+            Some(lib) ->
+              process.send(
+                lib,
+                librarian.IndexNode(node: dag_types.CycleNode(
+                  cycle_id: agent_task_id,
+                  parent_id: Some(cycle_id),
+                  node_type: dag_types.AgentCycle,
+                  timestamp: get_datetime(),
+                  outcome: dag_types.NodePending,
+                  model: "",
+                  complexity: "agent",
+                  tool_calls: [],
+                  dprime_gates: [],
+                  tokens_in: 0,
+                  tokens_out: 0,
+                  duration_ms: 0,
+                  agent_output: None,
+                )),
+              )
+            None -> Nil
+          }
+          Ok(PendingAgent(
+            task_id: agent_task_id,
+            tool_use_id: call.id,
+            agent: agent_name,
+            reply_to:,
+          ))
+        }
+      }
+    })
+
+  // Guard: if no agents were dispatched, reply with error and return to Idle
+  case new_pending_agents {
+    [] -> {
+      process.send(
+        reply_to,
+        CognitiveReply(
+          response: "[Error: no matching agents available]",
+          model: state.model,
+          usage: Some(resp.usage),
+        ),
+      )
+      CognitiveState(
+        ..state,
+        status: Idle,
+        pending: dict.delete(state.pending, task_id),
+      )
+    }
+    _ -> {
+      let pending_ids =
+        list.map(new_pending_agents, fn(p) {
+          case p {
+            PendingAgent(task_id: tid, ..) -> tid
+            _ -> ""
+          }
+        })
+
+      // Add assistant message with tool use content
+      let assistant_msg =
+        llm_types.Message(role: llm_types.Assistant, content: resp.content)
+      let messages = list.append(state.messages, [assistant_msg])
+
+      // Insert new pending agents into the dict
+      let new_pending =
+        list.fold(
+          new_pending_agents,
+          dict.delete(state.pending, task_id),
+          fn(d, p) {
+            case p {
+              PendingAgent(task_id: tid, ..) -> dict.insert(d, tid, p)
+              _ -> d
+            }
+          },
+        )
+
+      CognitiveState(
+        ..state,
+        messages:,
+        status: WaitingForAgents(
+          pending_ids:,
+          accumulated_results: initial_results,
+          reply_to:,
+        ),
+        pending: new_pending,
+      )
+    }
+  }
+}
+
+pub fn handle_agent_complete(
+  state: CognitiveState,
+  outcome: AgentOutcome,
+) -> CognitiveState {
+  let #(outcome_task_id, result_text) = case outcome {
+    AgentSuccess(task_id, result:, ..) -> #(task_id, result)
+    AgentFailure(task_id, error:, ..) -> #(
+      task_id,
+      "[Agent error: " <> error <> "]",
+    )
+  }
+
+  // Accumulate completion record for the Archivist
+  let completion = case outcome {
+    AgentSuccess(
+      agent_id:,
+      agent_human_name:,
+      agent_cycle_id:,
+      result:,
+      instruction:,
+      tools_used:,
+      input_tokens:,
+      output_tokens:,
+      duration_ms:,
+      ..,
+    ) ->
+      types.AgentCompletionRecord(
+        agent_id:,
+        agent_human_name:,
+        agent_cycle_id:,
+        instruction:,
+        result: Ok(result),
+        tools_used:,
+        input_tokens:,
+        output_tokens:,
+        duration_ms:,
+      )
+    AgentFailure(
+      agent_id:,
+      agent_human_name:,
+      agent_cycle_id:,
+      error:,
+      instruction:,
+      tools_used:,
+      input_tokens:,
+      output_tokens:,
+      duration_ms:,
+      ..,
+    ) ->
+      types.AgentCompletionRecord(
+        agent_id:,
+        agent_human_name:,
+        agent_cycle_id:,
+        instruction:,
+        result: Error(error),
+        tools_used:,
+        input_tokens:,
+        output_tokens:,
+        duration_ms:,
+      )
+  }
+  let state =
+    CognitiveState(..state, agent_completions: [
+      completion,
+      ..state.agent_completions
+    ])
+
+  // Update DAG node with agent outcome
+  case state.librarian {
+    Some(lib) -> {
+      let node_outcome = case outcome {
+        AgentSuccess(..) -> dag_types.NodeSuccess
+        AgentFailure(error:, ..) -> dag_types.NodeFailure(reason: error)
+      }
+      let tool_summaries =
+        list.map(completion.tools_used, fn(name) {
+          dag_types.ToolSummary(name:, success: True, error: None)
+        })
+      process.send(
+        lib,
+        librarian.UpdateNode(node: dag_types.CycleNode(
+          cycle_id: outcome_task_id,
+          parent_id: state.cycle_id,
+          node_type: dag_types.AgentCycle,
+          timestamp: get_datetime(),
+          outcome: node_outcome,
+          model: "",
+          complexity: "",
+          tool_calls: tool_summaries,
+          dprime_gates: [],
+          tokens_in: completion.input_tokens,
+          tokens_out: completion.output_tokens,
+          duration_ms: completion.duration_ms,
+          agent_output: Some(
+            dag_types.GenericOutput(notes: [
+              "agent="
+                <> case outcome {
+                AgentSuccess(agent:, ..) -> agent
+                AgentFailure(agent:, ..) -> agent
+              },
+              "id=" <> completion.agent_id,
+              "instruction=" <> completion.instruction,
+            ]),
+          ),
+        )),
+      )
+    }
+    None -> Nil
+  }
+
+  case dict.get(state.pending, outcome_task_id) {
+    Error(_) -> state
+    Ok(pending_agent) -> {
+      let actual_tool_use_id = case pending_agent {
+        PendingAgent(tool_use_id: tuid, ..) -> tuid
+        _ -> ""
+      }
+
+      // Build tool result content block
+      let is_error = case outcome {
+        AgentFailure(..) -> True
+        AgentSuccess(..) -> False
+      }
+      let tool_result_block =
+        llm_types.ToolResultContent(
+          tool_use_id: actual_tool_use_id,
+          content: result_text,
+          is_error:,
+        )
+
+      let remaining = dict.delete(state.pending, outcome_task_id)
+
+      // Check if all agents are done
+      let still_waiting =
+        dict.fold(remaining, False, fn(acc, _key, p) {
+          acc
+          || case p {
+            PendingAgent(..) -> True
+            _ -> False
+          }
+        })
+
+      case still_waiting {
+        True -> {
+          // More agents pending — accumulate result in WaitingForAgents status
+          case state.status {
+            WaitingForAgents(pending_ids:, accumulated_results:, reply_to:) -> {
+              CognitiveState(
+                ..state,
+                status: WaitingForAgents(
+                  pending_ids:,
+                  accumulated_results: list.append(accumulated_results, [
+                    tool_result_block,
+                  ]),
+                  reply_to:,
+                ),
+                pending: remaining,
+              )
+            }
+            _ -> CognitiveState(..state, pending: remaining)
+          }
+        }
+        False -> {
+          // All agents done — get reply_to and accumulated results from status
+          let #(all_results, reply_to) = case state.status {
+            WaitingForAgents(accumulated_results:, reply_to:, ..) -> #(
+              list.append(accumulated_results, [tool_result_block]),
+              reply_to,
+            )
+            _ -> {
+              // Fallback — shouldn't happen, but extract reply_to from pending
+              let rt = case pending_agent {
+                PendingAgent(reply_to: r, ..) -> r
+                PendingThink(reply_to: r, ..) -> r
+              }
+              #([tool_result_block], rt)
+            }
+          }
+
+          // Build ONE user message with ALL accumulated results
+          let user_msg =
+            llm_types.Message(role: llm_types.User, content: all_results)
+          let messages = list.append(state.messages, [user_msg])
+
+          // Spawn post-execution D' re-check if enabled
+          let result_text =
+            list.filter_map(all_results, fn(block) {
+              case block {
+                llm_types.ToolResultContent(content: c, ..) -> Ok(c)
+                _ -> Error(Nil)
+              }
+            })
+            |> string.join("\n")
+          let new_state_with_messages =
+            CognitiveState(..state, messages:, pending: remaining)
+          case state.dprime_state {
+            Some(dprime_st) -> {
+              let cycle_id = option.unwrap(state.cycle_id, "post-exec")
+              let self = state.self
+              let provider = state.provider
+              let scorer_model = state.task_model
+              let verbose = state.verbose
+              // Get the pre-execution D' score from the most recent history
+              let pre_score = case dprime_st.history {
+                [latest, ..] -> latest.score
+                [] -> 0.0
+              }
+              process.spawn_unlinked(fn() {
+                let post_result =
+                  gate.post_execution_evaluate(
+                    result_text,
+                    "",
+                    dprime_st,
+                    provider,
+                    scorer_model,
+                    cycle_id,
+                    verbose,
+                  )
+                process.send(
+                  self,
+                  types.PostExecutionGateComplete(
+                    cycle_id:,
+                    result: post_result,
+                    pre_score:,
+                    reply_to:,
+                  ),
+                )
+              })
+              Nil
+            }
+            None -> Nil
+          }
+
+          let new_task_id = cycle_log.generate_uuid()
+          let cycle_id = option.unwrap(state.cycle_id, new_task_id)
+          let req =
+            cognitive_llm.build_request(new_state_with_messages, messages)
+          case state.verbose {
+            True -> cycle_log.log_llm_request(cycle_id, req)
+            False -> Nil
+          }
+          worker.spawn_think(new_task_id, req, state.provider, state.self)
+
+          CognitiveState(
+            ..state,
+            messages:,
+            status: Thinking(task_id: new_task_id),
+            pending: dict.insert(
+              remaining,
+              new_task_id,
+              PendingThink(
+                task_id: new_task_id,
+                model: state.model,
+                fallback_from: None,
+                reply_to:,
+                output_gate_count: 0,
+                empty_retried: False,
+              ),
+            ),
+          )
+        }
+      }
+    }
+  }
+}
+
+pub fn handle_agent_question(
+  state: CognitiveState,
+  question: String,
+  agent: String,
+  reply_to: Subject(String),
+) -> CognitiveState {
+  process.send(
+    state.notify,
+    QuestionForHuman(question:, source: AgentQuestionSource(agent:)),
+  )
+  CognitiveState(
+    ..state,
+    status: WaitingForUser(question:, context: AgentWaiting(reply_to:)),
+  )
+}
+
+pub fn handle_user_answer(
+  state: CognitiveState,
+  answer: String,
+) -> CognitiveState {
+  case state.status {
+    WaitingForUser(context: AgentWaiting(reply_to:), ..) -> {
+      // Sub-agent question — forward answer
+      process.send(reply_to, answer)
+      CognitiveState(..state, status: Idle)
+    }
+    WaitingForUser(context: OwnToolWaiting(tool_use_id:, reply_to:), ..) -> {
+      // Cognitive loop's own request_human_input — build tool result and continue
+      let tool_result_block =
+        llm_types.ToolResultContent(
+          tool_use_id:,
+          content: answer,
+          is_error: False,
+        )
+      let user_msg =
+        llm_types.Message(role: llm_types.User, content: [tool_result_block])
+      let messages = list.append(state.messages, [user_msg])
+
+      // Spawn a continuation think worker
+      let new_task_id = cycle_log.generate_uuid()
+      let cycle_id = option.unwrap(state.cycle_id, new_task_id)
+      let req = cognitive_llm.build_request(state, messages)
+      case state.verbose {
+        True -> cycle_log.log_llm_request(cycle_id, req)
+        False -> Nil
+      }
+      worker.spawn_think(new_task_id, req, state.provider, state.self)
+
+      CognitiveState(
+        ..state,
+        messages:,
+        status: Thinking(task_id: new_task_id),
+        pending: dict.insert(
+          state.pending,
+          new_task_id,
+          PendingThink(
+            task_id: new_task_id,
+            model: state.model,
+            fallback_from: None,
+            reply_to:,
+            output_gate_count: 0,
+            empty_retried: False,
+          ),
+        ),
+      )
+    }
+    _ -> state
+  }
+}
+
+pub fn handle_agent_event(
+  state: CognitiveState,
+  event: types.AgentLifecycleEvent,
+) -> CognitiveState {
+  slog.debug(
+    "cognitive",
+    "handle_agent_event",
+    case event {
+      types.AgentStarted(name:, ..) -> "AgentStarted: " <> name
+      types.AgentCrashed(name:, ..) -> "AgentCrashed: " <> name
+      types.AgentRestarted(name:, ..) -> "AgentRestarted: " <> name
+      types.AgentRestartFailed(name:, ..) -> "AgentRestartFailed: " <> name
+      types.AgentStopped(name:) -> "AgentStopped: " <> name
+    },
+    state.cycle_id,
+  )
+  case event {
+    types.AgentStarted(name:, task_subject:) ->
+      CognitiveState(
+        ..state,
+        registry: registry.register(state.registry, name, task_subject),
+      )
+    types.AgentCrashed(name:, ..) ->
+      CognitiveState(
+        ..state,
+        registry: registry.mark_restarting(state.registry, name),
+      )
+    types.AgentRestarted(name:, task_subject:, ..) ->
+      CognitiveState(
+        ..state,
+        registry: registry.update_task_subject(
+          state.registry,
+          name,
+          task_subject,
+        ),
+      )
+    types.AgentRestartFailed(name:, ..) ->
+      CognitiveState(
+        ..state,
+        registry: registry.mark_stopped(state.registry, name),
+      )
+    types.AgentStopped(name:) ->
+      CognitiveState(
+        ..state,
+        registry: registry.mark_stopped(state.registry, name),
+      )
+  }
+}
+
+pub fn parse_agent_params(input_json: String) -> #(String, String) {
+  let decoder = {
+    use instruction <- decode.field("instruction", decode.string)
+    use ctx <- decode.optional_field("context", "", decode.string)
+    decode.success(#(instruction, ctx))
+  }
+  case json.parse(input_json, decoder) {
+    Ok(#(instruction, ctx)) -> #(instruction, ctx)
+    Error(_) -> #(input_json, "")
+  }
+}

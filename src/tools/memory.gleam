@@ -7,6 +7,7 @@
 //// memory_query_facts, memory_trace_fact) let the loop explicitly
 //// manage its working memory.
 
+import dag/types as dag_types
 import facts/log as facts_log
 import facts/types as facts_types
 import gleam/dynamic/decode
@@ -50,6 +51,8 @@ pub fn all() -> List(Tool) {
     memory_clear_tool(),
     memory_query_tool(),
     memory_trace_tool(),
+    reflect_tool(),
+    inspect_cycle_tool(),
   ]
 }
 
@@ -166,6 +169,32 @@ fn memory_trace_tool() -> Tool {
   |> tool.build()
 }
 
+fn reflect_tool() -> Tool {
+  tool.new("reflect")
+  |> tool.with_description(
+    "Reflect on past activity. Returns aggregated stats for a date: total cycles, "
+    <> "success/failure counts, token usage, models used, and D' gate decisions. "
+    <> "Use this to understand how a day of work went, spot patterns, or review efficiency.",
+  )
+  |> tool.add_string_param(
+    "date",
+    "Date to reflect on in YYYY-MM-DD format (default: today)",
+    False,
+  )
+  |> tool.build()
+}
+
+fn inspect_cycle_tool() -> Tool {
+  tool.new("inspect_cycle")
+  |> tool.with_description(
+    "Inspect a specific cycle by its ID. Returns the full cycle tree: the root cognitive "
+    <> "cycle and all agent sub-cycles, including tool calls, D' gate decisions, token "
+    <> "counts, and agent outputs. Use this to drill into a specific interaction.",
+  )
+  |> tool.add_string_param("cycle_id", "The cycle ID to inspect", True)
+  |> tool.build()
+}
+
 // ---------------------------------------------------------------------------
 // Executor
 // ---------------------------------------------------------------------------
@@ -180,6 +209,8 @@ pub fn is_memory_tool(name: String) -> Bool {
   || name == "memory_clear_key"
   || name == "memory_query_facts"
   || name == "memory_trace_fact"
+  || name == "reflect"
+  || name == "inspect_cycle"
 }
 
 /// Context for facts-based memory tools.
@@ -205,6 +236,8 @@ pub fn execute(
     "memory_clear_key" -> run_memory_clear(call, lib, facts_ctx)
     "memory_query_facts" -> run_memory_query(call, lib, facts_ctx)
     "memory_trace_fact" -> run_memory_trace(call, facts_ctx)
+    "reflect" -> run_reflect(call, lib)
+    "inspect_cycle" -> run_inspect_cycle(call, lib)
     _ -> ToolFailure(tool_use_id: call.id, error: "Unknown tool: " <> call.name)
   }
 }
@@ -743,6 +776,253 @@ fn run_memory_trace(
       }
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// reflect — day-level stats from DAG
+// ---------------------------------------------------------------------------
+
+fn run_reflect(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+) -> ToolResult {
+  case lib {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "reflect not available: DAG index not initialised",
+      )
+    Some(l) -> {
+      let decoder = {
+        use date <- decode.optional_field("date", get_date(), decode.string)
+        decode.success(date)
+      }
+      let date = case json.parse(call.input_json, decoder) {
+        Ok(d) -> d
+        Error(_) -> get_date()
+      }
+      let subj = process.new_subject()
+      process.send(l, librarian.QueryDayStats(date:, reply_to: subj))
+      case process.receive(subj, 5000) {
+        Error(_) ->
+          ToolFailure(tool_use_id: call.id, error: "Timeout querying DAG stats")
+        Ok(stats) ->
+          ToolSuccess(tool_use_id: call.id, content: format_day_stats(stats))
+      }
+    }
+  }
+}
+
+fn format_day_stats(stats: dag_types.DayStats) -> String {
+  let total = stats.total_cycles
+  case total {
+    0 -> "No cycles recorded for " <> stats.date <> "."
+    _ ->
+      "## Day summary for "
+      <> stats.date
+      <> "\n\n"
+      <> "Total cycles: "
+      <> int.to_string(total)
+      <> "\n"
+      <> "  Success: "
+      <> int.to_string(stats.success_count)
+      <> " | Partial: "
+      <> int.to_string(stats.partial_count)
+      <> " | Failure: "
+      <> int.to_string(stats.failure_count)
+      <> "\n"
+      <> "Tokens in: "
+      <> int.to_string(stats.total_tokens_in)
+      <> " | out: "
+      <> int.to_string(stats.total_tokens_out)
+      <> "\n"
+      <> "Total duration: "
+      <> int.to_string(stats.total_duration_ms)
+      <> "ms\n"
+      <> "Tool failure rate: "
+      <> float.to_string(stats.tool_failure_rate)
+      <> "\n"
+      <> "Models used: "
+      <> string.join(stats.models_used, ", ")
+      <> "\n"
+      <> case stats.gate_decisions {
+        [] -> ""
+        gates ->
+          "D' gates:\n"
+          <> string.join(
+            list.map(gates, fn(g) {
+              "  - "
+              <> g.gate
+              <> ": "
+              <> g.decision
+              <> " (score: "
+              <> float.to_string(g.score)
+              <> ")"
+            }),
+            "\n",
+          )
+          <> "\n"
+      }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// inspect_cycle — drill into a specific cycle tree
+// ---------------------------------------------------------------------------
+
+fn run_inspect_cycle(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+) -> ToolResult {
+  case lib {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "inspect_cycle not available: DAG index not initialised",
+      )
+    Some(l) -> {
+      let decoder = {
+        use cycle_id <- decode.field("cycle_id", decode.string)
+        decode.success(cycle_id)
+      }
+      case json.parse(call.input_json, decoder) {
+        Error(_) ->
+          ToolFailure(
+            tool_use_id: call.id,
+            error: "Invalid inspect_cycle input: missing cycle_id",
+          )
+        Ok(cycle_id) -> {
+          let subj = process.new_subject()
+          process.send(
+            l,
+            librarian.QueryNodeWithDescendants(cycle_id:, reply_to: subj),
+          )
+          case process.receive(subj, 5000) {
+            Error(_) ->
+              ToolFailure(
+                tool_use_id: call.id,
+                error: "Timeout querying cycle tree",
+              )
+            Ok(Error(_)) ->
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: "No cycle found with ID '" <> cycle_id <> "'",
+              )
+            Ok(Ok(subtree)) ->
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: format_subtree(subtree, 0),
+              )
+          }
+        }
+      }
+    }
+  }
+}
+
+fn format_subtree(tree: dag_types.DagSubtree, depth: Int) -> String {
+  let indent = string.repeat("  ", depth)
+  let node = tree.root
+  let type_str = case node.node_type {
+    dag_types.CognitiveCycle -> "cognitive"
+    dag_types.AgentCycle -> "agent"
+    dag_types.SchedulerCycle -> "scheduler"
+  }
+  let outcome_str = case node.outcome {
+    dag_types.NodeSuccess -> "success"
+    dag_types.NodePartial -> "partial"
+    dag_types.NodeFailure(reason:) -> "failure: " <> reason
+    dag_types.NodePending -> "pending"
+  }
+  let tools_str = case node.tool_calls {
+    [] -> ""
+    calls ->
+      "\n"
+      <> indent
+      <> "  Tools: "
+      <> string.join(
+        list.map(calls, fn(t) {
+          t.name
+          <> case t.success {
+            True -> ""
+            False -> " (FAILED)"
+          }
+        }),
+        ", ",
+      )
+  }
+  let gates_str = case node.dprime_gates {
+    [] -> ""
+    gates ->
+      "\n"
+      <> indent
+      <> "  D' gates: "
+      <> string.join(
+        list.map(gates, fn(g) { g.gate <> "=" <> g.decision }),
+        ", ",
+      )
+  }
+  let agent_str = case node.agent_output {
+    None -> ""
+    Some(dag_types.GenericOutput(notes:)) ->
+      "\n" <> indent <> "  " <> string.join(notes, " | ")
+    Some(dag_types.PlanOutput(steps:, ..)) ->
+      "\n"
+      <> indent
+      <> "  Plan: "
+      <> int.to_string(list.length(steps))
+      <> " steps"
+    Some(dag_types.ResearchOutput(facts:, sources:, ..)) ->
+      "\n"
+      <> indent
+      <> "  Research: "
+      <> int.to_string(list.length(facts))
+      <> " facts, "
+      <> int.to_string(sources)
+      <> " sources"
+    Some(dag_types.CoderOutput(files_touched:, ..)) ->
+      "\n" <> indent <> "  Coder: " <> string.join(files_touched, ", ")
+    Some(dag_types.WriterOutput(word_count:, format:, ..)) ->
+      "\n"
+      <> indent
+      <> "  Writer: "
+      <> int.to_string(word_count)
+      <> " words ("
+      <> format
+      <> ")"
+  }
+  let tokens_str =
+    " [tokens: "
+    <> int.to_string(node.tokens_in)
+    <> "/"
+    <> int.to_string(node.tokens_out)
+    <> "]"
+  let header =
+    indent
+    <> "["
+    <> type_str
+    <> "] "
+    <> node.cycle_id
+    <> " — "
+    <> outcome_str
+    <> tokens_str
+    <> case node.model {
+      "" -> ""
+      m -> " model=" <> m
+    }
+    <> tools_str
+    <> gates_str
+    <> agent_str
+  let children_str = case tree.children {
+    [] -> ""
+    children ->
+      "\n"
+      <> string.join(
+        list.map(children, fn(child) { format_subtree(child, depth + 1) }),
+        "\n",
+      )
+  }
+  header <> children_str
 }
 
 // ---------------------------------------------------------------------------

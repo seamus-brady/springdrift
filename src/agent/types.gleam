@@ -2,11 +2,25 @@ import dprime/types as dprime_types
 import gleam/erlang/process.{type Subject}
 import gleam/option.{type Option}
 import llm/provider.{type Provider}
+import llm/tool
 import llm/types.{
   type ContentBlock, type LlmResponse, type Message, type Tool, type ToolCall,
   type ToolResult, type Usage,
 }
 import query_complexity.{type QueryComplexity}
+
+// ---------------------------------------------------------------------------
+// Agent spec → Tool conversion
+// ---------------------------------------------------------------------------
+
+/// Build a Tool definition from an AgentSpec so the LLM can call agents.
+pub fn agent_to_tool(spec: AgentSpec) -> Tool {
+  tool.new("agent_" <> spec.name)
+  |> tool.with_description(spec.description)
+  |> tool.add_string_param("instruction", "Task for the agent", True)
+  |> tool.add_string_param("context", "Relevant context", False)
+  |> tool.build()
+}
 
 // ---------------------------------------------------------------------------
 // Restart strategy
