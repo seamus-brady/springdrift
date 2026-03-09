@@ -379,8 +379,12 @@ pub fn start_supervised(
   max_files: Int,
   max_restarts: Int,
 ) -> Subject(LibrarianMessage) {
-  let proxy_subj: Subject(LibrarianMessage) = process.new_subject()
+  // The proxy subject must be created inside the spawned process (owner rule),
+  // then sent back to the caller via a setup channel.
+  let setup: Subject(Subject(LibrarianMessage)) = process.new_subject()
   process.spawn_unlinked(fn() {
+    let proxy_subj: Subject(LibrarianMessage) = process.new_subject()
+    process.send(setup, proxy_subj)
     librarian_supervisor_loop(
       narrative_dir,
       cbr_dir,
@@ -391,6 +395,7 @@ pub fn start_supervised(
       proxy_subj,
     )
   })
+  let assert Ok(proxy_subj) = process.receive(setup, 30_000)
   proxy_subj
 }
 
