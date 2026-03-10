@@ -19,6 +19,7 @@ import gleam/string
 import llm/provider.{type Provider}
 import llm/request
 import llm/response
+import narrative/curator.{type CuratorMessage}
 import narrative/librarian.{type LibrarianMessage}
 import narrative/log as narrative_log
 import narrative/threading
@@ -30,6 +31,9 @@ import slog
 
 @external(erlang, "springdrift_ffi", "get_datetime")
 fn get_datetime() -> String
+
+@external(erlang, "springdrift_ffi", "get_date")
+fn get_date() -> String
 
 // ---------------------------------------------------------------------------
 // Archivist context — everything the Archivist needs
@@ -120,6 +124,7 @@ pub fn spawn(
   verbose: Bool,
   lib: Option(Subject(LibrarianMessage)),
   embed_config: embedding_types.EmbeddingConfig,
+  cur: Option(Subject(CuratorMessage)),
 ) -> Nil {
   let _ =
     process.spawn_unlinked(fn() {
@@ -134,6 +139,27 @@ pub fn spawn(
               // Also update the thread index in the Librarian
               let idx = narrative_log.load_thread_index(narrative_dir)
               librarian.notify_thread_index(l, idx)
+            }
+            None -> Nil
+          }
+
+          // Push constitution update to Curator
+          case cur {
+            Some(c) -> {
+              let today_entries =
+                narrative_log.load_entries(
+                  narrative_dir,
+                  get_date(),
+                  get_date(),
+                )
+              let total = list.length(today_entries)
+              let successes =
+                list.count(today_entries, fn(e) { e.outcome.status == Success })
+              let rate = case total > 0 {
+                True -> int.to_float(successes) /. int.to_float(total)
+                False -> 0.0
+              }
+              curator.update_constitution(c, total, rate, "")
             }
             None -> Nil
           }

@@ -1,6 +1,6 @@
 import embedding/types as embedding_types
 import gleam/list
-import gleam/option.{None}
+import gleam/option.{None, Some}
 import gleam/string
 import gleeunit
 import gleeunit/should
@@ -81,7 +81,14 @@ pub fn is_memory_tool_agent_test() {
 pub fn recall_recent_missing_period_test() {
   let call = ToolCall(id: "m1", name: "recall_recent", input_json: "{}")
   let result =
-    memory.execute(call, "/nonexistent/dir", None, None, test_embed_config, [])
+    memory.execute(
+      call,
+      "/nonexistent/dir",
+      None,
+      None,
+      test_embed_config,
+      None,
+    )
   case result {
     ToolFailure(..) -> Nil
     _ -> should.fail()
@@ -102,7 +109,7 @@ pub fn recall_recent_empty_dir_returns_no_entries_test() {
       None,
       None,
       test_embed_config,
-      [],
+      None,
     )
   case result {
     ToolSuccess(content: c, ..) -> {
@@ -126,7 +133,7 @@ pub fn recall_recent_yesterday_empty_test() {
       None,
       None,
       test_embed_config,
-      [],
+      None,
     )
   case result {
     ToolSuccess(content: c, ..) -> {
@@ -150,7 +157,7 @@ pub fn recall_recent_this_week_empty_test() {
       None,
       None,
       test_embed_config,
-      [],
+      None,
     )
   case result {
     ToolSuccess(content: c, ..) -> {
@@ -167,7 +174,14 @@ pub fn recall_recent_this_week_empty_test() {
 pub fn recall_search_missing_query_test() {
   let call = ToolCall(id: "s1", name: "recall_search", input_json: "{}")
   let result =
-    memory.execute(call, "/nonexistent/dir", None, None, test_embed_config, [])
+    memory.execute(
+      call,
+      "/nonexistent/dir",
+      None,
+      None,
+      test_embed_config,
+      None,
+    )
   case result {
     ToolFailure(..) -> Nil
     _ -> should.fail()
@@ -188,7 +202,7 @@ pub fn recall_search_empty_dir_returns_no_results_test() {
       None,
       None,
       test_embed_config,
-      [],
+      None,
     )
   case result {
     ToolSuccess(content: c, ..) -> {
@@ -214,7 +228,7 @@ pub fn recall_threads_empty_dir_test() {
       None,
       None,
       test_embed_config,
-      [],
+      None,
     )
   case result {
     ToolSuccess(content: c, ..) -> {
@@ -230,7 +244,7 @@ pub fn recall_threads_empty_dir_test() {
 
 pub fn unknown_memory_tool_test() {
   let call = ToolCall(id: "u1", name: "recall_unknown", input_json: "{}")
-  let result = memory.execute(call, "/tmp", None, None, test_embed_config, [])
+  let result = memory.execute(call, "/tmp", None, None, test_embed_config, None)
   case result {
     ToolFailure(..) -> Nil
     _ -> should.fail()
@@ -272,7 +286,7 @@ pub fn memory_write_no_context_test() {
       name: "memory_write",
       input_json: "{\"key\":\"rent\",\"value\":\"2340\",\"scope\":\"session\",\"confidence\":0.9}",
     )
-  let result = memory.execute(call, "/tmp", None, None, test_embed_config, [])
+  let result = memory.execute(call, "/tmp", None, None, test_embed_config, None)
   case result {
     ToolFailure(error: e, ..) ->
       should.be_true(string.contains(e, "not available"))
@@ -287,7 +301,7 @@ pub fn memory_clear_no_context_test() {
       name: "memory_clear_key",
       input_json: "{\"key\":\"rent\"}",
     )
-  let result = memory.execute(call, "/tmp", None, None, test_embed_config, [])
+  let result = memory.execute(call, "/tmp", None, None, test_embed_config, None)
   case result {
     ToolFailure(error: e, ..) ->
       should.be_true(string.contains(e, "not available"))
@@ -302,7 +316,7 @@ pub fn memory_trace_no_context_test() {
       name: "memory_trace_fact",
       input_json: "{\"key\":\"rent\"}",
     )
-  let result = memory.execute(call, "/tmp", None, None, test_embed_config, [])
+  let result = memory.execute(call, "/tmp", None, None, test_embed_config, None)
   case result {
     ToolFailure(error: e, ..) ->
       should.be_true(string.contains(e, "not available"))
@@ -321,7 +335,7 @@ pub fn memory_read_not_found_test() {
       name: "memory_read",
       input_json: "{\"key\":\"nonexistent\"}",
     )
-  let result = memory.execute(call, "/tmp", None, None, test_embed_config, [])
+  let result = memory.execute(call, "/tmp", None, None, test_embed_config, None)
   case result {
     ToolSuccess(content: c, ..) ->
       should.be_true(string.contains(c, "No fact found"))
@@ -340,7 +354,7 @@ pub fn memory_query_no_results_test() {
       name: "memory_query_facts",
       input_json: "{\"keyword\":\"nonexistent\"}",
     )
-  let result = memory.execute(call, "/tmp", None, None, test_embed_config, [])
+  let result = memory.execute(call, "/tmp", None, None, test_embed_config, None)
   case result {
     ToolSuccess(content: c, ..) ->
       should.be_true(string.contains(c, "No facts found"))
@@ -373,7 +387,7 @@ pub fn memory_write_and_read_roundtrip_test() {
       input_json: "{\"key\":\"dublin_rent\",\"value\":\"2340\",\"scope\":\"session\",\"confidence\":0.9}",
     )
   let write_result =
-    memory.execute(write_call, "/tmp", None, ctx, test_embed_config, [])
+    memory.execute(write_call, "/tmp", None, ctx, test_embed_config, None)
   case write_result {
     ToolSuccess(content: c, ..) ->
       should.be_true(string.contains(c, "dublin_rent"))
@@ -388,7 +402,7 @@ pub fn memory_write_and_read_roundtrip_test() {
       input_json: "{\"key\":\"dublin_rent\"}",
     )
   let read_result =
-    memory.execute(read_call, "/tmp", None, ctx, test_embed_config, [])
+    memory.execute(read_call, "/tmp", None, ctx, test_embed_config, None)
   case read_result {
     ToolSuccess(content: c, ..) -> {
       should.be_true(string.contains(c, "dublin_rent"))
@@ -425,7 +439,7 @@ pub fn memory_write_clear_read_test() {
       name: "memory_write",
       input_json: "{\"key\":\"temp\",\"value\":\"22C\",\"scope\":\"session\",\"confidence\":0.8}",
     )
-  let _ = memory.execute(write_call, "/tmp", None, ctx, test_embed_config, [])
+  let _ = memory.execute(write_call, "/tmp", None, ctx, test_embed_config, None)
 
   // Clear
   let clear_call =
@@ -435,7 +449,7 @@ pub fn memory_write_clear_read_test() {
       input_json: "{\"key\":\"temp\"}",
     )
   let clear_result =
-    memory.execute(clear_call, "/tmp", None, ctx, test_embed_config, [])
+    memory.execute(clear_call, "/tmp", None, ctx, test_embed_config, None)
   case clear_result {
     ToolSuccess(content: c, ..) -> should.be_true(string.contains(c, "Cleared"))
     _ -> should.fail()
@@ -445,7 +459,7 @@ pub fn memory_write_clear_read_test() {
   let read_call =
     ToolCall(id: "rc1", name: "memory_read", input_json: "{\"key\":\"temp\"}")
   let read_result =
-    memory.execute(read_call, "/tmp", None, ctx, test_embed_config, [])
+    memory.execute(read_call, "/tmp", None, ctx, test_embed_config, None)
   case read_result {
     ToolSuccess(content: c, ..) ->
       should.be_true(string.contains(c, "No fact found"))
@@ -479,7 +493,7 @@ pub fn memory_trace_shows_history_test() {
       name: "memory_write",
       input_json: "{\"key\":\"rent\",\"value\":\"2340\",\"scope\":\"session\",\"confidence\":0.8}",
     )
-  let _ = memory.execute(w1, "/tmp", None, ctx, test_embed_config, [])
+  let _ = memory.execute(w1, "/tmp", None, ctx, test_embed_config, None)
 
   let w2 =
     ToolCall(
@@ -487,7 +501,7 @@ pub fn memory_trace_shows_history_test() {
       name: "memory_write",
       input_json: "{\"key\":\"rent\",\"value\":\"2500\",\"scope\":\"session\",\"confidence\":0.9}",
     )
-  let _ = memory.execute(w2, "/tmp", None, ctx, test_embed_config, [])
+  let _ = memory.execute(w2, "/tmp", None, ctx, test_embed_config, None)
 
   // Trace
   let trace_call =
@@ -497,7 +511,7 @@ pub fn memory_trace_shows_history_test() {
       input_json: "{\"key\":\"rent\"}",
     )
   let trace_result =
-    memory.execute(trace_call, "/tmp", None, ctx, test_embed_config, [])
+    memory.execute(trace_call, "/tmp", None, ctx, test_embed_config, None)
   case trace_result {
     ToolSuccess(content: c, ..) -> {
       should.be_true(string.contains(c, "2 entries"))
@@ -534,7 +548,7 @@ pub fn memory_query_finds_facts_test() {
       name: "memory_write",
       input_json: "{\"key\":\"dublin_rent\",\"value\":\"2340\",\"scope\":\"session\",\"confidence\":0.9}",
     )
-  let _ = memory.execute(w1, "/tmp", None, ctx, test_embed_config, [])
+  let _ = memory.execute(w1, "/tmp", None, ctx, test_embed_config, None)
 
   let w2 =
     ToolCall(
@@ -542,7 +556,7 @@ pub fn memory_query_finds_facts_test() {
       name: "memory_write",
       input_json: "{\"key\":\"cork_rent\",\"value\":\"1800\",\"scope\":\"session\",\"confidence\":0.8}",
     )
-  let _ = memory.execute(w2, "/tmp", None, ctx, test_embed_config, [])
+  let _ = memory.execute(w2, "/tmp", None, ctx, test_embed_config, None)
 
   // Query for "dublin" — should find dublin_rent
   let query_call =
@@ -552,7 +566,7 @@ pub fn memory_query_finds_facts_test() {
       input_json: "{\"keyword\":\"dublin\"}",
     )
   let query_result =
-    memory.execute(query_call, "/tmp", None, ctx, test_embed_config, [])
+    memory.execute(query_call, "/tmp", None, ctx, test_embed_config, None)
   case query_result {
     ToolSuccess(content: c, ..) -> {
       should.be_true(string.contains(c, "dublin_rent"))
@@ -566,34 +580,80 @@ pub fn memory_query_finds_facts_test() {
 }
 
 // ---------------------------------------------------------------------------
-// agent_status
+// introspect
 // ---------------------------------------------------------------------------
 
-pub fn agent_status_no_agents_test() {
-  let call = ToolCall(id: "as1", name: "agent_status", input_json: "{}")
-  let result = memory.execute(call, "/tmp", None, None, test_embed_config, [])
+pub fn introspect_no_context_test() {
+  let call = ToolCall(id: "i1", name: "introspect", input_json: "{}")
+  let result = memory.execute(call, "/tmp", None, None, test_embed_config, None)
   case result {
-    ToolSuccess(content: c, ..) -> c |> should.equal("No agents registered.")
+    ToolFailure(error: e, ..) ->
+      should.be_true(string.contains(e, "no context"))
     _ -> should.fail()
   }
 }
 
-pub fn agent_status_with_agents_test() {
-  let entries = [
-    memory.AgentStatusEntry(name: "researcher", status: "Running"),
-    memory.AgentStatusEntry(name: "writer", status: "Stopped"),
-  ]
-  let call = ToolCall(id: "as2", name: "agent_status", input_json: "{}")
-  let result =
-    memory.execute(call, "/tmp", None, None, test_embed_config, entries)
+pub fn introspect_with_context_test() {
+  let ctx =
+    Some(memory.IntrospectContext(
+      agent_uuid: "test-uuid-1234",
+      session_since: "2026-03-10T09:00:00Z",
+      active_profile: Some("analyst"),
+      agents: [
+        memory.AgentStatusEntry(name: "researcher", status: "Running"),
+        memory.AgentStatusEntry(name: "writer", status: "Stopped"),
+      ],
+      dprime_enabled: True,
+      dprime_modify_threshold: 0.3,
+      dprime_reject_threshold: 0.7,
+      current_cycle_id: Some("cycle-abc"),
+    ))
+  let call = ToolCall(id: "i2", name: "introspect", input_json: "{}")
+  let result = memory.execute(call, "/tmp", None, None, test_embed_config, ctx)
   case result {
     ToolSuccess(content: c, ..) -> {
+      should.be_true(string.contains(c, "test-uuid-1234"))
+      should.be_true(string.contains(c, "2026-03-10"))
+      should.be_true(string.contains(c, "analyst"))
       should.be_true(string.contains(c, "researcher: Running"))
       should.be_true(string.contains(c, "writer: Stopped"))
-      should.be_true(string.contains(c, "2"))
+      should.be_true(string.contains(c, "enabled: true"))
+      should.be_true(string.contains(c, "cycle-abc"))
     }
     _ -> should.fail()
   }
+}
+
+pub fn introspect_no_agents_test() {
+  let ctx =
+    Some(memory.IntrospectContext(
+      agent_uuid: "uuid-empty",
+      session_since: "2026-03-10",
+      active_profile: None,
+      agents: [],
+      dprime_enabled: False,
+      dprime_modify_threshold: 0.0,
+      dprime_reject_threshold: 0.0,
+      current_cycle_id: None,
+    ))
+  let call = ToolCall(id: "i3", name: "introspect", input_json: "{}")
+  let result = memory.execute(call, "/tmp", None, None, test_embed_config, ctx)
+  case result {
+    ToolSuccess(content: c, ..) -> {
+      should.be_true(string.contains(c, "No agents registered"))
+      should.be_true(string.contains(c, "enabled: false"))
+      should.be_true(string.contains(c, "(none)"))
+    }
+    _ -> should.fail()
+  }
+}
+
+pub fn is_memory_tool_introspect_test() {
+  memory.is_memory_tool("introspect") |> should.be_true
+}
+
+pub fn is_memory_tool_agent_status_removed_test() {
+  memory.is_memory_tool("agent_status") |> should.be_false
 }
 
 // ---------------------------------------------------------------------------
@@ -602,7 +662,7 @@ pub fn agent_status_with_agents_test() {
 
 pub fn list_recent_cycles_no_librarian_test() {
   let call = ToolCall(id: "lrc1", name: "list_recent_cycles", input_json: "{}")
-  let result = memory.execute(call, "/tmp", None, None, test_embed_config, [])
+  let result = memory.execute(call, "/tmp", None, None, test_embed_config, None)
   case result {
     ToolFailure(error: e, ..) ->
       should.be_true(string.contains(e, "not available"))

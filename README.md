@@ -248,7 +248,7 @@ Fourteen memory tools let the agent query its own memory: `recall_recent`,
 `recall_search`, `recall_threads`, `recall_cases`, `memory_write`,
 `memory_read`, `memory_clear_key`, `memory_query_facts`,
 `memory_trace_fact`, `reflect`, `inspect_cycle`, `list_recent_cycles`,
-`query_tool_activity`, and `agent_status`.
+`query_tool_activity`, and `introspect`.
 
 ---
 
@@ -385,17 +385,42 @@ All runtime data lives under `.springdrift/` in the project root:
 ```
 .springdrift/
 ├── config.toml          Project config
-├── session.json          Session persistence (auto-generated)
-├── logs/                 System logs (date-rotated JSON-L)
+├── identity/            Agent identity files
+│   ├── persona.md       First-person character text ({{agent_name}} slot)
+│   └── session_preamble.md  Dynamic session template ({{slot}} + [OMIT IF])
+├── identity.json        Stable agent UUID (auto-generated)
+├── session.json         Session persistence (auto-generated)
+├── logs/                System logs (date-rotated JSON-L)
 ├── memory/
-│   ├── cycle-log/        Per-cycle request/response logs
-│   └── narrative/        Prime Narrative memory (JSON-L + thread index)
-├── skills/               Local skill definitions
-└── profiles/             Agent profile directories
+│   ├── cycle-log/       Per-cycle request/response logs
+│   ├── narrative/       Prime Narrative memory (JSON-L + thread index)
+│   ├── cbr/             Case-Based Reasoning cases
+│   └── facts/           Key-value fact store
+├── skills/              Local skill definitions
+└── profiles/            Agent profile directories
 ```
 
 Copy `.springdrift_example/` to `.springdrift/` to get started. Add `.springdrift/`
 to your `.gitignore` — it contains runtime state and logs.
+
+### Agent identity
+
+Every Springdrift instance gets a stable UUID persisted in `.springdrift/identity.json`.
+This gives the narrative corpus first-person continuity across sessions.
+
+The `identity/` directory contains two files assembled into the system prompt by the
+Curator actor:
+
+- **`persona.md`** — fixed first-person character text. The `{{agent_name}}` slot is
+  replaced with the value from `[agent] name` in config.
+- **`session_preamble.md`** — dynamic template populated each turn with memory counts,
+  thread summaries, performance stats, and agent health. Uses `[OMIT IF ZERO]` /
+  `[OMIT IF EMPTY]` rules to hide empty sections.
+
+Identity files are searched in order: `.springdrift/identity/` then
+`~/.config/springdrift/identity/`.
+
+### Config file
 
 Config is resolved with a three-layer merge (highest priority first):
 
@@ -407,10 +432,14 @@ Config is resolved with a three-layer merge (highest priority first):
 provider        = "anthropic"
 task_model      = "claude-haiku-4-5-20251001"
 reasoning_model = "claude-opus-4-6"
-system_prompt   = "You are a helpful assistant."
 max_tokens      = 2048
 max_turns       = 5
 log_verbose     = false
+
+# Agent identity
+[agent]
+name    = "Springdrift"
+version = ""
 
 # D' safety system
 dprime_enabled = false
@@ -418,7 +447,6 @@ dprime_config  = "dprime.json"
 
 # Prime Narrative
 [narrative]
-enabled          = false
 threading        = true
 summaries        = false
 summary_schedule = "weekly"
@@ -434,7 +462,7 @@ summary_schedule = "weekly"
 
 ```sh
 gleam build           # Compile
-gleam test            # Run the test suite (~515 tests)
+gleam test            # Run the test suite (~789 tests)
 gleam format          # Format all source files
 gleam run             # Run the application
 ```

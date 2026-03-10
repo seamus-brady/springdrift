@@ -497,7 +497,25 @@ pub fn curator_housekeeping_deduplicates_similar_cases_test() {
 // ---------------------------------------------------------------------------
 
 pub fn build_system_prompt_fallback_when_no_identity_test() {
-  let #(lib, cur) = start_both("sysprompt_fallback")
+  let dir = test_dir("sysprompt_fallback")
+  let cbr_dir = dir <> "/cbr"
+  let facts_dir = dir <> "/facts"
+  let _ = simplifile.create_directory_all(cbr_dir)
+  let _ = simplifile.create_directory_all(facts_dir)
+  let lib = librarian.start(dir, cbr_dir, facts_dir, 0)
+  // Use empty identity dirs to force fallback (no priv/ lookup)
+  let cur =
+    curator.start_with_identity(
+      lib,
+      dir,
+      cbr_dir,
+      facts_dir,
+      [],
+      "memory",
+      option.None,
+      "Springdrift",
+      "",
+    )
   let prompt = curator.build_system_prompt(cur, "You are helpful.")
   prompt |> should.equal("You are helpful.")
   process.send(cur, curator.Shutdown)
@@ -523,6 +541,8 @@ pub fn build_system_prompt_with_persona_test() {
       [identity_dir],
       "memory",
       option.None,
+      "Springdrift",
+      "",
     )
   let prompt = curator.build_system_prompt(cur, "fallback")
   should.be_true(string.contains(prompt, "I am Springdrift."))

@@ -82,6 +82,8 @@ pub fn start(cfg: cognitive_config.CognitiveConfig) -> Subject(CognitiveMessage)
         dprime_decisions: [],
         curator: cfg.curator,
         embedding_config: cfg.embedding_config,
+        agent_uuid: cfg.agent_uuid,
+        session_since: cfg.session_since,
       )
     process.send(setup, self)
     cognitive_loop(state)

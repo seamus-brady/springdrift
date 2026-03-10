@@ -3,6 +3,7 @@ import agent/cognitive_config.{CognitiveConfig}
 import agent/registry
 import agent/supervisor
 import agent/types as agent_types
+import agent_identity
 import agents/coder
 import agents/planner
 import agents/researcher
@@ -42,6 +43,9 @@ import web/gui as web_gui
 /// Exit the process with the given status code.
 @external(erlang, "erlang", "halt")
 fn do_halt(code: Int) -> Nil
+
+@external(erlang, "springdrift_ffi", "get_date")
+fn get_date_ffi() -> String
 
 fn default_skill_dirs() -> List(String) {
   paths.default_skills_dirs()
@@ -120,7 +124,10 @@ fn print_help() -> Nil {
     "  --reasoning-model <name>  Model for Complex queries (default: provider-specific)",
   )
   io.println(
-    "  --system <prompt>         System prompt (default: \"You are a helpful assistant.\")",
+    "  --agent-name <name>       Agent name for persona (default: \"Springdrift\")",
+  )
+  io.println(
+    "  --agent-version <ver>     Agent version for persona (default: none)",
   )
   io.println(
     "  --max-tokens <n>          Max output tokens per LLM call (default: 1024)",
@@ -178,7 +185,6 @@ fn print_help() -> Nil {
   io.println("  provider        = \"anthropic\"")
   io.println("  task_model      = \"claude-haiku-4-5-20251001\"")
   io.println("  reasoning_model = \"claude-opus-4-6\"")
-  io.println("  system_prompt   = \"You are a helpful assistant.\"")
   io.println("  max_tokens      = 2048")
   io.println("")
   io.println("  # Loop control")
@@ -198,17 +204,14 @@ fn run(cfg: AppConfig) -> Nil {
   slog.cleanup_old_logs()
   slog.info("springdrift", "run", "Starting springdrift", option.None)
 
-  let base_system =
-    option.unwrap(
-      cfg.system_prompt,
-      "You are a cognitive orchestrator. You manage specialist agents and talk to the human. Use agent tools to delegate work and request_human_input to ask questions.",
-    )
   let skill_dirs = option.unwrap(cfg.skills_dirs, default_skill_dirs())
   let discovered = skills.discover(skill_dirs)
   let system = case discovered {
-    [] -> base_system
-    _ -> base_system <> "\n\n" <> skills.to_system_prompt_xml(discovered)
+    [] -> ""
+    _ -> skills.to_system_prompt_xml(discovered)
   }
+  let agent_name = option.unwrap(cfg.agent_name, "Springdrift")
+  let agent_version = option.unwrap(cfg.agent_version, "")
   let max_tokens = option.unwrap(cfg.max_tokens, 2048)
   let write_anywhere = option.unwrap(cfg.write_anywhere, False)
 
@@ -347,7 +350,14 @@ fn run(cfg: AppConfig) -> Nil {
       paths.default_identity_dirs(),
       "memory",
       active_profile,
+      agent_name,
+      agent_version,
     )
+
+  // Load or create stable agent identity
+  let stable_identity = agent_identity.load_or_create()
+  agent_identity.save(stable_identity)
+  let session_since = get_date_ffi()
 
   // Start cognitive loop with empty registry (supervisor will register agents)
   let cognitive_subj =
@@ -373,6 +383,8 @@ fn run(cfg: AppConfig) -> Nil {
       write_anywhere:,
       curator: option.Some(curator_subj),
       embedding_config:,
+      agent_uuid: stable_identity.agent_uuid,
+      session_since:,
     ))
 
   // Start supervisor and register agents via StartChild

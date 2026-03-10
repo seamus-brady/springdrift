@@ -34,6 +34,8 @@ pub type CognitiveConfig {
     write_anywhere: Bool,
     curator: Option(Subject(CuratorMessage)),
     embedding_config: embedding_types.EmbeddingConfig,
+    agent_uuid: String,
+    session_since: String,
   )
 }
 
@@ -64,5 +66,7 @@ pub fn default_test_config(
     write_anywhere: False,
     curator: None,
     embedding_config: embedding_types.default_config(),
+    agent_uuid: "",
+    session_since: "",
   )
 }

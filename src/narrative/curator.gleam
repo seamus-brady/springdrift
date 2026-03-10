@@ -66,6 +66,14 @@ pub type CuratorMessage {
   BuildSystemPrompt(fallback_prompt: String, reply_to: Subject(String))
   /// Trigger a housekeeping pass (manual or timer-driven).
   RunHousekeeping
+  /// Update constitution cache (called by Archivist after each cycle).
+  UpdateConstitution(
+    today_cycles: Int,
+    today_success_rate: Float,
+    agent_health: String,
+  )
+  /// Update agent health only (called on lifecycle events).
+  UpdateAgentHealth(health: String)
   /// Shutdown the Curator.
   Shutdown
 }
@@ -88,6 +96,8 @@ type CuratorState {
     identity_dirs: List(String),
     memory_tag: String,
     active_profile: Option(String),
+    agent_name: String,
+    agent_version: String,
   )
 }
 
@@ -110,6 +120,8 @@ pub fn start(
     paths.default_identity_dirs(),
     "memory",
     None,
+    "Springdrift",
+    "",
   )
 }
 
@@ -122,6 +134,8 @@ pub fn start_with_identity(
   identity_dirs: List(String),
   memory_tag: String,
   active_profile: Option(String),
+  agent_name: String,
+  agent_version: String,
 ) -> Subject(CuratorMessage) {
   let setup: Subject(Subject(CuratorMessage)) = process.new_subject()
   process.spawn_unlinked(fn() {
@@ -143,6 +157,8 @@ pub fn start_with_identity(
         identity_dirs:,
         memory_tag:,
         active_profile:,
+        agent_name:,
+        agent_version:,
       )
 
     slog.info("narrative/curator", "start", "Curator ready", None)
@@ -257,6 +273,27 @@ pub fn run_housekeeping(curator: Subject(CuratorMessage)) -> Nil {
   process.send(curator, RunHousekeeping)
 }
 
+/// Update constitution cache (fire-and-forget). Called by the Archivist.
+pub fn update_constitution(
+  curator: Subject(CuratorMessage),
+  today_cycles: Int,
+  today_success_rate: Float,
+  agent_health: String,
+) -> Nil {
+  process.send(
+    curator,
+    UpdateConstitution(today_cycles:, today_success_rate:, agent_health:),
+  )
+}
+
+/// Update agent health only (fire-and-forget). Called on lifecycle events.
+pub fn update_agent_health(
+  curator: Subject(CuratorMessage),
+  health: String,
+) -> Nil {
+  process.send(curator, UpdateAgentHealth(health:))
+}
+
 // ---------------------------------------------------------------------------
 // Message loop
 // ---------------------------------------------------------------------------
@@ -363,6 +400,25 @@ fn loop(state: CuratorState) -> Nil {
         RunHousekeeping -> {
           do_housekeeping(state)
           loop(state)
+        }
+
+        UpdateConstitution(today_cycles:, today_success_rate:, agent_health:) -> {
+          let slot =
+            virtual_memory.ConstitutionSlot(
+              today_cycles:,
+              today_success_rate:,
+              agent_health:,
+            )
+          let new_vm = virtual_memory.set_constitution(state.vm, slot)
+          loop(CuratorState(..state, vm: new_vm))
+        }
+
+        UpdateAgentHealth(health:) -> {
+          let old = state.vm.constitution
+          let slot =
+            virtual_memory.ConstitutionSlot(..old, agent_health: health)
+          let new_vm = virtual_memory.set_constitution(state.vm, slot)
+          loop(CuratorState(..state, vm: new_vm))
         }
       }
   }
@@ -691,6 +747,21 @@ fn build_preamble_slots(state: CuratorState) -> List(identity.SlotValue) {
     ),
     identity.SlotValue(key: "recent_fact_sample", value: recent_fact_text),
     identity.SlotValue(key: "cbr_case_count", value: int.to_string(case_count)),
+    identity.SlotValue(
+      key: "today_cycles",
+      value: int.to_string(state.vm.constitution.today_cycles),
+    ),
+    identity.SlotValue(
+      key: "today_success_rate",
+      value: float.to_string(state.vm.constitution.today_success_rate),
+    ),
+    identity.SlotValue(
+      key: "agent_health",
+      value: case state.vm.constitution.agent_health {
+        "All agents nominal" -> ""
+        h -> h
+      },
+    ),
     identity.SlotValue(key: "open_commitments", value: ""),
     identity.SlotValue(key: "memory_health", value: "Nominal"),
     identity.SlotValue(key: "active_profile", value: case state.active_profile {
@@ -698,5 +769,7 @@ fn build_preamble_slots(state: CuratorState) -> List(identity.SlotValue) {
       None -> ""
     }),
     identity.SlotValue(key: "profile_agents", value: ""),
+    identity.SlotValue(key: "agent_name", value: state.agent_name),
+    identity.SlotValue(key: "agent_version", value: state.agent_version),
   ]
 }

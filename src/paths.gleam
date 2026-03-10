@@ -9,9 +9,10 @@
 ////   ├── config.toml          Local project config
 ////   ├── session.json          Session persistence
 ////   ├── logs/                 System logs (date-rotated JSON-L)
-////   ├── identity/             Local identity overrides
-////   │   ├── persona.md        First-person character text
-////   │   └── session_preamble.md  Template with {{slot}} syntax
+////   ├── identity/             Agent identity files
+////   │   ├── persona.md        First-person character text ({{agent_name}} slot)
+////   │   └── session_preamble.md  Dynamic template with {{slot}} and [OMIT IF] rules
+////   ├── identity.json          Stable agent UUID (auto-generated)
 ////   ├── memory/
 ////   │   ├── cycle-log/        Per-cycle JSON-L logs
 ////   │   ├── narrative/        Prime Narrative JSON-L + thread index
@@ -104,6 +105,11 @@ pub const persona_filename = "persona.md"
 /// Session preamble filename (Curator-populated {{slot}} template).
 pub const preamble_filename = "session_preamble.md"
 
+/// Stable agent identity file: .springdrift/identity.json
+pub fn agent_identity() -> String {
+  project_dir <> "/identity.json"
+}
+
 /// Local identity directory: .springdrift/identity/
 pub fn local_identity_dir() -> String {
   project_dir <> "/identity"
@@ -115,6 +121,7 @@ pub fn user_identity_dir() -> String {
 }
 
 /// Identity directories to search (local first for override precedence).
+/// Order: local project → user global.
 pub fn default_identity_dirs() -> List(String) {
   case get_env("HOME") {
     Ok(home) -> [

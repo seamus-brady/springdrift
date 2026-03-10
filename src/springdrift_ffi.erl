@@ -453,3 +453,4 @@ ensure_utf8_loop(<<C/utf8, Rest/binary>>, Acc) ->
 ensure_utf8_loop(<<_, Rest/binary>>, Acc) ->
     %% Replace invalid byte with U+FFFD (replacement character)
     ensure_utf8_loop(Rest, <<Acc/binary, 16#EF, 16#BF, 16#BD>>).
+

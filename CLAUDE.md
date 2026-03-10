@@ -27,6 +27,7 @@ src/
 ├── springdrift_ffi.erl        Erlang FFI (stdin, env, args, spinner, UUID, datetime, logger,
 │                              file_size, resolve_symlinks, sanitize_json, days_ago_date,
 │                              uri_encode, extract_ddg_results)
+├── agent_identity.gleam       Stable agent UUID — persisted across sessions in identity.json
 ├── paths.gleam                Centralised path definitions for .springdrift/ directory
 ├── slog.gleam                 System logger — date-rotated JSON-L + stderr + log retention
 ├── config.gleam               Three-layer config with key validation + range checking
@@ -181,7 +182,8 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `provider` | `--provider` | mock | anthropic \| openrouter \| openai \| mistral \| local \| mock |
 | `task_model` | `--task-model` | provider default | Model for Simple queries |
 | `reasoning_model` | `--reasoning-model` | provider default | Model for Complex queries |
-| `system_prompt` | `--system` | "You are a helpful assistant." | System prompt |
+| `agent_name` | `--agent-name` | "Springdrift" | Agent name (used in persona `{{agent_name}}` slot) |
+| `agent_version` | `--agent-version` | "" | Agent version string |
 | `max_tokens` | `--max-tokens` | 1024 | Max output tokens per LLM call |
 | `max_turns` | `--max-turns` | 5 | Max react-loop iterations per message |
 | `max_consecutive_errors` | `--max-errors` | 3 | Tool failure circuit breaker threshold |
@@ -244,7 +246,7 @@ DAG nodes. Messages: `QueryDayRoots`, `QueryDayStats`, `QueryNodeWithDescendants
 | `inspect_cycle` | DAG | Drill into a specific cycle tree with tool calls and agent output |
 | `list_recent_cycles` | DAG | Discover cycle IDs for a date (feed into `inspect_cycle`) |
 | `query_tool_activity` | DAG | Per-tool usage stats for a date |
-| `agent_status` | Registry | Show all registered agents and their status (Running/Restarting/Stopped) |
+| `introspect` | All | Perceive system state: identity, agent roster, D' config, cycle ID |
 
 **Curator** (`narrative/curator.gleam`) assembles the system prompt from memory.
 On each `BuildSystemPrompt` message it loads identity files (persona + preamble
@@ -275,8 +277,8 @@ text response or hits `max_turns`. When an agent calls `request_human_input`, th
 framework routes the question through the cognitive loop to the user.
 
 **Registry** (`agent/registry.gleam`) is a pure data structure tracking agent names,
-task subjects, and status (Running/Restarting/Stopped). The `agent_status` memory tool
-exposes this to the LLM.
+task subjects, and status (Running/Restarting/Stopped). The `introspect` memory tool
+exposes this (and other system state) to the LLM.
 
 **Specialist agents** (in `src/agents/`):
 
@@ -381,8 +383,11 @@ FACTS EXIST). `assemble_system_prompt` combines persona + rendered preamble in c
 
 **Curator** — `narrative/curator.gleam` orchestrates memory integration. Handles
 `BuildSystemPrompt` messages: loads identity files, queries Librarian for thread/fact/case
-counts, renders preamble slots, and assembles the final system prompt. Falls back to a
-provided fallback prompt when no identity files exist.
+counts, renders preamble slots (including `agent_name`, `agent_version`, and constitution
+stats like `today_cycles` and `today_success_rate`), and assembles the final system prompt.
+The Archivist pushes `UpdateConstitution` after each cycle; `handle_agent_event` pushes
+`UpdateAgentHealth` on crash/restart/stop events. Falls back to a provided fallback prompt
+when no identity files exist.
 
 **Profiles** — startup-only agent team configurations loaded from TOML directories.
 `profile.discover(dirs)` scans for directories with `config.toml`. `profile.load(name, dirs)`
@@ -441,8 +446,12 @@ for tool selection: discovery (exa/tavily) → extraction (firecrawl/fetch_url) 
 provider        = "anthropic"        # "anthropic" | "openrouter" | "openai" | "mistral" | "local" | "mock"
 task_model      = "claude-haiku-4-5-20251001"   # Model for Simple queries
 reasoning_model = "claude-opus-4-6"             # Model for Complex queries
-system_prompt   = "You are a helpful assistant."
 max_tokens      = 2048               # Max output tokens per LLM call
+
+# Agent identity
+[agent]
+name    = "Springdrift"              # Agent name (substituted into {{agent_name}} in persona.md)
+version = ""                         # Agent version string
 
 # Loop control
 max_turns              = 5           # React-loop iterations per message

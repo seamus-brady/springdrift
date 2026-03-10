@@ -51,5 +51,7 @@ pub type CognitiveState {
     dprime_decisions: List(dag_types.DprimeDecisionRecord),
     curator: Option(Subject(CuratorMessage)),
     embedding_config: embedding_types.EmbeddingConfig,
+    agent_uuid: String,
+    session_since: String,
   )
 }

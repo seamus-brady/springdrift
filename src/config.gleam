@@ -53,7 +53,6 @@ pub type AppConfig {
     provider: Option(String),
     task_model: Option(String),
     reasoning_model: Option(String),
-    system_prompt: Option(String),
     max_tokens: Option(Int),
     // Loop control
     max_turns: Option(Int),
@@ -79,6 +78,9 @@ pub type AppConfig {
     // Profiles
     profiles_dirs: Option(List(String)),
     default_profile: Option(String),
+    // Agent identity
+    agent_name: Option(String),
+    agent_version: Option(String),
   )
 }
 
@@ -99,7 +101,6 @@ pub fn default() -> AppConfig {
     provider: None,
     task_model: None,
     reasoning_model: None,
-    system_prompt: None,
     max_tokens: None,
     max_turns: None,
     max_consecutive_errors: None,
@@ -118,6 +119,8 @@ pub fn default() -> AppConfig {
     narrative_summary_schedule: None,
     profiles_dirs: None,
     default_profile: None,
+    agent_name: None,
+    agent_version: None,
   )
 }
 
@@ -130,7 +133,6 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       override_cfg.reasoning_model,
       base.reasoning_model,
     ),
-    system_prompt: option.or(override_cfg.system_prompt, base.system_prompt),
     max_tokens: option.or(override_cfg.max_tokens, base.max_tokens),
     max_turns: option.or(override_cfg.max_turns, base.max_turns),
     max_consecutive_errors: option.or(
@@ -170,6 +172,8 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       override_cfg.default_profile,
       base.default_profile,
     ),
+    agent_name: option.or(override_cfg.agent_name, base.agent_name),
+    agent_version: option.or(override_cfg.agent_version, base.agent_version),
   )
 }
 
@@ -221,7 +225,6 @@ pub fn to_string(cfg: AppConfig) -> String {
     option.map(cfg.provider, fn(v) { "provider: " <> v }),
     option.map(cfg.task_model, fn(v) { "task_model: " <> v }),
     option.map(cfg.reasoning_model, fn(v) { "reasoning_model: " <> v }),
-    option.map(cfg.system_prompt, fn(v) { "system_prompt: " <> v }),
     option.map(cfg.max_tokens, fn(v) { "max_tokens: " <> int.to_string(v) }),
     // Loop control
     option.map(cfg.max_turns, fn(v) { "max_turns: " <> int.to_string(v) }),
@@ -270,6 +273,9 @@ pub fn to_string(cfg: AppConfig) -> String {
     option.map(cfg.profiles_dirs, fn(dirs) {
       "profiles_dirs: " <> string.join(dirs, ", ")
     }),
+    // Agent identity
+    option.map(cfg.agent_name, fn(v) { "agent_name: " <> v }),
+    option.map(cfg.agent_version, fn(v) { "agent_version: " <> v }),
   ]
   |> list.filter_map(fn(x) { option.to_result(x, Nil) })
   |> string.join("\n")
@@ -289,8 +295,10 @@ fn do_parse_args(args: List(String), acc: AppConfig) -> AppConfig {
       do_parse_args(rest, AppConfig(..acc, task_model: Some(value)))
     ["--reasoning-model", value, ..rest] ->
       do_parse_args(rest, AppConfig(..acc, reasoning_model: Some(value)))
-    ["--system", value, ..rest] ->
-      do_parse_args(rest, AppConfig(..acc, system_prompt: Some(value)))
+    ["--agent-name", value, ..rest] ->
+      do_parse_args(rest, AppConfig(..acc, agent_name: Some(value)))
+    ["--agent-version", value, ..rest] ->
+      do_parse_args(rest, AppConfig(..acc, agent_version: Some(value)))
     ["--max-tokens", value, ..rest] ->
       case int.parse(value) {
         Ok(n) -> do_parse_args(rest, AppConfig(..acc, max_tokens: Some(n)))
@@ -396,7 +404,6 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     provider: get_str("provider"),
     task_model: get_str("task_model"),
     reasoning_model: get_str("reasoning_model"),
-    system_prompt: get_str("system_prompt"),
     max_tokens: get_int("max_tokens"),
     max_turns: get_int("max_turns"),
     max_consecutive_errors: get_int("max_consecutive_errors"),
@@ -433,6 +440,14 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
       Error(_) -> None
     },
     default_profile: get_str("profile"),
+    agent_name: case tom.get_string(table, ["agent", "name"]) {
+      Ok(v) -> Some(v)
+      Error(_) -> None
+    },
+    agent_version: case tom.get_string(table, ["agent", "version"]) {
+      Ok(v) -> Some(v)
+      Error(_) -> None
+    },
     profiles_dirs: case tom.get_array(table, ["profiles_dirs"]) {
       Error(_) -> None
       Ok(items) ->
@@ -472,10 +487,10 @@ fn load_from_path(path: String) -> AppConfig {
 // ---------------------------------------------------------------------------
 
 const known_keys = [
-  "provider", "task_model", "reasoning_model", "system_prompt", "max_tokens",
-  "max_turns", "max_consecutive_errors", "max_context_messages", "log_verbose",
+  "provider", "task_model", "reasoning_model", "max_tokens", "max_turns",
+  "max_consecutive_errors", "max_context_messages", "log_verbose",
   "write_anywhere", "skills_dirs", "gui", "dprime_enabled", "dprime_config",
-  "narrative", "profile", "profiles_dirs",
+  "narrative", "profile", "profiles_dirs", "agent",
 ]
 
 const known_narrative_keys = [
@@ -507,6 +522,23 @@ fn validate_toml_keys(table: dict.Dict(String, tom.Toml)) -> Nil {
               "config",
               "validate",
               "Unknown narrative config key: \"" <> key <> "\" — possible typo?",
+              None,
+            )
+        }
+      })
+    Error(_) -> Nil
+  }
+  case tom.get_table(table, ["agent"]) {
+    Ok(agent_table) ->
+      dict.keys(agent_table)
+      |> list.each(fn(key) {
+        case list.contains(["name", "version"], key) {
+          True -> Nil
+          False ->
+            slog.warn(
+              "config",
+              "validate",
+              "Unknown agent config key: \"" <> key <> "\" — possible typo?",
               None,
             )
         }

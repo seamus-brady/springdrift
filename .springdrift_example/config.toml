@@ -19,9 +19,6 @@ provider = "mock"
 # reasoning_model = "mistral-large-latest"       # Mistral
 # reasoning_model = "gpt-4o"                     # OpenAI / OpenRouter
 
-# System prompt injected on every request
-system_prompt = "You are a helpful assistant."
-
 # Maximum output tokens per LLM call (default: 2048)
 max_tokens = 2048
 
@@ -61,10 +58,16 @@ dprime_enabled = false
 # Path to D' config JSON (default: built-in)
 # dprime_config = "dprime.json"
 
+# ── Agent identity ─────────────────────────────────────────────────────────
+
+[agent]
+# Agent name — substituted into {{agent_name}} in identity/persona.md
+name = "Springdrift"
+# version = ""
+
 # ── Prime Narrative ─────────────────────────────────────────────────────────
 
 [narrative]
-enabled = false              # Enable narrative logging after each cycle
 # directory = ".springdrift/memory/narrative"  # Default location
 # archivist_model = ""       # Defaults to task_model
 threading = true             # Auto-assign threads by overlap scoring

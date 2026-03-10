@@ -58,7 +58,7 @@ pub fn all() -> List(Tool) {
     inspect_cycle_tool(),
     recall_cases_tool(),
     query_tool_activity_tool(),
-    agent_status_tool(),
+    introspect_tool(),
     list_recent_cycles_tool(),
   ]
 }
@@ -241,12 +241,13 @@ fn query_tool_activity_tool() -> Tool {
   |> tool.build()
 }
 
-fn agent_status_tool() -> Tool {
-  tool.new("agent_status")
+fn introspect_tool() -> Tool {
+  tool.new("introspect")
   |> tool.with_description(
-    "Show the status of all registered agents. Lists each agent's name and current "
-    <> "status (Running, Restarting, or Stopped). Use this to check which agents are "
-    <> "available for delegation.",
+    "Perceive your current constitution: identity, agent roster and status, "
+    <> "available tool categories, memory state, today's performance, and "
+    <> "D' safety config. Call before complex multi-agent tasks to confirm "
+    <> "readiness, or after failures to understand system state.",
   )
   |> tool.build()
 }
@@ -284,7 +285,7 @@ pub fn is_memory_tool(name: String) -> Bool {
   || name == "inspect_cycle"
   || name == "recall_cases"
   || name == "query_tool_activity"
-  || name == "agent_status"
+  || name == "introspect"
   || name == "list_recent_cycles"
 }
 
@@ -293,9 +294,23 @@ pub type FactsContext {
   FactsContext(facts_dir: String, cycle_id: String, agent_id: String)
 }
 
-/// Registry entry for agent_status tool (avoids depending on registry module's opaque type).
+/// Registry entry for agent roster (avoids depending on registry module's opaque type).
 pub type AgentStatusEntry {
   AgentStatusEntry(name: String, status: String)
+}
+
+/// Context for the `introspect` tool — carries system state from CognitiveState.
+pub type IntrospectContext {
+  IntrospectContext(
+    agent_uuid: String,
+    session_since: String,
+    active_profile: Option(String),
+    agents: List(AgentStatusEntry),
+    dprime_enabled: Bool,
+    dprime_modify_threshold: Float,
+    dprime_reject_threshold: Float,
+    current_cycle_id: Option(String),
+  )
 }
 
 /// Execute a memory tool call. Uses the Librarian if available,
@@ -306,7 +321,7 @@ pub fn execute(
   lib: Option(Subject(LibrarianMessage)),
   facts_ctx: Option(FactsContext),
   embed_config: embedding_types.EmbeddingConfig,
-  agent_entries: List(AgentStatusEntry),
+  introspect_ctx: Option(IntrospectContext),
 ) -> ToolResult {
   slog.debug("memory", "execute", "tool=" <> call.name, None)
   case call.name {
@@ -322,7 +337,7 @@ pub fn execute(
     "inspect_cycle" -> run_inspect_cycle(call, lib)
     "recall_cases" -> run_recall_cases(call, lib, embed_config)
     "query_tool_activity" -> run_query_tool_activity(call, lib)
-    "agent_status" -> run_agent_status(call, agent_entries)
+    "introspect" -> run_introspect(call, introspect_ctx)
     "list_recent_cycles" -> run_list_recent_cycles(call, lib)
     _ -> ToolFailure(tool_use_id: call.id, error: "Unknown tool: " <> call.name)
   }
@@ -1317,26 +1332,70 @@ fn op_to_string(op: facts_types.FactOp) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// agent_status — show agent registry
+// introspect — perceive system state
 // ---------------------------------------------------------------------------
 
-fn run_agent_status(
-  call: ToolCall,
-  entries: List(AgentStatusEntry),
-) -> ToolResult {
-  case entries {
-    [] -> ToolSuccess(tool_use_id: call.id, content: "No agents registered.")
-    _ -> {
-      let lines =
-        list.map(entries, fn(e: AgentStatusEntry) {
-          "- " <> e.name <> ": " <> e.status
-        })
+fn run_introspect(call: ToolCall, ctx: Option(IntrospectContext)) -> ToolResult {
+  case ctx {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "introspect not available: no context provided",
+      )
+    Some(c) -> {
+      let sections = []
+
+      // Identity
+      let identity =
+        "## Identity\n- agent_uuid: "
+        <> c.agent_uuid
+        <> "\n- session_since: "
+        <> c.session_since
+
+      // Profile
+      let profile = case c.active_profile {
+        Some(p) -> "\n- profile: " <> p
+        None -> "\n- profile: (none)"
+      }
+
+      // Cycle
+      let cycle = case c.current_cycle_id {
+        Some(cid) -> "\n- current_cycle: " <> cid
+        None -> ""
+      }
+
+      let sections = [identity <> profile <> cycle, ..sections]
+
+      // Agent roster
+      let agent_section = case c.agents {
+        [] -> "## Agents\nNo agents registered."
+        agents -> {
+          let lines =
+            list.map(agents, fn(e: AgentStatusEntry) {
+              "- " <> e.name <> ": " <> e.status
+            })
+          "## Agents ("
+          <> int.to_string(list.length(agents))
+          <> ")\n"
+          <> string.join(lines, "\n")
+        }
+      }
+      let sections = [agent_section, ..sections]
+
+      // D' safety
+      let dprime_section = case c.dprime_enabled {
+        True ->
+          "## D' Safety\n- enabled: true\n- modify_threshold: "
+          <> float.to_string(c.dprime_modify_threshold)
+          <> "\n- reject_threshold: "
+          <> float.to_string(c.dprime_reject_threshold)
+        False -> "## D' Safety\n- enabled: false"
+      }
+      let sections = [dprime_section, ..sections]
+
       ToolSuccess(
         tool_use_id: call.id,
-        content: "Registered agents ("
-          <> int.to_string(list.length(entries))
-          <> "):\n"
-          <> string.join(lines, "\n"),
+        content: string.join(list.reverse(sections), "\n\n"),
       )
     }
   }

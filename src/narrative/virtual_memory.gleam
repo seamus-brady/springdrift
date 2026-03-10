@@ -23,10 +23,20 @@ import gleam/string
 pub type VirtualMemory {
   VirtualMemory(
     core: CoreSlot,
+    constitution: ConstitutionSlot,
     narrative_thread: ThreadSlot,
     working_memory: WorkingSlot,
     cbr_cases: CbrSlot,
     agent_scratchpad: ScratchSlot,
+  )
+}
+
+/// Constitution — today's stats and agent health.
+pub type ConstitutionSlot {
+  ConstitutionSlot(
+    today_cycles: Int,
+    today_success_rate: Float,
+    agent_health: String,
   )
 }
 
@@ -79,6 +89,11 @@ pub type ScratchSlot {
 pub fn empty() -> VirtualMemory {
   VirtualMemory(
     core: CoreSlot(identity: "", preferences: [], instructions: []),
+    constitution: ConstitutionSlot(
+      today_cycles: 0,
+      today_success_rate: 0.0,
+      agent_health: "All agents nominal",
+    ),
     narrative_thread: ThreadSlot(thread_name: "", summary: "", cycle_count: 0),
     working_memory: WorkingSlot(entries: []),
     cbr_cases: CbrSlot(cases: []),
@@ -89,6 +104,13 @@ pub fn empty() -> VirtualMemory {
 // ---------------------------------------------------------------------------
 // Slot setters
 // ---------------------------------------------------------------------------
+
+pub fn set_constitution(
+  vm: VirtualMemory,
+  slot: ConstitutionSlot,
+) -> VirtualMemory {
+  VirtualMemory(..vm, constitution: slot)
+}
 
 pub fn set_core(
   vm: VirtualMemory,
@@ -163,18 +185,37 @@ pub fn clear_scratchpad(vm: VirtualMemory) -> VirtualMemory {
 /// Returns "" if all slots are empty (zero overhead when unused).
 pub fn to_system_prompt(vm: VirtualMemory) -> String {
   let core_xml = render_core(vm.core)
+  let constitution_xml = render_constitution(vm.constitution)
   let thread_xml = render_thread(vm.narrative_thread)
   let working_xml = render_working(vm.working_memory)
   let cbr_xml = render_cbr(vm.cbr_cases)
   let scratch_xml = render_scratch(vm.agent_scratchpad)
 
   let sections =
-    [core_xml, thread_xml, working_xml, cbr_xml, scratch_xml]
+    [core_xml, constitution_xml, thread_xml, working_xml, cbr_xml, scratch_xml]
     |> list.filter(fn(s) { s != "" })
 
   case sections {
     [] -> ""
     _ -> "<memory>\n" <> string.join(sections, "\n") <> "\n</memory>"
+  }
+}
+
+fn render_constitution(slot: ConstitutionSlot) -> String {
+  case slot.today_cycles {
+    0 -> ""
+    n ->
+      "<constitution>"
+      <> "\n  <today cycles=\""
+      <> int.to_string(n)
+      <> "\" success_rate=\""
+      <> float_to_string(slot.today_success_rate)
+      <> "\"/>"
+      <> case slot.agent_health {
+        "All agents nominal" -> ""
+        h -> "\n  <agent_health>" <> h <> "</agent_health>"
+      }
+      <> "\n</constitution>"
   }
 }
 

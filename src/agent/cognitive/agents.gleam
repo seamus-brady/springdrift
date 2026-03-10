@@ -122,6 +122,23 @@ fn handle_memory_tools(
           }
           memory.AgentStatusEntry(name: e.name, status: status_str)
         })
+      let introspect_ctx =
+        Some(memory.IntrospectContext(
+          agent_uuid: state.agent_uuid,
+          session_since: state.session_since,
+          active_profile: state.active_profile,
+          agents: agent_entries,
+          dprime_enabled: option.is_some(state.dprime_state),
+          dprime_modify_threshold: case state.dprime_state {
+            Some(ds) -> ds.current_modify_threshold
+            None -> 0.0
+          },
+          dprime_reject_threshold: case state.dprime_state {
+            Some(ds) -> ds.current_reject_threshold
+            None -> 0.0
+          },
+          current_cycle_id: state.cycle_id,
+        ))
       let result =
         memory.execute(
           call,
@@ -129,7 +146,7 @@ fn handle_memory_tools(
           state.librarian,
           facts_ctx,
           state.embedding_config,
-          agent_entries,
+          introspect_ctx,
         )
       case result {
         llm_types.ToolSuccess(tool_use_id: id, content: c) ->
@@ -840,6 +857,19 @@ pub fn handle_agent_event(
     state.notify,
     types.AgentLifecycleNotice(event_type:, agent_name: event_name),
   )
+  // Push agent health to Curator on crash/restart/stop events
+  case event {
+    types.AgentCrashed(name:, ..)
+    | types.AgentRestartFailed(name:, ..)
+    | types.AgentStopped(name:) -> {
+      case state.curator {
+        Some(cur) -> curator.update_agent_health(cur, name <> " " <> event_type)
+        None -> Nil
+      }
+    }
+    _ -> Nil
+  }
+
   case event {
     types.AgentStarted(name:, task_subject:) ->
       CognitiveState(

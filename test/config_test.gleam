@@ -16,7 +16,8 @@ pub fn default_has_all_none_test() {
   let cfg = config.default()
   cfg.provider |> should.equal(None)
 
-  cfg.system_prompt |> should.equal(None)
+  cfg.agent_name |> should.equal(None)
+  cfg.agent_version |> should.equal(None)
   cfg.max_tokens |> should.equal(None)
   cfg.max_turns |> should.equal(None)
   cfg.max_consecutive_errors |> should.equal(None)
@@ -41,9 +42,9 @@ pub fn from_args_provider_test() {
   cfg.provider |> should.equal(Some("anthropic"))
 }
 
-pub fn from_args_system_test() {
-  let cfg = config.from_args(["--system", "You are helpful."])
-  cfg.system_prompt |> should.equal(Some("You are helpful."))
+pub fn from_args_agent_name_test() {
+  let cfg = config.from_args(["--agent-name", "TestBot"])
+  cfg.agent_name |> should.equal(Some("TestBot"))
 }
 
 pub fn from_args_max_tokens_test() {
@@ -85,7 +86,8 @@ pub fn merge_override_wins_test() {
   let base =
     AppConfig(
       provider: Some("anthropic"),
-      system_prompt: None,
+      agent_name: None,
+      agent_version: None,
       max_tokens: None,
       max_turns: None,
       max_consecutive_errors: None,
@@ -110,7 +112,8 @@ pub fn merge_override_wins_test() {
   let override =
     AppConfig(
       provider: Some("openai"),
-      system_prompt: None,
+      agent_name: None,
+      agent_version: None,
       max_tokens: None,
       max_turns: None,
       max_consecutive_errors: None,
@@ -140,7 +143,8 @@ pub fn merge_base_preserved_when_override_none_test() {
   let base =
     AppConfig(
       provider: Some("anthropic"),
-      system_prompt: None,
+      agent_name: None,
+      agent_version: None,
       max_tokens: None,
       max_turns: None,
       max_consecutive_errors: None,
@@ -165,7 +169,8 @@ pub fn merge_base_preserved_when_override_none_test() {
   let override =
     AppConfig(
       provider: None,
-      system_prompt: None,
+      agent_name: None,
+      agent_version: None,
       max_tokens: None,
       max_turns: None,
       max_consecutive_errors: None,
@@ -195,7 +200,8 @@ pub fn merge_combines_different_fields_test() {
   let base =
     AppConfig(
       provider: Some("anthropic"),
-      system_prompt: None,
+      agent_name: None,
+      agent_version: None,
       max_tokens: None,
       max_turns: None,
       max_consecutive_errors: None,
@@ -220,7 +226,8 @@ pub fn merge_combines_different_fields_test() {
   let override =
     AppConfig(
       provider: None,
-      system_prompt: Some("Be concise."),
+      agent_name: Some("TestBot"),
+      agent_version: None,
       max_tokens: None,
       max_turns: None,
       max_consecutive_errors: None,
@@ -244,7 +251,7 @@ pub fn merge_combines_different_fields_test() {
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("anthropic"))
-  merged.system_prompt |> should.equal(Some("Be concise."))
+  merged.agent_name |> should.equal(Some("TestBot"))
 }
 
 // ---------------------------------------------------------------------------
@@ -255,14 +262,16 @@ pub fn parse_config_toml_full_test() {
   let toml =
     "provider = \"anthropic\"
 task_model = \"claude-haiku-4-5-20251001\"
-system_prompt = \"You are helpful.\"
-max_tokens = 2048"
+max_tokens = 2048
+
+[agent]
+name = \"TestBot\""
   let result = config.parse_config_toml(toml)
   result |> should.be_ok
   let assert Ok(cfg) = result
   cfg.provider |> should.equal(Some("anthropic"))
   cfg.task_model |> should.equal(Some("claude-haiku-4-5-20251001"))
-  cfg.system_prompt |> should.equal(Some("You are helpful."))
+  cfg.agent_name |> should.equal(Some("TestBot"))
   cfg.max_tokens |> should.equal(Some(2048))
 }
 
@@ -328,7 +337,8 @@ pub fn merge_new_fields_test() {
   let base =
     AppConfig(
       provider: None,
-      system_prompt: None,
+      agent_name: None,
+      agent_version: None,
       max_tokens: None,
       max_turns: Some(5),
       max_consecutive_errors: None,
@@ -353,7 +363,8 @@ pub fn merge_new_fields_test() {
   let override =
     AppConfig(
       provider: None,
-      system_prompt: None,
+      agent_name: None,
+      agent_version: None,
       max_tokens: None,
       max_turns: Some(10),
       max_consecutive_errors: Some(2),
@@ -425,7 +436,8 @@ pub fn merge_model_fields_override_wins_test() {
   let base =
     AppConfig(
       provider: None,
-      system_prompt: None,
+      agent_name: None,
+      agent_version: None,
       max_tokens: None,
       max_turns: None,
       max_consecutive_errors: None,
@@ -450,7 +462,8 @@ pub fn merge_model_fields_override_wins_test() {
   let override =
     AppConfig(
       provider: None,
-      system_prompt: None,
+      agent_name: None,
+      agent_version: None,
       max_tokens: None,
       max_turns: None,
       max_consecutive_errors: None,
@@ -481,7 +494,8 @@ pub fn merge_model_fields_base_preserved_test() {
   let base =
     AppConfig(
       provider: None,
-      system_prompt: None,
+      agent_name: None,
+      agent_version: None,
       max_tokens: None,
       max_turns: None,
       max_consecutive_errors: None,
@@ -506,7 +520,8 @@ pub fn merge_model_fields_base_preserved_test() {
   let override =
     AppConfig(
       provider: None,
-      system_prompt: None,
+      agent_name: None,
+      agent_version: None,
       max_tokens: None,
       max_turns: None,
       max_consecutive_errors: None,
@@ -574,7 +589,8 @@ pub fn to_string_fully_set_test() {
   let cfg =
     AppConfig(
       provider: Some("anthropic"),
-      system_prompt: Some("You are helpful."),
+      agent_name: Some("TestBot"),
+      agent_version: Some("1.0"),
       max_tokens: Some(1024),
       max_turns: Some(5),
       max_consecutive_errors: Some(3),
@@ -694,7 +710,8 @@ pub fn merge_gui_override_wins_test() {
   let base =
     AppConfig(
       provider: None,
-      system_prompt: None,
+      agent_name: None,
+      agent_version: None,
       max_tokens: None,
       max_turns: None,
       max_consecutive_errors: None,
@@ -719,7 +736,8 @@ pub fn merge_gui_override_wins_test() {
   let override =
     AppConfig(
       provider: None,
-      system_prompt: None,
+      agent_name: None,
+      agent_version: None,
       max_tokens: None,
       max_turns: None,
       max_consecutive_errors: None,
@@ -812,7 +830,8 @@ pub fn merge_dprime_override_wins_test() {
   let base =
     AppConfig(
       provider: None,
-      system_prompt: None,
+      agent_name: None,
+      agent_version: None,
       max_tokens: None,
       max_turns: None,
       max_consecutive_errors: None,
@@ -837,7 +856,8 @@ pub fn merge_dprime_override_wins_test() {
   let override =
     AppConfig(
       provider: None,
-      system_prompt: None,
+      agent_name: None,
+      agent_version: None,
       max_tokens: None,
       max_turns: None,
       max_consecutive_errors: None,

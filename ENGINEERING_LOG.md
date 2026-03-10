@@ -1984,3 +1984,101 @@ startup-only ("uniforms not personalities"):
 | Curator as orchestrator | Single point of coordination for identity + memory → system prompt. Avoids scattering assembly logic across cognitive loop |
 | Profile field on CbrCase | Lightweight retrieval hint — no hard coupling. Optional field with null default for backward compatibility |
 | Startup-only profiles | Runtime switching added complexity with no clear benefit. Profiles configure agent roster + D' — things that shouldn't change mid-conversation |
+
+---
+
+### Oikeiosis — Agent Self-Model (Mar 10)
+
+Five interconnected changes giving the agent a stable identity, richer self-perception,
+and dynamic system prompt assembly from memory state.
+
+#### Change A — Fold `agent_status` into `introspect` tool
+
+Replaced the simple `agent_status` tool (name + status list) with a richer `introspect`
+tool that exposes the agent's full self-model in a single call.
+
+**Files modified:**
+- `src/tools/memory.gleam` — replaced `agent_status_tool()` with `introspect_tool()`,
+  added `IntrospectContext` type (agent_uuid, session_since, active_profile, agents,
+  dprime_enabled, thresholds, current_cycle_id), updated `execute` signature (last param
+  changed from `List(AgentStatusEntry)` to `Option(IntrospectContext)`), replaced
+  `run_agent_status` with `run_introspect` (renders identity, agents, and D' sections)
+- `src/agent/cognitive/agents.gleam` — builds `IntrospectContext` from `CognitiveState`,
+  reads D' thresholds from `dprime_state`
+- `test/tools/memory_test.gleam` — replaced 2 `agent_status` tests with 5 `introspect`
+  tests (no context error, full context, no agents, is_memory_tool checks)
+
+#### Change B — Stable Agent Identity
+
+Every Springdrift instance gets a stable UUID persisted in `.springdrift/identity.json`.
+
+**Files added:**
+- `src/agent_identity.gleam` — `AgentIdentity` type with `load_or_create()` and `save()`,
+  JSON encoding/decoding, `generate_uuid` and `get_datetime` FFI
+
+**Files modified:**
+- `src/agent/cognitive_config.gleam` — added `agent_uuid: String`, `session_since: String`
+- `src/agent/cognitive_state.gleam` — added `agent_uuid: String`, `session_since: String`
+- `src/agent/cognitive.gleam` — threads uuid/session from config to state
+- `src/springdrift.gleam` — loads identity before cognitive loop, passes to config
+
+#### Change C — Curator Constitution Slot with Caching
+
+Added a `ConstitutionSlot` to the Curator's virtual memory, pushed by the Archivist
+after each cycle and by agent lifecycle events.
+
+**Files modified:**
+- `src/narrative/virtual_memory.gleam` — added `ConstitutionSlot` type (today_cycles,
+  today_success_rate, agent_health), `set_constitution()`, `render_constitution()`
+- `src/narrative/curator.gleam` — added `UpdateConstitution` and `UpdateAgentHealth`
+  messages, `agent_name`/`agent_version` state fields, constitution preamble slots
+- `src/narrative/archivist.gleam` — `spawn` gains `curator` parameter; after writing
+  entries, loads today's entries and pushes `update_constitution` to Curator
+- `src/agent/cognitive/agents.gleam` — `handle_agent_event` pushes `update_agent_health`
+  to Curator on crash/restart/stop events
+- `src/agent/cognitive/memory.gleam` — passes `state.curator` to `archivist.spawn`
+
+#### Change D — Replace `system_prompt` with `agent_name`/`agent_version`
+
+Removed the `system_prompt` config field entirely. The system prompt is now assembled
+by the Curator from identity files. Agent naming moves to `[agent] name`/`version`.
+
+**Files modified:**
+- `src/config.gleam` — removed `system_prompt: Option(String)`, added `agent_name`
+  and `agent_version`, removed `--system` CLI flag, added `--agent-name`/`--agent-version`,
+  updated TOML parsing for `[agent]` table
+- `src/springdrift.gleam` — removed system prompt fallback logic, passes agent_name/version
+  to Curator, updated help text
+- `test/config_test.gleam` — updated all ~20 AppConfig constructors
+
+#### Change E — Default identity files
+
+Shipped default `persona.md` and `session_preamble.md` in `.springdrift_example/identity/`.
+
+**Files added:**
+- `.springdrift_example/identity/persona.md` — first-person character text with
+  `{{agent_name}}` slot
+- `.springdrift_example/identity/session_preamble.md` — dynamic template with all
+  Curator slots and `[OMIT IF]` rules
+
+**Files modified:**
+- `src/paths.gleam` — removed `priv_dir` FFI and `priv_identity_dir()`, simplified
+  `default_identity_dirs()` to search local project then user global only
+- `src/springdrift_ffi.erl` — removed `priv_dir/0` export and implementation
+- `.springdrift_example/README.md` — updated directory layout with identity, CBR, facts
+- `.springdrift_example/config.toml` — replaced `system_prompt` with `[agent]` section
+
+#### Test coverage
+
+789 tests passing (up from 786 baseline). Net +3 tests from introspect additions
+minus agent_status removals.
+
+#### Design decisions
+
+| Decision | Rationale |
+|---|---|
+| `IntrospectContext` as Option param | Avoids tight coupling between memory tools and cognitive state. Tests pass None for non-introspect calls |
+| Identity files in `.springdrift_example/` not `priv/` | Avoids Erlang `code:priv_dir/1` dependency; files are user-facing templates meant to be copied and customised, not embedded in the release |
+| Archivist pushes constitution | Fire-and-forget after each cycle. Curator caches values; preamble always has fresh stats without blocking |
+| Agent health pushed on lifecycle events | Crash/restart/stop events update Curator immediately. Started events don't push (nominal state is implicit) |
+| `system_prompt` removed entirely | System prompt is now assembled from identity files by the Curator. No config field needed — falls back to empty when no identity exists |
