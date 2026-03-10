@@ -1,4 +1,5 @@
 import agent/cognitive
+import agent/cognitive_config.{CognitiveConfig}
 import agent/registry
 import agent/supervisor
 import agent/types as agent_types
@@ -301,27 +302,27 @@ fn run(cfg: AppConfig) -> Nil {
 
   // Start cognitive loop with empty registry (supervisor will register agents)
   let cognitive_subj =
-    cognitive.start(
-      p,
-      system,
-      max_tokens,
-      cfg.max_context_messages,
-      agent_tools,
-      initial_messages,
-      registry.new(),
-      verbose,
-      notify,
-      task_model,
-      reasoning_model,
-      dprime_state,
-      narrative_dir,
-      paths.cbr_dir(),
-      archivist_model,
-      lib,
-      profile_dirs,
-      write_anywhere,
-      option.Some(curator_subj),
-    )
+    cognitive.start(CognitiveConfig(
+      provider: p,
+      system:,
+      max_tokens:,
+      max_context_messages: cfg.max_context_messages,
+      agent_tools:,
+      initial_messages:,
+      registry: registry.new(),
+      verbose:,
+      notify:,
+      task_model:,
+      reasoning_model:,
+      dprime_state:,
+      narrative_dir:,
+      cbr_dir: paths.cbr_dir(),
+      archivist_model:,
+      librarian: lib,
+      profile_dirs:,
+      write_anywhere:,
+      curator: option.Some(curator_subj),
+    ))
 
   // Start supervisor and register agents via StartChild
   let sup = supervisor.start(cognitive_subj, 5)

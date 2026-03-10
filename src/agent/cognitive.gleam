@@ -3,28 +3,25 @@ import agent/cognitive/llm as cognitive_llm
 import agent/cognitive/memory as cognitive_memory
 import agent/cognitive/profile as cognitive_profile
 import agent/cognitive/safety as cognitive_safety
+import agent/cognitive_config
 import agent/cognitive_state.{type CognitiveState, CognitiveState}
-import agent/registry.{type Registry}
 import agent/types.{
-  type CognitiveMessage, type CognitiveReply, type Notification, AgentComplete,
-  AgentEvent, Classifying, CognitiveReply, Idle, PendingThink, RestoreMessages,
-  SaveResult, SetModel, ThinkComplete, ThinkError, ThinkWorkerDown, Thinking,
-  UserAnswer, UserInput,
+  type CognitiveMessage, type CognitiveReply, AgentComplete, AgentEvent,
+  Classifying, CognitiveReply, Idle, PendingThink, RestoreMessages, SaveResult,
+  SetModel, ThinkComplete, ThinkError, ThinkWorkerDown, Thinking, UserAnswer,
+  UserInput,
 }
 import agent/worker
 import cycle_log
 import dag/types as dag_types
-import dprime/types as dprime_types
 import gleam/dict
 import gleam/erlang/process.{type Subject}
 import gleam/list
-import gleam/option.{type Option, None, Some}
+import gleam/option.{None, Some}
 import gleam/string
-import llm/provider.{type Provider}
 import llm/response
 import llm/types as llm_types
-import narrative/curator
-import narrative/librarian.{type LibrarianMessage}
+import narrative/librarian
 import query_complexity
 import slog
 import tools/builtin
@@ -38,33 +35,13 @@ fn rescue(body: fn() -> a) -> Result(a, String)
 // ---------------------------------------------------------------------------
 
 /// Start the cognitive loop process. Returns a Subject for sending messages.
-pub fn start(
-  provider: Provider,
-  system: String,
-  max_tokens: Int,
-  max_context_messages: Option(Int),
-  agent_tools: List(llm_types.Tool),
-  initial_messages: List(llm_types.Message),
-  registry: Registry,
-  verbose: Bool,
-  notify: Subject(Notification),
-  task_model: String,
-  reasoning_model: String,
-  dprime_state: Option(dprime_types.DprimeState),
-  narrative_dir: String,
-  cbr_dir: String,
-  archivist_model: String,
-  librarian: Option(Subject(LibrarianMessage)),
-  profile_dirs: List(String),
-  write_anywhere: Bool,
-  curator: Option(Subject(curator.CuratorMessage)),
-) -> Subject(CognitiveMessage) {
+pub fn start(cfg: cognitive_config.CognitiveConfig) -> Subject(CognitiveMessage) {
   // The cognitive loop gets agent tools + request_human_input + memory tools
   let tools =
     list.flatten([
       [builtin.human_input_tool()],
       memory.all(),
-      agent_tools,
+      cfg.agent_tools,
     ])
   let setup = process.new_subject()
   process.spawn_unlinked(fn() {
@@ -72,37 +49,37 @@ pub fn start(
     let state =
       CognitiveState(
         self:,
-        provider:,
-        model: task_model,
-        system:,
-        max_tokens:,
-        max_context_messages:,
+        provider: cfg.provider,
+        model: cfg.task_model,
+        system: cfg.system,
+        max_tokens: cfg.max_tokens,
+        max_context_messages: cfg.max_context_messages,
         tools:,
-        messages: initial_messages,
-        registry:,
+        messages: cfg.initial_messages,
+        registry: cfg.registry,
         pending: dict.new(),
         status: Idle,
         cycle_id: None,
-        verbose:,
-        notify:,
-        task_model:,
-        reasoning_model:,
+        verbose: cfg.verbose,
+        notify: cfg.notify,
+        task_model: cfg.task_model,
+        reasoning_model: cfg.reasoning_model,
         save_in_progress: False,
         save_pending: None,
-        dprime_state:,
-        narrative_dir:,
-        cbr_dir:,
-        archivist_model:,
-        librarian:,
+        dprime_state: cfg.dprime_state,
+        narrative_dir: cfg.narrative_dir,
+        cbr_dir: cfg.cbr_dir,
+        archivist_model: cfg.archivist_model,
+        librarian: cfg.librarian,
         agent_completions: [],
         last_user_input: "",
         active_profile: None,
         supervisor: None,
-        profile_dirs:,
-        write_anywhere:,
+        profile_dirs: cfg.profile_dirs,
+        write_anywhere: cfg.write_anywhere,
         output_dprime_state: None,
         dprime_decisions: [],
-        curator:,
+        curator: cfg.curator,
       )
     process.send(setup, self)
     cognitive_loop(state)
@@ -379,11 +356,18 @@ fn handle_think_complete(
                 state.cycle_id,
               )
               let new_task_id = cycle_log.generate_uuid()
+              let nudge_msg =
+                llm_types.Message(role: llm_types.User, content: [
+                  llm_types.TextContent(
+                    "Your previous response was empty. Please provide a substantive response.",
+                  ),
+                ])
+              let retry_messages = list.append(state.messages, [nudge_msg])
               let req =
                 cognitive_llm.build_request_with_model(
                   state,
                   req_model,
-                  state.messages,
+                  retry_messages,
                 )
               worker.spawn_think(new_task_id, req, state.provider, state.self)
               CognitiveState(

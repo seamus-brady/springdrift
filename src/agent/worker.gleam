@@ -50,6 +50,14 @@ pub fn spawn_think(
   // Monitor forwarder: if the worker crashes before sending a result,
   // it sends ThinkWorkerDown to the cognitive loop. If the worker
   // completes normally (signalled via `done`), the forwarder exits quietly.
+  //
+  // NOTE: There is a theoretical race where the worker sends ThinkComplete
+  // to cognitive_self but exits before sending `done` (e.g., async exception).
+  // In that case the forwarder receives DOWN before `done` and sends
+  // ThinkWorkerDown. The cognitive loop would then receive both ThinkComplete
+  // and ThinkWorkerDown for the same task_id. This is benign: the first
+  // message removes the pending entry, and the second no-ops on dict.get
+  // returning Error(Nil).
   let monitor = process.monitor(pid)
   process.spawn_unlinked(fn() {
     let sel =

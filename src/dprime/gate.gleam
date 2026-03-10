@@ -269,6 +269,10 @@ fn evaluate_deliberative(
   )
 
   // Build situation model
+  // TODO: For multi-tool-call turns, this rebuilds the situation model for
+  // every tool dispatch (3-5 LLM calls per tool). Consider caching the
+  // situation model in DprimeState for the duration of a single turn to
+  // avoid redundant LLM round-trips.
   let situation_model =
     deliberative.build_situation_model(
       instruction,
