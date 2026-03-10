@@ -227,9 +227,9 @@ fn build_tool_executor(
 ) -> fn(llm_types.ToolCall) -> llm_types.ToolResult {
   let has_web = list.contains(tool_groups, "web")
   fn(call: llm_types.ToolCall) -> llm_types.ToolResult {
-    case call.name {
-      "fetch_url" if has_web -> tools_web.execute(call)
-      _ -> builtin.execute(call)
+    case has_web && tools_web.is_web_tool(call.name) {
+      True -> tools_web.execute(call)
+      False -> builtin.execute(call)
     }
   }
 }

@@ -263,15 +263,22 @@ fn run(cfg: AppConfig) -> Nil {
   // Create notification channel
   let notify: process.Subject(agent_types.Notification) = process.new_subject()
 
-  // Load D' config if enabled
-  let dprime_state = case option.unwrap(cfg.dprime_enabled, False) {
-    False -> option.None
+  // Load D' config if enabled (dual-gate: tool_gate + optional output_gate)
+  let #(dprime_state, output_dprime_state) = case
+    option.unwrap(cfg.dprime_enabled, False)
+  {
+    False -> #(option.None, option.None)
     True -> {
-      let dprime_cfg = case cfg.dprime_config {
-        option.Some(path) -> dprime_config_mod.load(path)
-        option.None -> dprime_config_mod.default()
+      let #(tool_cfg, output_cfg) = case cfg.dprime_config {
+        option.Some(path) -> dprime_config_mod.load_dual(path)
+        option.None -> #(dprime_config_mod.default(), option.None)
       }
-      option.Some(dprime_config_mod.initial_state(dprime_cfg))
+      let tool_state = option.Some(dprime_config_mod.initial_state(tool_cfg))
+      let output_state = case output_cfg {
+        option.Some(ocfg) -> option.Some(dprime_config_mod.initial_state(ocfg))
+        option.None -> option.None
+      }
+      #(tool_state, output_state)
     }
   }
 
@@ -357,6 +364,7 @@ fn run(cfg: AppConfig) -> Nil {
       task_model:,
       reasoning_model:,
       dprime_state:,
+      output_dprime_state:,
       narrative_dir:,
       cbr_dir: paths.cbr_dir(),
       archivist_model:,
@@ -384,7 +392,13 @@ fn run(cfg: AppConfig) -> Nil {
   cognitive.set_supervisor(cognitive_subj, sup)
 
   case dprime_state {
-    option.Some(_) -> io.println("D' Safety: enabled")
+    option.Some(_) -> {
+      io.println("D' Safety: enabled (tool gate)")
+      case output_dprime_state {
+        option.Some(_) -> io.println("D' Safety: enabled (output gate)")
+        option.None -> Nil
+      }
+    }
     option.None -> Nil
   }
   io.println("Narrative: " <> narrative_dir)
@@ -522,11 +536,19 @@ fn select_provider(cfg: AppConfig) -> #(Provider, String, String) {
         }
       }
     }
-    option.Some("local") -> {
-      let assert Ok(p) = local_adapter.provider_from_env()
-      io.println("Provider : Local")
-      #(p, local_adapter.smollm3, local_adapter.smollm3)
-    }
+    option.Some("local") ->
+      case local_adapter.provider_from_env() {
+        Ok(p) -> {
+          io.println("Provider : Local")
+          #(p, local_adapter.smollm3, local_adapter.smollm3)
+        }
+        Error(_) -> {
+          io.println(
+            "Provider : Local failed (check LOCAL_LLM_HOST), falling back to mock",
+          )
+          #(mock_provider(), "mock-model", "mock-model")
+        }
+      }
     option.Some("mock") -> #(mock_provider(), "mock-model", "mock-model")
     option.Some(unknown) -> {
       io.println(
@@ -612,9 +634,9 @@ fn build_profile_tool_executor(
 ) -> fn(llm_types.ToolCall) -> llm_types.ToolResult {
   let has_web = list.contains(tool_groups, "web")
   fn(call: llm_types.ToolCall) -> llm_types.ToolResult {
-    case call.name {
-      "fetch_url" if has_web -> tools_web.execute(call)
-      _ -> tools_builtin.execute(call)
+    case has_web && tools_web.is_web_tool(call.name) {
+      True -> tools_web.execute(call)
+      False -> tools_builtin.execute(call)
     }
   }
 }

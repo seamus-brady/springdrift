@@ -99,6 +99,15 @@ fn firecrawl_extract_tool() -> Tool {
 // Executor
 // ---------------------------------------------------------------------------
 
+/// Whether a tool name belongs to the web tool set.
+pub fn is_web_tool(name: String) -> Bool {
+  name == "fetch_url"
+  || name == "web_search"
+  || name == "exa_search"
+  || name == "tavily_search"
+  || name == "firecrawl_extract"
+}
+
 pub fn execute(call: ToolCall) -> ToolResult {
   slog.debug("web", "execute", "tool=" <> call.name, option.None)
   case call.name {

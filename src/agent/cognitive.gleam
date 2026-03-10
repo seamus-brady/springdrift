@@ -78,7 +78,7 @@ pub fn start(cfg: cognitive_config.CognitiveConfig) -> Subject(CognitiveMessage)
         supervisor: None,
         profile_dirs: cfg.profile_dirs,
         write_anywhere: cfg.write_anywhere,
-        output_dprime_state: None,
+        output_dprime_state: cfg.output_dprime_state,
         dprime_decisions: [],
         curator: cfg.curator,
         embedding_config: cfg.embedding_config,
@@ -315,13 +315,14 @@ fn handle_classify_complete(
             cycle_id,
             reply_to,
           )
-        Some(_) ->
+        Some(dprime_st) ->
           cognitive_safety.spawn_input_safety_gate(
             state,
             cycle_id,
             model,
             text,
             reply_to,
+            dprime_st,
           )
       }
     }
@@ -512,13 +513,14 @@ fn handle_think_complete(
                 calls,
                 rt,
               )
-            Some(_dprime_st) ->
+            Some(dprime_st) ->
               cognitive_safety.spawn_safety_gate(
                 state,
                 task_id,
                 resp,
                 calls,
                 rt,
+                dprime_st,
               )
           }
         }

@@ -38,6 +38,7 @@ pub fn spawn_safety_gate(
   resp: llm_types.LlmResponse,
   calls: List(llm_types.ToolCall),
   reply_to: Subject(CognitiveReply),
+  dprime_st: dprime_types.DprimeState,
 ) -> CognitiveState {
   slog.info(
     "cognitive",
@@ -45,7 +46,6 @@ pub fn spawn_safety_gate(
     "Spawning D' safety evaluation",
     state.cycle_id,
   )
-  let assert Some(dprime_st) = state.dprime_state
   let self = state.self
   let provider = state.provider
   let model = state.task_model
@@ -297,6 +297,7 @@ pub fn spawn_input_safety_gate(
   model: String,
   text: String,
   reply_to: Subject(CognitiveReply),
+  dprime_st: dprime_types.DprimeState,
 ) -> CognitiveState {
   slog.info(
     "cognitive",
@@ -304,7 +305,6 @@ pub fn spawn_input_safety_gate(
     "Spawning D' input safety evaluation",
     Some(cycle_id),
   )
-  let assert Some(dprime_st) = state.dprime_state
   let self = state.self
   let provider = state.provider
   let scorer_model = state.task_model
