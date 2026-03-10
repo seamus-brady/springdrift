@@ -17,7 +17,7 @@ pub fn main() -> Nil {
 
 pub fn memory_tools_defined_test() {
   let tools = memory.all()
-  tools |> list.length |> should.equal(10)
+  tools |> list.length |> should.equal(12)
 }
 
 pub fn recall_recent_tool_exists_test() {
@@ -52,6 +52,10 @@ pub fn is_memory_tool_recall_search_test() {
 
 pub fn is_memory_tool_recall_threads_test() {
   memory.is_memory_tool("recall_threads") |> should.be_true
+}
+
+pub fn is_memory_tool_recall_cases_test() {
+  memory.is_memory_tool("recall_cases") |> should.be_true
 }
 
 pub fn is_memory_tool_unknown_test() {

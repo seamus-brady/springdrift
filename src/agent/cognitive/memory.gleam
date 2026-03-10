@@ -91,7 +91,8 @@ pub fn maybe_spawn_archivist(
       },
       total_input_tokens: input_tokens,
       total_output_tokens: output_tokens,
-      tool_calls: list.length(state.agent_completions),
+      tool_calls: list.flat_map(state.agent_completions, fn(c) { c.tools_used })
+        |> list.length,
       dprime_decisions: list.map(
         list.reverse(state.dprime_decisions),
         fn(r: dag_types.DprimeDecisionRecord) {

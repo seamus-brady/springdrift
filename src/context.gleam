@@ -3,21 +3,23 @@
 //// Provides a sliding-window trim to keep the context within a configurable
 //// message count, discarding the oldest messages first. The trim point is
 //// adjusted forward to avoid splitting a ToolUseContent from its
-//// corresponding ToolResultContent.
+//// corresponding ToolResultContent, and consecutive same-role messages
+//// are coalesced to maintain strict user/assistant alternation.
 
 import gleam/int
 import gleam/list
 import gleam/option
-import llm/types.{type Message, ToolUseContent}
+import llm/types.{type Message, Message, ToolUseContent}
 import slog
 
 /// Trim a message list to at most `max_messages` entries, keeping the most
 /// recent ones. The cut point is adjusted to avoid orphaning tool use/result
-/// pairs (which would cause a 400 from the Anthropic API).
+/// pairs (which would cause a 400 from the Anthropic API). After trimming,
+/// consecutive same-role messages are coalesced to maintain strict alternation.
 pub fn trim(messages: List(Message), max_messages: Int) -> List(Message) {
   let total = list.length(messages)
   case total <= max_messages {
-    True -> messages
+    True -> ensure_alternation(messages)
     False -> {
       let drop_count = total - max_messages
       // If the message right at the cut point is an assistant message ending
@@ -34,7 +36,41 @@ pub fn trim(messages: List(Message), max_messages: Int) -> List(Message) {
         option.None,
       )
       list.drop(messages, adjusted_drop)
+      |> ensure_alternation
     }
+  }
+}
+
+/// Coalesce consecutive same-role messages by merging their content blocks.
+/// This prevents the Anthropic API from rejecting requests with
+/// "messages must alternate between user and assistant roles".
+pub fn ensure_alternation(messages: List(Message)) -> List(Message) {
+  case messages {
+    [] -> []
+    [first, ..rest] -> coalesce_loop(rest, first, [])
+  }
+}
+
+fn coalesce_loop(
+  remaining: List(Message),
+  current: Message,
+  acc: List(Message),
+) -> List(Message) {
+  case remaining {
+    [] -> list.reverse([current, ..acc])
+    [next, ..rest] ->
+      case current.role == next.role {
+        True -> {
+          // Merge content blocks into the current message
+          let merged =
+            Message(
+              role: current.role,
+              content: list.append(current.content, next.content),
+            )
+          coalesce_loop(rest, merged, acc)
+        }
+        False -> coalesce_loop(rest, next, [current, ..acc])
+      }
   }
 }
 

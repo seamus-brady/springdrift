@@ -33,7 +33,12 @@ type AgentState {
 }
 
 type ReactStats {
-  ReactStats(tools_used: List(String), input_tokens: Int, output_tokens: Int)
+  ReactStats(
+    tools_used: List(String),
+    tool_call_details: List(types.ToolCallDetail),
+    input_tokens: Int,
+    output_tokens: Int,
+  )
 }
 
 type ReactResult {
@@ -166,6 +171,7 @@ fn agent_loop(
               error: "Worker crashed",
               instruction: "",
               tools_used: [],
+              tool_call_details: [],
               input_tokens: 0,
               output_tokens: 0,
               duration_ms: 0,
@@ -198,7 +204,12 @@ fn do_react_loop(
   let req = build_agent_request(spec, task)
   let start_ms = monotonic_now_ms()
   let initial_stats =
-    ReactStats(tools_used: [], input_tokens: 0, output_tokens: 0)
+    ReactStats(
+      tools_used: [],
+      tool_call_details: [],
+      input_tokens: 0,
+      output_tokens: 0,
+    )
   let react_result =
     do_react(
       req,
@@ -247,18 +258,38 @@ fn do_react(
             True -> {
               let calls = response.tool_calls(resp)
               let tool_names = list.map(calls, fn(c) { c.name })
-              let stats_with_tools =
-                ReactStats(
-                  ..updated_stats,
-                  tools_used: list.append(updated_stats.tools_used, tool_names),
-                )
-              let results =
+              // Execute tools and capture details
+              let call_results =
                 list.map(calls, fn(call) {
                   cycle_log.log_tool_call(cycle_id, call)
                   let result = execute_tool(call, spec, cognitive)
                   cycle_log.log_tool_result(cycle_id, result)
-                  result
+                  #(call, result)
                 })
+              let results = list.map(call_results, fn(cr) { cr.1 })
+              let new_details =
+                list.map(call_results, fn(cr) {
+                  let #(call, result) = cr
+                  let #(output, success) = case result {
+                    llm_types.ToolSuccess(content: c, ..) -> #(c, True)
+                    llm_types.ToolFailure(error: e, ..) -> #(e, False)
+                  }
+                  types.ToolCallDetail(
+                    name: call.name,
+                    input_summary: string.slice(call.input_json, 0, 500),
+                    output_summary: string.slice(output, 0, 500),
+                    success:,
+                  )
+                })
+              let stats_with_tools =
+                ReactStats(
+                  ..updated_stats,
+                  tools_used: list.append(updated_stats.tools_used, tool_names),
+                  tool_call_details: list.append(
+                    updated_stats.tool_call_details,
+                    new_details,
+                  ),
+                )
               let has_failure =
                 list.any(results, fn(r) {
                   case r {
@@ -378,6 +409,7 @@ fn outcome_from_result(
         structured_result: option.None,
         instruction:,
         tools_used: unique_tools,
+        tool_call_details: stats.tool_call_details,
         input_tokens: stats.input_tokens,
         output_tokens: stats.output_tokens,
         duration_ms:,
@@ -392,6 +424,7 @@ fn outcome_from_result(
         error: err,
         instruction:,
         tools_used: unique_tools,
+        tool_call_details: stats.tool_call_details,
         input_tokens: stats.input_tokens,
         output_tokens: stats.output_tokens,
         duration_ms:,

@@ -11,7 +11,8 @@
          resolve_symlinks/1,
          file_size/1, days_ago_date/1,
          uri_encode/1, extract_ddg_results/1,
-         http_get/1, cosine_similarity/2]).
+         http_get/1, cosine_similarity/2,
+         ensure_utf8/1]).
 
 %% Read one line from stdin.
 %% Returns {ok, Binary} (including trailing newline) or {error, nil} on EOF.
@@ -412,9 +413,9 @@ extract_results_loop(Html, Acc) ->
             %% Find snippet
             Snippet = extract_snippet(Rest),
             Result = {search_result,
-                      list_to_binary(Title),
-                      list_to_binary(clean_ddg_url(Url)),
-                      list_to_binary(Snippet)},
+                      to_binary(Title),
+                      to_binary(clean_ddg_url(Url)),
+                      to_binary(Snippet)},
             %% Move past this result
             Remaining = case string:str(Rest, "class=\"result__a\"") of
                 0 -> [];
@@ -427,9 +428,9 @@ extract_results_loop(Html, Acc) ->
             end,
             case Remaining of
                 [] -> [{search_result,
-                        list_to_binary(Title),
-                        list_to_binary(clean_ddg_url(Url)),
-                        list_to_binary(Snippet)} | Acc];
+                        to_binary(Title),
+                        to_binary(clean_ddg_url(Url)),
+                        to_binary(Snippet)} | Acc];
                 _ -> extract_results_loop(Remaining, [Result | Acc])
             end
     end.
@@ -523,6 +524,11 @@ cosine_similarity(A, B) when is_list(A), is_list(B) ->
     end.
 
 %% Clean DuckDuckGo redirect URLs to extract the actual URL.
+%% Convert either a charlist or a binary to a binary safely.
+to_binary(V) when is_binary(V) -> V;
+to_binary(V) when is_list(V) -> unicode:characters_to_binary(V);
+to_binary(V) -> unicode:characters_to_binary(io_lib:format("~p", [V])).
+
 clean_ddg_url(Url) ->
     case string:str(Url, "uddg=") of
         0 -> Url;
@@ -535,3 +541,20 @@ clean_ddg_url(Url) ->
                     uri_string:unquote(list_to_binary(Part))
             end
     end.
+
+%% Ensure a binary is valid UTF-8, replacing invalid bytes with U+FFFD.
+ensure_utf8(Bin) when is_binary(Bin) ->
+    case unicode:characters_to_binary(Bin) of
+        Result when is_binary(Result) -> Result;
+        _ ->
+            %% Contains invalid sequences — replace byte by byte
+            ensure_utf8_loop(Bin, <<>>)
+    end.
+
+ensure_utf8_loop(<<>>, Acc) ->
+    Acc;
+ensure_utf8_loop(<<C/utf8, Rest/binary>>, Acc) ->
+    ensure_utf8_loop(Rest, <<Acc/binary, C/utf8>>);
+ensure_utf8_loop(<<_, Rest/binary>>, Acc) ->
+    %% Replace invalid byte with U+FFFD (replacement character)
+    ensure_utf8_loop(Rest, <<Acc/binary, 16#EF, 16#BF, 16#BD>>).

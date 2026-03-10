@@ -16,6 +16,7 @@ import mist.{type Connection, type ResponseData}
 import narrative/librarian.{type LibrarianMessage}
 import narrative/log as narrative_log
 import slog
+import web/auth
 import web/html
 import web/protocol
 
@@ -72,25 +73,6 @@ fn get_auth_token() -> Option(String) {
   case get_env("SPRINGDRIFT_WEB_TOKEN") {
     Ok(token) -> Some(token)
     Error(_) -> None
-  }
-}
-
-fn check_auth(req: Request(Connection), token: Option(String)) -> Bool {
-  case token {
-    None -> True
-    Some(expected) ->
-      case request.get_header(req, "authorization") {
-        Ok(header) -> header == "Bearer " <> expected
-        Error(_) ->
-          case request.get_query(req) {
-            Ok(params) ->
-              case list.key_find(params, "token") {
-                Ok(t) -> t == expected
-                Error(_) -> False
-              }
-            Error(_) -> False
-          }
-      }
   }
 }
 
@@ -151,7 +133,7 @@ fn handle_request(
   auth_token: Option(String),
   lib: Option(Subject(LibrarianMessage)),
 ) -> Response(ResponseData) {
-  case check_auth(req, auth_token) {
+  case auth.check_auth(req, auth_token) {
     False ->
       response.new(401)
       |> response.set_body(

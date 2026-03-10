@@ -1,5 +1,5 @@
 import agent/cognitive
-import agent/registry
+import agent/cognitive_config
 import agent/types.{
   type CognitiveReply, type Notification, QuestionForHuman, RestoreMessages,
   SetModel, UserAnswer, UserInput,
@@ -18,29 +18,8 @@ import llm/types as llm_types
 
 fn start_cognitive(provider) {
   let notify_subj: process.Subject(Notification) = process.new_subject()
-  let reg = registry.new()
-  let subj =
-    cognitive.start(
-      provider,
-      "You are a test assistant.",
-      256,
-      None,
-      [],
-      [],
-      reg,
-      False,
-      notify_subj,
-      "mock-model",
-      "mock-reasoning",
-      None,
-      ".springdrift/memory/narrative",
-      ".springdrift/memory/cbr",
-      "mock-model",
-      None,
-      [],
-      False,
-      None,
-    )
+  let cfg = cognitive_config.default_test_config(provider, notify_subj)
+  let subj = cognitive.start(cfg)
   #(subj, notify_subj)
 }
 
@@ -265,29 +244,14 @@ pub fn model_fallback_on_retryable_error_test() {
     })
 
   let notify_subj: process.Subject(types.Notification) = process.new_subject()
-  let reg = registry.new()
-  let cognitive =
-    cognitive.start(
-      provider,
-      "You are a test assistant.",
-      256,
-      None,
-      [],
-      [],
-      reg,
-      False,
-      notify_subj,
-      "mock-task",
-      "mock-reasoning",
-      None,
-      ".springdrift/memory/narrative",
-      ".springdrift/memory/cbr",
-      "mock-task",
-      None,
-      [],
-      False,
-      None,
+  let cfg =
+    cognitive_config.CognitiveConfig(
+      ..cognitive_config.default_test_config(provider, notify_subj),
+      task_model: "mock-task",
+      reasoning_model: "mock-reasoning",
+      archivist_model: "mock-task",
     )
+  let cognitive = cognitive.start(cfg)
 
   // Use a query with complexity keywords so heuristic classifies as Complex,
   // routing to reasoning_model (mock-reasoning) which returns 529

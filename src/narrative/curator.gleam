@@ -18,6 +18,7 @@ import agent/types as agent_types
 import facts/log as facts_log
 import facts/types as facts_types
 import gleam/erlang/process.{type Subject}
+import gleam/float
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -81,6 +82,8 @@ type CuratorState {
     cbr_dir: String,
     facts_dir: String,
     housekeeping_interval_ms: Int,
+    housekeeping_ticks: Int,
+    housekeeping_tick_target: Int,
     vm: VirtualMemory,
     identity_dirs: List(String),
     memory_tag: String,
@@ -133,6 +136,9 @@ pub fn start_with_identity(
         cbr_dir:,
         facts_dir:,
         housekeeping_interval_ms: 86_400_000,
+        housekeeping_ticks: 0,
+        // 60 ticks × 60s timeout = ~1 hour between housekeeping passes
+        housekeeping_tick_target: 60,
         vm: virtual_memory.empty(),
         identity_dirs:,
         memory_tag:,
@@ -258,8 +264,15 @@ pub fn run_housekeeping(curator: Subject(CuratorMessage)) -> Nil {
 fn loop(state: CuratorState) -> Nil {
   case process.receive(state.self, 60_000) {
     Error(_) -> {
-      // Timeout — idle heartbeat
-      loop(state)
+      // Timeout — idle heartbeat; check if housekeeping is due
+      let ticks = state.housekeeping_ticks + 1
+      case ticks >= state.housekeeping_tick_target {
+        True -> {
+          do_housekeeping(state)
+          loop(CuratorState(..state, housekeeping_ticks: 0))
+        }
+        False -> loop(CuratorState(..state, housekeeping_ticks: ticks))
+      }
     }
     Ok(msg) ->
       case msg {
@@ -620,21 +633,63 @@ fn build_preamble_slots(state: CuratorState) -> List(identity.SlotValue) {
   let fact_count = librarian.get_persistent_fact_count(state.librarian)
   let case_count = librarian.get_case_count(state.librarian)
 
+  // Query thread index and format top 5 threads
+  let thread_index = librarian.load_thread_index(state.librarian)
+  let active_threads_text =
+    thread_index.threads
+    |> list.sort(fn(a, b) { string.compare(b.last_cycle_at, a.last_cycle_at) })
+    |> list.take(5)
+    |> list.map(fn(t) {
+      "- "
+      <> t.thread_name
+      <> " ("
+      <> int.to_string(t.cycle_count)
+      <> " cycles, last: "
+      <> t.last_cycle_at
+      <> ")"
+    })
+    |> string.join("\n")
+
+  // Query persistent facts and format 3 most recent
+  let all_facts = librarian.get_all_facts(state.librarian)
+  let recent_fact_text =
+    all_facts
+    |> list.filter(fn(f) { f.scope == facts_types.Persistent })
+    |> list.filter(fn(f) { f.operation == facts_types.Write })
+    |> list.sort(fn(a, b) { string.compare(b.timestamp, a.timestamp) })
+    |> list.take(3)
+    |> list.map(fn(f) {
+      "- "
+      <> f.key
+      <> " = "
+      <> f.value
+      <> " (confidence: "
+      <> float.to_string(f.confidence)
+      <> ")"
+    })
+    |> string.join("\n")
+
+  // Query last narrative entry for session summary
+  let last_session_summary = case librarian.get_recent(state.librarian, 1) {
+    [entry] -> entry.summary
+    _ -> ""
+  }
+
   // Build slot values
   [
     identity.SlotValue(key: "session_status", value: "Active session"),
     identity.SlotValue(key: "last_session_date", value: today),
-    identity.SlotValue(key: "last_session_summary", value: ""),
+    identity.SlotValue(key: "last_session_summary", value: last_session_summary),
     identity.SlotValue(
       key: "active_thread_count",
       value: int.to_string(thread_count),
     ),
-    identity.SlotValue(key: "active_threads", value: ""),
+    identity.SlotValue(key: "active_threads", value: active_threads_text),
     identity.SlotValue(
       key: "persistent_fact_count",
       value: int.to_string(fact_count),
     ),
-    identity.SlotValue(key: "recent_fact_sample", value: ""),
+    identity.SlotValue(key: "recent_fact_sample", value: recent_fact_text),
     identity.SlotValue(key: "cbr_case_count", value: int.to_string(case_count)),
     identity.SlotValue(key: "open_commitments", value: ""),
     identity.SlotValue(key: "memory_health", value: "Nominal"),

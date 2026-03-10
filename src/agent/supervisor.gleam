@@ -122,6 +122,13 @@ fn handle_external(state: SupervisorState, msg: SupervisorMessage) -> Nil {
     }
 
     StopChild(name:) -> {
+      // Kill the agent process before removing from children
+      list.each(state.children, fn(c) {
+        case c.spec.name == name {
+          True -> process.kill(c.pid)
+          False -> Nil
+        }
+      })
       let new_children =
         list.filter(state.children, fn(c) { c.spec.name != name })
       notify(state.cognitive, AgentStopped(name:))
@@ -130,6 +137,7 @@ fn handle_external(state: SupervisorState, msg: SupervisorMessage) -> Nil {
 
     ShutdownAll -> {
       list.each(state.children, fn(c) {
+        process.kill(c.pid)
         notify(state.cognitive, AgentStopped(name: c.spec.name))
       })
       Nil

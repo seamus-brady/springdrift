@@ -278,6 +278,11 @@ pub type LibrarianMessage {
   )
   /// Get aggregated stats for a date.
   QueryDayStats(date: String, reply_to: Subject(dag_types.DayStats))
+  /// Get per-tool usage stats for a date.
+  QueryToolActivity(
+    date: String,
+    reply_to: Subject(List(dag_types.ToolActivityRecord)),
+  )
 
   /// Shutdown
   Shutdown
@@ -932,6 +937,18 @@ pub fn clear_cycle_scratchpad(
   process.send(librarian, ClearCycleScratchpad(cycle_id:))
 }
 
+pub fn query_tool_activity(
+  librarian: Subject(LibrarianMessage),
+  date: String,
+) -> List(dag_types.ToolActivityRecord) {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryToolActivity(date:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(records) -> records
+    Error(_) -> []
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Message loop
 // ---------------------------------------------------------------------------
@@ -1185,6 +1202,12 @@ fn loop(state: LibrarianState) -> Nil {
         QueryDayStats(date:, reply_to:) -> {
           let stats = compute_day_stats(state, date)
           process.send(reply_to, stats)
+          loop(state)
+        }
+
+        QueryToolActivity(date:, reply_to:) -> {
+          let records = compute_tool_activity(state, date)
+          process.send(reply_to, records)
           loop(state)
         }
       }
@@ -1680,6 +1703,79 @@ fn compute_day_stats(state: LibrarianState, date: String) -> dag_types.DayStats 
     models_used:,
     gate_decisions:,
   )
+}
+
+fn compute_tool_activity(
+  state: LibrarianState,
+  date: String,
+) -> List(dag_types.ToolActivityRecord) {
+  let all = do_query_dag_day(state, date)
+  // Collect all (tool_name, success, cycle_id) triples
+  let triples =
+    list.flat_map(all, fn(node) {
+      list.map(node.tool_calls, fn(t) { #(t.name, t.success, node.cycle_id) })
+    })
+  // Group by tool name using list-based accumulation
+  list.fold(triples, [], fn(acc, triple) {
+    let #(name, success, cycle_id) = triple
+    upsert_tool_record(acc, name, success, cycle_id, [])
+  })
+}
+
+fn upsert_tool_record(
+  records: List(dag_types.ToolActivityRecord),
+  name: String,
+  success: Bool,
+  cycle_id: String,
+  checked: List(dag_types.ToolActivityRecord),
+) -> List(dag_types.ToolActivityRecord) {
+  case records {
+    [] -> {
+      // Not found — create new record
+      let new =
+        dag_types.ToolActivityRecord(
+          name:,
+          total_calls: 1,
+          success_count: case success {
+            True -> 1
+            False -> 0
+          },
+          failure_count: case success {
+            True -> 0
+            False -> 1
+          },
+          cycle_ids: [cycle_id],
+        )
+      [new, ..checked]
+    }
+    [rec, ..rest] ->
+      case rec.name == name {
+        True -> {
+          let updated =
+            dag_types.ToolActivityRecord(
+              ..rec,
+              total_calls: rec.total_calls + 1,
+              success_count: rec.success_count
+                + case success {
+                  True -> 1
+                  False -> 0
+                },
+              failure_count: rec.failure_count
+                + case success {
+                  True -> 0
+                  False -> 1
+                },
+              cycle_ids: case list.contains(rec.cycle_ids, cycle_id) {
+                True -> rec.cycle_ids
+                False -> [cycle_id, ..rec.cycle_ids]
+              },
+            )
+          list.append(checked, [updated, ..rest])
+        }
+        False ->
+          upsert_tool_record(rest, name, success, cycle_id, [rec, ..checked])
+      }
+  }
 }
 
 fn replay_dag_from_cycle_log(state: LibrarianState, max_files: Int) -> Nil {

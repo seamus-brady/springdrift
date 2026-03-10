@@ -28,14 +28,33 @@ pub fn run_probes(
   cycle_id: String,
   verbose: Bool,
 ) -> ProbeResult {
+  run_probes_with_tokens(
+    instruction,
+    provider,
+    model,
+    cycle_id,
+    verbose,
+    generate_token(),
+    generate_token(),
+  )
+}
+
+/// Run probes with caller-supplied tokens. Useful for deterministic testing.
+pub fn run_probes_with_tokens(
+  instruction: String,
+  provider: Provider,
+  model: String,
+  cycle_id: String,
+  verbose: Bool,
+  hijack_token: String,
+  leakage_token: String,
+) -> ProbeResult {
   slog.debug(
     "dprime/canary",
     "run_probes",
     "Running hijack + leakage probes",
     Some(cycle_id),
   )
-  let hijack_token = generate_token()
-  let leakage_token = generate_token()
 
   let hijack_result =
     run_hijack_probe(

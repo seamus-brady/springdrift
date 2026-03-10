@@ -1,4 +1,5 @@
 import agent/cognitive
+import agent/cognitive_config.{CognitiveConfig}
 import agent/registry
 import agent/supervisor
 import agent/types as agent_types
@@ -6,6 +7,7 @@ import agents/coder
 import agents/planner
 import agents/researcher
 import config.{type AppConfig}
+import dot_env
 import dprime/config as dprime_config_mod
 import gleam/erlang/process
 import gleam/int
@@ -44,6 +46,11 @@ fn default_skill_dirs() -> List(String) {
 }
 
 pub fn main() -> Nil {
+  // Load .env file from project root (silently ignored if missing)
+  dot_env.new()
+  |> dot_env.set_ignore_missing_file(True)
+  |> dot_env.load()
+
   let args = get_startup_args()
   case list.contains(args, "--help") || list.contains(args, "-h") {
     True -> {
@@ -295,27 +302,27 @@ fn run(cfg: AppConfig) -> Nil {
 
   // Start cognitive loop with empty registry (supervisor will register agents)
   let cognitive_subj =
-    cognitive.start(
-      p,
-      system,
-      max_tokens,
-      cfg.max_context_messages,
-      agent_tools,
-      initial_messages,
-      registry.new(),
-      verbose,
-      notify,
-      task_model,
-      reasoning_model,
-      dprime_state,
-      narrative_dir,
-      paths.cbr_dir(),
-      archivist_model,
-      lib,
-      profile_dirs,
-      write_anywhere,
-      option.Some(curator_subj),
-    )
+    cognitive.start(CognitiveConfig(
+      provider: p,
+      system:,
+      max_tokens:,
+      max_context_messages: cfg.max_context_messages,
+      agent_tools:,
+      initial_messages:,
+      registry: registry.new(),
+      verbose:,
+      notify:,
+      task_model:,
+      reasoning_model:,
+      dprime_state:,
+      narrative_dir:,
+      cbr_dir: paths.cbr_dir(),
+      archivist_model:,
+      librarian: lib,
+      profile_dirs:,
+      write_anywhere:,
+      curator: option.Some(curator_subj),
+    ))
 
   // Start supervisor and register agents via StartChild
   let sup = supervisor.start(cognitive_subj, 5)
