@@ -3,7 +3,7 @@ version = "0.1.0"
 description = "A knowledge worker agent framework for the BEAM. Persistent memory, scheduled research, configurable safety."
 licences = ["MIT"]
 repository = { type = "github", user = "seamus-brady", repo = "springdrift" }
-gleam = ">= 1.5.0"
+gleam = ">= 1.11.0"
 
 [dependencies]
 gleam_stdlib = ">= 0.44.0 and < 2.0.0"

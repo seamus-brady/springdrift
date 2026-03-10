@@ -3,8 +3,7 @@
          start_spinner/1, stop_spinner/0,
          generate_uuid/0, get_datetime/0, get_date/0,
          tui_run/2, throw_tui_exit/0,
-         fetch_url/1, http_post/3, check_docker/0, docker_build/1,
-         docker_run_container/2, docker_exec/2, docker_stop/1,
+         fetch_url/1, http_post/3,
          rescue/1, sha256_hex/1,
          log_init/1, log_stdout_enabled/0, log_stderr/1,
          monotonic_now_ms/0, file_rename/2, sanitize_json/1,
@@ -166,100 +165,6 @@ http_post(Url, Headers, Body) ->
             {error, list_to_binary(io_lib:format("~p", [Reason]))}
     end.
 
-%% Check whether Docker daemon is reachable. Returns true or false.
-check_docker() ->
-    case os:find_executable("docker") of
-        false -> false;
-        _Path ->
-            Out = os:cmd("docker info 2>&1"),
-            not lists:prefix("Cannot connect", Out) andalso
-            not lists:prefix("Error", Out) andalso
-            string:str(Out, "Server Version") > 0
-    end.
-
-%% Build the springdrift-sandbox Docker image from ContextDir.
-%% Returns {ok, nil} or {error, Reason}.
-docker_build(ContextDir) ->
-    Dir = case is_binary(ContextDir) of
-        true  -> binary_to_list(ContextDir);
-        false -> ContextDir
-    end,
-    Cmd = "docker build -t springdrift-sandbox:latest " ++ Dir ++ " 2>&1",
-    Out = os:cmd(Cmd),
-    %% docker build exits 0 on success; os:cmd doesn't give exit code,
-    %% so we check for known success/failure markers.
-    case string:str(Out, "Successfully built") > 0 orelse
-         string:str(Out, "naming to docker.io") > 0 orelse
-         string:str(Out, "FINISHED") > 0 of
-        true  -> {ok, nil};
-        false ->
-            %% Also accept if the image already exists (no rebuild needed).
-            CheckCmd = "docker image inspect springdrift-sandbox:latest 2>&1",
-            CheckOut = os:cmd(CheckCmd),
-            case string:str(CheckOut, "\"Id\"") > 0 of
-                true  -> {ok, nil};
-                false -> {error, list_to_binary(Out)}
-            end
-    end.
-
-%% Start a detached sandbox container with the project directory mounted.
-%% Returns {ok, ContainerId} or {error, Reason}.
-docker_run_container(Image, Cwd) ->
-    ImageStr = case is_binary(Image) of
-        true  -> binary_to_list(Image);
-        false -> Image
-    end,
-    CwdStr = case is_binary(Cwd) of
-        true  -> binary_to_list(Cwd);
-        false -> Cwd
-    end,
-    Uuid = binary_to_list(generate_uuid()),
-    Name = "springdrift-sandbox-" ++ Uuid,
-    Cmd = "docker run -d --name " ++ Name ++
-          " --mount type=bind,src=" ++ CwdStr ++ ",dst=/workspace" ++
-          " --memory 512m --cpus 1.0" ++
-          " --cap-drop ALL --security-opt no-new-privileges" ++
-          " --network bridge" ++
-          " " ++ ImageStr ++ " sleep infinity 2>&1",
-    Out = string:trim(os:cmd(Cmd)),
-    %% On success, docker run -d prints the container ID (64 hex chars)
-    case length(Out) >= 12 andalso string:str(Out, " ") =:= 0 of
-        true  -> {ok, list_to_binary(Out)};
-        false -> {error, list_to_binary(Out)}
-    end.
-
-%% Run a command inside the container. Returns {ok, Output} or {error, Output}.
-%% Output is truncated to 16 KB.
-docker_exec(ContainerId, Cmd) ->
-    IdStr = case is_binary(ContainerId) of
-        true  -> binary_to_list(ContainerId);
-        false -> ContainerId
-    end,
-    CmdStr = case is_binary(Cmd) of
-        true  -> binary_to_list(Cmd);
-        false -> Cmd
-    end,
-    %% Escape single quotes in the command
-    Escaped = re:replace(CmdStr, "'", "'\\\\''", [global, {return, list}]),
-    FullCmd = "docker exec " ++ IdStr ++ " bash -c '" ++ Escaped ++ "' 2>&1; echo \"__EXIT:$?\"",
-    RawOut = os:cmd(FullCmd),
-    %% Parse exit code from sentinel
-    case re:run(RawOut, "__EXIT:(\\d+)", [{capture, all_but_first, list}]) of
-        {match, [CodeStr]} ->
-            Code = list_to_integer(CodeStr),
-            %% Strip sentinel from output
-            Output0 = re:replace(RawOut, "\n?__EXIT:\\d+\n?$", "", [{return, list}]),
-            Output1 = list_to_binary(Output0),
-            Truncated = binary:part(Output1, 0, min(byte_size(Output1), 16384)),
-            case Code of
-                0 -> {ok, Truncated};
-                _ -> {error, Truncated}
-            end;
-        nomatch ->
-            Out = list_to_binary(RawOut),
-            Truncated = binary:part(Out, 0, min(byte_size(Out), 16384)),
-            {error, Truncated}
-    end.
 
 %% Run a zero-arity function, catching any throw/error/exit.
 %% Returns {ok, Result} or {error, Reason}.
@@ -290,16 +195,6 @@ log_stdout_enabled() ->
 %% Write a line to stderr (avoids corrupting TUI alternate-screen output).
 log_stderr(Text) ->
     io:format(standard_error, "~ts~n", [Text]).
-
-%% Stop and remove the container.
-docker_stop(ContainerId) ->
-    IdStr = case is_binary(ContainerId) of
-        true  -> binary_to_list(ContainerId);
-        false -> ContainerId
-    end,
-    os:cmd("docker stop " ++ IdStr ++ " 2>&1"),
-    os:cmd("docker rm " ++ IdStr ++ " 2>&1"),
-    nil.
 
 monotonic_now_ms() ->
     erlang:system_time(millisecond).

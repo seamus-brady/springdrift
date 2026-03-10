@@ -111,6 +111,35 @@ pub fn is_not_retryable_unknown_test() {
 }
 
 // ---------------------------------------------------------------------------
+// is_rate_limit — distinguishes rate limits from other retryable errors
+// ---------------------------------------------------------------------------
+
+pub fn is_rate_limit_429_test() {
+  retry.is_rate_limit(llm_types.ApiError(status_code: 429, message: ""))
+  |> should.be_true
+}
+
+pub fn is_rate_limit_rate_limit_error_test() {
+  retry.is_rate_limit(llm_types.RateLimitError(message: ""))
+  |> should.be_true
+}
+
+pub fn is_not_rate_limit_500_test() {
+  retry.is_rate_limit(llm_types.ApiError(status_code: 500, message: ""))
+  |> should.be_false
+}
+
+pub fn is_not_rate_limit_529_test() {
+  retry.is_rate_limit(llm_types.ApiError(status_code: 529, message: ""))
+  |> should.be_false
+}
+
+pub fn is_not_rate_limit_network_test() {
+  retry.is_rate_limit(llm_types.NetworkError(reason: ""))
+  |> should.be_false
+}
+
+// ---------------------------------------------------------------------------
 // call_with_retry — retryable error succeeds on retry
 // ---------------------------------------------------------------------------
 

@@ -7,6 +7,8 @@
 import agent/types as agent_types
 import cbr/log as cbr_log
 import cbr/types as cbr_types
+import embedding/client as embedding_client
+import embedding/types as embedding_types
 import gleam/dynamic/decode
 import gleam/erlang/process.{type Subject}
 import gleam/int
@@ -117,6 +119,7 @@ pub fn spawn(
   cbr_dir: String,
   verbose: Bool,
   lib: Option(Subject(LibrarianMessage)),
+  embed_config: embedding_types.EmbeddingConfig,
 ) -> Nil {
   let _ =
     process.spawn_unlinked(fn() {
@@ -138,9 +141,11 @@ pub fn spawn(
           // Step 2: Generate CBR case from the narrative entry
           case generate_cbr_case(ctx, threaded, provider, model) {
             Some(cbr_case) -> {
-              cbr_log.append(cbr_dir, cbr_case)
+              // Embed the case before persisting
+              let embedded = embed_cbr_case(cbr_case, embed_config)
+              cbr_log.append(cbr_dir, embedded)
               case lib {
-                Some(l) -> librarian.notify_new_case(l, cbr_case)
+                Some(l) -> librarian.notify_new_case(l, embedded)
                 None -> Nil
               }
             }
@@ -648,6 +653,49 @@ fn generate_cbr_case(
   }
 }
 
+/// Generate an embedding for a CBR case and attach it.
+/// Falls back to empty embedding on any error (best-effort).
+fn embed_cbr_case(
+  cbr_case: cbr_types.CbrCase,
+  config: embedding_types.EmbeddingConfig,
+) -> cbr_types.CbrCase {
+  // Build a text representation for embedding from the case's key fields
+  let text =
+    cbr_case.problem.intent
+    <> " "
+    <> cbr_case.problem.domain
+    <> " "
+    <> string.join(cbr_case.problem.keywords, " ")
+    <> " "
+    <> cbr_case.problem.user_input
+    <> " "
+    <> cbr_case.solution.approach
+  case embedding_client.embed(config, text) {
+    Ok(result) -> {
+      slog.info(
+        "narrative/archivist",
+        "embed_cbr",
+        "Embedded CBR case "
+          <> cbr_case.case_id
+          <> " ("
+          <> int.to_string(list.length(result.embedding))
+          <> " dims)",
+        Some(cbr_case.case_id),
+      )
+      cbr_types.CbrCase(..cbr_case, embedding: result.embedding)
+    }
+    Error(_) -> {
+      slog.warn(
+        "narrative/archivist",
+        "embed_cbr",
+        "Embedding failed for CBR case " <> cbr_case.case_id <> ", using empty",
+        Some(cbr_case.case_id),
+      )
+      cbr_case
+    }
+  }
+}
+
 fn cbr_system_prompt() -> String {
   "You are the Archivist extracting a Case-Based Reasoning record from a completed cognitive cycle. Your goal is to produce a structured problem/solution/outcome record optimised for future retrieval.
 
@@ -886,14 +934,57 @@ fn lenient_cbr_outcome_decoder() -> decode.Decoder(cbr_types.CbrOutcome) {
 }
 
 fn fallback_entry(ctx: ArchivistContext) -> NarrativeEntry {
-  let summary =
-    "I completed a cycle but my Archivist could not render the memory into structured form — like a monk who finishes the day's work but finds the ink has run dry. The user asked: \""
-    <> string.slice(ctx.user_input, 0, 120)
-    <> case string.length(ctx.user_input) > 120 {
-      True -> "..."
-      False -> ""
+  // Build a factual summary from the cycle context
+  let user_part =
+    "I was asked: \"" <> truncate_text(ctx.user_input, 200) <> "\"."
+  let response_part = case ctx.final_response {
+    "" -> " I was unable to produce a response."
+    r -> " I responded: \"" <> truncate_text(r, 300) <> "\""
+  }
+  let agent_part = case ctx.agent_completions {
+    [] -> ""
+    completions -> {
+      let agent_lines =
+        list.map(completions, fn(c) {
+          c.agent_human_name
+          <> " ("
+          <> string.join(c.tools_used, ", ")
+          <> "): "
+          <> case c.result {
+            Ok(r) -> "succeeded — " <> truncate_text(r, 100)
+            Error(e) -> "failed — " <> truncate_text(e, 100)
+          }
+        })
+      " I delegated to: " <> string.join(agent_lines, "; ") <> "."
     }
-    <> "\". I responded, but this record is reconstructed from fragments rather than narrated properly."
+  }
+  let error_part = case string.contains(ctx.final_response, "[Error:") {
+    True -> " (Note: cycle encountered errors.)"
+    False -> ""
+  }
+  let summary = user_part <> response_part <> agent_part <> error_part
+  // Determine intent from agent names if possible
+  let has_researcher =
+    list.any(ctx.agent_completions, fn(c) {
+      string.contains(string.lowercase(c.agent_human_name), "research")
+    })
+  let classification = case has_researcher {
+    True -> types.DataQuery
+    False -> Conversation
+  }
+  // Determine outcome from response and agent results
+  let any_failure =
+    list.any(ctx.agent_completions, fn(c) {
+      case c.result {
+        Error(_) -> True
+        _ -> False
+      }
+    })
+  let status = case ctx.final_response, any_failure {
+    "", _ -> Failure
+    _, True -> types.Partial
+    _, False -> Success
+  }
   NarrativeEntry(
     schema_version: 1,
     cycle_id: ctx.cycle_id,
@@ -901,14 +992,11 @@ fn fallback_entry(ctx: ArchivistContext) -> NarrativeEntry {
     timestamp: get_datetime(),
     entry_type: Narrative,
     summary: summary,
-    intent: Intent(classification: Conversation, description: "", domain: ""),
+    intent: Intent(classification:, description: "", domain: ""),
     outcome: Outcome(
-      status: case ctx.final_response {
-        "" -> Failure
-        _ -> Success
-      },
-      confidence: 0.5,
-      assessment: "Fallback entry — archivist parse failed",
+      status:,
+      confidence: 0.4,
+      assessment: "Reconstructed from cycle context (archivist parse failed)",
     ),
     delegation_chain: list.map(ctx.agent_completions, fn(c) {
       types.DelegationStep(
@@ -916,12 +1004,15 @@ fn fallback_entry(ctx: ArchivistContext) -> NarrativeEntry {
         agent_id: c.agent_id,
         agent_human_name: c.agent_human_name,
         agent_cycle_id: c.agent_cycle_id,
-        instruction: "",
+        instruction: truncate_text(c.instruction, 200),
         outcome: case c.result {
           Ok(_) -> "success"
           Error(_) -> "failure"
         },
-        contribution: "",
+        contribution: case c.result {
+          Ok(r) -> truncate_text(r, 300)
+          Error(e) -> "Error: " <> truncate_text(e, 200)
+        },
         tools_used: c.tools_used,
         sources_accessed: 0,
         input_tokens: c.input_tokens,
@@ -930,7 +1021,7 @@ fn fallback_entry(ctx: ArchivistContext) -> NarrativeEntry {
       )
     }),
     decisions: [],
-    keywords: [],
+    keywords: extract_simple_keywords(ctx.user_input),
     entities: Entities(
       locations: [],
       organisations: [],
@@ -951,6 +1042,41 @@ fn fallback_entry(ctx: ArchivistContext) -> NarrativeEntry {
     ),
     observations: [],
   )
+}
+
+/// Truncate text to a maximum length, appending "..." if truncated.
+fn truncate_text(text: String, max_len: Int) -> String {
+  case string.length(text) > max_len {
+    True -> string.slice(text, 0, max_len) <> "..."
+    False -> text
+  }
+}
+
+/// Extract simple keywords by splitting on spaces and filtering short/stop words.
+fn extract_simple_keywords(text: String) -> List(String) {
+  text
+  |> string.lowercase
+  |> string.replace(",", " ")
+  |> string.replace(".", " ")
+  |> string.replace("?", " ")
+  |> string.replace("!", " ")
+  |> string.replace("\"", " ")
+  |> string.split(" ")
+  |> list.map(string.trim)
+  |> list.filter(fn(w) { string.length(w) > 3 })
+  |> list.filter(fn(w) {
+    !list.contains(
+      [
+        "what", "that", "this", "with", "from", "have", "been", "will", "would",
+        "could", "should", "about", "there", "their", "which", "when", "where",
+        "some", "than", "them", "then", "they", "your", "into", "also", "just",
+        "like", "very", "much", "does", "want",
+      ],
+      w,
+    )
+  })
+  |> list.unique
+  |> list.take(10)
 }
 
 /// Extract a JSON object from text that may contain markdown fences,

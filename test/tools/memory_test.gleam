@@ -1,3 +1,4 @@
+import embedding/types as embedding_types
 import gleam/list
 import gleam/option.{None}
 import gleam/string
@@ -6,6 +7,13 @@ import gleeunit/should
 import llm/types.{ToolCall, ToolFailure, ToolSuccess}
 import simplifile
 import tools/memory
+
+const test_embed_config = embedding_types.EmbeddingConfig(
+  model: "test",
+  base_url: "http://localhost:0",
+  dimensions: 768,
+  fallback: "symbolic",
+)
 
 pub fn main() -> Nil {
   gleeunit.main()
@@ -72,7 +80,8 @@ pub fn is_memory_tool_agent_test() {
 
 pub fn recall_recent_missing_period_test() {
   let call = ToolCall(id: "m1", name: "recall_recent", input_json: "{}")
-  let result = memory.execute(call, "/nonexistent/dir", None, None)
+  let result =
+    memory.execute(call, "/nonexistent/dir", None, None, test_embed_config)
   case result {
     ToolFailure(..) -> Nil
     _ -> should.fail()
@@ -86,7 +95,14 @@ pub fn recall_recent_empty_dir_returns_no_entries_test() {
       name: "recall_recent",
       input_json: "{\"period\": \"today\"}",
     )
-  let result = memory.execute(call, "/nonexistent/narrative/dir", None, None)
+  let result =
+    memory.execute(
+      call,
+      "/nonexistent/narrative/dir",
+      None,
+      None,
+      test_embed_config,
+    )
   case result {
     ToolSuccess(content: c, ..) -> {
       c |> should.equal("No narrative entries found for today.")
@@ -102,7 +118,14 @@ pub fn recall_recent_yesterday_empty_test() {
       name: "recall_recent",
       input_json: "{\"period\": \"yesterday\"}",
     )
-  let result = memory.execute(call, "/nonexistent/narrative/dir", None, None)
+  let result =
+    memory.execute(
+      call,
+      "/nonexistent/narrative/dir",
+      None,
+      None,
+      test_embed_config,
+    )
   case result {
     ToolSuccess(content: c, ..) -> {
       c |> should.equal("No narrative entries found for yesterday.")
@@ -118,7 +141,14 @@ pub fn recall_recent_this_week_empty_test() {
       name: "recall_recent",
       input_json: "{\"period\": \"this_week\"}",
     )
-  let result = memory.execute(call, "/nonexistent/narrative/dir", None, None)
+  let result =
+    memory.execute(
+      call,
+      "/nonexistent/narrative/dir",
+      None,
+      None,
+      test_embed_config,
+    )
   case result {
     ToolSuccess(content: c, ..) -> {
       c |> should.equal("No narrative entries found for this_week.")
@@ -133,7 +163,8 @@ pub fn recall_recent_this_week_empty_test() {
 
 pub fn recall_search_missing_query_test() {
   let call = ToolCall(id: "s1", name: "recall_search", input_json: "{}")
-  let result = memory.execute(call, "/nonexistent/dir", None, None)
+  let result =
+    memory.execute(call, "/nonexistent/dir", None, None, test_embed_config)
   case result {
     ToolFailure(..) -> Nil
     _ -> should.fail()
@@ -147,7 +178,14 @@ pub fn recall_search_empty_dir_returns_no_results_test() {
       name: "recall_search",
       input_json: "{\"query\": \"dublin property\"}",
     )
-  let result = memory.execute(call, "/nonexistent/narrative/dir", None, None)
+  let result =
+    memory.execute(
+      call,
+      "/nonexistent/narrative/dir",
+      None,
+      None,
+      test_embed_config,
+    )
   case result {
     ToolSuccess(content: c, ..) -> {
       c
@@ -165,7 +203,14 @@ pub fn recall_search_empty_dir_returns_no_results_test() {
 
 pub fn recall_threads_empty_dir_test() {
   let call = ToolCall(id: "t1", name: "recall_threads", input_json: "{}")
-  let result = memory.execute(call, "/nonexistent/narrative/dir", None, None)
+  let result =
+    memory.execute(
+      call,
+      "/nonexistent/narrative/dir",
+      None,
+      None,
+      test_embed_config,
+    )
   case result {
     ToolSuccess(content: c, ..) -> {
       c |> should.equal("No active threads in narrative memory.")
@@ -180,7 +225,7 @@ pub fn recall_threads_empty_dir_test() {
 
 pub fn unknown_memory_tool_test() {
   let call = ToolCall(id: "u1", name: "recall_unknown", input_json: "{}")
-  let result = memory.execute(call, "/tmp", None, None)
+  let result = memory.execute(call, "/tmp", None, None, test_embed_config)
   case result {
     ToolFailure(..) -> Nil
     _ -> should.fail()
@@ -222,7 +267,7 @@ pub fn memory_write_no_context_test() {
       name: "memory_write",
       input_json: "{\"key\":\"rent\",\"value\":\"2340\",\"scope\":\"session\",\"confidence\":0.9}",
     )
-  let result = memory.execute(call, "/tmp", None, None)
+  let result = memory.execute(call, "/tmp", None, None, test_embed_config)
   case result {
     ToolFailure(error: e, ..) ->
       should.be_true(string.contains(e, "not available"))
@@ -237,7 +282,7 @@ pub fn memory_clear_no_context_test() {
       name: "memory_clear_key",
       input_json: "{\"key\":\"rent\"}",
     )
-  let result = memory.execute(call, "/tmp", None, None)
+  let result = memory.execute(call, "/tmp", None, None, test_embed_config)
   case result {
     ToolFailure(error: e, ..) ->
       should.be_true(string.contains(e, "not available"))
@@ -252,7 +297,7 @@ pub fn memory_trace_no_context_test() {
       name: "memory_trace_fact",
       input_json: "{\"key\":\"rent\"}",
     )
-  let result = memory.execute(call, "/tmp", None, None)
+  let result = memory.execute(call, "/tmp", None, None, test_embed_config)
   case result {
     ToolFailure(error: e, ..) ->
       should.be_true(string.contains(e, "not available"))
@@ -271,7 +316,7 @@ pub fn memory_read_not_found_test() {
       name: "memory_read",
       input_json: "{\"key\":\"nonexistent\"}",
     )
-  let result = memory.execute(call, "/tmp", None, None)
+  let result = memory.execute(call, "/tmp", None, None, test_embed_config)
   case result {
     ToolSuccess(content: c, ..) ->
       should.be_true(string.contains(c, "No fact found"))
@@ -290,7 +335,7 @@ pub fn memory_query_no_results_test() {
       name: "memory_query_facts",
       input_json: "{\"keyword\":\"nonexistent\"}",
     )
-  let result = memory.execute(call, "/tmp", None, None)
+  let result = memory.execute(call, "/tmp", None, None, test_embed_config)
   case result {
     ToolSuccess(content: c, ..) ->
       should.be_true(string.contains(c, "No facts found"))
@@ -322,7 +367,8 @@ pub fn memory_write_and_read_roundtrip_test() {
       name: "memory_write",
       input_json: "{\"key\":\"dublin_rent\",\"value\":\"2340\",\"scope\":\"session\",\"confidence\":0.9}",
     )
-  let write_result = memory.execute(write_call, "/tmp", None, ctx)
+  let write_result =
+    memory.execute(write_call, "/tmp", None, ctx, test_embed_config)
   case write_result {
     ToolSuccess(content: c, ..) ->
       should.be_true(string.contains(c, "dublin_rent"))
@@ -336,7 +382,8 @@ pub fn memory_write_and_read_roundtrip_test() {
       name: "memory_read",
       input_json: "{\"key\":\"dublin_rent\"}",
     )
-  let read_result = memory.execute(read_call, "/tmp", None, ctx)
+  let read_result =
+    memory.execute(read_call, "/tmp", None, ctx, test_embed_config)
   case read_result {
     ToolSuccess(content: c, ..) -> {
       should.be_true(string.contains(c, "dublin_rent"))
@@ -373,7 +420,7 @@ pub fn memory_write_clear_read_test() {
       name: "memory_write",
       input_json: "{\"key\":\"temp\",\"value\":\"22C\",\"scope\":\"session\",\"confidence\":0.8}",
     )
-  let _ = memory.execute(write_call, "/tmp", None, ctx)
+  let _ = memory.execute(write_call, "/tmp", None, ctx, test_embed_config)
 
   // Clear
   let clear_call =
@@ -382,7 +429,8 @@ pub fn memory_write_clear_read_test() {
       name: "memory_clear_key",
       input_json: "{\"key\":\"temp\"}",
     )
-  let clear_result = memory.execute(clear_call, "/tmp", None, ctx)
+  let clear_result =
+    memory.execute(clear_call, "/tmp", None, ctx, test_embed_config)
   case clear_result {
     ToolSuccess(content: c, ..) -> should.be_true(string.contains(c, "Cleared"))
     _ -> should.fail()
@@ -391,7 +439,8 @@ pub fn memory_write_clear_read_test() {
   // Read should show not found
   let read_call =
     ToolCall(id: "rc1", name: "memory_read", input_json: "{\"key\":\"temp\"}")
-  let read_result = memory.execute(read_call, "/tmp", None, ctx)
+  let read_result =
+    memory.execute(read_call, "/tmp", None, ctx, test_embed_config)
   case read_result {
     ToolSuccess(content: c, ..) ->
       should.be_true(string.contains(c, "No fact found"))
@@ -425,7 +474,7 @@ pub fn memory_trace_shows_history_test() {
       name: "memory_write",
       input_json: "{\"key\":\"rent\",\"value\":\"2340\",\"scope\":\"session\",\"confidence\":0.8}",
     )
-  let _ = memory.execute(w1, "/tmp", None, ctx)
+  let _ = memory.execute(w1, "/tmp", None, ctx, test_embed_config)
 
   let w2 =
     ToolCall(
@@ -433,7 +482,7 @@ pub fn memory_trace_shows_history_test() {
       name: "memory_write",
       input_json: "{\"key\":\"rent\",\"value\":\"2500\",\"scope\":\"session\",\"confidence\":0.9}",
     )
-  let _ = memory.execute(w2, "/tmp", None, ctx)
+  let _ = memory.execute(w2, "/tmp", None, ctx, test_embed_config)
 
   // Trace
   let trace_call =
@@ -442,7 +491,8 @@ pub fn memory_trace_shows_history_test() {
       name: "memory_trace_fact",
       input_json: "{\"key\":\"rent\"}",
     )
-  let trace_result = memory.execute(trace_call, "/tmp", None, ctx)
+  let trace_result =
+    memory.execute(trace_call, "/tmp", None, ctx, test_embed_config)
   case trace_result {
     ToolSuccess(content: c, ..) -> {
       should.be_true(string.contains(c, "2 entries"))
@@ -479,7 +529,7 @@ pub fn memory_query_finds_facts_test() {
       name: "memory_write",
       input_json: "{\"key\":\"dublin_rent\",\"value\":\"2340\",\"scope\":\"session\",\"confidence\":0.9}",
     )
-  let _ = memory.execute(w1, "/tmp", None, ctx)
+  let _ = memory.execute(w1, "/tmp", None, ctx, test_embed_config)
 
   let w2 =
     ToolCall(
@@ -487,7 +537,7 @@ pub fn memory_query_finds_facts_test() {
       name: "memory_write",
       input_json: "{\"key\":\"cork_rent\",\"value\":\"1800\",\"scope\":\"session\",\"confidence\":0.8}",
     )
-  let _ = memory.execute(w2, "/tmp", None, ctx)
+  let _ = memory.execute(w2, "/tmp", None, ctx, test_embed_config)
 
   // Query for "dublin" — should find dublin_rent
   let query_call =
@@ -496,7 +546,8 @@ pub fn memory_query_finds_facts_test() {
       name: "memory_query_facts",
       input_json: "{\"keyword\":\"dublin\"}",
     )
-  let query_result = memory.execute(query_call, "/tmp", None, ctx)
+  let query_result =
+    memory.execute(query_call, "/tmp", None, ctx, test_embed_config)
   case query_result {
     ToolSuccess(content: c, ..) -> {
       should.be_true(string.contains(c, "dublin_rent"))

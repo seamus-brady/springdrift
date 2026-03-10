@@ -17,6 +17,10 @@ import llm/retry
 import llm/types as llm_types
 import slog
 
+/// Minimum delay between react loop turns (ms).
+/// Prevents agents from hammering the API on rapid tool-use cycles.
+const inter_turn_delay_ms = 200
+
 @external(erlang, "springdrift_ffi", "monotonic_now_ms")
 fn monotonic_now_ms() -> Int
 
@@ -308,6 +312,8 @@ fn do_react(
                     stats: stats_with_tools,
                   )
                 False -> {
+                  // Pace requests — brief pause between turns
+                  process.sleep(inter_turn_delay_ms)
                   let next =
                     request.with_tool_results(req, resp.content, results)
                   do_react(

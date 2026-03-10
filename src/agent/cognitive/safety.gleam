@@ -21,6 +21,16 @@ import gleam/string
 import llm/types as llm_types
 import slog
 
+/// Add a synthetic assistant message to state so message history stays
+/// well-formed (alternating user/assistant) when going to Idle after an error.
+fn with_assistant_error(state: CognitiveState, text: String) -> CognitiveState {
+  let msg =
+    llm_types.Message(role: llm_types.Assistant, content: [
+      llm_types.TextContent(text:),
+    ])
+  CognitiveState(..state, messages: list.append(state.messages, [msg]))
+}
+
 /// Spawn a D' safety evaluation for tool calls (pre-dispatch gate).
 pub fn spawn_safety_gate(
   state: CognitiveState,
@@ -441,18 +451,17 @@ pub fn handle_input_safety_gate_complete(
 
     dprime_types.Reject -> {
       // Reply directly with refusal — no LLM call
+      let reject_text =
+        "[Safety system: query rejected (D' score: "
+        <> float.to_string(result.dprime_score)
+        <> "). "
+        <> result.explanation
+        <> "]"
       process.send(
         reply_to,
-        CognitiveReply(
-          response: "[Safety system: query rejected (D' score: "
-            <> float.to_string(result.dprime_score)
-            <> "). "
-            <> result.explanation
-            <> "]",
-          model:,
-          usage: None,
-        ),
+        CognitiveReply(response: reject_text, model:, usage: None),
       )
+      let state = with_assistant_error(state, reject_text)
       CognitiveState(..state, status: Idle)
     }
   }
@@ -669,6 +678,7 @@ pub fn handle_output_gate_complete(
         reply_to,
         CognitiveReply(response: report_text, model: state.model, usage: None),
       )
+      let state = with_assistant_error(state, report_text)
       CognitiveState(..state, status: Idle)
     }
     dprime_types.Modify -> {
@@ -683,14 +693,12 @@ pub fn handle_output_gate_complete(
           let warning =
             "\n\n---\nQuality warning: This report was flagged for review but could not be fully corrected. Issues: "
             <> explanation
+          let full_text = report_text <> warning
           process.send(
             reply_to,
-            CognitiveReply(
-              response: report_text <> warning,
-              model: state.model,
-              usage: None,
-            ),
+            CognitiveReply(response: full_text, model: state.model, usage: None),
           )
+          let state = with_assistant_error(state, full_text)
           CognitiveState(..state, status: Idle)
         }
         False -> {
@@ -739,14 +747,13 @@ pub fn handle_output_gate_complete(
         "Output gate: REJECT (" <> explanation <> ")",
         state.cycle_id,
       )
+      let reject_text =
+        "[Report rejected by quality gate: " <> explanation <> "]"
       process.send(
         reply_to,
-        CognitiveReply(
-          response: "[Report rejected by quality gate: " <> explanation <> "]",
-          model: state.model,
-          usage: None,
-        ),
+        CognitiveReply(response: reject_text, model: state.model, usage: None),
       )
+      let state = with_assistant_error(state, reject_text)
       CognitiveState(..state, status: Idle)
     }
   }

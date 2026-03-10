@@ -9,6 +9,8 @@ import agents/researcher
 import config.{type AppConfig}
 import dot_env
 import dprime/config as dprime_config_mod
+import embedding/health as embedding_health
+import embedding/types as embedding_types
 import gleam/erlang/process
 import gleam/int
 import gleam/io
@@ -277,6 +279,46 @@ fn run(cfg: AppConfig) -> Nil {
   let narrative_dir = option.unwrap(cfg.narrative_dir, paths.narrative_dir())
   let archivist_model = option.unwrap(cfg.archivist_model, task_model)
 
+  // Ollama embedding service — obligatory health check at startup
+  let embedding_config = embedding_types.default_config()
+  case embedding_health.check(embedding_config) {
+    embedding_types.Healthy(model: m, dimensions: d) ->
+      io.println(
+        "Embeddings: " <> m <> " (" <> int.to_string(d) <> " dims) — OK",
+      )
+    embedding_types.Unhealthy(error: e) -> {
+      io.println("FATAL: Ollama embedding service is required but unavailable.")
+      case e {
+        embedding_types.NotReachable(reason:) ->
+          io.println(
+            "  Ollama not reachable: " <> reason <> "\n  Fix: ollama serve",
+          )
+        embedding_types.ModelNotFound(model:) ->
+          io.println(
+            "  Model '" <> model <> "' not found.\n  Fix: ollama pull " <> model,
+          )
+        embedding_types.DimensionMismatch(expected:, got:) ->
+          io.println(
+            "  Dimension mismatch: expected "
+            <> int.to_string(expected)
+            <> ", got "
+            <> int.to_string(got)
+            <> "\n  Fix: ollama rm "
+            <> embedding_config.model
+            <> " && ollama pull "
+            <> embedding_config.model,
+          )
+        embedding_types.HttpError(status:, body:) ->
+          io.println("  HTTP error " <> int.to_string(status) <> ": " <> body)
+        embedding_types.NetworkError(reason:) ->
+          io.println("  Network error: " <> reason)
+        embedding_types.DecodeError(reason:) ->
+          io.println("  Decode error: " <> reason)
+      }
+      do_halt(1)
+    }
+  }
+
   // Start the Librarian (supervised — auto-restarts on crash)
   let librarian_subj =
     librarian.start_supervised(
@@ -322,6 +364,7 @@ fn run(cfg: AppConfig) -> Nil {
       profile_dirs:,
       write_anywhere:,
       curator: option.Some(curator_subj),
+      embedding_config:,
     ))
 
   // Start supervisor and register agents via StartChild

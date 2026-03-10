@@ -133,8 +133,8 @@ pub fn generate_completely_invalid_response_falls_back_test() {
   let result = archivist.generate(ctx, provider, "mock-model", False)
   result |> should.be_some
   let assert Some(entry) = result
-  // Fallback entry — should contain the koan-style message with user input
-  let assert True = string.contains(entry.summary, "ink has run dry")
+  // Fallback entry — should contain the user input and a factual summary
+  let assert True = string.contains(entry.summary, "I was asked")
   let assert True = string.contains(entry.summary, "hello")
   entry.cycle_id |> should.equal("test-cycle-123")
 }

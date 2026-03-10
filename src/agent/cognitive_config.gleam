@@ -1,6 +1,7 @@
 import agent/registry.{type Registry}
 import agent/types.{type Notification}
 import dprime/types as dprime_types
+import embedding/types as embedding_types
 import gleam/erlang/process.{type Subject}
 import gleam/option.{type Option, None}
 import llm/provider.{type Provider}
@@ -31,6 +32,7 @@ pub type CognitiveConfig {
     profile_dirs: List(String),
     write_anywhere: Bool,
     curator: Option(Subject(CuratorMessage)),
+    embedding_config: embedding_types.EmbeddingConfig,
   )
 }
 
@@ -59,5 +61,6 @@ pub fn default_test_config(
     profile_dirs: [],
     write_anywhere: False,
     curator: None,
+    embedding_config: embedding_types.default_config(),
   )
 }

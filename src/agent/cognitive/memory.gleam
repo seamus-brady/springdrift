@@ -116,5 +116,6 @@ pub fn maybe_spawn_archivist(
     state.cbr_dir,
     state.verbose,
     state.librarian,
+    state.embedding_config,
   )
 }

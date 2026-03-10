@@ -157,16 +157,27 @@ pub fn handle_think_error(
           )
         }
         False -> {
+          let error_text = "[Error: " <> error <> "]"
           process.send(
             rt,
             CognitiveReply(
-              response: "[Error: " <> error <> "]",
+              response: error_text,
               model: state.model,
               usage: None,
             ),
           )
+          // Add synthetic assistant message so message history stays
+          // well-formed (alternating user/assistant). Without this, the
+          // next user input would create two consecutive user messages
+          // and the API would reject the request.
+          let error_msg =
+            llm_types.Message(role: llm_types.Assistant, content: [
+              llm_types.TextContent(text: error_text),
+            ])
+          let messages = list.append(state.messages, [error_msg])
           CognitiveState(
             ..state,
+            messages:,
             status: types.Idle,
             pending: dict.delete(state.pending, task_id),
           )
@@ -187,16 +198,19 @@ pub fn handle_think_down(
   case dict.get(state.pending, task_id) {
     Error(_) -> state
     Ok(PendingThink(reply_to: rt, ..)) -> {
+      let error_text = "[Error: think worker crashed: " <> reason <> "]"
       process.send(
         rt,
-        CognitiveReply(
-          response: "[Error: think worker crashed: " <> reason <> "]",
-          model: state.model,
-          usage: None,
-        ),
+        CognitiveReply(response: error_text, model: state.model, usage: None),
       )
+      let error_msg =
+        llm_types.Message(role: llm_types.Assistant, content: [
+          llm_types.TextContent(text: error_text),
+        ])
+      let messages = list.append(state.messages, [error_msg])
       CognitiveState(
         ..state,
+        messages:,
         status: types.Idle,
         pending: dict.delete(state.pending, task_id),
       )
@@ -220,7 +234,7 @@ pub fn build_request_with_model(
   messages: List(llm_types.Message),
 ) -> llm_types.LlmRequest {
   let trimmed = case state.max_context_messages {
-    None -> messages
+    None -> context.ensure_alternation(messages)
     Some(max) -> context.trim(messages, max)
   }
   let base =

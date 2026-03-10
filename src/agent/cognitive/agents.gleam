@@ -114,7 +114,13 @@ fn handle_memory_tools(
         None -> None
       }
       let result =
-        memory.execute(call, state.narrative_dir, state.librarian, facts_ctx)
+        memory.execute(
+          call,
+          state.narrative_dir,
+          state.librarian,
+          facts_ctx,
+          state.embedding_config,
+        )
       case result {
         llm_types.ToolSuccess(tool_use_id: id, content: c) ->
           llm_types.ToolResultContent(
@@ -377,16 +383,27 @@ fn do_dispatch_agents(
   // Guard: if no agents were dispatched, reply with error and return to Idle
   case new_pending_agents {
     [] -> {
+      let error_text = "[Error: no matching agents available]"
       process.send(
         reply_to,
         CognitiveReply(
-          response: "[Error: no matching agents available]",
+          response: error_text,
           model: state.model,
           usage: Some(resp.usage),
         ),
       )
+      // Add assistant message with the original response + error so
+      // message history stays well-formed for the next user input.
+      let assistant_msg =
+        llm_types.Message(role: llm_types.Assistant, content: resp.content)
+      let error_msg =
+        llm_types.Message(role: llm_types.Assistant, content: [
+          llm_types.TextContent(text: error_text),
+        ])
+      let messages = list.append(state.messages, [assistant_msg, error_msg])
       CognitiveState(
         ..state,
+        messages:,
         status: Idle,
         pending: dict.delete(state.pending, task_id),
       )

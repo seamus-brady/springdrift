@@ -29,9 +29,11 @@ import cbr/log as cbr_log
 import cbr/types as cbr_types
 import cycle_log
 import dag/types as dag_types
+import embedding/client as embedding_client
 import facts/log as facts_log
 import facts/types as facts_types
 import gleam/erlang/process.{type Subject}
+import gleam/float
 import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
@@ -147,9 +149,6 @@ fn dag_lookup(table: EtsTable, key: String) -> Result(dag_types.CycleNode, Nil)
 
 @external(erlang, "store_ffi", "lookup_bag")
 fn dag_lookup_bag(table: EtsTable, key: String) -> List(dag_types.CycleNode)
-
-@external(erlang, "store_ffi", "all_values")
-fn dag_all_values(table: EtsTable) -> List(dag_types.CycleNode)
 
 // ---------------------------------------------------------------------------
 // Messages
@@ -1277,10 +1276,10 @@ fn do_retrieve_cases(
     _ -> candidates
   }
 
-  // Stage 2: Score each candidate
+  // Stage 2: Score each candidate (hybrid when embeddings available)
   let scored =
     list.map(candidates, fn(c) {
-      let score = score_case_symbolic(c, query)
+      let score = score_case(c, query)
       cbr_types.ScoredCase(score:, cbr_case: c)
     })
 
@@ -1298,6 +1297,21 @@ fn do_retrieve_cases(
     }
   })
   |> list.take(query.max_results)
+}
+
+/// Hybrid scoring: when both query and case have embeddings, blend
+/// cosine similarity (0.40) with symbolic (0.60). Otherwise pure symbolic.
+fn score_case(c: cbr_types.CbrCase, query: cbr_types.CbrQuery) -> Float {
+  let symbolic = score_case_symbolic(c, query)
+  case query.embedding, c.embedding {
+    Some(q_emb), [_, ..] -> {
+      let cosine = embedding_client.cosine_similarity(q_emb, c.embedding)
+      // Clamp cosine to [0, 1] for scoring
+      let clamped = float.max(0.0, float.min(1.0, cosine))
+      { symbolic *. 0.6 } +. { clamped *. 0.4 }
+    }
+    _, _ -> symbolic
+  }
 }
 
 /// Symbolic scoring fallback (no embeddings).
