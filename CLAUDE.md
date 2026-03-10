@@ -201,6 +201,98 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `profiles_dirs` | `--profiles-dir` (repeatable) | `[~/.config/springdrift/profiles, .springdrift/profiles]` | Profile directories |
 | `default_profile` | `--profile` | None | Profile to load at startup |
 
+## Memory architecture
+
+The agent has five memory stores, all backed by append-only JSON-L files and
+indexed in ETS by the Librarian actor for fast queries.
+
+| Store | Location | Unit | Purpose |
+|---|---|---|---|
+| Narrative | `.springdrift/memory/narrative/YYYY-MM-DD.jsonl` | `NarrativeEntry` | What happened each cycle: summary, intent, outcome, entities, delegation chain |
+| Threads | (derived from narrative entries) | `Thread` / `ThreadState` | Ongoing lines of investigation grouping related narrative entries |
+| Facts | `.springdrift/memory/facts/facts.jsonl` | `MemoryFact` | Explicit key-value working memory with scope (Session/Persistent/Ephemeral) and confidence |
+| CBR cases | `.springdrift/memory/cbr/cases.jsonl` | `CbrCase` | Problem-solution-outcome patterns for case-based reasoning |
+| DAG nodes | (in-memory ETS, populated from cycle log) | `CycleNode` | Operational telemetry: token counts, tool calls, D' gates, agent output per cycle |
+
+**How they relate:** Narrative entries are the atomic record of each cycle. Threads
+group entries by topic using overlap scoring (location=3, domain=2, keyword=1;
+threshold=4). Facts are things the agent explicitly stores (`memory_write`). CBR
+cases capture reusable problem-solution patterns extracted by the Archivist alongside
+narrative entries. DAG nodes form a parent-child tree tracking every cognitive cycle,
+agent sub-cycle, and scheduler cycle with structured agent output.
+
+**Librarian** (`narrative/librarian.gleam`) is the unified query layer. All memory
+tools go through it when available, falling back to direct JSONL reads when it's
+`None`. It owns ETS tables for narrative entries, threads, facts, CBR cases, and
+DAG nodes. Messages: `QueryDayRoots`, `QueryDayStats`, `QueryNodeWithDescendants`,
+`QueryThreadCount`, `QueryPersistentFactCount`, `QueryCaseCount`, etc.
+
+**Memory tools** (14 tools in `tools/memory.gleam`):
+
+| Tool | Store | Purpose |
+|---|---|---|
+| `recall_recent` | Narrative | Entries for a time period (today, yesterday, this_week, etc.) |
+| `recall_search` | Narrative | Keyword search across summaries and keywords |
+| `recall_threads` | Threads | List active research threads with domains, keywords, data points |
+| `recall_cases` | CBR | Find similar past cases by intent, domain, keywords |
+| `memory_write` | Facts | Store a key-value fact with scope and confidence |
+| `memory_read` | Facts | Read current value of a fact by key |
+| `memory_clear_key` | Facts | Remove a fact (history preserved) |
+| `memory_query_facts` | Facts | Search facts by keyword |
+| `memory_trace_fact` | Facts | Full history of a key including supersessions |
+| `reflect` | DAG | Aggregated day-level stats (cycles, tokens, models, gate decisions) |
+| `inspect_cycle` | DAG | Drill into a specific cycle tree with tool calls and agent output |
+| `list_recent_cycles` | DAG | Discover cycle IDs for a date (feed into `inspect_cycle`) |
+| `query_tool_activity` | DAG | Per-tool usage stats for a date |
+| `agent_status` | Registry | Show all registered agents and their status (Running/Restarting/Stopped) |
+
+**Curator** (`narrative/curator.gleam`) assembles the system prompt from memory.
+On each `BuildSystemPrompt` message it loads identity files (persona + preamble
+template), queries the Librarian for thread/fact/case counts, renders `{{slot}}`
+substitutions and `[OMIT IF]` rules, and returns the final prompt. Falls back to a
+plain system prompt when no identity files exist.
+
+**Archivist** (`narrative/archivist.gleam`) runs after each final reply as a
+fire-and-forget `spawn_unlinked` process. It makes a single LLM call to generate a
+`NarrativeEntry` and a `CbrCase` from the cycle's context, assigns a thread, appends
+to JSONL, and notifies the Librarian. Failures never affect the user.
+
+## Agent subsystem
+
+The agent substrate provides supervised, tool-using specialist agents that the
+cognitive loop delegates work to.
+
+**Supervisor** (`agent/supervisor.gleam`) manages agent lifecycle with three restart
+strategies: `Permanent` (always restart), `Transient` (restart on abnormal exit), and
+`Temporary` (never restart). Lifecycle events (`AgentStarted`, `AgentCrashed`,
+`AgentRestarted`, `AgentStopped`) are forwarded through the cognitive loop to the
+notification channel for TUI/web GUI display.
+
+**Framework** (`agent/framework.gleam`) wraps each `AgentSpec` into a running OTP
+process with a react loop. Each agent has its own message history, tool set, and
+executor. The react loop calls the LLM, executes tool calls, and loops until it gets a
+text response or hits `max_turns`. When an agent calls `request_human_input`, the
+framework routes the question through the cognitive loop to the user.
+
+**Registry** (`agent/registry.gleam`) is a pure data structure tracking agent names,
+task subjects, and status (Running/Restarting/Stopped). The `agent_status` memory tool
+exposes this to the LLM.
+
+**Specialist agents** (in `src/agents/`):
+
+| Agent | Tools | max_turns | Restart | Purpose |
+|---|---|---|---|---|
+| Planner | none | 3 | Permanent | Break down complex goals into structured plans |
+| Researcher | web + builtin | 8 | Permanent | Gather information via search and extraction |
+| Coder | builtin | 10 | Permanent | Write and modify code, fix errors |
+| Writer | builtin | 6 | Permanent | Draft and edit text |
+
+**Structured output** — when an agent completes, the framework populates
+`AgentSuccess.structured_result` with typed `AgentFindings` based on the agent name
+(e.g. `ResearcherFindings` with sources and dead ends, `CoderFindings` with files
+touched). These feed into DAG nodes as typed `AgentOutput` variants and into the
+Curator's inter-agent context via `write_back_result`.
+
 ## Patterns to follow
 
 **Provider abstraction** — all LLM work goes through `llm/provider.gleam`. Never call

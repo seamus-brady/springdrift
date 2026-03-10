@@ -217,6 +217,64 @@ end-to-end explainability from input to output.
 
 ---
 
+## Memory architecture
+
+The agent has five memory stores that work together to give it continuity,
+self-awareness, and the ability to learn from experience.
+
+```
+Librarian (ETS query layer)
+├── Narrative entries    what happened each cycle (append-only JSONL)
+│   └── Threads          ongoing topics grouping related entries
+├── Facts                explicit key-value working memory (scoped, versioned)
+├── CBR cases            problem → solution → outcome patterns
+└── DAG nodes            operational telemetry (tokens, tools, gates, agent output)
+```
+
+**Narrative entries** are the atomic unit -- one per cognitive cycle, recording
+intent, outcome, entities, delegation chain, and confidence. **Threads** group
+related entries by overlap scoring across locations, domains, and keywords.
+**Facts** are things the agent explicitly stores and retrieves (e.g. "Dublin
+average rent = €2,340"). **CBR cases** capture reusable patterns so the agent
+can learn from past approaches. **DAG nodes** track every cycle's operational
+data in a parent-child tree.
+
+The **Librarian** actor owns ETS tables indexing all five stores and serves as
+the unified query layer. The **Curator** assembles the system prompt from
+identity files and memory counts. The **Archivist** generates narrative entries
+and CBR cases after each cycle via fire-and-forget LLM calls.
+
+Fourteen memory tools let the agent query its own memory: `recall_recent`,
+`recall_search`, `recall_threads`, `recall_cases`, `memory_write`,
+`memory_read`, `memory_clear_key`, `memory_query_facts`,
+`memory_trace_fact`, `reflect`, `inspect_cycle`, `list_recent_cycles`,
+`query_tool_activity`, and `agent_status`.
+
+---
+
+## Agent subsystem
+
+The cognitive loop delegates work to specialist agents, each running as a
+supervised OTP process with its own react loop and tool set.
+
+| Agent | Tools | Turns | Purpose |
+|---|---|---|---|
+| Planner | none | 3 | Break down complex goals into structured plans |
+| Researcher | web + builtin | 8 | Gather information via search and extraction |
+| Coder | builtin | 10 | Write and modify code |
+| Writer | builtin | 6 | Draft and edit text |
+
+Agents are managed by a supervisor with restart strategies (Permanent,
+Transient, Temporary). Lifecycle events are forwarded to the TUI/web GUI.
+When an agent calls `request_human_input`, the question routes through the
+cognitive loop to the user.
+
+Profiles configure which agents are available and how they're wired. A profile
+is a directory with `config.toml` (agent roster, models), optional `dprime.json`
+(safety config), `schedule.toml` (recurring tasks), and a `skills/` directory.
+
+---
+
 ## Why Gleam on the BEAM
 
 Gleam is a particularly good fit for building AI agent systems, for reasons
