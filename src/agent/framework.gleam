@@ -3,6 +3,7 @@ import agent/types.{
   type CognitiveMessage, AgentComplete, AgentFailure, AgentIdentity,
   AgentQuestion, AgentSuccess,
 }
+import context
 import cycle_log
 import gleam/dynamic/decode
 import gleam/erlang/process.{type ExitMessage, type Pid, type Subject}
@@ -316,8 +317,17 @@ fn do_react(
                   process.sleep(inter_turn_delay_ms)
                   let next =
                     request.with_tool_results(req, resp.content, results)
+                  // Apply context trimming if configured
+                  let trimmed = case spec.max_context_messages {
+                    Some(max) ->
+                      llm_types.LlmRequest(
+                        ..next,
+                        messages: context.trim(next.messages, max),
+                      )
+                    None -> next
+                  }
                   do_react(
-                    next,
+                    trimmed,
                     spec,
                     remaining - 1,
                     new_consecutive,

@@ -4,6 +4,7 @@ import agent/types.{
   AgentSuccess, AgentTask, Temporary,
 }
 import gleam/erlang/process
+import gleam/option.{None}
 import gleeunit/should
 import llm/adapters/mock
 import llm/types as llm_types
@@ -27,6 +28,7 @@ fn make_spec(provider) -> AgentSpec {
     max_tokens: 256,
     max_turns: 3,
     max_consecutive_errors: 2,
+    max_context_messages: None,
     tools: [],
     restart: Temporary,
     tool_executor: noop_executor,

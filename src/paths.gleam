@@ -95,6 +95,11 @@ pub fn facts_dir() -> String {
   project_dir <> "/memory/facts"
 }
 
+/// Artifacts directory: .springdrift/memory/artifacts/
+pub fn artifacts_dir() -> String {
+  project_dir <> "/memory/artifacts"
+}
+
 // ---------------------------------------------------------------------------
 // Identity
 // ---------------------------------------------------------------------------

@@ -9,6 +9,7 @@ import agent/types.{
 }
 import gleam/erlang/process
 import gleam/list
+import gleam/option.{None}
 import gleeunit
 import gleeunit/should
 import llm/adapters/mock
@@ -41,6 +42,7 @@ fn make_spec(
     max_tokens: 256,
     max_turns: 3,
     max_consecutive_errors: 2,
+    max_context_messages: None,
     tools: [],
     restart:,
     tool_executor: noop_executor,
@@ -298,6 +300,7 @@ pub fn agent_tool_execution_test() {
       max_tokens: 256,
       max_turns: 5,
       max_consecutive_errors: 2,
+      max_context_messages: None,
       tools: [],
       restart: Temporary,
       tool_executor: fn(call: llm_types.ToolCall) -> llm_types.ToolResult {

@@ -81,6 +81,8 @@ pub type AppConfig {
     // Agent identity
     agent_name: Option(String),
     agent_version: Option(String),
+    // Librarian startup
+    librarian_max_days: Option(Int),
   )
 }
 
@@ -121,6 +123,7 @@ pub fn default() -> AppConfig {
     default_profile: None,
     agent_name: None,
     agent_version: None,
+    librarian_max_days: None,
   )
 }
 
@@ -174,6 +177,10 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     ),
     agent_name: option.or(override_cfg.agent_name, base.agent_name),
     agent_version: option.or(override_cfg.agent_version, base.agent_version),
+    librarian_max_days: option.or(
+      override_cfg.librarian_max_days,
+      base.librarian_max_days,
+    ),
   )
 }
 
@@ -276,6 +283,10 @@ pub fn to_string(cfg: AppConfig) -> String {
     // Agent identity
     option.map(cfg.agent_name, fn(v) { "agent_name: " <> v }),
     option.map(cfg.agent_version, fn(v) { "agent_version: " <> v }),
+    // Librarian
+    option.map(cfg.librarian_max_days, fn(v) {
+      "librarian_max_days: " <> int.to_string(v)
+    }),
   ]
   |> list.filter_map(fn(x) { option.to_result(x, Nil) })
   |> string.join("\n")
@@ -355,6 +366,12 @@ fn do_parse_args(args: List(String), acc: AppConfig) -> AppConfig {
     // Profiles
     ["--profile", name, ..rest] ->
       do_parse_args(rest, AppConfig(..acc, default_profile: Some(name)))
+    ["--narrative-max-days", value, ..rest] ->
+      case int.parse(value) {
+        Ok(n) ->
+          do_parse_args(rest, AppConfig(..acc, librarian_max_days: Some(n)))
+        Error(_) -> do_parse_args(rest, acc)
+      }
     ["--profiles-dir", path, ..rest] ->
       case acc.profiles_dirs {
         None ->
@@ -448,6 +465,10 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
       Ok(v) -> Some(v)
       Error(_) -> None
     },
+    librarian_max_days: case tom.get_int(table, ["narrative", "max_days"]) {
+      Ok(v) -> Some(v)
+      Error(_) -> None
+    },
     profiles_dirs: case tom.get_array(table, ["profiles_dirs"]) {
       Error(_) -> None
       Ok(items) ->
@@ -495,6 +516,7 @@ const known_keys = [
 
 const known_narrative_keys = [
   "directory", "archivist_model", "threading", "summaries", "summary_schedule",
+  "max_days",
 ]
 
 fn validate_toml_keys(table: dict.Dict(String, tom.Toml)) -> Nil {

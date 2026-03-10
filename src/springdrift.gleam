@@ -12,6 +12,7 @@ import dot_env
 import dprime/config as dprime_config_mod
 import embedding/health as embedding_health
 import embedding/types as embedding_types
+import facts/log as facts_log
 import gleam/erlang/process
 import gleam/int
 import gleam/io
@@ -226,6 +227,26 @@ fn run(cfg: AppConfig) -> Nil {
     False -> []
   }
 
+  // Narrative config (always enabled)
+  let narrative_dir = option.unwrap(cfg.narrative_dir, paths.narrative_dir())
+  let archivist_model = option.unwrap(cfg.archivist_model, task_model)
+
+  // Migrate legacy facts.jsonl to daily rotation (no-op if already done)
+  facts_log.migrate_legacy(paths.facts_dir())
+
+  // Start the Librarian (supervised — auto-restarts on crash)
+  let librarian_max_days = option.unwrap(cfg.librarian_max_days, 90)
+  let librarian_subj =
+    librarian.start_supervised(
+      narrative_dir,
+      paths.cbr_dir(),
+      paths.facts_dir(),
+      paths.artifacts_dir(),
+      librarian_max_days,
+      5,
+    )
+  let lib = option.Some(librarian_subj)
+
   // Profile system
   let profile_dirs =
     option.unwrap(cfg.profiles_dirs, profile.default_profile_dirs())
@@ -254,10 +275,13 @@ fn run(cfg: AppConfig) -> Nil {
             <> msg
             <> ") — using defaults",
           )
-          #(default_agent_specs(p, task_model), option.None)
+          #(default_agent_specs(p, task_model, librarian_subj), option.None)
         }
       }
-    option.None -> #(default_agent_specs(p, task_model), option.None)
+    option.None -> #(
+      default_agent_specs(p, task_model, librarian_subj),
+      option.None,
+    )
   }
 
   // Build agent tools for the cognitive loop
@@ -284,10 +308,6 @@ fn run(cfg: AppConfig) -> Nil {
       #(tool_state, output_state)
     }
   }
-
-  // Narrative config (always enabled)
-  let narrative_dir = option.unwrap(cfg.narrative_dir, paths.narrative_dir())
-  let archivist_model = option.unwrap(cfg.archivist_model, task_model)
 
   // Ollama embedding service — obligatory health check at startup
   let embedding_config = embedding_types.default_config()
@@ -328,17 +348,6 @@ fn run(cfg: AppConfig) -> Nil {
       do_halt(1)
     }
   }
-
-  // Start the Librarian (supervised — auto-restarts on crash)
-  let librarian_subj =
-    librarian.start_supervised(
-      narrative_dir,
-      paths.cbr_dir(),
-      paths.facts_dir(),
-      0,
-      5,
-    )
-  let lib = option.Some(librarian_subj)
 
   // Start Curator (stays alive for dynamic system prompt assembly)
   let curator_subj =
@@ -590,10 +599,11 @@ fn mock_provider() -> Provider {
 fn default_agent_specs(
   provider: Provider,
   task_model: String,
+  librarian_subj: process.Subject(librarian.LibrarianMessage),
 ) -> List(agent_types.AgentSpec) {
   [
     planner.spec(provider, task_model),
-    researcher.spec(provider, task_model),
+    researcher.spec(provider, task_model, paths.artifacts_dir(), librarian_subj),
     coder.spec(provider, task_model),
   ]
 }
@@ -623,6 +633,7 @@ fn build_profile_agent_specs(
       max_tokens: 4096,
       max_turns: agent_def.max_turns,
       max_consecutive_errors: 3,
+      max_context_messages: option.None,
       tools: tools_list,
       restart: agent_types.Permanent,
       tool_executor:,

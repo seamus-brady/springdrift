@@ -25,6 +25,8 @@
 ////   - facts_by_cycle (bag)    — cycle_id → MemoryFact
 
 import agent/types as agent_types
+import artifacts/log as artifacts_log
+import artifacts/types as artifacts_types
 import cbr/log as cbr_log
 import cbr/types as cbr_types
 import cycle_log
@@ -149,6 +151,26 @@ fn dag_lookup(table: EtsTable, key: String) -> Result(dag_types.CycleNode, Nil)
 
 @external(erlang, "store_ffi", "lookup_bag")
 fn dag_lookup_bag(table: EtsTable, key: String) -> List(dag_types.CycleNode)
+
+// Artifact-typed operations
+@external(erlang, "store_ffi", "insert")
+fn artifact_insert(
+  table: EtsTable,
+  key: String,
+  value: artifacts_types.ArtifactMeta,
+) -> Nil
+
+@external(erlang, "store_ffi", "lookup")
+fn artifact_lookup_one(
+  table: EtsTable,
+  key: String,
+) -> Result(artifacts_types.ArtifactMeta, Nil)
+
+@external(erlang, "store_ffi", "lookup_bag")
+fn artifact_lookup_bag(
+  table: EtsTable,
+  key: String,
+) -> List(artifacts_types.ArtifactMeta)
 
 // ---------------------------------------------------------------------------
 // Messages
@@ -283,6 +305,26 @@ pub type LibrarianMessage {
     reply_to: Subject(List(dag_types.ToolActivityRecord)),
   )
 
+  // --- Artifact operations ---
+  /// Index a new artifact after it has been written to disk.
+  IndexArtifact(meta: artifacts_types.ArtifactMeta)
+  /// Query all artifact metadata for a given cycle.
+  QueryArtifactsByCycle(
+    cycle_id: String,
+    reply_to: Subject(List(artifacts_types.ArtifactMeta)),
+  )
+  /// Read full artifact content from disk (targeted file read).
+  RetrieveArtifactContent(
+    artifact_id: String,
+    stored_at: String,
+    reply_to: Subject(Result(String, Nil)),
+  )
+  /// Look up artifact metadata by ID.
+  QueryArtifactById(
+    artifact_id: String,
+    reply_to: Subject(Result(artifacts_types.ArtifactMeta, Nil)),
+  )
+
   /// Shutdown
   Shutdown
 }
@@ -318,6 +360,10 @@ type LibrarianState {
     dag_nodes: EtsTable,
     dag_by_parent: EtsTable,
     dag_by_date: EtsTable,
+    // Artifact ETS tables
+    artifacts_dir: String,
+    artifacts: EtsTable,
+    artifacts_by_cycle: EtsTable,
   )
 }
 
@@ -332,6 +378,7 @@ pub fn start(
   narrative_dir: String,
   cbr_dir: String,
   facts_dir: String,
+  artifacts_dir: String,
   max_files: Int,
 ) -> Subject(LibrarianMessage) {
   let setup: Subject(Subject(LibrarianMessage)) = process.new_subject()
@@ -364,6 +411,10 @@ pub fn start(
     let dag_parent_table = new_table("dag_by_parent", "bag")
     let dag_date_table = new_table("dag_by_date", "bag")
 
+    // Create Artifact ETS tables
+    let artifacts_table = new_table("artifacts", "set")
+    let artifacts_cycle_table = new_table("artifacts_by_cycle", "bag")
+
     let state =
       LibrarianState(
         self:,
@@ -386,6 +437,9 @@ pub fn start(
         dag_nodes: dag_nodes_table,
         dag_by_parent: dag_parent_table,
         dag_by_date: dag_date_table,
+        artifacts_dir:,
+        artifacts: artifacts_table,
+        artifacts_by_cycle: artifacts_cycle_table,
       )
 
     // Replay narrative JSONL files
@@ -403,6 +457,9 @@ pub fn start(
 
     // Replay DAG from cycle log
     replay_dag_from_cycle_log(state, max_files)
+
+    // Replay artifacts from disk
+    replay_artifacts_from_disk(state, max_files)
 
     let narrative_count = ets_table_size(entries_table)
     let cbr_count = cbr_table_size(cbr_cases_table)
@@ -436,6 +493,7 @@ pub fn start_supervised(
   narrative_dir: String,
   cbr_dir: String,
   facts_dir: String,
+  artifacts_dir: String,
   max_files: Int,
   max_restarts: Int,
 ) -> Subject(LibrarianMessage) {
@@ -449,6 +507,7 @@ pub fn start_supervised(
       narrative_dir,
       cbr_dir,
       facts_dir,
+      artifacts_dir,
       max_files,
       max_restarts,
       0,
@@ -463,13 +522,15 @@ fn librarian_supervisor_loop(
   narrative_dir: String,
   cbr_dir: String,
   facts_dir: String,
+  artifacts_dir: String,
   max_files: Int,
   max_restarts: Int,
   restart_count: Int,
   proxy: Subject(LibrarianMessage),
 ) -> Nil {
   // Start a fresh librarian
-  let librarian = start(narrative_dir, cbr_dir, facts_dir, max_files)
+  let librarian =
+    start(narrative_dir, cbr_dir, facts_dir, artifacts_dir, max_files)
 
   // Forward messages and monitor the librarian process
   forward_loop(
@@ -478,6 +539,7 @@ fn librarian_supervisor_loop(
     narrative_dir,
     cbr_dir,
     facts_dir,
+    artifacts_dir,
     max_files,
     max_restarts,
     restart_count,
@@ -490,6 +552,7 @@ fn forward_loop(
   narrative_dir: String,
   cbr_dir: String,
   facts_dir: String,
+  artifacts_dir: String,
   max_files: Int,
   max_restarts: Int,
   restart_count: Int,
@@ -504,6 +567,7 @@ fn forward_loop(
         narrative_dir,
         cbr_dir,
         facts_dir,
+        artifacts_dir,
         max_files,
         max_restarts,
         restart_count,
@@ -521,6 +585,7 @@ fn forward_loop(
             narrative_dir,
             cbr_dir,
             facts_dir,
+            artifacts_dir,
             max_files,
             max_restarts,
             restart_count,
@@ -541,6 +606,7 @@ fn forward_loop(
                 narrative_dir,
                 cbr_dir,
                 facts_dir,
+                artifacts_dir,
                 max_files,
                 max_restarts,
                 restart_count + 1,
@@ -949,6 +1015,85 @@ pub fn query_tool_activity(
 }
 
 // ---------------------------------------------------------------------------
+// Synchronous query helpers — Artifacts
+// ---------------------------------------------------------------------------
+
+/// Notify the Librarian to index a new artifact (fire-and-forget).
+pub fn index_artifact(
+  librarian: Subject(LibrarianMessage),
+  meta: artifacts_types.ArtifactMeta,
+) -> Nil {
+  process.send(librarian, IndexArtifact(meta:))
+}
+
+/// Query all artifact metadata for a cycle. Blocks until reply.
+pub fn query_artifacts_by_cycle(
+  librarian: Subject(LibrarianMessage),
+  cycle_id: String,
+) -> List(artifacts_types.ArtifactMeta) {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryArtifactsByCycle(cycle_id:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(metas) -> metas
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "query_artifacts_by_cycle",
+        "Timeout waiting for reply",
+        None,
+      )
+      []
+    }
+  }
+}
+
+/// Retrieve full artifact content by ID. Blocks until reply.
+pub fn retrieve_artifact_content(
+  librarian: Subject(LibrarianMessage),
+  artifact_id: String,
+  stored_at: String,
+) -> Result(String, Nil) {
+  let reply_to = process.new_subject()
+  process.send(
+    librarian,
+    RetrieveArtifactContent(artifact_id:, stored_at:, reply_to:),
+  )
+  case process.receive(reply_to, 5000) {
+    Ok(result) -> result
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "retrieve_artifact_content",
+        "Timeout waiting for reply",
+        None,
+      )
+      Error(Nil)
+    }
+  }
+}
+
+/// Look up artifact metadata by ID. Blocks until reply.
+pub fn lookup_artifact(
+  librarian: Subject(LibrarianMessage),
+  artifact_id: String,
+) -> Result(artifacts_types.ArtifactMeta, Nil) {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryArtifactById(artifact_id:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(result) -> result
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "lookup_artifact",
+        "Timeout waiting for reply",
+        None,
+      )
+      Error(Nil)
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Message loop
 // ---------------------------------------------------------------------------
 
@@ -981,6 +1126,9 @@ fn loop(state: LibrarianState) -> Nil {
           ets_delete_table(state.dag_nodes)
           ets_delete_table(state.dag_by_parent)
           ets_delete_table(state.dag_by_date)
+          // Delete Artifact tables
+          ets_delete_table(state.artifacts)
+          ets_delete_table(state.artifacts_by_cycle)
           slog.info(
             "narrative/librarian",
             "shutdown",
@@ -1207,6 +1355,32 @@ fn loop(state: LibrarianState) -> Nil {
         QueryToolActivity(date:, reply_to:) -> {
           let records = compute_tool_activity(state, date)
           process.send(reply_to, records)
+          loop(state)
+        }
+
+        // --- Artifact operations ---
+        IndexArtifact(meta:) -> {
+          index_artifact_meta(state, meta)
+          loop(state)
+        }
+
+        QueryArtifactsByCycle(cycle_id:, reply_to:) -> {
+          let metas = artifact_lookup_bag(state.artifacts_by_cycle, cycle_id)
+          process.send(reply_to, metas)
+          loop(state)
+        }
+
+        RetrieveArtifactContent(artifact_id:, stored_at:, reply_to:) -> {
+          let date = string.slice(stored_at, 0, 10)
+          let result =
+            artifacts_log.read_content(state.artifacts_dir, artifact_id, date)
+          process.send(reply_to, result)
+          loop(state)
+        }
+
+        QueryArtifactById(artifact_id:, reply_to:) -> {
+          let result = artifact_lookup_one(state.artifacts, artifact_id)
+          process.send(reply_to, result)
           loop(state)
         }
       }
@@ -1583,8 +1757,43 @@ fn replay_cbr_from_disk(state: LibrarianState, max_files: Int) -> Nil {
 }
 
 fn replay_facts_from_disk(state: LibrarianState) -> Nil {
+  // Facts always load ALL files — no max_files windowing.
+  // Full history is needed for memory_trace_fact, inspect_cycle, and correct
+  // supersession resolution across the entire fact timeline.
   let facts = facts_log.load_all(state.facts_dir)
   list.each(facts, fn(f) { index_fact(state, f) })
+}
+
+fn index_artifact_meta(
+  state: LibrarianState,
+  meta: artifacts_types.ArtifactMeta,
+) -> Nil {
+  artifact_insert(state.artifacts, meta.artifact_id, meta)
+  artifact_insert(state.artifacts_by_cycle, meta.cycle_id, meta)
+}
+
+fn replay_artifacts_from_disk(state: LibrarianState, max_files: Int) -> Nil {
+  case simplifile.read_directory(state.artifacts_dir) {
+    Error(_) -> Nil
+    Ok(files) -> {
+      let artifact_files =
+        files
+        |> list.filter(fn(f) { string.ends_with(f, ".jsonl") })
+        |> list.sort(string.compare)
+
+      let limited = limit_files(artifact_files, max_files)
+
+      list.each(limited, fn(f) {
+        // File format: artifacts-YYYY-MM-DD.jsonl
+        let date =
+          f
+          |> string.drop_start(10)
+          |> string.drop_end(6)
+        let metas = artifacts_log.load_date_meta(state.artifacts_dir, date)
+        list.each(metas, fn(m) { index_artifact_meta(state, m) })
+      })
+    }
+  }
 }
 
 fn limit_files(files: List(String), max_files: Int) -> List(String) {

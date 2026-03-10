@@ -1,4 +1,5 @@
 import agent/types.{type AgentSpec, AgentSpec, Permanent}
+import gleam/option.{None}
 import llm/provider.{type Provider}
 import llm/types as llm_types
 import tools/builtin
@@ -27,6 +28,7 @@ pub fn spec(provider: Provider, model: String) -> AgentSpec {
     max_tokens: 4096,
     max_turns: 10,
     max_consecutive_errors: 3,
+    max_context_messages: None,
     tools:,
     restart: Permanent,
     tool_executor: coder_executor,

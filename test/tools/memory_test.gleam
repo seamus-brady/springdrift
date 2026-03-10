@@ -368,9 +368,8 @@ pub fn memory_query_no_results_test() {
 
 pub fn memory_write_and_read_roundtrip_test() {
   let dir = "/tmp/memory_tools_test_roundtrip"
+  let _ = simplifile.delete(dir)
   let _ = simplifile.create_directory_all(dir)
-  // Clean up any previous test data
-  let _ = simplifile.delete(dir <> "/facts.jsonl")
 
   let ctx =
     option.Some(memory.FactsContext(
@@ -412,7 +411,7 @@ pub fn memory_write_and_read_roundtrip_test() {
   }
 
   // Clean up
-  let _ = simplifile.delete(dir <> "/facts.jsonl")
+  let _ = simplifile.delete(dir)
   Nil
 }
 
@@ -422,8 +421,8 @@ pub fn memory_write_and_read_roundtrip_test() {
 
 pub fn memory_write_clear_read_test() {
   let dir = "/tmp/memory_tools_test_clear"
+  let _ = simplifile.delete(dir)
   let _ = simplifile.create_directory_all(dir)
-  let _ = simplifile.delete(dir <> "/facts.jsonl")
 
   let ctx =
     option.Some(memory.FactsContext(
@@ -466,7 +465,7 @@ pub fn memory_write_clear_read_test() {
     _ -> should.fail()
   }
 
-  let _ = simplifile.delete(dir <> "/facts.jsonl")
+  let _ = simplifile.delete(dir)
   Nil
 }
 
@@ -476,8 +475,8 @@ pub fn memory_write_clear_read_test() {
 
 pub fn memory_trace_shows_history_test() {
   let dir = "/tmp/memory_tools_test_trace"
+  let _ = simplifile.delete(dir)
   let _ = simplifile.create_directory_all(dir)
-  let _ = simplifile.delete(dir <> "/facts.jsonl")
 
   let ctx =
     option.Some(memory.FactsContext(
@@ -521,7 +520,7 @@ pub fn memory_trace_shows_history_test() {
     _ -> should.fail()
   }
 
-  let _ = simplifile.delete(dir <> "/facts.jsonl")
+  let _ = simplifile.delete(dir)
   Nil
 }
 
@@ -531,8 +530,8 @@ pub fn memory_trace_shows_history_test() {
 
 pub fn memory_query_finds_facts_test() {
   let dir = "/tmp/memory_tools_test_query"
+  let _ = simplifile.delete(dir)
   let _ = simplifile.create_directory_all(dir)
-  let _ = simplifile.delete(dir <> "/facts.jsonl")
 
   let ctx =
     option.Some(memory.FactsContext(
@@ -575,7 +574,7 @@ pub fn memory_query_finds_facts_test() {
     _ -> should.fail()
   }
 
-  let _ = simplifile.delete(dir <> "/facts.jsonl")
+  let _ = simplifile.delete(dir)
   Nil
 }
 

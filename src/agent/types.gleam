@@ -55,6 +55,7 @@ pub type AgentSpec {
     max_tokens: Int,
     max_turns: Int,
     max_consecutive_errors: Int,
+    max_context_messages: Option(Int),
     tools: List(Tool),
     restart: RestartStrategy,
     tool_executor: fn(ToolCall) -> ToolResult,

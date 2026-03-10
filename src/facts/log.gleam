@@ -1,8 +1,10 @@
-//// Append-only MemoryFact log — facts.jsonl in .springdrift/memory/facts/.
+//// Append-only MemoryFact log — daily JSONL files in .springdrift/memory/facts/.
 ////
-//// Unlike narrative and CBR which are date-sharded, facts use a single
-//// facts.jsonl file since the volume is much lower and key-based lookup
-//// needs the full history.
+//// Facts use daily rotation (YYYY-MM-DD-facts.jsonl) like narrative and CBR.
+//// All fact files are always loaded at startup (no max_files windowing) because
+//// fact history must be fully introspectable for memory_trace_fact and
+//// inspect_cycle. Supersession semantics work correctly: index_fact replays
+//// all files chronologically, so later Writes override earlier entries.
 
 import facts/types.{
   type FactOp, type FactScope, type MemoryFact, Clear, Ephemeral, MemoryFact,
@@ -16,13 +18,17 @@ import gleam/string
 import simplifile
 import slog
 
+@external(erlang, "springdrift_ffi", "get_date")
+fn get_date() -> String
+
 // ---------------------------------------------------------------------------
 // Append
 // ---------------------------------------------------------------------------
 
-/// Append a MemoryFact to facts.jsonl.
+/// Append a MemoryFact to a dated JSONL file (YYYY-MM-DD-facts.jsonl).
 pub fn append(dir: String, fact: MemoryFact) -> Nil {
-  let path = dir <> "/facts.jsonl"
+  let date = get_date()
+  let path = dir <> "/" <> date <> "-facts.jsonl"
   let json_str = json.to_string(encode_fact(fact))
   let _ = simplifile.create_directory_all(dir)
   case simplifile.append(path, json_str <> "\n") {
@@ -47,12 +53,43 @@ pub fn append(dir: String, fact: MemoryFact) -> Nil {
 // Loading
 // ---------------------------------------------------------------------------
 
-/// Load all facts from facts.jsonl.
-pub fn load_all(dir: String) -> List(MemoryFact) {
-  let path = dir <> "/facts.jsonl"
+/// Load facts for a specific date from YYYY-MM-DD-facts.jsonl.
+pub fn load_date(dir: String, date: String) -> List(MemoryFact) {
+  let path = dir <> "/" <> date <> "-facts.jsonl"
   case simplifile.read(path) {
     Error(_) -> []
     Ok(content) -> parse_jsonl(content)
+  }
+}
+
+/// Load all facts from all dated JSONL files, in chronological order.
+/// Also loads from legacy facts.jsonl if present (for backward compat).
+pub fn load_all(dir: String) -> List(MemoryFact) {
+  case simplifile.read_directory(dir) {
+    Error(_) -> []
+    Ok(files) -> {
+      // Legacy single-file facts
+      let legacy = case list.contains(files, "facts.jsonl") {
+        True ->
+          case simplifile.read(dir <> "/facts.jsonl") {
+            Ok(content) -> parse_jsonl(content)
+            Error(_) -> []
+          }
+        False -> []
+      }
+
+      // Dated fact files, sorted chronologically
+      let dated_facts =
+        files
+        |> list.filter(fn(f) { string.ends_with(f, "-facts.jsonl") })
+        |> list.sort(string.compare)
+        |> list.flat_map(fn(f) {
+          let date = string.drop_end(f, 12)
+          load_date(dir, date)
+        })
+
+      list.append(legacy, dated_facts)
+    }
   }
 }
 
@@ -108,6 +145,51 @@ pub fn resolve_from_list(
 pub fn trace_key(dir: String, key: String) -> List(MemoryFact) {
   let all = load_all(dir)
   list.filter(all, fn(f) { f.key == key })
+}
+
+// ---------------------------------------------------------------------------
+// Legacy migration
+// ---------------------------------------------------------------------------
+
+/// If legacy facts.jsonl exists, distribute its records into dated files
+/// based on each record's timestamp field. Renames facts.jsonl to
+/// facts.jsonl.migrated on completion. Silent no-op if already migrated.
+pub fn migrate_legacy(dir: String) -> Nil {
+  let legacy_path = dir <> "/facts.jsonl"
+  case simplifile.is_file(legacy_path) {
+    Ok(True) -> {
+      case simplifile.read(legacy_path) {
+        Ok(content) -> {
+          let facts = parse_jsonl(content)
+          // Group facts by date (from timestamp field)
+          list.each(facts, fn(fact) {
+            let date = string.slice(fact.timestamp, 0, 10)
+            // Use a valid date or fallback to "unknown"
+            let date_str = case string.length(date) == 10 {
+              True -> date
+              False -> "unknown"
+            }
+            let dated_path = dir <> "/" <> date_str <> "-facts.jsonl"
+            let json_str = json.to_string(encode_fact(fact))
+            let _ = simplifile.append(dated_path, json_str <> "\n")
+            Nil
+          })
+          // Rename legacy file
+          let _ = simplifile.rename(legacy_path, legacy_path <> ".migrated")
+          slog.info(
+            "facts/log",
+            "migrate_legacy",
+            "Migrated legacy facts.jsonl ("
+              <> string.inspect(list.length(facts))
+              <> " facts)",
+            None,
+          )
+        }
+        Error(_) -> Nil
+      }
+    }
+    _ -> Nil
+  }
 }
 
 // ---------------------------------------------------------------------------

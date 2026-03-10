@@ -12,6 +12,7 @@ import agent/types.{
   StartChild, StopChild, Temporary, Transient,
 }
 import gleam/erlang/process
+import gleam/option.{None}
 import gleeunit
 import gleeunit/should
 import llm/adapters/mock
@@ -44,6 +45,7 @@ fn make_spec(
     max_tokens: 256,
     max_turns: 3,
     max_consecutive_errors: 2,
+    max_context_messages: None,
     tools: [],
     restart:,
     tool_executor: noop_executor,

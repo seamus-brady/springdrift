@@ -204,6 +204,7 @@ fn profile_agent_specs(
       max_tokens: 4096,
       max_turns: agent_def.max_turns,
       max_consecutive_errors: 3,
+      max_context_messages: option.None,
       tools: tools_list,
       restart: types.Permanent,
       tool_executor:,
