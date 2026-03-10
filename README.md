@@ -269,6 +269,9 @@ cognitive loop
 ├── multi-agent supervisor (OTP)
 │   └── named agents with typed specs, tool sets, restart strategies
 ├── tools
+│   ├── exa_search (semantic neural search, EXA_API_KEY)
+│   ├── tavily_search (fast factual lookup, TAVILY_API_KEY)
+│   ├── firecrawl_extract (deep page extraction, FIRECRAWL_API_KEY)
 │   ├── web_search (DuckDuckGo, no API key required)
 │   └── fetch_url (HTTP GET with scheme validation)
 ├── D-prime safety gate (reactive -> deliberative -> meta-management)

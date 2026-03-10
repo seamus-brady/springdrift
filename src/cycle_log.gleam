@@ -161,10 +161,13 @@ pub fn log_tool_result(cycle_id: String, result: ToolResult) -> Nil {
       #("type", json.string("tool_result")),
       #("tool_use_id", json.string(tool_use_id)),
       #("success", json.bool(success)),
-      #("content", json.string(content)),
+      #("content", json.string(ensure_utf8(content))),
     ]),
   )
 }
+
+@external(erlang, "springdrift_ffi", "ensure_utf8")
+fn ensure_utf8(text: String) -> String
 
 pub fn log_dprime_canary(
   cycle_id: String,

@@ -6,6 +6,7 @@ import agents/coder
 import agents/planner
 import agents/researcher
 import config.{type AppConfig}
+import dot_env
 import dprime/config as dprime_config_mod
 import gleam/erlang/process
 import gleam/int
@@ -44,6 +45,11 @@ fn default_skill_dirs() -> List(String) {
 }
 
 pub fn main() -> Nil {
+  // Load .env file from project root (silently ignored if missing)
+  dot_env.new()
+  |> dot_env.set_ignore_missing_file(True)
+  |> dot_env.load()
+
   let args = get_startup_args()
   case list.contains(args, "--help") || list.contains(args, "-h") {
     True -> {
