@@ -317,14 +317,18 @@ fn do_react(
                   process.sleep(inter_turn_delay_ms)
                   let next =
                     request.with_tool_results(req, resp.content, results)
-                  // Apply context trimming if configured
+                  // Apply context trimming if configured, always ensure alternation
                   let trimmed = case spec.max_context_messages {
                     Some(max) ->
                       llm_types.LlmRequest(
                         ..next,
                         messages: context.trim(next.messages, max),
                       )
-                    None -> next
+                    None ->
+                      llm_types.LlmRequest(
+                        ..next,
+                        messages: context.ensure_alternation(next.messages),
+                      )
                   }
                   do_react(
                     trimmed,

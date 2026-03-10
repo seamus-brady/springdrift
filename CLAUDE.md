@@ -47,7 +47,7 @@ src/
 │
 ├── agents/                    Specialist agent specs
 │   ├── planner.gleam          Planning agent (no tools, max_turns=3)
-│   ├── researcher.gleam       Research agent (web+builtin, max_turns=8)
+│   ├── researcher.gleam       Research agent (web+artifacts+builtin, max_turns=8)
 │   ├── coder.gleam            Coding agent (builtin, max_turns=10)
 │   └── writer.gleam           Writer agent (builtin, max_turns=6)
 │
@@ -79,7 +79,11 @@ src/
 │
 ├── facts/                     Fact store — key-value memory with scopes
 │   ├── types.gleam            MemoryFact, FactScope, FactOperation
-│   └── log.gleam              Append-only JSON-L log for facts
+│   └── log.gleam              Daily-rotated JSON-L log for facts (YYYY-MM-DD-facts.jsonl)
+│
+├── artifacts/                 Artifact store — large content on disk
+│   ├── types.gleam            ArtifactRecord, ArtifactMeta
+│   └── log.gleam              Daily-rotated JSON-L log (artifacts-YYYY-MM-DD.jsonl, 50KB truncation)
 │
 ├── identity.gleam             Persona + session preamble templating with OMIT IF rules
 │
@@ -96,6 +100,7 @@ src/
 ├── tools/builtin.gleam        Built-in tools: calculator, get_current_datetime,
 │                              request_human_input, read_skill
 ├── tools/web.gleam            Web tools: fetch_url, web_search, exa_search, tavily_search, firecrawl_extract
+├── tools/artifacts.gleam      Artifact tools: store_result, retrieve_result (researcher agent)
 ├── tui.gleam                  Alternate-screen TUI; Chat + Log + Narrative tabs
 │
 ├── web/                       Web chat GUI
@@ -165,7 +170,7 @@ Long-lived processes and per-turn workers:
 | Think worker | Per turn | Blocking LLM call with retry + exponential backoff |
 | Agent processes | App | Each specialist agent runs its own react loop |
 | Archivist | Per turn | Async narrative generation after reply (spawn_unlinked) |
-| Librarian | App | Owns ETS query cache over narrative + CBR + facts JSONL |
+| Librarian | App | Owns ETS query cache over narrative + CBR + facts + artifacts JSONL |
 | Curator | App | Orchestrates system prompt assembly from identity + memory |
 | Scheduler | App | BEAM-native task scheduler with `send_after` tick loop |
 
@@ -198,6 +203,7 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `narrative_dir` | `--narrative-dir` | `.springdrift/memory/narrative` | Directory for narrative JSON-L files (narrative is always enabled) |
 | `archivist_model` | — | task_model | Model used by the Archivist for narrative generation |
 | `narrative_threading` | — | True | Enable automatic thread assignment |
+| `librarian_max_days` | — | 30 | Max days of history to replay into ETS at startup |
 | `narrative_summaries` | — | False | Enable periodic narrative summaries |
 | `narrative_summary_schedule` | — | `"weekly"` | Summary schedule: `"weekly"` or `"monthly"` |
 | `profiles_dirs` | `--profiles-dir` (repeatable) | `[~/.config/springdrift/profiles, .springdrift/profiles]` | Profile directories |
@@ -205,31 +211,37 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 
 ## Memory architecture
 
-The agent has five memory stores, all backed by append-only JSON-L files and
+The agent has six memory stores, all backed by append-only JSON-L files and
 indexed in ETS by the Librarian actor for fast queries.
 
 | Store | Location | Unit | Purpose |
 |---|---|---|---|
 | Narrative | `.springdrift/memory/narrative/YYYY-MM-DD.jsonl` | `NarrativeEntry` | What happened each cycle: summary, intent, outcome, entities, delegation chain |
 | Threads | (derived from narrative entries) | `Thread` / `ThreadState` | Ongoing lines of investigation grouping related narrative entries |
-| Facts | `.springdrift/memory/facts/facts.jsonl` | `MemoryFact` | Explicit key-value working memory with scope (Session/Persistent/Ephemeral) and confidence |
+| Facts | `.springdrift/memory/facts/YYYY-MM-DD-facts.jsonl` | `MemoryFact` | Explicit key-value working memory with scope (Session/Persistent/Ephemeral) and confidence |
 | CBR cases | `.springdrift/memory/cbr/cases.jsonl` | `CbrCase` | Problem-solution-outcome patterns for case-based reasoning |
+| Artifacts | `.springdrift/memory/artifacts/artifacts-YYYY-MM-DD.jsonl` | `ArtifactRecord` | Large content stored on disk (web pages, extractions) with 50KB truncation |
 | DAG nodes | (in-memory ETS, populated from cycle log) | `CycleNode` | Operational telemetry: token counts, tool calls, D' gates, agent output per cycle |
 
 **How they relate:** Narrative entries are the atomic record of each cycle. Threads
 group entries by topic using overlap scoring (location=3, domain=2, keyword=1;
 threshold=4). Facts are things the agent explicitly stores (`memory_write`). CBR
 cases capture reusable problem-solution patterns extracted by the Archivist alongside
-narrative entries. DAG nodes form a parent-child tree tracking every cognitive cycle,
-agent sub-cycle, and scheduler cycle with structured agent output.
+narrative entries. Artifacts hold large content (web pages, extractions) on disk with
+compact IDs, referenced by the researcher agent via `store_result`/`retrieve_result`.
+DAG nodes form a parent-child tree tracking every cognitive cycle, agent sub-cycle,
+and scheduler cycle with structured agent output.
 
 **Librarian** (`narrative/librarian.gleam`) is the unified query layer. All memory
 tools go through it when available, falling back to direct JSONL reads when it's
-`None`. It owns ETS tables for narrative entries, threads, facts, CBR cases, and
-DAG nodes. Messages: `QueryDayRoots`, `QueryDayStats`, `QueryNodeWithDescendants`,
-`QueryThreadCount`, `QueryPersistentFactCount`, `QueryCaseCount`, etc.
+`None`. It owns ETS tables for narrative entries, threads, facts, CBR cases, artifacts,
+and DAG nodes. Messages: `QueryDayRoots`, `QueryDayStats`, `QueryNodeWithDescendants`,
+`QueryThreadCount`, `QueryPersistentFactCount`, `QueryCaseCount`, `IndexArtifact`,
+`QueryArtifactsByCycle`, `QueryArtifactById`, `RetrieveArtifactContent`, etc.
+At startup, the Librarian replays artifact metadata from disk (configurable via
+`librarian_max_days`, default 30).
 
-**Memory tools** (14 tools in `tools/memory.gleam`):
+**Memory tools** (14 tools in `tools/memory.gleam`) plus **artifact tools** (2 tools in `tools/artifacts.gleam`):
 
 | Tool | Store | Purpose |
 |---|---|---|
@@ -242,6 +254,8 @@ DAG nodes. Messages: `QueryDayRoots`, `QueryDayStats`, `QueryNodeWithDescendants
 | `memory_clear_key` | Facts | Remove a fact (history preserved) |
 | `memory_query_facts` | Facts | Search facts by keyword |
 | `memory_trace_fact` | Facts | Full history of a key including supersessions |
+| `store_result` | Artifacts | Store large content to disk, returns compact artifact_id |
+| `retrieve_result` | Artifacts | Retrieve stored content by artifact_id |
 | `reflect` | DAG | Aggregated day-level stats (cycles, tokens, models, gate decisions) |
 | `inspect_cycle` | DAG | Drill into a specific cycle tree with tool calls and agent output |
 | `list_recent_cycles` | DAG | Discover cycle IDs for a date (feed into `inspect_cycle`) |
@@ -282,12 +296,12 @@ exposes this (and other system state) to the LLM.
 
 **Specialist agents** (in `src/agents/`):
 
-| Agent | Tools | max_turns | Restart | Purpose |
-|---|---|---|---|---|
-| Planner | none | 3 | Permanent | Break down complex goals into structured plans |
-| Researcher | web + builtin | 8 | Permanent | Gather information via search and extraction |
-| Coder | builtin | 10 | Permanent | Write and modify code, fix errors |
-| Writer | builtin | 6 | Permanent | Draft and edit text |
+| Agent | Tools | max_turns | max_context_messages | Restart | Purpose |
+|---|---|---|---|---|---|
+| Planner | none | 3 | unlimited | Permanent | Break down complex goals into structured plans |
+| Researcher | web + artifacts + builtin | 8 | 30 | Permanent | Gather information via search and extraction |
+| Coder | builtin | 10 | unlimited | Permanent | Write and modify code, fix errors |
+| Writer | builtin | 6 | unlimited | Permanent | Draft and edit text |
 
 **Structured output** — when an agent completes, the framework populates
 `AgentSuccess.structured_result` with typed `AgentFindings` based on the agent name
@@ -325,7 +339,9 @@ automatically falls back to `task_model`. The response is prefixed with
 `[model_x unavailable, used model_y]`.
 
 **Context trimming** — `context.trim` is applied inside `build_request` only. The
-full history is always stored in `CognitiveState.messages` and on disk.
+full history is always stored in `CognitiveState.messages` and on disk. Agent
+framework also applies `context.trim` per-agent via `max_context_messages` on
+`AgentSpec` (e.g. Researcher uses 30 to stay lean during multi-turn web research).
 
 **Skills** — `skills.discover(dirs)` returns `List(SkillMeta)`. `skills.parse_frontmatter`
 is public and unit-testable (pure function, no I/O). `to_system_prompt_xml` returns `""`
@@ -364,8 +380,18 @@ JSON-L persistence with lenient decoders (null → defaults).
 
 **Facts store** — key-value memory in `facts/types.gleam` and `facts/log.gleam`.
 `MemoryFact` has scope (Session/Persistent/Global), operation (Write/Delete/Superseded),
-confidence score, and supersedes chain. The Librarian indexes facts in ETS and supports
+confidence score, and supersedes chain. Facts use daily-rotated JSONL files
+(`YYYY-MM-DD-facts.jsonl`). The Librarian replays recent files at startup and migrates
+legacy `facts.jsonl` to the new format. The Librarian indexes facts in ETS and supports
 read/write/delete operations.
+
+**Artifact store** — large content storage in `artifacts/types.gleam` and `artifacts/log.gleam`.
+`ArtifactRecord` holds metadata + content in daily JSONL files (`artifacts-YYYY-MM-DD.jsonl`).
+Content over 50KB is truncated (with `truncated: True` flag). `ArtifactMeta` is the
+metadata-only projection indexed in ETS by the Librarian. The `store_result` and
+`retrieve_result` tools in `tools/artifacts.gleam` let the researcher agent push large
+web content to disk and retrieve it by ID, keeping the agent's context window lean.
+The researcher executor captures `artifacts_dir` and `librarian` via closure.
 
 **Housekeeping** — `narrative/housekeeping.gleam` provides CBR deduplication (cosine
 similarity on embeddings, configurable threshold), case pruning (old low-confidence
@@ -474,6 +500,7 @@ archivist_model  = "claude-haiku-4-5-20251001" # Model for Archivist LLM calls
 threading        = true              # Auto-assign threads by overlap scoring
 summaries        = false             # Enable periodic summaries
 summary_schedule = "weekly"          # "weekly" or "monthly"
+max_days         = 30               # Days of history replayed into ETS at startup
 ```
 
 ### Profile directory format

@@ -228,6 +228,7 @@ Librarian (ETS query layer)
 │   └── Threads          ongoing topics grouping related entries
 ├── Facts                explicit key-value working memory (scoped, versioned)
 ├── CBR cases            problem → solution → outcome patterns
+├── Artifacts            large content on disk (web pages, extractions)
 └── DAG nodes            operational telemetry (tokens, tools, gates, agent output)
 ```
 
@@ -236,10 +237,11 @@ intent, outcome, entities, delegation chain, and confidence. **Threads** group
 related entries by overlap scoring across locations, domains, and keywords.
 **Facts** are things the agent explicitly stores and retrieves (e.g. "Dublin
 average rent = €2,340"). **CBR cases** capture reusable patterns so the agent
-can learn from past approaches. **DAG nodes** track every cycle's operational
-data in a parent-child tree.
+can learn from past approaches. **Artifacts** store large web content on disk
+with compact IDs, keeping agent context windows lean. **DAG nodes** track every
+cycle's operational data in a parent-child tree.
 
-The **Librarian** actor owns ETS tables indexing all five stores and serves as
+The **Librarian** actor owns ETS tables indexing all six stores and serves as
 the unified query layer. The **Curator** assembles the system prompt from
 identity files and memory counts. The **Archivist** generates narrative entries
 and CBR cases after each cycle via fire-and-forget LLM calls.
@@ -248,7 +250,9 @@ Fourteen memory tools let the agent query its own memory: `recall_recent`,
 `recall_search`, `recall_threads`, `recall_cases`, `memory_write`,
 `memory_read`, `memory_clear_key`, `memory_query_facts`,
 `memory_trace_fact`, `reflect`, `inspect_cycle`, `list_recent_cycles`,
-`query_tool_activity`, and `introspect`.
+`query_tool_activity`, and `introspect`. Two additional artifact tools
+(`store_result`, `retrieve_result`) let the researcher agent offload large
+content to disk and retrieve it by ID.
 
 ---
 
@@ -260,7 +264,7 @@ supervised OTP process with its own react loop and tool set.
 | Agent | Tools | Turns | Purpose |
 |---|---|---|---|
 | Planner | none | 3 | Break down complex goals into structured plans |
-| Researcher | web + builtin | 8 | Gather information via search and extraction |
+| Researcher | web + artifacts + builtin | 8 | Gather information via search and extraction |
 | Coder | builtin | 10 | Write and modify code |
 | Writer | builtin | 6 | Draft and edit text |
 
@@ -395,7 +399,8 @@ All runtime data lives under `.springdrift/` in the project root:
 │   ├── cycle-log/       Per-cycle request/response logs
 │   ├── narrative/       Prime Narrative memory (JSON-L + thread index)
 │   ├── cbr/             Case-Based Reasoning cases
-│   └── facts/           Key-value fact store
+│   ├── facts/           Key-value fact store (daily-rotated JSON-L)
+│   └── artifacts/       Large content store (daily-rotated JSON-L)
 ├── skills/              Local skill definitions
 └── profiles/            Agent profile directories
 ```
@@ -450,6 +455,7 @@ dprime_config  = "dprime.json"
 threading        = true
 summaries        = false
 summary_schedule = "weekly"
+# max_days       = 30          # Days of history replayed into ETS at startup
 ```
 
 ## Requirements
@@ -462,7 +468,7 @@ summary_schedule = "weekly"
 
 ```sh
 gleam build           # Compile
-gleam test            # Run the test suite (~789 tests)
+gleam test            # Run the test suite (~800 tests)
 gleam format          # Format all source files
 gleam run             # Run the application
 ```

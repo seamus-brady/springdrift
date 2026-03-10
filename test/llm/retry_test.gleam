@@ -129,9 +129,10 @@ pub fn is_not_rate_limit_500_test() {
   |> should.be_false
 }
 
-pub fn is_not_rate_limit_529_test() {
+pub fn is_rate_limit_529_test() {
+  // 529 (Overloaded) now treated as rate limit for longer backoff
   retry.is_rate_limit(llm_types.ApiError(status_code: 529, message: ""))
-  |> should.be_false
+  |> should.be_true
 }
 
 pub fn is_not_rate_limit_network_test() {

@@ -2082,3 +2082,81 @@ minus agent_status removals.
 | Archivist pushes constitution | Fire-and-forget after each cycle. Curator caches values; preamble always has fresh stats without blocking |
 | Agent health pushed on lifecycle events | Crash/restart/stop events update Curator immediately. Started events don't push (nominal state is implicit) |
 | `system_prompt` removed entirely | System prompt is now assembled from identity files by the Curator. No config field needed — falls back to empty when no identity exists |
+
+---
+
+### Artifact Store & ETS Startup (Mar 10)
+
+Four-part implementation adding artifact storage, agent context windowing, facts daily
+rotation, and ETS startup optimisations. 800 tests passing.
+
+#### Change 1 — Facts daily rotation
+
+Migrated facts from a single `facts.jsonl` to daily-rotated `YYYY-MM-DD-facts.jsonl` files,
+matching the pattern used by narrative and cycle-log stores.
+
+**Files modified:**
+- `src/facts/log.gleam` — rewritten for daily rotation; `append()` writes to dated files,
+  `load_all()` scans directory for all `*-facts.jsonl` files, `migrate_legacy()` moves
+  old `facts.jsonl` entries to dated format
+- `src/narrative/librarian.gleam` — calls `facts_log.migrate_legacy()` at startup before
+  replaying facts into ETS
+
+#### Change 2 — Librarian artifact ETS tables
+
+Extended the Librarian actor with two new ETS tables (`artifacts` set and
+`artifacts_by_cycle` bag) for fast artifact metadata lookups.
+
+**Files modified:**
+- `src/narrative/librarian.gleam` — added `artifacts_dir`, `artifacts`, `artifacts_by_cycle`
+  to `LibrarianState`; added 4 new messages (`IndexArtifact`, `QueryArtifactsByCycle`,
+  `QueryArtifactById`, `RetrieveArtifactContent`); added `replay_artifacts_from_disk()`
+  at startup; added artifact ETS FFI calls; updated `start()`/`start_supervised()` signatures
+- `src/narrative/store_ffi.erl` — artifact-specific ETS insert/lookup FFI functions
+- All Librarian test files — updated `start()` calls with `artifacts_dir` parameter
+
+#### Change 3 — Artifact tools (store_result / retrieve_result)
+
+Two new tools for the researcher agent to offload large web content to disk and retrieve
+it by compact artifact ID, keeping the agent's context window lean.
+
+**Files added:**
+- `src/artifacts/types.gleam` — `ArtifactRecord` (full on-disk record) and `ArtifactMeta`
+  (metadata-only projection)
+- `src/artifacts/log.gleam` — daily-rotated JSONL storage with 50KB truncation; `append()`,
+  `load_date_meta()`, `read_content()`
+- `src/tools/artifacts.gleam` — `store_result` and `retrieve_result` tool definitions +
+  execution; uses closure to capture `artifacts_dir` and `librarian` subject
+- `test/artifacts/log_test.gleam` — 6 tests for JSONL storage
+- `test/artifacts/librarian_artifact_test.gleam` — 5 tests for ETS indexing and replay
+
+**Files modified:**
+- `src/agents/researcher.gleam` — updated `spec()` to accept `artifacts_dir` and `lib`;
+  added artifact tools to tool list; updated `researcher_executor()` closure
+- `src/springdrift.gleam` — moved Librarian startup before agent spec construction;
+  updated `default_agent_specs()` to pass librarian subject; added `paths.artifacts_dir()`
+- `src/paths.gleam` — added `artifacts_dir()` returning `.springdrift/memory/artifacts`
+
+#### Change 4 — Agent context windowing
+
+Added `max_context_messages: Option(Int)` to `AgentSpec` for per-agent sliding-window
+context trimming. The researcher agent uses 30 messages to stay lean during multi-turn
+web research.
+
+**Files modified:**
+- `src/agent/types.gleam` — added `max_context_messages` field to `AgentSpec`
+- `src/agent/framework.gleam` — applies `context.trim()` in the react loop when the
+  spec has a `max_context_messages` limit
+- All agent specs (`planner.gleam`, `researcher.gleam`, `coder.gleam`, `writer.gleam`) —
+  added `max_context_messages` field
+
+#### Design decisions
+
+| Decision | Rationale |
+|---|---|
+| Closure-based tool executors | `AgentSpec.tool_executor` is `fn(ToolCall) -> ToolResult` — no room for extra params. Closure captures `artifacts_dir` and `librarian` at spec construction time |
+| Two-step retrieve (lookup meta → read content) | `retrieve_result` needs `stored_at` date to find the right JSONL file. Looks up metadata first via `QueryArtifactById`, then uses `stored_at` for content read |
+| Librarian starts before agent specs | `researcher.spec()` needs the librarian subject. Reorganised `springdrift.gleam` boot sequence accordingly |
+| 50KB truncation limit | Balances content preservation with disk usage. `truncated: True` flag in metadata lets agents know content was capped |
+| Daily rotation for facts | Consistency with narrative/artifact stores. Legacy `facts.jsonl` auto-migrated at startup |
+| Per-agent context windowing | Researcher's multi-turn web research can generate many messages. 30-message window prevents context overflow without affecting other agents |

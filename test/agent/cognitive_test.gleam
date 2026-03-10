@@ -232,8 +232,8 @@ pub fn agent_question_decoupled_test() {
 
 pub fn model_fallback_on_retryable_error_test() {
   // Reasoning model returns 529 (overloaded), task model works fine.
-  // The worker retries with backoff (~3.5s) then the cognitive loop
-  // falls back to the task model automatically.
+  // The worker retries 3x with 2s base backoff (~14s) then the cognitive
+  // loop falls back to the task model automatically.
   let provider =
     mock.provider_with_handler(fn(req) {
       case req.model {
@@ -263,8 +263,8 @@ pub fn model_fallback_on_retryable_error_test() {
       reply_to: reply_subj,
     ),
   )
-  // Longer timeout: worker retries 3x with backoff before fallback kicks in
-  let assert Ok(reply) = process.receive(reply_subj, 15_000)
+  // Longer timeout: worker retries 3x with 2s base backoff (~14s) + fallback
+  let assert Ok(reply) = process.receive(reply_subj, 25_000)
 
   // Should include fallback prefix and the actual response
   should.be_true(string.contains(reply.response, "mock-reasoning unavailable"))

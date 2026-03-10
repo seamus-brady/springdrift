@@ -419,15 +419,16 @@ fn do_dispatch_agents(
           usage: Some(resp.usage),
         ),
       )
-      // Add assistant message with the original response + error so
-      // message history stays well-formed for the next user input.
+      // Add single assistant message with the original response content + error
+      // so message history stays well-formed (alternating user/assistant).
       let assistant_msg =
-        llm_types.Message(role: llm_types.Assistant, content: resp.content)
-      let error_msg =
-        llm_types.Message(role: llm_types.Assistant, content: [
-          llm_types.TextContent(text: error_text),
-        ])
-      let messages = list.append(state.messages, [assistant_msg, error_msg])
+        llm_types.Message(
+          role: llm_types.Assistant,
+          content: list.append(resp.content, [
+            llm_types.TextContent(text: error_text),
+          ]),
+        )
+      let messages = list.append(state.messages, [assistant_msg])
       CognitiveState(
         ..state,
         messages:,

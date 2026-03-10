@@ -73,3 +73,4 @@ name = "Springdrift"
 threading = true             # Auto-assign threads by overlap scoring
 summaries = false            # Enable periodic summaries
 summary_schedule = "weekly"  # "weekly" or "monthly"
+# max_days = 30              # Days of history replayed into ETS at startup

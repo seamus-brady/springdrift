@@ -44,10 +44,26 @@ pub fn trim(messages: List(Message), max_messages: Int) -> List(Message) {
 /// Coalesce consecutive same-role messages by merging their content blocks.
 /// This prevents the Anthropic API from rejecting requests with
 /// "messages must alternate between user and assistant roles".
+/// Also ensures the first message has User role (Anthropic requirement).
 pub fn ensure_alternation(messages: List(Message)) -> List(Message) {
-  case messages {
+  let coalesced = case messages {
     [] -> []
     [first, ..rest] -> coalesce_loop(rest, first, [])
+  }
+  // Anthropic requires the first message to be User role.
+  // If the list starts with an Assistant message (can happen after trimming
+  // or error recovery), drop it.
+  case coalesced {
+    [Message(role: types.Assistant, ..), ..rest_msgs] -> {
+      slog.warn(
+        "context",
+        "ensure_alternation",
+        "Dropped leading Assistant message to satisfy API first-message-must-be-User constraint",
+        option.None,
+      )
+      rest_msgs
+    }
+    _ -> coalesced
   }
 }
 

@@ -22,22 +22,27 @@ pub fn is_retryable(err: LlmError) -> Bool {
   }
 }
 
-/// Whether an error is specifically a rate limit (needs longer backoff).
+/// Whether an error needs longer backoff (rate limit or server overload).
+/// 429 = rate limited, 529 = Anthropic overloaded — both need breathing room.
 pub fn is_rate_limit(err: LlmError) -> Bool {
   case err {
     ApiError(status_code: 429, ..) -> True
+    ApiError(status_code: 529, ..) -> True
     RateLimitError(..) -> True
     _ -> False
   }
 }
 
 /// Initial backoff delay for an error type.
-/// Rate limits: 5s (APIs typically enforce windows of 60s+).
+/// Rate limits (429): 5s (APIs typically enforce windows of 60s+).
+/// Overloaded (529): 2s (server busy, needs moderate breathing room).
 /// Server errors / network: 500ms.
 fn initial_delay_for(err: LlmError) -> Int {
-  case is_rate_limit(err) {
-    True -> 5000
-    False -> 500
+  case err {
+    ApiError(status_code: 429, ..) -> 5000
+    RateLimitError(..) -> 5000
+    ApiError(status_code: 529, ..) -> 2000
+    _ -> 500
   }
 }
 

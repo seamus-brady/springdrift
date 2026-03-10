@@ -4,11 +4,14 @@ import anthropic/error as aerr
 import anthropic/message as amsg
 import anthropic/request as areq
 import anthropic/tool as atool
+import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
+import gleam/string
 import llm/provider.{type Provider, Provider}
 import llm/types
+import slog
 
 /// Predefined model name constants
 pub const claude_opus_4 = "claude-opus-4-20250514"
@@ -48,6 +51,8 @@ pub fn provider_with_key(api_key: String) -> Result(Provider, types.LlmError) {
 // ---------------------------------------------------------------------------
 
 fn translate_request(req: types.LlmRequest) -> areq.CreateMessageRequest {
+  // Diagnostic: log message roles to aid debugging 400 alternation errors
+  check_message_roles(req.messages)
   let messages = list.map(req.messages, translate_message)
   let base = areq.new(req.model, messages, req.max_tokens)
 
@@ -231,5 +236,66 @@ fn translate_error(error: aerr.AnthropicError) -> types.LlmError {
     aerr.ConfigError(reason: reason) -> types.ConfigError(reason: reason)
     aerr.TimeoutError(_) -> types.TimeoutError
     aerr.JsonError(reason: reason) -> types.DecodeError(reason: reason)
+  }
+}
+
+/// Diagnostic: check message roles before sending to Anthropic API.
+/// Logs a warning if messages don't alternate or start with Assistant.
+fn check_message_roles(messages: List(types.Message)) -> Nil {
+  let roles =
+    list.map(messages, fn(m) {
+      case m.role {
+        types.User -> "U"
+        types.Assistant -> "A"
+      }
+    })
+  let role_str = string.join(roles, ",")
+
+  // Check first message is User
+  case messages {
+    [types.Message(role: types.Assistant, ..), ..] ->
+      slog.warn(
+        "anthropic",
+        "check_message_roles",
+        "First message is Assistant (should be User). Roles: "
+          <> role_str
+          <> " (count="
+          <> int.to_string(list.length(messages))
+          <> ")",
+        None,
+      )
+    _ -> Nil
+  }
+
+  // Check for consecutive same-role messages
+  case find_consecutive_same_role(messages, 0) {
+    Ok(idx) ->
+      slog.warn(
+        "anthropic",
+        "check_message_roles",
+        "Consecutive same-role messages at index "
+          <> int.to_string(idx)
+          <> ". Roles: "
+          <> role_str
+          <> " (count="
+          <> int.to_string(list.length(messages))
+          <> ")",
+        None,
+      )
+    Error(_) -> Nil
+  }
+}
+
+fn find_consecutive_same_role(
+  messages: List(types.Message),
+  idx: Int,
+) -> Result(Int, Nil) {
+  case messages {
+    [a, b, ..rest] ->
+      case a.role == b.role {
+        True -> Ok(idx)
+        False -> find_consecutive_same_role([b, ..rest], idx + 1)
+      }
+    _ -> Error(Nil)
   }
 }

@@ -69,8 +69,9 @@ pub fn trim_preserves_tool_use_result_pair_test() {
   ]
   // 6 msgs, limit 3 → drop_count = 3. Boundary (last dropped) = tool_use_msg.
   // Adjustment: drop 4 instead of 3 → keeps [assistant("d"), user("final")].
+  // Then ensure_alternation drops leading Assistant → [user("final")].
   let result = context.trim(msgs, 3)
-  result |> should.equal([assistant_msg("d"), user_msg("final")])
+  result |> should.equal([user_msg("final")])
 }
 
 pub fn trim_no_adjustment_when_boundary_is_text_test() {
@@ -126,6 +127,13 @@ pub fn alternation_merges_three_consecutive_test() {
     ]),
     assistant_msg("d"),
   ])
+}
+
+pub fn alternation_drops_leading_assistant_test() {
+  // Anthropic requires first message to be User role
+  let msgs = [assistant_msg("a"), user_msg("b"), assistant_msg("c")]
+  context.ensure_alternation(msgs)
+  |> should.equal([user_msg("b"), assistant_msg("c")])
 }
 
 pub fn alternation_empty_list_test() {
