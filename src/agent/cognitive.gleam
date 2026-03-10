@@ -21,6 +21,7 @@ import gleam/option.{None, Some}
 import gleam/string
 import llm/response
 import llm/types as llm_types
+import narrative/curator as narrative_curator
 import narrative/librarian
 import query_complexity
 import slog
@@ -225,6 +226,12 @@ fn handle_user_input(
     Idle -> {
       let cycle_id = cycle_log.generate_uuid()
       cycle_log.log_human_input(cycle_id, state.cycle_id, text)
+      // Clear Curator scratchpad from previous cycle
+      case state.curator {
+        option.Some(cur) ->
+          narrative_curator.clear_cycle(cur, option.unwrap(state.cycle_id, ""))
+        option.None -> Nil
+      }
       let state =
         CognitiveState(
           ..state,

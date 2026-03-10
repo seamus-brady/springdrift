@@ -195,13 +195,33 @@ fn build_prompt(ctx: ArchivistContext) -> String {
       "AGENT DELEGATIONS:\n"
       <> string.join(
         list.map(completions, fn(c) {
+          let tool_lines = case c.tool_call_details {
+            [] -> ""
+            details ->
+              "\n"
+              <> string.join(
+                list.map(details, fn(d: agent_types.ToolCallDetail) {
+                  "    Tool: "
+                  <> d.name
+                  <> " → "
+                  <> string.slice(d.output_summary, 0, 150)
+                  <> " ["
+                  <> case d.success {
+                    True -> "SUCCESS"
+                    False -> "FAILED"
+                  }
+                  <> "]"
+                }),
+                "\n",
+              )
+          }
           "- "
           <> c.agent_human_name
           <> " (id: "
           <> c.agent_id
           <> "): "
           <> case c.result {
-            Ok(r) -> "SUCCESS — " <> string.slice(r, 0, 200)
+            Ok(r) -> "SUCCESS — " <> string.slice(r, 0, 1000)
             Error(e) -> "FAILED — " <> e
           }
           <> " [tokens: "
@@ -211,6 +231,7 @@ fn build_prompt(ctx: ArchivistContext) -> String {
           <> ", "
           <> int.to_string(c.duration_ms)
           <> "ms]"
+          <> tool_lines
         }),
         "\n",
       )
@@ -668,13 +689,34 @@ fn build_cbr_prompt(ctx: ArchivistContext, entry: NarrativeEntry) -> String {
       "AGENTS USED:\n"
       <> string.join(
         list.map(completions, fn(c) {
+          let tool_lines = case c.tool_call_details {
+            [] -> ""
+            details ->
+              "\n"
+              <> string.join(
+                list.map(details, fn(d: agent_types.ToolCallDetail) {
+                  "    Tool: "
+                  <> d.name
+                  <> " → "
+                  <> string.slice(d.output_summary, 0, 150)
+                  <> " ["
+                  <> case d.success {
+                    True -> "SUCCESS"
+                    False -> "FAILED"
+                  }
+                  <> "]"
+                }),
+                "\n",
+              )
+          }
           "- "
           <> c.agent_human_name
           <> ": "
           <> case c.result {
-            Ok(r) -> "SUCCESS — " <> string.slice(r, 0, 150)
+            Ok(r) -> "SUCCESS — " <> string.slice(r, 0, 500)
             Error(e) -> "FAILED — " <> e
           }
+          <> tool_lines
         }),
         "\n",
       )

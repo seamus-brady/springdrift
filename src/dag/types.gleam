@@ -98,6 +98,20 @@ pub type DayStats {
 }
 
 // ---------------------------------------------------------------------------
+// Tool activity record — per-tool usage stats from DAG queries
+// ---------------------------------------------------------------------------
+
+pub type ToolActivityRecord {
+  ToolActivityRecord(
+    name: String,
+    total_calls: Int,
+    success_count: Int,
+    failure_count: Int,
+    cycle_ids: List(String),
+  )
+}
+
+// ---------------------------------------------------------------------------
 // D-prime decision record — passed from cognitive loop to Archivist
 // ---------------------------------------------------------------------------
 

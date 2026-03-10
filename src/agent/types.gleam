@@ -91,6 +91,7 @@ pub type AgentOutcome {
     structured_result: Option(AgentResult),
     instruction: String,
     tools_used: List(String),
+    tool_call_details: List(ToolCallDetail),
     input_tokens: Int,
     output_tokens: Int,
     duration_ms: Int,
@@ -104,6 +105,7 @@ pub type AgentOutcome {
     error: String,
     instruction: String,
     tools_used: List(String),
+    tool_call_details: List(ToolCallDetail),
     input_tokens: Int,
     output_tokens: Int,
     duration_ms: Int,
@@ -159,6 +161,19 @@ pub type AgentDataPoint {
 }
 
 // ---------------------------------------------------------------------------
+// Tool call detail — captured per tool invocation for introspection
+// ---------------------------------------------------------------------------
+
+pub type ToolCallDetail {
+  ToolCallDetail(
+    name: String,
+    input_summary: String,
+    output_summary: String,
+    success: Bool,
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Agent completion record — accumulated in cognitive loop for Archivist
 // ---------------------------------------------------------------------------
 
@@ -170,6 +185,7 @@ pub type AgentCompletionRecord {
     instruction: String,
     result: Result(String, String),
     tools_used: List(String),
+    tool_call_details: List(ToolCallDetail),
     input_tokens: Int,
     output_tokens: Int,
     duration_ms: Int,

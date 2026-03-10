@@ -7,6 +7,7 @@
 //// memory_query_facts, memory_trace_fact) let the loop explicitly
 //// manage its working memory.
 
+import cbr/types as cbr_types
 import dag/types as dag_types
 import facts/log as facts_log
 import facts/types as facts_types
@@ -53,6 +54,8 @@ pub fn all() -> List(Tool) {
     memory_trace_tool(),
     reflect_tool(),
     inspect_cycle_tool(),
+    recall_cases_tool(),
+    query_tool_activity_tool(),
   ]
 }
 
@@ -184,6 +187,34 @@ fn reflect_tool() -> Tool {
   |> tool.build()
 }
 
+fn recall_cases_tool() -> Tool {
+  tool.new("recall_cases")
+  |> tool.with_description(
+    "Search for similar past cases from Case-Based Reasoning memory. Returns matching cases showing the problem summary, approach taken, outcome status, and pitfalls encountered. Use this to learn from past experience before tackling a similar task.",
+  )
+  |> tool.add_string_param(
+    "intent",
+    "Intent to match against past cases (e.g. 'research', 'summarise')",
+    False,
+  )
+  |> tool.add_string_param(
+    "domain",
+    "Domain to match (e.g. 'technology', 'finance')",
+    False,
+  )
+  |> tool.add_string_param(
+    "keywords",
+    "Comma-separated keywords to match against case keywords",
+    False,
+  )
+  |> tool.add_integer_param(
+    "max_results",
+    "Maximum number of results to return (default 5)",
+    False,
+  )
+  |> tool.build()
+}
+
 fn inspect_cycle_tool() -> Tool {
   tool.new("inspect_cycle")
   |> tool.with_description(
@@ -192,6 +223,17 @@ fn inspect_cycle_tool() -> Tool {
     <> "counts, and agent outputs. Use this to drill into a specific interaction.",
   )
   |> tool.add_string_param("cycle_id", "The cycle ID to inspect", True)
+  |> tool.build()
+}
+
+fn query_tool_activity_tool() -> Tool {
+  tool.new("query_tool_activity")
+  |> tool.with_description(
+    "Query tool usage activity for a given date. Returns per-tool stats showing how many "
+    <> "times each tool was called, how many succeeded or failed, and which cycles used it. "
+    <> "Use this to understand what tools agents have been using and spot failure patterns.",
+  )
+  |> tool.add_string_param("date", "Date to query in YYYY-MM-DD format", True)
   |> tool.build()
 }
 
@@ -211,6 +253,8 @@ pub fn is_memory_tool(name: String) -> Bool {
   || name == "memory_trace_fact"
   || name == "reflect"
   || name == "inspect_cycle"
+  || name == "recall_cases"
+  || name == "query_tool_activity"
 }
 
 /// Context for facts-based memory tools.
@@ -238,6 +282,8 @@ pub fn execute(
     "memory_trace_fact" -> run_memory_trace(call, facts_ctx)
     "reflect" -> run_reflect(call, lib)
     "inspect_cycle" -> run_inspect_cycle(call, lib)
+    "recall_cases" -> run_recall_cases(call, lib)
+    "query_tool_activity" -> run_query_tool_activity(call, lib)
     _ -> ToolFailure(tool_use_id: call.id, error: "Unknown tool: " <> call.name)
   }
 }
@@ -1026,6 +1072,121 @@ fn format_subtree(tree: dag_types.DagSubtree, depth: Int) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// recall_cases — CBR case retrieval
+// ---------------------------------------------------------------------------
+
+fn run_recall_cases(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+) -> ToolResult {
+  case lib {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "recall_cases not available: Librarian not initialised",
+      )
+    Some(l) -> {
+      let decoder = {
+        use intent <- decode.optional_field("intent", "", decode.string)
+        use domain <- decode.optional_field("domain", "", decode.string)
+        use keywords_str <- decode.optional_field("keywords", "", decode.string)
+        use max_results <- decode.optional_field("max_results", 5, decode.int)
+        decode.success(#(intent, domain, keywords_str, max_results))
+      }
+      case json.parse(call.input_json, decoder) {
+        Error(_) ->
+          ToolFailure(tool_use_id: call.id, error: "Invalid recall_cases input")
+        Ok(#(intent, domain, keywords_str, max_results)) -> {
+          let keywords = case keywords_str {
+            "" -> []
+            s ->
+              s
+              |> string.split(",")
+              |> list.map(string.trim)
+              |> list.filter(fn(k) { k != "" })
+          }
+          let clamped = int.min(20, int.max(1, max_results))
+          let query =
+            cbr_types.CbrQuery(
+              intent:,
+              domain:,
+              keywords:,
+              entities: [],
+              embedding: None,
+              max_results: clamped,
+            )
+          let results = librarian.retrieve_cases(l, query)
+          case results {
+            [] ->
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: "No matching cases found in CBR memory.",
+              )
+            _ ->
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: "Found "
+                  <> int.to_string(list.length(results))
+                  <> " matching cases:\n\n"
+                  <> string.join(
+                  list.map(results, format_scored_case),
+                  "\n---\n",
+                ),
+              )
+          }
+        }
+      }
+    }
+  }
+}
+
+fn format_scored_case(sc: cbr_types.ScoredCase) -> String {
+  let c = sc.cbr_case
+  let pitfalls = case c.outcome.pitfalls {
+    [] -> ""
+    ps -> "  Pitfalls: " <> string.join(ps, "; ") <> "\n"
+  }
+  let agents = case c.solution.agents_used {
+    [] -> ""
+    a -> "  Agents: " <> string.join(a, ", ") <> "\n"
+  }
+  let tools = case c.solution.tools_used {
+    [] -> ""
+    t -> "  Tools: " <> string.join(t, ", ") <> "\n"
+  }
+  let keywords = case c.problem.keywords {
+    [] -> ""
+    k -> "  Keywords: " <> string.join(k, ", ") <> "\n"
+  }
+  "[score: "
+  <> float.to_string(sc.score)
+  <> "] "
+  <> c.problem.intent
+  <> " | "
+  <> c.problem.domain
+  <> "\n"
+  <> "  Query: "
+  <> c.problem.user_input
+  <> "\n"
+  <> "  Approach: "
+  <> c.solution.approach
+  <> "\n"
+  <> "  Outcome: "
+  <> c.outcome.status
+  <> " (confidence: "
+  <> float.to_string(c.outcome.confidence)
+  <> ")\n"
+  <> case c.outcome.assessment {
+    "" -> ""
+    a -> "  Assessment: " <> a <> "\n"
+  }
+  <> pitfalls
+  <> agents
+  <> tools
+  <> keywords
+}
+
+// ---------------------------------------------------------------------------
 // Facts formatting
 // ---------------------------------------------------------------------------
 
@@ -1102,5 +1263,67 @@ fn op_to_string(op: facts_types.FactOp) -> String {
     facts_types.Write -> "write"
     facts_types.Clear -> "clear"
     facts_types.Superseded -> "superseded"
+  }
+}
+
+// ---------------------------------------------------------------------------
+// query_tool_activity — per-tool usage stats from DAG
+// ---------------------------------------------------------------------------
+
+fn run_query_tool_activity(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+) -> ToolResult {
+  case lib {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "query_tool_activity not available: Librarian not initialised",
+      )
+    Some(l) -> {
+      let decoder = {
+        use date <- decode.field("date", decode.string)
+        decode.success(date)
+      }
+      case json.parse(call.input_json, decoder) {
+        Error(_) ->
+          ToolFailure(
+            tool_use_id: call.id,
+            error: "Invalid query_tool_activity input: requires 'date' field",
+          )
+        Ok(date) -> {
+          let records = librarian.query_tool_activity(l, date)
+          case records {
+            [] ->
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: "No tool activity found for " <> date,
+              )
+            _ -> {
+              let lines =
+                list.map(records, fn(r: dag_types.ToolActivityRecord) {
+                  r.name
+                  <> ": "
+                  <> int.to_string(r.total_calls)
+                  <> " calls ("
+                  <> int.to_string(r.success_count)
+                  <> " ok, "
+                  <> int.to_string(r.failure_count)
+                  <> " failed) in "
+                  <> int.to_string(list.length(r.cycle_ids))
+                  <> " cycles"
+                })
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: "Tool activity for "
+                  <> date
+                  <> ":\n"
+                  <> string.join(lines, "\n"),
+              )
+            }
+          }
+        }
+      }
+    }
   }
 }

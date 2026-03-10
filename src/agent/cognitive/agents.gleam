@@ -21,6 +21,7 @@ import gleam/option.{None, Some}
 import gleam/string
 import llm/response
 import llm/types as llm_types
+import narrative/curator
 import narrative/librarian
 import paths
 import slog
@@ -324,8 +325,7 @@ fn do_dispatch_agents(
         Some(task_subject) -> {
           let agent_task_id = cycle_log.generate_uuid()
           let #(instruction, ctx) = parse_agent_params(call.input_json)
-          process.send(
-            task_subject,
+          let base_task =
             AgentTask(
               task_id: agent_task_id,
               tool_use_id: call.id,
@@ -333,8 +333,13 @@ fn do_dispatch_agents(
               context: ctx,
               parent_cycle_id: cycle_id,
               reply_to: state.self,
-            ),
-          )
+            )
+          // Enrich task with prior agent results via Curator
+          let enriched_task = case state.curator {
+            Some(cur) -> curator.inject_context(cur, base_task)
+            None -> base_task
+          }
+          process.send(task_subject, enriched_task)
           process.send(state.notify, ToolCalling(name: call.name))
           // Index agent cycle as NodePending in DAG
           case state.librarian {
@@ -448,6 +453,7 @@ pub fn handle_agent_complete(
       result:,
       instruction:,
       tools_used:,
+      tool_call_details:,
       input_tokens:,
       output_tokens:,
       duration_ms:,
@@ -460,6 +466,7 @@ pub fn handle_agent_complete(
         instruction:,
         result: Ok(result),
         tools_used:,
+        tool_call_details:,
         input_tokens:,
         output_tokens:,
         duration_ms:,
@@ -471,6 +478,7 @@ pub fn handle_agent_complete(
       error:,
       instruction:,
       tools_used:,
+      tool_call_details:,
       input_tokens:,
       output_tokens:,
       duration_ms:,
@@ -483,6 +491,7 @@ pub fn handle_agent_complete(
         instruction:,
         result: Error(error),
         tools_used:,
+        tool_call_details:,
         input_tokens:,
         output_tokens:,
         duration_ms:,
@@ -493,6 +502,25 @@ pub fn handle_agent_complete(
       completion,
       ..state.agent_completions
     ])
+
+  // Write back to Curator scratchpad for inter-agent context
+  case state.curator {
+    Some(cur) -> {
+      let cycle_id = option.unwrap(state.cycle_id, outcome_task_id)
+      let agent_result =
+        types.AgentResult(
+          final_text: case completion.result {
+            Ok(text) -> text
+            Error(err) -> "[error] " <> err
+          },
+          agent_id: completion.agent_id,
+          cycle_id:,
+          findings: types.GenericFindings(notes: completion.tools_used),
+        )
+      curator.write_back_result(cur, cycle_id, agent_result)
+    }
+    None -> Nil
+  }
 
   // Update DAG node with agent outcome
   case state.librarian {
