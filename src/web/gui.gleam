@@ -399,6 +399,8 @@ fn notification_to_server_message(
     agent_types.SafetyGateNotice(decision:, score:, explanation:) ->
       protocol.SafetyNotification(decision:, score:, explanation:)
     agent_types.ProfileNotification(_) -> protocol.ToolNotification(name: "")
+    agent_types.AgentLifecycleNotice(event_type:, agent_name:) ->
+      protocol.ToolNotification(name: agent_name <> " " <> event_type)
   }
 }
 

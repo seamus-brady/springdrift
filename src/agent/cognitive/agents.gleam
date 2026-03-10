@@ -113,6 +113,15 @@ fn handle_memory_tools(
           ))
         None -> None
       }
+      let agent_entries =
+        list.map(registry.list_agents(state.registry), fn(e) {
+          let status_str = case e.status {
+            registry.Running -> "Running"
+            registry.Restarting -> "Restarting"
+            registry.Stopped -> "Stopped"
+          }
+          memory.AgentStatusEntry(name: e.name, status: status_str)
+        })
       let result =
         memory.execute(
           call,
@@ -120,6 +129,7 @@ fn handle_memory_tools(
           state.librarian,
           facts_ctx,
           state.embedding_config,
+          agent_entries,
         )
       case result {
         llm_types.ToolSuccess(tool_use_id: id, content: c) ->
@@ -524,6 +534,10 @@ pub fn handle_agent_complete(
   case state.curator {
     Some(cur) -> {
       let cycle_id = option.unwrap(state.cycle_id, outcome_task_id)
+      let findings = case outcome {
+        AgentSuccess(structured_result: option.Some(sr), ..) -> sr.findings
+        _ -> types.GenericFindings(notes: completion.tools_used)
+      }
       let agent_result =
         types.AgentResult(
           final_text: case completion.result {
@@ -532,7 +546,7 @@ pub fn handle_agent_complete(
           },
           agent_id: completion.agent_id,
           cycle_id:,
-          findings: types.GenericFindings(notes: completion.tools_used),
+          findings:,
         )
       curator.write_back_result(cur, cycle_id, agent_result)
     }
@@ -565,17 +579,7 @@ pub fn handle_agent_complete(
           tokens_in: completion.input_tokens,
           tokens_out: completion.output_tokens,
           duration_ms: completion.duration_ms,
-          agent_output: Some(
-            dag_types.GenericOutput(notes: [
-              "agent="
-                <> case outcome {
-                AgentSuccess(agent:, ..) -> agent
-                AgentFailure(agent:, ..) -> agent
-              },
-              "id=" <> completion.agent_id,
-              "instruction=" <> completion.instruction,
-            ]),
-          ),
+          agent_output: Some(findings_to_dag_output(outcome, completion)),
         )),
       )
     }
@@ -824,6 +828,18 @@ pub fn handle_agent_event(
     },
     state.cycle_id,
   )
+  // Forward lifecycle event to notification channel
+  let #(event_type, event_name) = case event {
+    types.AgentStarted(name:, ..) -> #("started", name)
+    types.AgentCrashed(name:, ..) -> #("crashed", name)
+    types.AgentRestarted(name:, ..) -> #("restarted", name)
+    types.AgentRestartFailed(name:, ..) -> #("restart_failed", name)
+    types.AgentStopped(name:) -> #("stopped", name)
+  }
+  process.send(
+    state.notify,
+    types.AgentLifecycleNotice(event_type:, agent_name: event_name),
+  )
   case event {
     types.AgentStarted(name:, task_subject:) ->
       CognitiveState(
@@ -866,5 +882,53 @@ pub fn parse_agent_params(input_json: String) -> #(String, String) {
   case json.parse(input_json, decoder) {
     Ok(#(instruction, ctx)) -> #(instruction, ctx)
     Error(_) -> #(input_json, "")
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Structured output → DAG AgentOutput conversion
+// ---------------------------------------------------------------------------
+
+fn findings_to_dag_output(
+  outcome: types.AgentOutcome,
+  completion: types.AgentCompletionRecord,
+) -> dag_types.AgentOutput {
+  case outcome {
+    types.AgentSuccess(structured_result: option.Some(sr), ..) ->
+      case sr.findings {
+        types.ResearcherFindings(sources:, dead_ends:, ..) ->
+          dag_types.ResearchOutput(
+            facts: list.map(sources, fn(s) {
+              dag_types.FoundFact(
+                label: s.title,
+                value: s.url,
+                confidence: s.relevance,
+              )
+            }),
+            sources: list.length(sources),
+            dead_ends:,
+            confidence: case sources != [] {
+              True -> 1.0
+              False -> 0.0
+            },
+          )
+        types.PlannerFindings(plan_steps:, dependencies:, complexity:, risks:) ->
+          dag_types.PlanOutput(
+            steps: plan_steps,
+            dependencies:,
+            complexity:,
+            risks:,
+          )
+        types.CoderFindings(files_touched:, patterns_used:, ..) ->
+          dag_types.CoderOutput(files_touched:, patterns: patterns_used)
+        types.WriterFindings(word_count:, format:, sections:) ->
+          dag_types.WriterOutput(word_count:, format:, sections:)
+        types.GenericFindings(notes:) -> dag_types.GenericOutput(notes:)
+      }
+    _ ->
+      dag_types.GenericOutput(notes: [
+        "agent=" <> completion.agent_id,
+        "instruction=" <> completion.instruction,
+      ])
   }
 }

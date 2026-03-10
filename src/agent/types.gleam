@@ -352,4 +352,5 @@ pub type Notification {
   ToolCalling(name: String)
   SafetyGateNotice(decision: String, score: Float, explanation: String)
   ProfileNotification(name: String)
+  AgentLifecycleNotice(event_type: String, agent_name: String)
 }

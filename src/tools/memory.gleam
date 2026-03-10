@@ -58,6 +58,8 @@ pub fn all() -> List(Tool) {
     inspect_cycle_tool(),
     recall_cases_tool(),
     query_tool_activity_tool(),
+    agent_status_tool(),
+    list_recent_cycles_tool(),
   ]
 }
 
@@ -239,6 +241,31 @@ fn query_tool_activity_tool() -> Tool {
   |> tool.build()
 }
 
+fn agent_status_tool() -> Tool {
+  tool.new("agent_status")
+  |> tool.with_description(
+    "Show the status of all registered agents. Lists each agent's name and current "
+    <> "status (Running, Restarting, or Stopped). Use this to check which agents are "
+    <> "available for delegation.",
+  )
+  |> tool.build()
+}
+
+fn list_recent_cycles_tool() -> Tool {
+  tool.new("list_recent_cycles")
+  |> tool.with_description(
+    "List recent cycle IDs for a given date. Returns cycle IDs that can be passed "
+    <> "to inspect_cycle for detailed analysis. Use this to discover which cycles "
+    <> "happened without needing to know IDs in advance.",
+  )
+  |> tool.add_string_param(
+    "date",
+    "Date to query in YYYY-MM-DD format (default: today)",
+    False,
+  )
+  |> tool.build()
+}
+
 // ---------------------------------------------------------------------------
 // Executor
 // ---------------------------------------------------------------------------
@@ -257,11 +284,18 @@ pub fn is_memory_tool(name: String) -> Bool {
   || name == "inspect_cycle"
   || name == "recall_cases"
   || name == "query_tool_activity"
+  || name == "agent_status"
+  || name == "list_recent_cycles"
 }
 
 /// Context for facts-based memory tools.
 pub type FactsContext {
   FactsContext(facts_dir: String, cycle_id: String, agent_id: String)
+}
+
+/// Registry entry for agent_status tool (avoids depending on registry module's opaque type).
+pub type AgentStatusEntry {
+  AgentStatusEntry(name: String, status: String)
 }
 
 /// Execute a memory tool call. Uses the Librarian if available,
@@ -272,6 +306,7 @@ pub fn execute(
   lib: Option(Subject(LibrarianMessage)),
   facts_ctx: Option(FactsContext),
   embed_config: embedding_types.EmbeddingConfig,
+  agent_entries: List(AgentStatusEntry),
 ) -> ToolResult {
   slog.debug("memory", "execute", "tool=" <> call.name, None)
   case call.name {
@@ -287,6 +322,8 @@ pub fn execute(
     "inspect_cycle" -> run_inspect_cycle(call, lib)
     "recall_cases" -> run_recall_cases(call, lib, embed_config)
     "query_tool_activity" -> run_query_tool_activity(call, lib)
+    "agent_status" -> run_agent_status(call, agent_entries)
+    "list_recent_cycles" -> run_list_recent_cycles(call, lib)
     _ -> ToolFailure(tool_use_id: call.id, error: "Unknown tool: " <> call.name)
   }
 }
@@ -1276,6 +1313,103 @@ fn op_to_string(op: facts_types.FactOp) -> String {
     facts_types.Write -> "write"
     facts_types.Clear -> "clear"
     facts_types.Superseded -> "superseded"
+  }
+}
+
+// ---------------------------------------------------------------------------
+// agent_status — show agent registry
+// ---------------------------------------------------------------------------
+
+fn run_agent_status(
+  call: ToolCall,
+  entries: List(AgentStatusEntry),
+) -> ToolResult {
+  case entries {
+    [] -> ToolSuccess(tool_use_id: call.id, content: "No agents registered.")
+    _ -> {
+      let lines =
+        list.map(entries, fn(e: AgentStatusEntry) {
+          "- " <> e.name <> ": " <> e.status
+        })
+      ToolSuccess(
+        tool_use_id: call.id,
+        content: "Registered agents ("
+          <> int.to_string(list.length(entries))
+          <> "):\n"
+          <> string.join(lines, "\n"),
+      )
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// list_recent_cycles — discover cycle IDs for a date
+// ---------------------------------------------------------------------------
+
+fn run_list_recent_cycles(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+) -> ToolResult {
+  case lib {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "list_recent_cycles not available: DAG index not initialised",
+      )
+    Some(l) -> {
+      let decoder = {
+        use date <- decode.optional_field("date", get_date(), decode.string)
+        decode.success(date)
+      }
+      let date = case json.parse(call.input_json, decoder) {
+        Ok(d) -> d
+        Error(_) -> get_date()
+      }
+      let subj = process.new_subject()
+      process.send(l, librarian.QueryDayRoots(date:, reply_to: subj))
+      case process.receive(subj, 5000) {
+        Error(_) ->
+          ToolFailure(tool_use_id: call.id, error: "Timeout querying day roots")
+        Ok(roots) ->
+          case roots {
+            [] ->
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: "No cycles found for " <> date <> ".",
+              )
+            _ -> {
+              let lines =
+                list.map(roots, fn(node: dag_types.CycleNode) {
+                  let outcome_str = case node.outcome {
+                    dag_types.NodeSuccess -> "success"
+                    dag_types.NodePartial -> "partial"
+                    dag_types.NodeFailure(reason:) -> "failure: " <> reason
+                    dag_types.NodePending -> "pending"
+                  }
+                  node.cycle_id
+                  <> " ["
+                  <> node.timestamp
+                  <> "] "
+                  <> outcome_str
+                  <> " [tokens: "
+                  <> int.to_string(node.tokens_in)
+                  <> "/"
+                  <> int.to_string(node.tokens_out)
+                  <> "]"
+                })
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: "Cycles for "
+                  <> date
+                  <> " ("
+                  <> int.to_string(list.length(roots))
+                  <> "):\n"
+                  <> string.join(lines, "\n"),
+              )
+            }
+          }
+      }
+    }
   }
 }
 

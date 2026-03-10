@@ -403,6 +403,16 @@ fn outcome_from_result(
   let stats = react_result.stats
   // Deduplicate tool names
   let unique_tools = list.unique(stats.tools_used)
+  let structured = case react_result.result {
+    Ok(text) ->
+      Some(types.AgentResult(
+        final_text: text,
+        agent_id: identity.agent_id,
+        cycle_id: agent_cycle_id,
+        findings: build_findings(agent, stats),
+      ))
+    Error(_) -> None
+  }
   case react_result.result {
     Ok(text) ->
       AgentSuccess(
@@ -412,7 +422,7 @@ fn outcome_from_result(
         agent_human_name: identity.human_name,
         agent_cycle_id:,
         result: text,
-        structured_result: option.None,
+        structured_result: structured,
         instruction:,
         tools_used: unique_tools,
         tool_call_details: stats.tool_call_details,
@@ -435,6 +445,71 @@ fn outcome_from_result(
         output_tokens: stats.output_tokens,
         duration_ms:,
       )
+  }
+}
+
+fn build_findings(agent: String, stats: ReactStats) -> types.AgentFindings {
+  let details = stats.tool_call_details
+  case agent {
+    "researcher" -> {
+      // Extract sources from web tool calls and dead ends from failures
+      let sources =
+        list.filter_map(details, fn(d) {
+          case d.name == "web_search" || d.name == "fetch_url" {
+            True ->
+              Ok(
+                types.DiscoveredSource(
+                  url: d.input_summary,
+                  title: d.output_summary,
+                  relevance: case d.success {
+                    True -> 1.0
+                    False -> 0.0
+                  },
+                ),
+              )
+            False -> Error(Nil)
+          }
+        })
+      let dead_ends =
+        list.filter_map(details, fn(d) {
+          case d.success {
+            False -> Ok(d.name <> ": " <> d.output_summary)
+            True -> Error(Nil)
+          }
+        })
+      types.ResearcherFindings(sources:, facts: [], data_points: [], dead_ends:)
+    }
+    "planner" ->
+      types.PlannerFindings(
+        plan_steps: [],
+        dependencies: [],
+        complexity: "",
+        risks: [],
+      )
+    "coder" -> {
+      let files =
+        list.filter_map(details, fn(d) {
+          case d.name == "write_file" || d.name == "read_file" {
+            True -> Ok(d.input_summary)
+            False -> Error(Nil)
+          }
+        })
+      let errors =
+        list.filter_map(details, fn(d) {
+          case d.success {
+            False -> Ok(d.name <> ": " <> d.output_summary)
+            True -> Error(Nil)
+          }
+        })
+      types.CoderFindings(
+        files_touched: list.unique(files),
+        patterns_used: [],
+        errors_fixed: errors,
+        libraries: [],
+      )
+    }
+    "writer" -> types.WriterFindings(word_count: 0, format: "", sections: [])
+    _ -> types.GenericFindings(notes: list.unique(stats.tools_used))
   }
 }
 
