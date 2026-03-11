@@ -23,7 +23,7 @@ pub fn spec(provider: Provider, model: String) -> AgentSpec {
   AgentSpec(
     name: "writer",
     human_name: "Writer",
-    description: "Synthesise research into structured reports with citations and hedging language",
+    description: "Synthesise research findings into structured, well-cited reports. Applies hedging language to uncertain claims, flags stale data, and distinguishes confirmed facts from projections.",
     system_prompt:,
     provider:,
     model:,

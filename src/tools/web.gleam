@@ -396,7 +396,6 @@ pub fn tavily_search(
 
   let body =
     json.object([
-      #("api_key", json.string(key)),
       #("query", json.string(query)),
       #("search_depth", json.string("basic")),
       #("include_answer", json.bool(True)),
@@ -412,6 +411,7 @@ pub fn tavily_search(
     |> request.set_scheme(http.Https)
     |> request.set_body(body)
     |> request.set_header("content-type", "application/json")
+    |> request.set_header("authorization", "Bearer " <> key)
 
   slog.debug("tools/web", "tavily_search", "query: " <> query, cycle_id)
 

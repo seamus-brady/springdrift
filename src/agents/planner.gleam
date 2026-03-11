@@ -28,7 +28,7 @@ pub fn spec(provider: Provider, model: String) -> AgentSpec {
   AgentSpec(
     name: "planner",
     human_name: "Planner",
-    description: "Break down complex goals into structured, actionable plans with clear steps and dependencies",
+    description: "Break down complex goals into structured plans with numbered steps, dependencies, complexity assessment, and risk identification. No tools — pure reasoning. Use before delegating to researcher or coder.",
     system_prompt:,
     provider:,
     model:,

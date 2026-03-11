@@ -1,27 +1,47 @@
 import agent/types.{type AgentSpec, AgentSpec, Permanent}
+import gleam/list
 import gleam/option.{None}
 import llm/provider.{type Provider}
 import llm/types as llm_types
 import tools/builtin
+import tools/e2b
 
-const system_prompt = "You are a coding agent. Your job is to write, modify, and test code.
+const system_prompt = "You are a coding agent. Your job is to write, modify, and reason about code.
 
-You have access to: calculator, get_current_datetime, request_human_input, read_skill.
+## Tools
 
-When writing code:
-- Ask the human for file contents or directory listings when needed
-- Provide clear, tested code that follows existing conventions
-- Ask the human to run tests after making changes
+### Code execution
+You have **run_code** — a secure cloud sandbox (E2B) for executing code. It supports Python (default), JavaScript, R, Java, and Bash. Each call creates a fresh sandbox, so combine related operations into a single code block when possible.
 
-When you complete your task, respond with a concise summary of your actions and results. Include what was changed and test outcomes, but omit raw file contents and verbose output."
+Use run_code to:
+- Test code snippets before presenting them
+- Run data transformations or calculations
+- Verify logic, parse files, or prototype solutions
+- Install packages with pip/npm within the code block
+
+The sandbox has no persistent state between calls. If you need results from a previous execution, capture the output and feed it into the next call.
+
+### Other tools
+- **request_human_input**: Ask the human for file contents, directory listings, or clarification
+- **read_skill**: Load skill documentation for patterns and conventions
+- **calculator**: Quick arithmetic
+- **get_current_datetime**: Current date and time
+
+## Workflow
+1. Understand the task — ask the human for context if needed
+2. Write and test code using run_code
+3. Iterate based on results
+4. Present the final solution with a clear summary
+
+When you complete your task, respond with a concise summary of what was built or changed, including test results. Omit raw file contents and verbose output."
 
 pub fn spec(provider: Provider, model: String) -> AgentSpec {
-  let tools = builtin.all()
+  let tools = list.flatten([e2b.all(), builtin.all()])
 
   AgentSpec(
     name: "coder",
     human_name: "Coder",
-    description: "Write and reason about code, delegating file and shell operations to the human",
+    description: "Write, test, and debug code. Has run_code for executing Python/JS/Bash in a secure E2B cloud sandbox, plus request_human_input for file access and clarification.",
     system_prompt:,
     provider:,
     model:,
@@ -36,5 +56,8 @@ pub fn spec(provider: Provider, model: String) -> AgentSpec {
 }
 
 fn coder_executor(call: llm_types.ToolCall) -> llm_types.ToolResult {
-  builtin.execute(call)
+  case call.name {
+    "run_code" -> e2b.execute(call)
+    _ -> builtin.execute(call)
+  }
 }
