@@ -1,20 +1,30 @@
 //// Embedded HTML/CSS/JS for the web chat GUI.
 
-pub fn page() -> String {
+import gleam/string
+
+pub fn page(agent_name: String, agent_version: String) -> String {
+  let version_display = case agent_version {
+    "" -> ""
+    v -> " v" <> v
+  }
+  let title = escape(agent_name)
+  let version = escape(version_display)
+  let placeholder = "Message " <> escape(string.lowercase(agent_name)) <> "..."
+
   "<!DOCTYPE html>
 <html lang=\"en\">
 <head>
 <meta charset=\"UTF-8\">
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
-<title>Springdrift</title>
+<title>" <> title <> "</title>
 <script src=\"https://cdn.jsdelivr.net/npm/marked/marked.min.js\"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   :root {
     --bg: #f7f7f8;
     --surface: #ffffff;
-    --sidebar-bg: #f0efe9;
-    --sidebar-border: #e3e2dc;
+    --header-bg: #f0efe9;
+    --header-border: #e3e2dc;
     --border: #e5e5e5;
     --border-hover: #d0d0d0;
     --text: #2d2d2d;
@@ -38,52 +48,51 @@ pub fn page() -> String {
     color: var(--text);
     height: 100vh;
     display: flex;
+    flex-direction: column;
     font-size: 17px;
   }
 
-  /* ── Sidebar ─────────────────────────────────────── */
-  #sidebar {
-    width: 30%;
-    min-width: 220px;
-    max-width: 340px;
-    background: var(--sidebar-bg);
-    border-right: 1px solid var(--sidebar-border);
+  /* ── Header ──────────────────────────────────────── */
+  #header {
+    background: var(--header-bg);
+    border-bottom: 1px solid var(--header-border);
+    padding: 16px 24px;
     display: flex;
-    flex-direction: column;
-    padding: 20px 16px;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
   }
-  #sidebar h1 {
-    font-size: 18px;
+  #header-left {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  #header h1 {
+    font-size: 20px;
     font-weight: 600;
     color: var(--text);
-    letter-spacing: -0.2px;
-    margin-bottom: 20px;
+    letter-spacing: -0.3px;
   }
-  #sidebar .sidebar-status {
-    margin-top: auto;
+  #header .version {
     font-size: 13px;
     color: var(--text-dim);
   }
-  #sidebar .sidebar-status .dot {
+  #header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  .dot {
     display: inline-block;
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    margin-right: 6px;
-    vertical-align: middle;
     background: var(--text-dim);
   }
-  #sidebar .sidebar-status .dot.connected { background: #34c759; }
-  #sidebar .sidebar-status .dot.disconnected { background: #ff3b30; }
-
-  /* ── Main area ───────────────────────────────────── */
-  #main {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    position: relative;
-  }
+  .dot.connected { background: #34c759; }
+  .dot.disconnected { background: #ff3b30; }
 
   /* ── Tab bar ──────────────────────────────────────── */
   #tab-bar {
@@ -91,7 +100,8 @@ pub fn page() -> String {
     gap: 0;
     border-bottom: 1px solid var(--border);
     background: var(--surface);
-    padding: 0 24px;
+    padding: 0 10%;
+    flex-shrink: 0;
   }
   .tab-btn {
     padding: 10px 20px;
@@ -99,6 +109,7 @@ pub fn page() -> String {
     background: none;
     font-family: inherit;
     font-size: 15px;
+    font-weight: 600;
     color: var(--text-dim);
     cursor: pointer;
     border-bottom: 2px solid transparent;
@@ -108,10 +119,22 @@ pub fn page() -> String {
   .tab-btn.active {
     color: var(--accent);
     border-bottom-color: var(--accent);
-    font-weight: 600;
+  }
+  .tab-btn.chat-disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
   }
 
   /* ── Tab content ─────────────────────────────────── */
+  #content-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    width: 80%;
+    max-width: 1200px;
+    margin: 0 auto;
+  }
   .tab-content { display: none; flex: 1; flex-direction: column; min-height: 0; }
   .tab-content.active { display: flex; }
 
@@ -126,13 +149,10 @@ pub fn page() -> String {
   #messages {
     flex: 1;
     overflow-y: auto;
-    padding: 32px 24px 16px;
+    padding: 32px 0 16px;
     display: flex;
     flex-direction: column;
     gap: 16px;
-    max-width: 720px;
-    width: 100%;
-    margin: 0 auto;
   }
   .msg {
     padding: 14px 18px;
@@ -243,13 +263,13 @@ pub fn page() -> String {
   .notification {
     font-size: 14px;
     color: var(--text-dim);
-    padding: 4px 18px;
+    padding: 4px 0;
     align-self: flex-start;
     font-style: italic;
   }
   .thinking {
     align-self: flex-start;
-    padding: 14px 18px;
+    padding: 14px 0;
     color: var(--text-dim);
     font-size: 17px;
   }
@@ -298,19 +318,17 @@ pub fn page() -> String {
 
   /* ── Input area ──────────────────────────────────── */
   #input-area {
-    padding: 0 24px 28px;
-    max-width: 720px;
-    width: 100%;
-    margin: 0 auto;
+    padding: 0 0 28px;
+    flex-shrink: 0;
   }
   #input-area form {
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     gap: 10px;
     background: var(--input-bg);
     border: 1px solid var(--input-border);
     border-radius: var(--radius);
-    padding: 6px 6px 6px 18px;
+    padding: 10px 10px 10px 18px;
     transition: border-color 0.15s, box-shadow 0.15s;
     box-shadow: 0 1px 4px rgba(0,0,0,0.04);
   }
@@ -318,17 +336,24 @@ pub fn page() -> String {
     border-color: var(--input-focus);
     box-shadow: 0 0 0 3px rgba(218,126,55,0.12);
   }
-  #input-area input {
+  #chat-input {
     flex: 1;
-    padding: 10px 0;
+    padding: 6px 0;
     background: transparent;
     border: none;
     color: var(--text);
     font-size: 16px;
     font-family: inherit;
     outline: none;
+    resize: none;
+    line-height: 1.5;
+    max-height: 200px;
+    overflow-y: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
   }
-  #input-area input::placeholder { color: var(--text-dim); }
+  #chat-input::-webkit-scrollbar { display: none; }
+  #chat-input::placeholder { color: var(--text-dim); }
   #input-area button {
     width: 36px;
     height: 36px;
@@ -354,42 +379,25 @@ pub fn page() -> String {
     margin-top: 8px;
   }
 
-  /* ── Tab bar ──────────────────────────────────────── */
-  #tab-bar {
-    display: flex;
-    gap: 0;
-    border-bottom: 1px solid var(--border);
-    padding: 0 24px;
-    background: var(--surface);
+  /* ── Thinking overlay (chat tab only) ────────────── */
+  #thinking-overlay {
+    display: none;
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 10;
+    background: rgba(247,247,248,0.4);
   }
-  .tab-btn {
-    padding: 10px 20px;
-    border: none;
-    background: none;
-    color: var(--text-dim);
-    font-family: inherit;
-    font-size: 15px;
-    font-weight: 600;
-    cursor: pointer;
-    border-bottom: 2px solid transparent;
-    transition: color 0.15s, border-color 0.15s;
-  }
-  .tab-btn:hover { color: var(--text); }
-  .tab-btn.active {
-    color: var(--accent);
-    border-bottom-color: var(--accent);
-  }
-  .tab-content { display: none; flex: 1; flex-direction: column; min-height: 0; }
-  .tab-content.active { display: flex; }
+  #thinking-overlay.active { display: block; }
+  #chat-tab { position: relative; }
 
   /* ── Narrative tab ───────────────────────────────── */
   #narrative-container {
     flex: 1;
     overflow-y: auto;
-    padding: 16px 24px;
-    max-width: 720px;
-    width: 100%;
-    margin: 0 auto;
+    padding: 16px 0;
     scrollbar-width: none;
     -ms-overflow-style: none;
   }
@@ -472,9 +480,9 @@ pub fn page() -> String {
     padding: 40px 20px;
     font-size: 15px;
   }
-  #narrative-refresh {
+  .refresh-btn {
     padding: 6px 14px;
-    margin: 12px 24px;
+    margin: 12px 0;
     border: 1px solid var(--border);
     border-radius: 8px;
     background: var(--surface);
@@ -483,29 +491,13 @@ pub fn page() -> String {
     color: var(--text-secondary);
     cursor: pointer;
   }
-  #narrative-refresh:hover { background: var(--code-bg); }
-
-  /* ── Thinking overlay ──────────────────────────── */
-  #thinking-overlay {
-    display: none;
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 10;
-  }
-  #thinking-overlay.active { display: block; }
-  .tab-btn.disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
+  .refresh-btn:hover { background: var(--code-bg); }
 
   /* ── Log tab ──────────────────────────────────────── */
   #log-container {
     flex: 1;
     overflow-y: auto;
-    padding: 16px 24px;
+    padding: 16px 0;
     font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
     font-size: 13px;
     scrollbar-width: none;
@@ -527,99 +519,105 @@ pub fn page() -> String {
   .log-mod { color: var(--text-secondary); white-space: nowrap; }
   .log-msg { color: var(--text); word-break: break-all; }
   .log-cycle { color: var(--text-dim); white-space: nowrap; }
-  #log-refresh {
-    padding: 6px 14px;
-    margin: 12px 24px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--surface);
-    font-family: inherit;
-    font-size: 13px;
-    color: var(--text-secondary);
-    cursor: pointer;
-  }
-  #log-refresh:hover { background: var(--code-bg); }
 </style>
 </head>
 <body>
-<div id=\"sidebar\">
-  <h1>Springdrift</h1>
-  <div class=\"sidebar-status\">
+<div id=\"header\">
+  <div id=\"header-left\">
+    <h1>" <> title <> "</h1>
+    <span class=\"version\">" <> version <> "</span>
+  </div>
+  <div id=\"header-right\">
     <span class=\"dot\" id=\"status-dot\"></span>
     <span id=\"status\">connecting...</span>
   </div>
 </div>
-<div id=\"main\">
-  <div id=\"tab-bar\">
-    <button class=\"tab-btn active\" data-tab=\"chat\">Chat</button>
-    <button class=\"tab-btn\" data-tab=\"narrative\">Narrative</button>
-    <button class=\"tab-btn\" data-tab=\"log\">Log</button>
-  </div>
-  <div id=\"thinking-overlay\"></div>
+<div id=\"tab-bar\">
+  <button class=\"tab-btn active\" data-tab=\"chat\">Chat</button>
+  <button class=\"tab-btn\" data-tab=\"narrative\">Narrative</button>
+  <button class=\"tab-btn\" data-tab=\"log\">Log</button>
+</div>
+<div id=\"content-area\">
   <div id=\"chat-tab\" class=\"tab-content active\">
+    <div id=\"thinking-overlay\"></div>
     <div id=\"messages\"></div>
     <div id=\"input-area\">
       <form id=\"chat-form\">
-        <input id=\"chat-input\" type=\"text\" placeholder=\"Message springdrift...\" autocomplete=\"off\" autofocus>
+        <textarea id=\"chat-input\" rows=\"1\" placeholder=\"" <> placeholder <> "\" autofocus></textarea>
         <button type=\"submit\" aria-label=\"Send\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><line x1=\"22\" y1=\"2\" x2=\"11\" y2=\"13\"/><polygon points=\"22 2 15 22 11 13 2 9 22 2\"/></svg></button>
       </form>
-      <div id=\"input-hint\">Press Enter to send</div>
+      <div id=\"input-hint\">Enter to send, Shift+Enter for new line</div>
     </div>
   </div>
   <div id=\"narrative-tab\" class=\"tab-content\">
-    <button id=\"narrative-refresh\">Refresh</button>
+    <button class=\"refresh-btn\" id=\"narrative-refresh\">Refresh</button>
     <div id=\"narrative-container\"><div class=\"narrative-empty\">Loading narrative entries...</div></div>
   </div>
   <div id=\"log-tab\" class=\"tab-content\">
-    <button id=\"log-refresh\">Refresh</button>
+    <button class=\"refresh-btn\" id=\"log-refresh\">Refresh</button>
     <div id=\"log-container\">Loading...</div>
   </div>
 </div>
 <script>
 (function() {
-  const msgs = document.getElementById('messages');
-  const form = document.getElementById('chat-form');
-  const input = document.getElementById('chat-input');
-  const status = document.getElementById('status');
-  const statusDot = document.getElementById('status-dot');
-  const logContainer = document.getElementById('log-container');
-  const narrativeContainer = document.getElementById('narrative-container');
-  const thinkingOverlay = document.getElementById('thinking-overlay');
-  const tabBtns = document.querySelectorAll('.tab-btn');
-  let ws = null;
-  let thinkingEl = null;
-  let questionEl = null;
-  let isThinking = false;
-  let reconnectDelay = 1000;
+  var STORAGE_KEY = 'springdrift_chat_history';
+  var msgs = document.getElementById('messages');
+  var form = document.getElementById('chat-form');
+  var input = document.getElementById('chat-input');
+  var statusEl = document.getElementById('status');
+  var statusDot = document.getElementById('status-dot');
+  var logContainer = document.getElementById('log-container');
+  var narrativeContainer = document.getElementById('narrative-container');
+  var thinkingOverlay = document.getElementById('thinking-overlay');
+  var tabBtns = document.querySelectorAll('.tab-btn');
+  var ws = null;
+  var thinkingEl = null;
+  var questionEl = null;
+  var isThinking = false;
+  var reconnectDelay = 1000;
+  var chatHistory = [];
 
   // Configure marked for safe rendering
-  marked.setOptions({
-    breaks: true,
-    gfm: true
-  });
+  marked.setOptions({ breaks: true, gfm: true });
 
   function renderMarkdown(text) {
+    try { return marked.parse(text); }
+    catch(e) { return escapeHtml(text); }
+  }
+
+  // ── localStorage persistence ──
+  function saveChatHistory() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(chatHistory)); }
+    catch(e) {}
+  }
+
+  function loadChatHistory() {
     try {
-      return marked.parse(text);
-    } catch(e) {
-      return escapeHtml(text);
-    }
+      var stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        chatHistory = JSON.parse(stored);
+        chatHistory.forEach(function(item) {
+          if (item.role === 'user') renderUserMessage(item.text);
+          else if (item.role === 'assistant') renderAssistantMessage(item.text, item.model, item.usage);
+          else if (item.role === 'notification') renderNotification(item.text);
+        });
+        scrollBottom();
+      }
+    } catch(e) { chatHistory = []; }
   }
 
   // ── Tab switching ──
   tabBtns.forEach(function(btn) {
     btn.addEventListener('click', function() {
-      if (isThinking) return;
+      var tab = btn.getAttribute('data-tab');
+      // During thinking, only the chat tab is locked — allow switching to others
+      if (isThinking && tab === 'chat') return;
       tabBtns.forEach(function(b) { b.classList.remove('active'); });
       document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
       btn.classList.add('active');
-      var tabId = btn.getAttribute('data-tab') + '-tab';
-      document.getElementById(tabId).classList.add('active');
-      if (btn.getAttribute('data-tab') === 'log') {
-        requestLogData();
-      } else if (btn.getAttribute('data-tab') === 'narrative') {
-        requestNarrativeData();
-      }
+      document.getElementById(tab + '-tab').classList.add('active');
+      if (tab === 'log') requestLogData();
+      else if (tab === 'narrative') requestNarrativeData();
     });
   });
 
@@ -644,14 +642,12 @@ pub fn page() -> String {
       return;
     }
     var html = '';
-    // Show newest first
     var sorted = entries.slice().reverse();
     sorted.forEach(function(e) {
       var cycleShort = (e.cycle_id || '').substring(0, 8);
       var time = (e.timestamp || '').substring(0, 19).replace('T', ' ');
-      var status = (e.outcome && e.outcome.status) || 'unknown';
-      var statusClass = status;
-      var statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
+      var st = (e.outcome && e.outcome.status) || 'unknown';
+      var statusLabel = st.charAt(0).toUpperCase() + st.slice(1);
       var threadHtml = '';
       if (e.thread && e.thread.thread_name) {
         threadHtml = '<span class=\"narrative-thread\">' + escapeHtml(e.thread.thread_name) + ' #' + (e.thread.position || 0) + '</span>';
@@ -666,14 +662,14 @@ pub fn page() -> String {
       if (e.delegation_chain && e.delegation_chain.length > 0) {
         var agents = e.delegation_chain.map(function(d) {
           return '<span class=\"agent-name\">' + escapeHtml(d.agent_human_name || d.agent) + '</span>';
-        }).join(' → ');
+        }).join(' \\u2192 ');
         delegationHtml = '<div class=\"narrative-delegation\">Delegated to: ' + agents + '</div>';
       }
       html += '<div class=\"narrative-entry\">' +
         '<div class=\"narrative-header\">' +
           '<span class=\"narrative-cycle\">' + escapeHtml(cycleShort) + '</span>' +
           '<span class=\"narrative-time\">' + escapeHtml(time) + '</span>' +
-          '<span class=\"narrative-status ' + statusClass + '\">' + statusLabel + '</span>' +
+          '<span class=\"narrative-status ' + st + '\">' + statusLabel + '</span>' +
           threadHtml +
         '</div>' +
         '<div class=\"narrative-summary\">' + escapeHtml(e.summary || '') + '</div>' +
@@ -707,21 +703,28 @@ pub fn page() -> String {
     logContainer.scrollTop = logContainer.scrollHeight;
   }
 
+  // ── Auto-resize textarea ──
+  function autoResize() {
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 200) + 'px';
+  }
+  input.addEventListener('input', autoResize);
+
   function connect() {
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const params = new URLSearchParams(location.search);
-    const token = params.get('token');
-    const tokenParam = token ? '?token=' + encodeURIComponent(token) : '';
+    var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    var params = new URLSearchParams(location.search);
+    var token = params.get('token');
+    var tokenParam = token ? '?token=' + encodeURIComponent(token) : '';
     ws = new WebSocket(proto + '//' + location.host + '/ws' + tokenParam);
 
     ws.onopen = function() {
-      status.textContent = 'connected';
+      statusEl.textContent = 'connected';
       statusDot.className = 'dot connected';
       reconnectDelay = 1000;
     };
 
     ws.onclose = function() {
-      status.textContent = 'reconnecting...';
+      statusEl.textContent = 'reconnecting...';
       statusDot.className = 'dot disconnected';
       setTimeout(connect, reconnectDelay);
       reconnectDelay = Math.min(reconnectDelay * 2, 10000);
@@ -730,7 +733,7 @@ pub fn page() -> String {
     ws.onerror = function() {};
 
     ws.onmessage = function(evt) {
-      let data;
+      var data;
       try { data = JSON.parse(evt.data); } catch(e) { return; }
       handleServerMessage(data);
     };
@@ -768,50 +771,71 @@ pub fn page() -> String {
     }
   }
 
-  function addUserMessage(text) {
-    const el = document.createElement('div');
+  // ── Render helpers (no state mutation) ──
+  function renderUserMessage(text) {
+    var el = document.createElement('div');
     el.className = 'msg user';
     el.textContent = text;
     msgs.appendChild(el);
-    scrollBottom();
   }
 
-  function addAssistantMessage(text, model, usage) {
-    const el = document.createElement('div');
+  function renderAssistantMessage(text, model, usage) {
+    var el = document.createElement('div');
     el.className = 'msg assistant';
-    const body = document.createElement('div');
+    var body = document.createElement('div');
     body.className = 'md-body';
     body.innerHTML = renderMarkdown(text);
     el.appendChild(body);
     if (model || usage) {
-      const meta = document.createElement('div');
+      var meta = document.createElement('div');
       meta.className = 'meta';
-      let parts = [];
+      var parts = [];
       if (model) parts.push(model);
       if (usage) parts.push(usage.input + ' in / ' + usage.output + ' out');
       meta.textContent = parts.join(' | ');
       el.appendChild(meta);
     }
     msgs.appendChild(el);
+  }
+
+  function renderNotification(text) {
+    var el = document.createElement('div');
+    el.className = 'notification';
+    el.textContent = text;
+    msgs.appendChild(el);
+  }
+
+  // ── State-mutating message adders ──
+  function addUserMessage(text) {
+    renderUserMessage(text);
+    chatHistory.push({ role: 'user', text: text });
+    saveChatHistory();
+    scrollBottom();
+  }
+
+  function addAssistantMessage(text, model, usage) {
+    renderAssistantMessage(text, model, usage);
+    chatHistory.push({ role: 'assistant', text: text, model: model, usage: usage });
+    saveChatHistory();
     scrollBottom();
   }
 
   function addNotification(text) {
-    const el = document.createElement('div');
-    el.className = 'notification';
-    el.textContent = text;
-    msgs.appendChild(el);
+    renderNotification(text);
+    chatHistory.push({ role: 'notification', text: text });
+    saveChatHistory();
     scrollBottom();
   }
 
   function setThinkingLock(locked) {
     isThinking = locked;
+    var chatBtn = document.querySelector('.tab-btn[data-tab=\"chat\"]');
     if (locked) {
       thinkingOverlay.classList.add('active');
-      tabBtns.forEach(function(b) { b.classList.add('disabled'); });
+      chatBtn.classList.add('chat-disabled');
     } else {
       thinkingOverlay.classList.remove('active');
-      tabBtns.forEach(function(b) { b.classList.remove('disabled'); });
+      chatBtn.classList.remove('chat-disabled');
     }
   }
 
@@ -834,15 +858,15 @@ pub fn page() -> String {
     removeQuestion();
     questionEl = document.createElement('div');
     questionEl.className = 'question-prompt';
-    const srcLabel = source === 'cognitive' ? 'Cognitive' : source.replace('agent:', '');
+    var srcLabel = source === 'cognitive' ? 'Cognitive' : source.replace('agent:', '');
     questionEl.innerHTML =
       '<div class=\"q-source\">' + escapeHtml(srcLabel) + ' asks:</div>' +
       '<div class=\"q-text\">' + escapeHtml(text) + '</div>' +
       '<input type=\"text\" placeholder=\"Type your answer...\" autofocus>';
-    const qInput = questionEl.querySelector('input');
+    var qInput = questionEl.querySelector('input');
     qInput.addEventListener('keydown', function(e) {
       if (e.key === 'Enter' && qInput.value.trim()) {
-        const answer = qInput.value.trim();
+        var answer = qInput.value.trim();
         ws.send(JSON.stringify({ type: 'user_answer', text: answer }));
         addUserMessage(answer);
         removeQuestion();
@@ -863,17 +887,18 @@ pub fn page() -> String {
   }
 
   function escapeHtml(s) {
-    const d = document.createElement('div');
+    var d = document.createElement('div');
     d.textContent = s;
     return d.innerHTML;
   }
 
   function sendMessage() {
-    const text = input.value.trim();
+    var text = input.value.trim();
     if (!text || !ws || ws.readyState !== WebSocket.OPEN || isThinking) return;
     ws.send(JSON.stringify({ type: 'user_message', text: text }));
     addUserMessage(text);
     input.value = '';
+    input.style.height = 'auto';
   }
 
   input.addEventListener('keydown', function(e) {
@@ -888,9 +913,19 @@ pub fn page() -> String {
     sendMessage();
   });
 
+  // Load history from localStorage, then connect
+  loadChatHistory();
   connect();
 })();
 </script>
 </body>
 </html>"
+}
+
+fn escape(s: String) -> String {
+  s
+  |> string.replace("&", "&amp;")
+  |> string.replace("<", "&lt;")
+  |> string.replace(">", "&gt;")
+  |> string.replace("\"", "&quot;")
 }

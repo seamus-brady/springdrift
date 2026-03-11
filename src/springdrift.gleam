@@ -484,6 +484,8 @@ fn run(cfg: AppConfig) -> Nil {
         port,
         narrative_dir,
         lib,
+        agent_name,
+        agent_version,
       )
     }
     _ ->

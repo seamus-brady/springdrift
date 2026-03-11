@@ -90,6 +90,8 @@ pub fn start(
   port: Int,
   narrative_dir: String,
   lib: Option(Subject(LibrarianMessage)),
+  agent_name: String,
+  agent_version: String,
 ) -> Nil {
   let auth_token = get_auth_token()
   let relay: Subject(RelayMsg) = process.new_subject()
@@ -109,6 +111,8 @@ pub fn start(
         narrative_dir,
         auth_token,
         lib,
+        agent_name,
+        agent_version,
       )
     }
     |> mist.new
@@ -132,6 +136,8 @@ fn handle_request(
   narrative_dir: String,
   auth_token: Option(String),
   lib: Option(Subject(LibrarianMessage)),
+  agent_name: String,
+  agent_version: String,
 ) -> Response(ResponseData) {
   case auth.check_auth(req, auth_token) {
     False ->
@@ -147,7 +153,11 @@ fn handle_request(
         [] ->
           response.new(200)
           |> response.set_header("content-type", "text/html; charset=utf-8")
-          |> response.set_body(mist.Bytes(bytes_tree.from_string(html.page())))
+          |> response.set_body(
+            mist.Bytes(
+              bytes_tree.from_string(html.page(agent_name, agent_version)),
+            ),
+          )
 
         // WebSocket upgrade
         ["ws"] ->
