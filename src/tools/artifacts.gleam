@@ -16,7 +16,7 @@ import llm/types as llm_types
 import narrative/librarian.{type LibrarianMessage}
 import slog
 
-@external(erlang, "springdrift_ffi", "uuid_v4")
+@external(erlang, "springdrift_ffi", "generate_uuid")
 fn uuid_v4() -> String
 
 @external(erlang, "springdrift_ffi", "iso_now")
