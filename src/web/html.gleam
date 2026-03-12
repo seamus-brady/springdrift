@@ -740,9 +740,9 @@ pub fn page(agent_name: String, agent_version: String) -> String {
   }
 
   function handleServerMessage(data) {
-    removeThinking();
     switch (data.type) {
       case 'assistant_message':
+        removeThinking();
         removeQuestion();
         addAssistantMessage(data.text, data.model, data.usage);
         break;
@@ -750,6 +750,7 @@ pub fn page(agent_name: String, agent_version: String) -> String {
         showThinking();
         break;
       case 'question':
+        removeThinking();
         showQuestion(data.text, data.source);
         break;
       case 'notification':

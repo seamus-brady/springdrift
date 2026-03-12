@@ -34,8 +34,21 @@ const sandbox_timeout_ms = 120_000
 // Tool definitions
 // ---------------------------------------------------------------------------
 
+/// Returns E2B tools only if E2B_API_KEY is set. When the key is missing,
+/// returns an empty list so the coder agent never sees run_code.
 pub fn all() -> List(Tool) {
-  [run_code_tool()]
+  case is_available() {
+    True -> [run_code_tool()]
+    False -> []
+  }
+}
+
+/// Check whether E2B is configured (API key present).
+pub fn is_available() -> Bool {
+  case get_env("E2B_API_KEY") {
+    Ok(_) -> True
+    Error(_) -> False
+  }
 }
 
 fn run_code_tool() -> Tool {
@@ -112,19 +125,44 @@ fn run_code(call: ToolCall) -> ToolResult {
 }
 
 fn do_run_code(code: String, language: String) -> Result(String, String) {
-  use api_key <- result.try(
-    get_env("E2B_API_KEY")
-    |> result.replace_error(
-      "E2B_API_KEY is not set. Add it to your environment to use run_code.",
-    ),
-  )
+  use api_key <- result.try({
+    case get_env("E2B_API_KEY") {
+      Ok(key) -> Ok(key)
+      Error(_) -> {
+        let msg =
+          "E2B_API_KEY is not set. Add it to your environment to use run_code."
+        slog.log_error("e2b", "do_run_code", msg, None)
+        Error(msg)
+      }
+    }
+  })
 
   // 1. Create sandbox
-  use sandbox <- result.try(create_sandbox(api_key))
-  slog.debug("e2b", "run_code", "Created sandbox " <> sandbox.sandbox_id, None)
+  use sandbox <- result.try({
+    case create_sandbox(api_key) {
+      Ok(sb) -> {
+        slog.debug("e2b", "run_code", "Created sandbox " <> sb.sandbox_id, None)
+        Ok(sb)
+      }
+      Error(msg) -> {
+        slog.log_error(
+          "e2b",
+          "run_code",
+          "Sandbox creation failed: " <> msg,
+          None,
+        )
+        Error(msg)
+      }
+    }
+  })
 
   // 2. Execute code (always clean up sandbox afterward)
   let exec_result = execute_code(sandbox, code, language)
+  case exec_result {
+    Error(msg) ->
+      slog.log_error("e2b", "run_code", "Execution failed: " <> msg, None)
+    Ok(_) -> slog.debug("e2b", "run_code", "Execution succeeded", None)
+  }
 
   // 3. Kill sandbox (best effort — don't fail if this errors)
   let _ = kill_sandbox(api_key, sandbox.sandbox_id)
