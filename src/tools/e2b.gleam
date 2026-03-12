@@ -28,7 +28,7 @@ const jupyter_port = "49999"
 
 const default_template = "code-interpreter-v1"
 
-const sandbox_timeout_ms = 120_000
+const sandbox_timeout_s = 600
 
 // ---------------------------------------------------------------------------
 // Tool definitions
@@ -179,7 +179,7 @@ fn create_sandbox(api_key: String) -> Result(SandboxInfo, String) {
   let body =
     json.object([
       #("templateID", json.string(default_template)),
-      #("timeout", json.int(sandbox_timeout_ms)),
+      #("timeout", json.int(sandbox_timeout_s)),
     ])
     |> json.to_string
 

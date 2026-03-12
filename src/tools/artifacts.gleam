@@ -19,7 +19,7 @@ import slog
 @external(erlang, "springdrift_ffi", "generate_uuid")
 fn uuid_v4() -> String
 
-@external(erlang, "springdrift_ffi", "iso_now")
+@external(erlang, "springdrift_ffi", "get_datetime")
 fn iso_now() -> String
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,6 @@
 import anthropic/api as aapi
 import anthropic/client as aclient
+import anthropic/config as aconfig
 import anthropic/error as aerr
 import anthropic/message as amsg
 import anthropic/request as areq
@@ -20,9 +21,14 @@ pub const claude_sonnet_4 = "claude-sonnet-4-20250514"
 
 pub const claude_haiku_3_5 = "claude-haiku-3-5-20241022"
 
+const request_timeout_ms = 120_000
+
 /// Create an Anthropic provider using the ANTHROPIC_API_KEY environment variable
 pub fn provider() -> Result(Provider, types.LlmError) {
-  aclient.init()
+  aconfig.config_options()
+  |> aconfig.with_timeout_ms(request_timeout_ms)
+  |> aconfig.load_config()
+  |> result.map(aclient.new)
   |> result.map_error(translate_error)
   |> result.map(fn(c) {
     Provider(name: "anthropic", chat: fn(req) {
@@ -35,7 +41,11 @@ pub fn provider() -> Result(Provider, types.LlmError) {
 
 /// Create an Anthropic provider with an explicit API key
 pub fn provider_with_key(api_key: String) -> Result(Provider, types.LlmError) {
-  aclient.init_with_key(api_key)
+  aconfig.config_options()
+  |> aconfig.with_api_key(api_key)
+  |> aconfig.with_timeout_ms(request_timeout_ms)
+  |> aconfig.load_config()
+  |> result.map(aclient.new)
   |> result.map_error(translate_error)
   |> result.map(fn(c) {
     Provider(name: "anthropic", chat: fn(req) {
