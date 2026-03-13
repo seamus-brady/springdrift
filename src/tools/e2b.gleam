@@ -28,7 +28,7 @@ const jupyter_port = "49999"
 
 const default_template = "code-interpreter-v1"
 
-const sandbox_timeout_s = 600
+pub const default_sandbox_timeout_s = 600
 
 // ---------------------------------------------------------------------------
 // Tool definitions
@@ -77,10 +77,10 @@ pub fn is_e2b_tool(name: String) -> Bool {
 // Executor
 // ---------------------------------------------------------------------------
 
-pub fn execute(call: ToolCall) -> ToolResult {
+pub fn execute(call: ToolCall, timeout_s: Int) -> ToolResult {
   slog.debug("e2b", "execute", "tool=" <> call.name, None)
   case call.name {
-    "run_code" -> run_code(call)
+    "run_code" -> run_code(call, timeout_s)
     _ -> ToolFailure(tool_use_id: call.id, error: "Unknown tool: " <> call.name)
   }
 }
@@ -104,7 +104,7 @@ type SandboxInfo {
 // run_code implementation
 // ---------------------------------------------------------------------------
 
-fn run_code(call: ToolCall) -> ToolResult {
+fn run_code(call: ToolCall, timeout_s: Int) -> ToolResult {
   let decoder = {
     use code <- decode.field("code", decode.string)
     use language <- decode.optional_field("language", "python", decode.string)
@@ -117,14 +117,18 @@ fn run_code(call: ToolCall) -> ToolResult {
         error: "Invalid run_code input: missing code parameter",
       )
     Ok(#(code, language)) ->
-      case do_run_code(code, language) {
+      case do_run_code(code, language, timeout_s) {
         Ok(output) -> ToolSuccess(tool_use_id: call.id, content: output)
         Error(msg) -> ToolFailure(tool_use_id: call.id, error: msg)
       }
   }
 }
 
-fn do_run_code(code: String, language: String) -> Result(String, String) {
+fn do_run_code(
+  code: String,
+  language: String,
+  timeout_s: Int,
+) -> Result(String, String) {
   use api_key <- result.try({
     case get_env("E2B_API_KEY") {
       Ok(key) -> Ok(key)
@@ -139,7 +143,7 @@ fn do_run_code(code: String, language: String) -> Result(String, String) {
 
   // 1. Create sandbox
   use sandbox <- result.try({
-    case create_sandbox(api_key) {
+    case create_sandbox(api_key, timeout_s) {
       Ok(sb) -> {
         slog.debug("e2b", "run_code", "Created sandbox " <> sb.sandbox_id, None)
         Ok(sb)
@@ -175,11 +179,14 @@ fn do_run_code(code: String, language: String) -> Result(String, String) {
 // REST API — sandbox lifecycle
 // ---------------------------------------------------------------------------
 
-fn create_sandbox(api_key: String) -> Result(SandboxInfo, String) {
+fn create_sandbox(
+  api_key: String,
+  timeout_s: Int,
+) -> Result(SandboxInfo, String) {
   let body =
     json.object([
       #("templateID", json.string(default_template)),
-      #("timeout", json.int(sandbox_timeout_s)),
+      #("timeout", json.int(timeout_s)),
     ])
     |> json.to_string
 

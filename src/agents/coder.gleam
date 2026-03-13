@@ -53,7 +53,11 @@ Note: You do NOT have a code execution sandbox. If you need to test code, use **
 
 When you complete your task, respond with a concise summary of what was built or changed. Omit raw file contents and verbose output."
 
-pub fn spec(provider: Provider, model: String) -> AgentSpec {
+pub fn spec(
+  provider: Provider,
+  model: String,
+  sandbox_timeout: Int,
+) -> AgentSpec {
   let has_e2b = e2b.is_available()
   let tools = list.flatten([e2b.all(), builtin.all()])
   let system_prompt = case has_e2b {
@@ -80,13 +84,17 @@ pub fn spec(provider: Provider, model: String) -> AgentSpec {
     max_context_messages: None,
     tools:,
     restart: Permanent,
-    tool_executor: coder_executor,
+    tool_executor: coder_executor(sandbox_timeout),
   )
 }
 
-fn coder_executor(call: llm_types.ToolCall) -> llm_types.ToolResult {
-  case call.name {
-    "run_code" -> e2b.execute(call)
-    _ -> builtin.execute(call)
+fn coder_executor(
+  sandbox_timeout: Int,
+) -> fn(llm_types.ToolCall) -> llm_types.ToolResult {
+  fn(call: llm_types.ToolCall) -> llm_types.ToolResult {
+    case call.name {
+      "run_code" -> e2b.execute(call, sandbox_timeout)
+      _ -> builtin.execute(call)
+    }
   }
 }

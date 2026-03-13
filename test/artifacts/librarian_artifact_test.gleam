@@ -99,7 +99,12 @@ pub fn librarian_retrieve_content_from_disk_test() {
       char_count: 13,
       truncated: False,
     )
-  artifacts_log.append(artifacts_dir, record, "Hello, world!")
+  artifacts_log.append(
+    artifacts_dir,
+    record,
+    "Hello, world!",
+    artifacts_log.default_max_content_chars,
+  )
 
   // Index metadata in ETS
   let meta = make_meta("art-ret1", "cycle-001")
@@ -147,8 +152,18 @@ pub fn librarian_replays_artifacts_from_disk_test() {
       char_count: 8,
       truncated: False,
     )
-  artifacts_log.append(artifacts_dir, r1, "Content1")
-  artifacts_log.append(artifacts_dir, r2, "Content2")
+  artifacts_log.append(
+    artifacts_dir,
+    r1,
+    "Content1",
+    artifacts_log.default_max_content_chars,
+  )
+  artifacts_log.append(
+    artifacts_dir,
+    r2,
+    "Content2",
+    artifacts_log.default_max_content_chars,
+  )
 
   // Start librarian — should replay artifact metadata
   let lib =

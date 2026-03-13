@@ -86,6 +86,7 @@ pub fn start(
         embedding_config: cfg.embedding_config,
         agent_uuid: cfg.agent_uuid,
         session_since: cfg.session_since,
+        memory_limits: cfg.memory_limits,
       )
     process.send(setup, self)
     cognitive_loop(state)

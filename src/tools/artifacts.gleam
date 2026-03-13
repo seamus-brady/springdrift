@@ -75,9 +75,11 @@ pub fn execute(
   artifacts_dir: String,
   cycle_id: String,
   lib: Subject(LibrarianMessage),
+  max_artifact_chars: Int,
 ) -> llm_types.ToolResult {
   case call.name {
-    "store_result" -> run_store_result(call, artifacts_dir, cycle_id, lib)
+    "store_result" ->
+      run_store_result(call, artifacts_dir, cycle_id, lib, max_artifact_chars)
     "retrieve_result" -> run_retrieve_result(call, lib)
     _ ->
       llm_types.ToolFailure(
@@ -92,6 +94,7 @@ fn run_store_result(
   artifacts_dir: String,
   cycle_id: String,
   lib: Subject(LibrarianMessage),
+  max_artifact_chars: Int,
 ) -> llm_types.ToolResult {
   let decoder = {
     use content <- decode.field("content", decode.string)
@@ -124,7 +127,7 @@ fn run_store_result(
           char_count: string.length(content),
           truncated: False,
         )
-      artifacts_log.append(artifacts_dir, record, content)
+      artifacts_log.append(artifacts_dir, record, content, max_artifact_chars)
       let meta =
         ArtifactMeta(
           artifact_id:,

@@ -50,6 +50,7 @@ pub fn spec(
   model: String,
   artifacts_dir: String,
   lib: Subject(LibrarianMessage),
+  max_artifact_chars: Int,
 ) -> AgentSpec {
   let tools = list.flatten([web.all(), artifacts.all(), builtin.all()])
 
@@ -66,13 +67,14 @@ pub fn spec(
     max_context_messages: Some(30),
     tools:,
     restart: Permanent,
-    tool_executor: researcher_executor(artifacts_dir, lib),
+    tool_executor: researcher_executor(artifacts_dir, lib, max_artifact_chars),
   )
 }
 
 fn researcher_executor(
   artifacts_dir: String,
   lib: Subject(LibrarianMessage),
+  max_artifact_chars: Int,
 ) -> fn(llm_types.ToolCall) -> llm_types.ToolResult {
   fn(call: llm_types.ToolCall) -> llm_types.ToolResult {
     case call.name {
@@ -82,7 +84,13 @@ fn researcher_executor(
       | "tavily_search"
       | "firecrawl_extract" -> web.execute(call)
       "store_result" | "retrieve_result" ->
-        artifacts.execute(call, artifacts_dir, "researcher", lib)
+        artifacts.execute(
+          call,
+          artifacts_dir,
+          "researcher",
+          lib,
+          max_artifact_chars,
+        )
       _ -> builtin.execute(call)
     }
   }

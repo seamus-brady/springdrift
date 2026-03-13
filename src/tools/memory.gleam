@@ -313,6 +313,16 @@ pub type IntrospectContext {
   )
 }
 
+/// Limits for memory tool result sizes.
+pub type MemoryLimits {
+  MemoryLimits(recall_max_entries: Int, cbr_max_results: Int)
+}
+
+/// Default memory limits.
+pub fn default_limits() -> MemoryLimits {
+  MemoryLimits(recall_max_entries: 50, cbr_max_results: 20)
+}
+
 /// Execute a memory tool call. Uses the Librarian if available,
 /// otherwise falls back to direct JSONL reads.
 pub fn execute(
@@ -322,11 +332,14 @@ pub fn execute(
   facts_ctx: Option(FactsContext),
   embed_config: embedding_types.EmbeddingConfig,
   introspect_ctx: Option(IntrospectContext),
+  limits: MemoryLimits,
 ) -> ToolResult {
   slog.debug("memory", "execute", "tool=" <> call.name, None)
   case call.name {
-    "recall_recent" -> run_recall_recent(call, narrative_dir, lib)
-    "recall_search" -> run_recall_search(call, narrative_dir, lib)
+    "recall_recent" ->
+      run_recall_recent(call, narrative_dir, lib, limits.recall_max_entries)
+    "recall_search" ->
+      run_recall_search(call, narrative_dir, lib, limits.recall_max_entries)
     "recall_threads" -> run_recall_threads(call, narrative_dir, lib)
     "memory_write" -> run_memory_write(call, lib, facts_ctx)
     "memory_read" -> run_memory_read(call, lib, facts_ctx)
@@ -335,7 +348,8 @@ pub fn execute(
     "memory_trace_fact" -> run_memory_trace(call, facts_ctx)
     "reflect" -> run_reflect(call, lib)
     "inspect_cycle" -> run_inspect_cycle(call, lib)
-    "recall_cases" -> run_recall_cases(call, lib, embed_config)
+    "recall_cases" ->
+      run_recall_cases(call, lib, embed_config, limits.cbr_max_results)
     "query_tool_activity" -> run_query_tool_activity(call, lib)
     "introspect" -> run_introspect(call, introspect_ctx)
     "list_recent_cycles" -> run_list_recent_cycles(call, lib)
@@ -351,6 +365,7 @@ fn run_recall_recent(
   call: ToolCall,
   dir: String,
   lib: Option(Subject(LibrarianMessage)),
+  recall_max: Int,
 ) -> ToolResult {
   let decoder = {
     use period <- decode.field("period", decode.string)
@@ -364,7 +379,7 @@ fn run_recall_recent(
         error: "Invalid recall_recent input: missing period",
       )
     Ok(#(period, max_entries)) -> {
-      let clamped = int.min(50, int.max(1, max_entries))
+      let clamped = int.min(recall_max, int.max(1, max_entries))
       let #(from, to) = date_range_for_period(period)
       let entries = case lib {
         Some(l) -> librarian.load_entries(l, from, to)
@@ -410,6 +425,7 @@ fn run_recall_search(
   call: ToolCall,
   dir: String,
   lib: Option(Subject(LibrarianMessage)),
+  recall_max: Int,
 ) -> ToolResult {
   let decoder = {
     use query <- decode.field("query", decode.string)
@@ -423,7 +439,7 @@ fn run_recall_search(
         error: "Invalid recall_search input: missing query",
       )
     Ok(#(query, max_entries)) -> {
-      let clamped = int.min(50, int.max(1, max_entries))
+      let clamped = int.min(recall_max, int.max(1, max_entries))
       let entries = case lib {
         Some(l) -> librarian.search(l, query)
         None -> narrative_log.search(dir, query)
@@ -1134,6 +1150,7 @@ fn run_recall_cases(
   call: ToolCall,
   lib: Option(Subject(LibrarianMessage)),
   embed_config: embedding_types.EmbeddingConfig,
+  cbr_max: Int,
 ) -> ToolResult {
   case lib {
     None ->
@@ -1161,7 +1178,7 @@ fn run_recall_cases(
               |> list.map(string.trim)
               |> list.filter(fn(k) { k != "" })
           }
-          let clamped = int.min(20, int.max(1, max_results))
+          let clamped = int.min(cbr_max, int.max(1, max_results))
           // Embed the query text for semantic retrieval
           let query_text =
             intent <> " " <> domain <> " " <> string.join(keywords, " ")

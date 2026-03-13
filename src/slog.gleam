@@ -124,10 +124,10 @@ pub fn load_entries() -> List(LogEntry) {
   }
 }
 
-/// Remove log files older than 30 days from the logs directory.
-pub fn cleanup_old_logs() -> Nil {
+/// Remove log files older than `retention_days` from the logs directory.
+pub fn cleanup_old_logs(retention_days: Int) -> Nil {
   let dir = log_dir()
-  let cutoff = days_ago_date(30)
+  let cutoff = days_ago_date(retention_days)
   case simplifile.read_directory(dir) {
     Error(_) -> Nil
     Ok(entries) ->

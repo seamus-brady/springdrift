@@ -55,6 +55,7 @@ type WsState {
     relay: Subject(RelayMsg),
     narrative_dir: String,
     librarian: Option(Subject(LibrarianMessage)),
+    ws_max_bytes: Int,
   )
 }
 
@@ -92,6 +93,7 @@ pub fn start(
   lib: Option(Subject(LibrarianMessage)),
   agent_name: String,
   agent_version: String,
+  ws_max_bytes: Int,
 ) -> Nil {
   let auth_token = get_auth_token()
   let relay: Subject(RelayMsg) = process.new_subject()
@@ -113,6 +115,7 @@ pub fn start(
         lib,
         agent_name,
         agent_version,
+        ws_max_bytes,
       )
     }
     |> mist.new
@@ -138,6 +141,7 @@ fn handle_request(
   lib: Option(Subject(LibrarianMessage)),
   agent_name: String,
   agent_version: String,
+  ws_max_bytes: Int,
 ) -> Response(ResponseData) {
   case auth.check_auth(req, auth_token) {
     False ->
@@ -164,7 +168,14 @@ fn handle_request(
           mist.websocket(
             request: req,
             on_init: fn(_conn) {
-              ws_on_init(cognitive, relay, initial_messages, narrative_dir, lib)
+              ws_on_init(
+                cognitive,
+                relay,
+                initial_messages,
+                narrative_dir,
+                lib,
+                ws_max_bytes,
+              )
             },
             on_close: fn(state) {
               process.send(state.relay, Unregister(state.notify_subject))
@@ -190,6 +201,7 @@ fn ws_on_init(
   initial_messages: List(Message),
   narrative_dir: String,
   lib: Option(Subject(LibrarianMessage)),
+  ws_max_bytes: Int,
 ) -> #(WsState, option.Option(Selector(WsMsg))) {
   // Create per-connection subjects (owned by this WebSocket handler process)
   let reply_subject: Subject(agent_types.CognitiveReply) = process.new_subject()
@@ -212,6 +224,7 @@ fn ws_on_init(
       relay:,
       narrative_dir:,
       librarian: lib,
+      ws_max_bytes:,
     )
 
   // Replay initial messages after init
@@ -248,7 +261,7 @@ fn ws_handler(
   case message {
     // Client sent a text frame
     mist.Text(json_str) -> {
-      case string.byte_size(json_str) > 1_048_576 {
+      case string.byte_size(json_str) > state.ws_max_bytes {
         True -> mist.continue(state)
         False ->
           case protocol.decode_client_message(json_str) {

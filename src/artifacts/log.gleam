@@ -14,22 +14,27 @@ import gleam/string
 import simplifile
 import slog
 
-/// Maximum content size before truncation (50KB).
-pub const max_content_chars = 50_000
+/// Default maximum content size before truncation (50KB).
+pub const default_max_content_chars = 50_000
 
 // ---------------------------------------------------------------------------
 // Append
 // ---------------------------------------------------------------------------
 
 /// Write an artifact record with content to the daily JSONL file.
-/// Content is capped at max_content_chars; truncated flag is set accordingly.
-pub fn append(dir: String, record: ArtifactRecord, content: String) -> Nil {
+/// Content is capped at `max_chars`; truncated flag is set accordingly.
+pub fn append(
+  dir: String,
+  record: ArtifactRecord,
+  content: String,
+  max_chars: Int,
+) -> Nil {
   let date = string.slice(record.stored_at, 0, 10)
   let path = dir <> "/artifacts-" <> date <> ".jsonl"
   let #(trimmed_content, was_truncated) = case
-    string.length(content) > max_content_chars
+    string.length(content) > max_chars
   {
-    True -> #(string.slice(content, 0, max_content_chars), True)
+    True -> #(string.slice(content, 0, max_chars), True)
     False -> #(content, record.truncated)
   }
   let actual_chars = string.length(trimmed_content)
