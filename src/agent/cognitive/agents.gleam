@@ -188,7 +188,13 @@ fn handle_memory_tools(
         True -> cycle_log.log_llm_request(cycle_id, req)
         False -> Nil
       }
-      worker.spawn_think(new_task_id, req, state.provider, state.self)
+      worker.spawn_think(
+        new_task_id,
+        req,
+        state.provider,
+        state.self,
+        state.retry_config,
+      )
 
       CognitiveState(
         ..new_state,
@@ -243,7 +249,13 @@ fn handle_memory_tools(
             True -> cycle_log.log_llm_request(cycle_id, req)
             False -> Nil
           }
-          worker.spawn_think(new_task_id, req, state.provider, state.self)
+          worker.spawn_think(
+            new_task_id,
+            req,
+            state.provider,
+            state.self,
+            state.retry_config,
+          )
           CognitiveState(
             ..new_state,
             status: Thinking(task_id: new_task_id),
@@ -736,7 +748,13 @@ pub fn handle_agent_complete(
             True -> cycle_log.log_llm_request(cycle_id, req)
             False -> Nil
           }
-          worker.spawn_think(new_task_id, req, state.provider, state.self)
+          worker.spawn_think(
+            new_task_id,
+            req,
+            state.provider,
+            state.self,
+            state.retry_config,
+          )
 
           CognitiveState(
             ..state,
@@ -807,7 +825,13 @@ pub fn handle_user_answer(
         True -> cycle_log.log_llm_request(cycle_id, req)
         False -> Nil
       }
-      worker.spawn_think(new_task_id, req, state.provider, state.self)
+      worker.spawn_think(
+        new_task_id,
+        req,
+        state.provider,
+        state.self,
+        state.retry_config,
+      )
 
       CognitiveState(
         ..state,

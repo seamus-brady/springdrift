@@ -125,12 +125,14 @@ pub fn spawn(
   lib: Option(Subject(LibrarianMessage)),
   embed_config: embedding_types.EmbeddingConfig,
   cur: Option(Subject(CuratorMessage)),
+  threading_config: threading.ThreadingConfig,
 ) -> Nil {
   let _ =
     process.spawn_unlinked(fn() {
       case generate(ctx, provider, model, verbose) {
         Some(entry) -> {
-          let threaded = threading.assign_thread(entry, narrative_dir, lib)
+          let threaded =
+            threading.assign_thread(entry, narrative_dir, lib, threading_config)
           narrative_log.append(narrative_dir, threaded)
           // Notify the Librarian to index the new entry
           case lib {

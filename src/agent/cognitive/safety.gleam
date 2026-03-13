@@ -220,7 +220,13 @@ pub fn handle_safety_gate_complete(
         True -> cycle_log.log_llm_request(cycle_id, req)
         False -> Nil
       }
-      worker.spawn_think(new_task_id, req, state.provider, state.self)
+      worker.spawn_think(
+        new_task_id,
+        req,
+        state.provider,
+        state.self,
+        state.retry_config,
+      )
 
       CognitiveState(
         ..state,
@@ -267,7 +273,13 @@ pub fn handle_safety_gate_complete(
         True -> cycle_log.log_llm_request(cycle_id, req)
         False -> Nil
       }
-      worker.spawn_think(new_task_id, req, state.provider, state.self)
+      worker.spawn_think(
+        new_task_id,
+        req,
+        state.provider,
+        state.self,
+        state.retry_config,
+      )
 
       CognitiveState(
         ..state,
@@ -720,7 +732,13 @@ pub fn handle_output_gate_complete(
           let new_state = CognitiveState(..state, messages:)
           let task_id = cycle_log.generate_uuid()
           let req = cognitive_llm.build_request(new_state, messages)
-          worker.spawn_think(task_id, req, new_state.provider, new_state.self)
+          worker.spawn_think(
+            task_id,
+            req,
+            new_state.provider,
+            new_state.self,
+            new_state.retry_config,
+          )
           CognitiveState(
             ..new_state,
             status: Thinking(task_id:),

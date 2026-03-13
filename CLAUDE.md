@@ -158,6 +158,28 @@ This formats every `.gleam` file in `src/` and `test/` in place. The formatter i
 non-negotiable — unformatted code should not be committed. If you are unsure whether
 formatting is needed, run `gleam format` anyway; it is idempotent.
 
+### No magic numbers, no invisible settings, no hidden system vars
+
+**Every configurable value must be surfaced in `config.toml`.** This is non-negotiable.
+
+- **No magic numbers** — timeouts, retry counts, scoring weights, size limits, thresholds,
+  port numbers, and similar operational parameters must never be hardcoded in source files.
+  They must be read from `AppConfig` with a sensible default applied via `option.unwrap`.
+- **No invisible settings** — if a value affects runtime behaviour and a user might
+  reasonably want to change it, it must appear (even commented out) in both
+  `.springdrift/config.toml` and `.springdrift_example/config.toml` with a comment
+  explaining what it does and what the default is.
+- **No hidden system vars** — environment variables that affect behaviour (API keys,
+  feature flags, auth tokens) must be documented. Do not introduce new env vars without
+  adding them to the docs.
+
+When adding a new configurable value:
+1. Add the field to `AppConfig` in `src/config.gleam` (as `Option(T)`)
+2. Add it to `default()`, `merge()`, `toml_to_config()`, and `known_keys`
+3. Add a commented entry in both config.toml files with the default value
+4. Apply the default at the usage site: `option.unwrap(cfg.field, default_value)`
+5. Update this guide's Config fields table if it's a user-facing setting
+
 ## Concurrency model
 
 Long-lived processes and per-turn workers:
@@ -465,42 +487,51 @@ for tool selection: discovery (exa/tavily) → extraction (firecrawl/fetch_url) 
 
 ## Config file format
 
-`.springdrift/config.toml` (or `~/.config/springdrift/config.toml`). All fields are optional; TOML `#` comments are fully supported:
+`.springdrift/config.toml` (or `~/.config/springdrift/config.toml`). All fields are optional;
+TOML `#` comments are fully supported. See `.springdrift_example/config.toml` for the
+complete reference with every section and default value documented.
+
+The config is organized into these TOML sections:
+
+| Section | Purpose |
+|---|---|
+| *(top-level)* | Provider, models, loop control, logging, D', GUI |
+| `[agent]` | Agent name and version |
+| `[narrative]` | Prime Narrative settings |
+| `[timeouts]` | All timeout values (ms) — LLM, startup, housekeeping, etc. |
+| `[retry]` | LLM retry: max retries, backoff delays, cap |
+| `[limits]` | Size limits: artifacts, fetch, TUI, WebSocket, mailbox, query results |
+| `[scoring.threading]` | Thread assignment overlap weights and threshold |
+| `[scoring.cbr]` | CBR retrieval: cosine/symbolic weights, min score, decay |
+| `[housekeeping]` | Dedup similarity, pruning confidence, fact threshold |
+| `[embedding]` | Ollama: model, base_url, dimensions |
+| `[agents.planner]` | Planner agent: max_tokens, max_turns, max_errors |
+| `[agents.researcher]` | Researcher agent: max_tokens, max_turns, max_errors, max_context |
+| `[agents.coder]` | Coder agent: max_tokens, max_turns, max_errors |
+| `[agents.writer]` | Writer agent: max_tokens, max_turns, max_errors |
+| `[web]` | Web GUI port |
+| `[services]` | External API base URLs (DuckDuckGo, Exa, Tavily, Firecrawl, E2B) |
+
+Quick example (top-level fields only):
 
 ```toml
-# LLM provider and models
-provider        = "anthropic"        # "anthropic" | "openrouter" | "openai" | "mistral" | "local" | "mock"
-task_model      = "claude-haiku-4-5-20251001"   # Model for Simple queries
-reasoning_model = "claude-opus-4-6"             # Model for Complex queries
-max_tokens      = 2048               # Max output tokens per LLM call
+provider        = "anthropic"
+task_model      = "claude-haiku-4-5-20251001"
+reasoning_model = "claude-opus-4-6"
+max_tokens      = 2048
+max_turns       = 5
+gui             = "tui"
 
-# Agent identity
 [agent]
-name    = "Springdrift"              # Agent name (substituted into {{agent_name}} in persona.md)
-version = ""                         # Agent version string
+name = "Springdrift"
 
-# Loop control
-max_turns              = 5           # React-loop iterations per message
-max_consecutive_errors = 3           # Tool failures before abort
-max_context_messages   = 50          # Sliding-window cap (omit for unlimited)
-
-# Logging and filesystem
-log_verbose    = false               # Log full LLM payloads to cycle log
-write_anywhere = false               # Allow write_file outside CWD
-skills_dirs    = ["/path/to/skills"] # Extra skill directories
-
-# D' safety system
-dprime_enabled = false               # Enable D' safety gate before tool dispatch
-dprime_config  = "dprime.json" # Path to D' config JSON (omit for built-in defaults)
-
-# Prime Narrative (always enabled)
 [narrative]
-dir              = ".springdrift/memory/narrative" # Default location
-archivist_model  = "claude-haiku-4-5-20251001" # Model for Archivist LLM calls
-threading        = true              # Auto-assign threads by overlap scoring
-summaries        = false             # Enable periodic summaries
-summary_schedule = "weekly"          # "weekly" or "monthly"
-max_days         = 30               # Days of history replayed into ETS at startup
+threading = true
+
+[embedding]
+model = "nomic-embed-text"
+base_url = "http://localhost:11434"
+dimensions = 768
 ```
 
 ### Profile directory format

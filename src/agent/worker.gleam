@@ -17,6 +17,7 @@ pub fn spawn_think(
   req: llm_types.LlmRequest,
   provider: Provider,
   cognitive_self: process.Subject(CognitiveMessage),
+  retry_config: retry.RetryConfig,
 ) -> Nil {
   slog.debug(
     "worker",
@@ -29,7 +30,7 @@ pub fn spawn_think(
   let done = process.new_subject()
   let pid =
     process.spawn_unlinked(fn() {
-      case retry.call_with_retry(req, provider, 3, 500) {
+      case retry.call_with_retry(req, provider, retry_config) {
         Ok(resp) -> {
           process.send(cognitive_self, ThinkComplete(task_id, resp))
           process.send(done, Nil)

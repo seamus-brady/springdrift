@@ -18,16 +18,28 @@ import narrative/types.{
 }
 
 // ---------------------------------------------------------------------------
-// Overlap scoring weights
+// Overlap scoring config
 // ---------------------------------------------------------------------------
 
-const location_weight = 3
+/// Configurable overlap scoring weights for thread assignment.
+pub type ThreadingConfig {
+  ThreadingConfig(
+    location_weight: Int,
+    domain_weight: Int,
+    keyword_weight: Int,
+    threshold: Int,
+  )
+}
 
-const domain_weight = 2
-
-const keyword_weight = 1
-
-const default_threshold = 4
+/// Default threading configuration.
+pub fn default_config() -> ThreadingConfig {
+  ThreadingConfig(
+    location_weight: 3,
+    domain_weight: 2,
+    keyword_weight: 1,
+    threshold: 4,
+  )
+}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -40,12 +52,13 @@ pub fn assign_thread(
   entry: NarrativeEntry,
   dir: String,
   lib: Option(Subject(LibrarianMessage)),
+  cfg: ThreadingConfig,
 ) -> NarrativeEntry {
   let index = case lib {
     Some(l) -> librarian.load_thread_index(l)
     None -> narrative_log.load_thread_index(dir)
   }
-  let #(updated_entry, updated_index) = do_assign(entry, index)
+  let #(updated_entry, updated_index) = do_assign(entry, index, cfg)
   narrative_log.save_thread_index(dir, updated_index)
   updated_entry
 }
@@ -54,9 +67,12 @@ pub fn assign_thread(
 pub fn do_assign(
   entry: NarrativeEntry,
   index: ThreadIndex,
+  cfg: ThreadingConfig,
 ) -> #(NarrativeEntry, ThreadIndex) {
   let scores =
-    list.map(index.threads, fn(ts) { #(ts, score_overlap(entry, ts)) })
+    list.map(index.threads, fn(ts) {
+      #(ts, score_overlap_with_config(entry, ts, cfg))
+    })
 
   let best =
     list.fold(scores, #(None, 0), fn(acc, pair) {
@@ -69,7 +85,7 @@ pub fn do_assign(
     })
 
   case best {
-    #(Some(ts), s) if s >= default_threshold -> {
+    #(Some(ts), s) if s >= cfg.threshold -> {
       // Join existing thread
       let thread =
         Thread(
@@ -119,21 +135,30 @@ pub fn do_assign(
   }
 }
 
-/// Compute the overlap score between an entry and a thread state.
+/// Compute the overlap score between an entry and a thread state (default weights).
 pub fn score_overlap(entry: NarrativeEntry, ts: ThreadState) -> Int {
+  score_overlap_with_config(entry, ts, default_config())
+}
+
+/// Compute the overlap score with configurable weights.
+pub fn score_overlap_with_config(
+  entry: NarrativeEntry,
+  ts: ThreadState,
+  cfg: ThreadingConfig,
+) -> Int {
   let location_score =
     count_intersections(entry.entities.locations, ts.locations)
-    * location_weight
+    * cfg.location_weight
   let domain_score = case entry.intent.domain {
     "" -> 0
     d ->
       case list.contains(ts.domains, d) {
-        True -> domain_weight
+        True -> cfg.domain_weight
         False -> 0
       }
   }
   let keyword_score =
-    count_intersections(entry.keywords, ts.keywords) * keyword_weight
+    count_intersections(entry.keywords, ts.keywords) * cfg.keyword_weight
   location_score + domain_score + keyword_score
 }
 
@@ -241,10 +266,10 @@ fn replace_thread(index: ThreadIndex, updated: ThreadState) -> ThreadIndex {
 
 /// Get the default overlap threshold.
 pub fn threshold() -> Int {
-  default_threshold
+  default_config().threshold
 }
 
 /// Format overlap score for display.
 pub fn score_to_string(score: Int) -> String {
-  int.to_string(score) <> "/" <> int.to_string(default_threshold)
+  int.to_string(score) <> "/" <> int.to_string(default_config().threshold)
 }

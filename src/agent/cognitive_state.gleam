@@ -10,9 +10,11 @@ import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Subject}
 import gleam/option.{type Option}
 import llm/provider.{type Provider}
+import llm/retry
 import llm/types as llm_types
 import narrative/curator.{type CuratorMessage}
 import narrative/librarian.{type LibrarianMessage}
+import narrative/threading
 import tools/memory
 
 /// Model selection and generation parameters — extracted for documentation
@@ -84,6 +86,10 @@ pub type CognitiveState {
     write_anywhere: Bool,
     agent_uuid: String,
     session_since: String,
+    // --- Retry and timeouts ---
+    retry_config: retry.RetryConfig,
+    classify_timeout_ms: Int,
+    threading_config: threading.ThreadingConfig,
     // --- Memory tool limits ---
     memory_limits: memory.MemoryLimits,
   )

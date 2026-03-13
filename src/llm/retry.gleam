@@ -8,6 +8,28 @@ import llm/types.{
 }
 import slog
 
+/// Retry configuration for LLM calls with exponential backoff.
+pub type RetryConfig {
+  RetryConfig(
+    max_retries: Int,
+    initial_delay_ms: Int,
+    rate_limit_delay_ms: Int,
+    overload_delay_ms: Int,
+    max_delay_ms: Int,
+  )
+}
+
+/// Default retry configuration.
+pub fn default_retry_config() -> RetryConfig {
+  RetryConfig(
+    max_retries: 3,
+    initial_delay_ms: 500,
+    rate_limit_delay_ms: 5000,
+    overload_delay_ms: 2000,
+    max_delay_ms: 60_000,
+  )
+}
+
 /// Whether an LLM error is transient and worth retrying.
 pub fn is_retryable(err: LlmError) -> Bool {
   case err {
@@ -33,71 +55,57 @@ pub fn is_rate_limit(err: LlmError) -> Bool {
   }
 }
 
-/// Initial backoff delay for an error type.
-/// Rate limits (429): 5s (APIs typically enforce windows of 60s+).
-/// Overloaded (529): 2s (server busy, needs moderate breathing room).
-/// Server errors / network: 500ms.
-fn initial_delay_for(err: LlmError) -> Int {
+/// Initial backoff delay for an error type, using configurable delays.
+fn initial_delay_for(err: LlmError, cfg: RetryConfig) -> Int {
   case err {
-    ApiError(status_code: 429, ..) -> 5000
-    RateLimitError(..) -> 5000
-    ApiError(status_code: 529, ..) -> 2000
-    _ -> 500
+    ApiError(status_code: 429, ..) -> cfg.rate_limit_delay_ms
+    RateLimitError(..) -> cfg.rate_limit_delay_ms
+    ApiError(status_code: 529, ..) -> cfg.overload_delay_ms
+    _ -> cfg.initial_delay_ms
   }
 }
 
 /// Call the provider with retry logic (exponential backoff).
-/// `max_retries` is the number of retries (not total attempts).
-/// `initial_delay_ms` is the delay before the first retry for server errors.
-/// Rate limit errors automatically use a longer backoff (5s base).
+/// Uses RetryConfig for all retry parameters.
 pub fn call_with_retry(
   req: LlmRequest,
   provider: Provider,
-  max_retries: Int,
-  initial_delay_ms: Int,
+  cfg: RetryConfig,
 ) -> Result(LlmResponse, LlmError) {
-  do_call_with_retry(req, provider, 0, max_retries, initial_delay_ms)
+  do_call_with_retry(req, provider, 0, cfg)
 }
 
 fn do_call_with_retry(
   req: LlmRequest,
   provider: Provider,
   attempt: Int,
-  max_retries: Int,
-  base_delay_ms: Int,
+  cfg: RetryConfig,
 ) -> Result(LlmResponse, LlmError) {
   case provider.chat_with(req, provider) {
     Ok(resp) -> Ok(resp)
     Error(err) ->
-      case is_retryable(err) && attempt < max_retries {
+      case is_retryable(err) && attempt < cfg.max_retries {
         True -> {
           // Rate limits get their own longer backoff; server errors use base
           let delay = case is_rate_limit(err) {
-            True -> initial_delay_for(err) * pow2(attempt)
-            False -> base_delay_ms * pow2(attempt)
+            True -> initial_delay_for(err, cfg) * pow2(attempt)
+            False -> cfg.initial_delay_ms * pow2(attempt)
           }
-          // Cap at 60s to avoid absurdly long waits
-          let capped = int.min(delay, 60_000)
+          let capped = int.min(delay, cfg.max_delay_ms)
           slog.warn(
             "llm/retry",
             "backoff",
             "Attempt "
               <> int.to_string(attempt + 1)
               <> "/"
-              <> int.to_string(max_retries)
+              <> int.to_string(cfg.max_retries)
               <> " failed, waiting "
               <> int.to_string(capped)
               <> "ms before retry",
             None,
           )
           process.sleep(capped)
-          do_call_with_retry(
-            req,
-            provider,
-            attempt + 1,
-            max_retries,
-            base_delay_ms,
-          )
+          do_call_with_retry(req, provider, attempt + 1, cfg)
         }
         False -> Error(err)
       }

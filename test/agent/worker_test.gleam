@@ -5,6 +5,7 @@ import gleeunit/should
 import llm/adapters/mock
 import llm/request
 import llm/response
+import llm/retry
 
 // ---------------------------------------------------------------------------
 // Think worker sends ThinkComplete on success
@@ -18,7 +19,13 @@ pub fn think_complete_on_success_test() {
     |> request.with_user_message("test")
   let task_id = "test-task-1"
 
-  worker.spawn_think(task_id, req, provider, cognitive_subj)
+  worker.spawn_think(
+    task_id,
+    req,
+    provider,
+    cognitive_subj,
+    retry.default_retry_config(),
+  )
 
   // Should receive ThinkComplete
   let assert Ok(msg) = process.receive(cognitive_subj, 5000)
@@ -43,7 +50,13 @@ pub fn think_error_on_provider_error_test() {
     |> request.with_user_message("test")
   let task_id = "test-task-2"
 
-  worker.spawn_think(task_id, req, provider, cognitive_subj)
+  worker.spawn_think(
+    task_id,
+    req,
+    provider,
+    cognitive_subj,
+    retry.default_retry_config(),
+  )
 
   // Should receive ThinkError
   let assert Ok(msg) = process.receive(cognitive_subj, 5000)
@@ -71,7 +84,13 @@ pub fn monitor_forwarder_fires_after_worker_exits_test() {
     |> request.with_user_message("test")
   let task_id = "test-task-3"
 
-  worker.spawn_think(task_id, req, provider, cognitive_subj)
+  worker.spawn_think(
+    task_id,
+    req,
+    provider,
+    cognitive_subj,
+    retry.default_retry_config(),
+  )
 
   // We expect ThinkComplete first, then ThinkWorkerDown from the monitor
   // forwarder (since the worker process exits normally after sending).

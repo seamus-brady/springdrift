@@ -33,6 +33,7 @@ type SupervisorState {
     cognitive: Subject(CognitiveMessage),
     children: List(ChildEntry),
     max_restarts: Int,
+    restart_window_ms: Int,
   )
 }
 
@@ -41,12 +42,13 @@ type SupervisorEvent {
   ChildExited(ExitMessage)
 }
 
-/// Sliding restart window duration in milliseconds (60 seconds).
-const restart_window_ms = 60_000
-
 /// Count restarts within the sliding window, pruning old entries.
-fn restarts_in_window(timestamps: List(Int), now: Int) -> #(Int, List(Int)) {
-  let cutoff = now - restart_window_ms
+fn restarts_in_window(
+  timestamps: List(Int),
+  now: Int,
+  window_ms: Int,
+) -> #(Int, List(Int)) {
+  let cutoff = now - window_ms
   let recent = list.filter(timestamps, fn(ts) { ts >= cutoff })
   #(list.length(recent), recent)
 }
@@ -58,13 +60,21 @@ fn restarts_in_window(timestamps: List(Int), now: Int) -> #(Int, List(Int)) {
 pub fn start(
   cognitive: Subject(CognitiveMessage),
   max_restarts: Int,
+  restart_window_ms: Int,
 ) -> Result(Subject(SupervisorMessage), Nil) {
   slog.info("supervisor", "start", "Starting supervisor", None)
   let setup = process.new_subject()
   process.spawn_unlinked(fn() {
     process.trap_exits(True)
     let self = process.new_subject()
-    let state = SupervisorState(self:, cognitive:, children: [], max_restarts:)
+    let state =
+      SupervisorState(
+        self:,
+        cognitive:,
+        children: [],
+        max_restarts:,
+        restart_window_ms:,
+      )
     process.send(setup, self)
     supervisor_loop(state)
   })
@@ -183,7 +193,11 @@ fn handle_child_exit(state: SupervisorState, exit_msg: ExitMessage) -> Nil {
         True -> {
           let now = monotonic_now_ms()
           let #(recent_count, recent_timestamps) =
-            restarts_in_window(child.restart_timestamps, now)
+            restarts_in_window(
+              child.restart_timestamps,
+              now,
+              state.restart_window_ms,
+            )
           slog.info(
             "supervisor",
             "restart_child",

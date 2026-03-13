@@ -31,6 +31,13 @@ pub fn default_has_all_none_test() {
   cfg.gui |> should.equal(None)
   cfg.dprime_enabled |> should.equal(None)
   cfg.dprime_config |> should.equal(None)
+  // New fields
+  cfg.llm_request_timeout_ms |> should.equal(None)
+  cfg.retry_max_retries |> should.equal(None)
+  cfg.max_artifact_chars |> should.equal(None)
+  cfg.embedding_model |> should.equal(None)
+  cfg.web_port |> should.equal(None)
+  cfg.planner_max_turns |> should.equal(None)
 }
 
 // ---------------------------------------------------------------------------
@@ -83,316 +90,22 @@ pub fn from_args_empty_test() {
 // ---------------------------------------------------------------------------
 
 pub fn merge_override_wins_test() {
-  let base =
-    AppConfig(
-      provider: Some("anthropic"),
-      agent_name: None,
-      agent_version: None,
-      max_tokens: None,
-      max_turns: None,
-      max_consecutive_errors: None,
-      max_context_messages: None,
-      task_model: None,
-      reasoning_model: None,
-      config_path: None,
-      log_verbose: None,
-      skills_dirs: None,
-      write_anywhere: None,
-      gui: None,
-      dprime_enabled: None,
-      dprime_config: None,
-      narrative_dir: None,
-      archivist_model: None,
-      narrative_threading: None,
-      narrative_summaries: None,
-      narrative_summary_schedule: None,
-      profiles_dirs: None,
-      default_profile: None,
-      librarian_max_days: None,
-      cbr_cosine_weight: None,
-      cbr_symbolic_weight: None,
-      cbr_intent_weight: None,
-      cbr_keyword_weight: None,
-      cbr_entity_weight: None,
-      cbr_domain_weight: None,
-      cbr_recency_weight: None,
-      cbr_min_score: None,
-      cbr_recency_decay_days: None,
-      mailbox_warn_threshold: None,
-      housekeeping_tick_ms: None,
-      housekeeping_interval_ticks: None,
-      dedup_similarity: None,
-      pruning_confidence: None,
-      fact_confidence: None,
-      cbr_pruning_days: None,
-      log_retention_days: None,
-      max_artifact_chars: None,
-      recall_max_entries: None,
-      cbr_max_results: None,
-      sandbox_timeout_s: None,
-      tui_input_limit: None,
-      websocket_max_bytes: None,
-    )
-  let override =
-    AppConfig(
-      provider: Some("openai"),
-      agent_name: None,
-      agent_version: None,
-      max_tokens: None,
-      max_turns: None,
-      max_consecutive_errors: None,
-      max_context_messages: None,
-      task_model: None,
-      reasoning_model: None,
-      config_path: None,
-      log_verbose: None,
-      skills_dirs: None,
-      write_anywhere: None,
-      gui: None,
-      dprime_enabled: None,
-      dprime_config: None,
-      narrative_dir: None,
-      archivist_model: None,
-      narrative_threading: None,
-      narrative_summaries: None,
-      narrative_summary_schedule: None,
-      profiles_dirs: None,
-      default_profile: None,
-      librarian_max_days: None,
-      cbr_cosine_weight: None,
-      cbr_symbolic_weight: None,
-      cbr_intent_weight: None,
-      cbr_keyword_weight: None,
-      cbr_entity_weight: None,
-      cbr_domain_weight: None,
-      cbr_recency_weight: None,
-      cbr_min_score: None,
-      cbr_recency_decay_days: None,
-      mailbox_warn_threshold: None,
-      housekeeping_tick_ms: None,
-      housekeeping_interval_ticks: None,
-      dedup_similarity: None,
-      pruning_confidence: None,
-      fact_confidence: None,
-      cbr_pruning_days: None,
-      log_retention_days: None,
-      max_artifact_chars: None,
-      recall_max_entries: None,
-      cbr_max_results: None,
-      sandbox_timeout_s: None,
-      tui_input_limit: None,
-      websocket_max_bytes: None,
-    )
+  let base = AppConfig(..config.default(), provider: Some("anthropic"))
+  let override = AppConfig(..config.default(), provider: Some("openai"))
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("openai"))
 }
 
 pub fn merge_base_preserved_when_override_none_test() {
-  let base =
-    AppConfig(
-      provider: Some("anthropic"),
-      agent_name: None,
-      agent_version: None,
-      max_tokens: None,
-      max_turns: None,
-      max_consecutive_errors: None,
-      max_context_messages: None,
-      task_model: None,
-      reasoning_model: None,
-      config_path: None,
-      log_verbose: None,
-      skills_dirs: None,
-      write_anywhere: None,
-      gui: None,
-      dprime_enabled: None,
-      dprime_config: None,
-      narrative_dir: None,
-      archivist_model: None,
-      narrative_threading: None,
-      narrative_summaries: None,
-      narrative_summary_schedule: None,
-      profiles_dirs: None,
-      default_profile: None,
-      librarian_max_days: None,
-      cbr_cosine_weight: None,
-      cbr_symbolic_weight: None,
-      cbr_intent_weight: None,
-      cbr_keyword_weight: None,
-      cbr_entity_weight: None,
-      cbr_domain_weight: None,
-      cbr_recency_weight: None,
-      cbr_min_score: None,
-      cbr_recency_decay_days: None,
-      mailbox_warn_threshold: None,
-      housekeeping_tick_ms: None,
-      housekeeping_interval_ticks: None,
-      dedup_similarity: None,
-      pruning_confidence: None,
-      fact_confidence: None,
-      cbr_pruning_days: None,
-      log_retention_days: None,
-      max_artifact_chars: None,
-      recall_max_entries: None,
-      cbr_max_results: None,
-      sandbox_timeout_s: None,
-      tui_input_limit: None,
-      websocket_max_bytes: None,
-    )
-  let override =
-    AppConfig(
-      provider: None,
-      agent_name: None,
-      agent_version: None,
-      max_tokens: None,
-      max_turns: None,
-      max_consecutive_errors: None,
-      max_context_messages: None,
-      task_model: None,
-      reasoning_model: None,
-      config_path: None,
-      log_verbose: None,
-      skills_dirs: None,
-      write_anywhere: None,
-      gui: None,
-      dprime_enabled: None,
-      dprime_config: None,
-      narrative_dir: None,
-      archivist_model: None,
-      narrative_threading: None,
-      narrative_summaries: None,
-      narrative_summary_schedule: None,
-      profiles_dirs: None,
-      default_profile: None,
-      librarian_max_days: None,
-      cbr_cosine_weight: None,
-      cbr_symbolic_weight: None,
-      cbr_intent_weight: None,
-      cbr_keyword_weight: None,
-      cbr_entity_weight: None,
-      cbr_domain_weight: None,
-      cbr_recency_weight: None,
-      cbr_min_score: None,
-      cbr_recency_decay_days: None,
-      mailbox_warn_threshold: None,
-      housekeeping_tick_ms: None,
-      housekeeping_interval_ticks: None,
-      dedup_similarity: None,
-      pruning_confidence: None,
-      fact_confidence: None,
-      cbr_pruning_days: None,
-      log_retention_days: None,
-      max_artifact_chars: None,
-      recall_max_entries: None,
-      cbr_max_results: None,
-      sandbox_timeout_s: None,
-      tui_input_limit: None,
-      websocket_max_bytes: None,
-    )
+  let base = AppConfig(..config.default(), provider: Some("anthropic"))
+  let override = config.default()
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("anthropic"))
 }
 
 pub fn merge_combines_different_fields_test() {
-  let base =
-    AppConfig(
-      provider: Some("anthropic"),
-      agent_name: None,
-      agent_version: None,
-      max_tokens: None,
-      max_turns: None,
-      max_consecutive_errors: None,
-      max_context_messages: None,
-      task_model: None,
-      reasoning_model: None,
-      config_path: None,
-      log_verbose: None,
-      skills_dirs: None,
-      write_anywhere: None,
-      gui: None,
-      dprime_enabled: None,
-      dprime_config: None,
-      narrative_dir: None,
-      archivist_model: None,
-      narrative_threading: None,
-      narrative_summaries: None,
-      narrative_summary_schedule: None,
-      profiles_dirs: None,
-      default_profile: None,
-      librarian_max_days: None,
-      cbr_cosine_weight: None,
-      cbr_symbolic_weight: None,
-      cbr_intent_weight: None,
-      cbr_keyword_weight: None,
-      cbr_entity_weight: None,
-      cbr_domain_weight: None,
-      cbr_recency_weight: None,
-      cbr_min_score: None,
-      cbr_recency_decay_days: None,
-      mailbox_warn_threshold: None,
-      housekeeping_tick_ms: None,
-      housekeeping_interval_ticks: None,
-      dedup_similarity: None,
-      pruning_confidence: None,
-      fact_confidence: None,
-      cbr_pruning_days: None,
-      log_retention_days: None,
-      max_artifact_chars: None,
-      recall_max_entries: None,
-      cbr_max_results: None,
-      sandbox_timeout_s: None,
-      tui_input_limit: None,
-      websocket_max_bytes: None,
-    )
-  let override =
-    AppConfig(
-      provider: None,
-      agent_name: Some("TestBot"),
-      agent_version: None,
-      max_tokens: None,
-      max_turns: None,
-      max_consecutive_errors: None,
-      max_context_messages: None,
-      task_model: None,
-      reasoning_model: None,
-      config_path: None,
-      log_verbose: None,
-      skills_dirs: None,
-      write_anywhere: None,
-      gui: None,
-      dprime_enabled: None,
-      dprime_config: None,
-      narrative_dir: None,
-      archivist_model: None,
-      narrative_threading: None,
-      narrative_summaries: None,
-      narrative_summary_schedule: None,
-      profiles_dirs: None,
-      default_profile: None,
-      librarian_max_days: None,
-      cbr_cosine_weight: None,
-      cbr_symbolic_weight: None,
-      cbr_intent_weight: None,
-      cbr_keyword_weight: None,
-      cbr_entity_weight: None,
-      cbr_domain_weight: None,
-      cbr_recency_weight: None,
-      cbr_min_score: None,
-      cbr_recency_decay_days: None,
-      mailbox_warn_threshold: None,
-      housekeeping_tick_ms: None,
-      housekeeping_interval_ticks: None,
-      dedup_similarity: None,
-      pruning_confidence: None,
-      fact_confidence: None,
-      cbr_pruning_days: None,
-      log_retention_days: None,
-      max_artifact_chars: None,
-      recall_max_entries: None,
-      cbr_max_results: None,
-      sandbox_timeout_s: None,
-      tui_input_limit: None,
-      websocket_max_bytes: None,
-    )
+  let base = AppConfig(..config.default(), provider: Some("anthropic"))
+  let override = AppConfig(..config.default(), agent_name: Some("TestBot"))
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("anthropic"))
   merged.agent_name |> should.equal(Some("TestBot"))
@@ -478,105 +191,12 @@ max_context_messages = 100"
 }
 
 pub fn merge_new_fields_test() {
-  let base =
-    AppConfig(
-      provider: None,
-      agent_name: None,
-      agent_version: None,
-      max_tokens: None,
-      max_turns: Some(5),
-      max_consecutive_errors: None,
-      max_context_messages: None,
-      task_model: None,
-      reasoning_model: None,
-      config_path: None,
-      log_verbose: None,
-      skills_dirs: None,
-      write_anywhere: None,
-      gui: None,
-      dprime_enabled: None,
-      dprime_config: None,
-      narrative_dir: None,
-      archivist_model: None,
-      narrative_threading: None,
-      narrative_summaries: None,
-      narrative_summary_schedule: None,
-      profiles_dirs: None,
-      default_profile: None,
-      librarian_max_days: None,
-      cbr_cosine_weight: None,
-      cbr_symbolic_weight: None,
-      cbr_intent_weight: None,
-      cbr_keyword_weight: None,
-      cbr_entity_weight: None,
-      cbr_domain_weight: None,
-      cbr_recency_weight: None,
-      cbr_min_score: None,
-      cbr_recency_decay_days: None,
-      mailbox_warn_threshold: None,
-      housekeeping_tick_ms: None,
-      housekeeping_interval_ticks: None,
-      dedup_similarity: None,
-      pruning_confidence: None,
-      fact_confidence: None,
-      cbr_pruning_days: None,
-      log_retention_days: None,
-      max_artifact_chars: None,
-      recall_max_entries: None,
-      cbr_max_results: None,
-      sandbox_timeout_s: None,
-      tui_input_limit: None,
-      websocket_max_bytes: None,
-    )
+  let base = AppConfig(..config.default(), max_turns: Some(5))
   let override =
     AppConfig(
-      provider: None,
-      agent_name: None,
-      agent_version: None,
-      max_tokens: None,
+      ..config.default(),
       max_turns: Some(10),
       max_consecutive_errors: Some(2),
-      max_context_messages: None,
-      task_model: None,
-      reasoning_model: None,
-      config_path: None,
-      log_verbose: None,
-      skills_dirs: None,
-      write_anywhere: None,
-      gui: None,
-      dprime_enabled: None,
-      dprime_config: None,
-      narrative_dir: None,
-      archivist_model: None,
-      narrative_threading: None,
-      narrative_summaries: None,
-      narrative_summary_schedule: None,
-      profiles_dirs: None,
-      default_profile: None,
-      librarian_max_days: None,
-      cbr_cosine_weight: None,
-      cbr_symbolic_weight: None,
-      cbr_intent_weight: None,
-      cbr_keyword_weight: None,
-      cbr_entity_weight: None,
-      cbr_domain_weight: None,
-      cbr_recency_weight: None,
-      cbr_min_score: None,
-      cbr_recency_decay_days: None,
-      mailbox_warn_threshold: None,
-      housekeeping_tick_ms: None,
-      housekeeping_interval_ticks: None,
-      dedup_similarity: None,
-      pruning_confidence: None,
-      fact_confidence: None,
-      cbr_pruning_days: None,
-      log_retention_days: None,
-      max_artifact_chars: None,
-      recall_max_entries: None,
-      cbr_max_results: None,
-      sandbox_timeout_s: None,
-      tui_input_limit: None,
-      websocket_max_bytes: None,
     )
   let merged = config.merge(base, override:)
   merged.max_turns |> should.equal(Some(10))
@@ -627,104 +247,12 @@ reasoning_model = \"gpt-4o\""
 pub fn merge_model_fields_override_wins_test() {
   let base =
     AppConfig(
-      provider: None,
-      agent_name: None,
-      agent_version: None,
-      max_tokens: None,
-      max_turns: None,
-      max_consecutive_errors: None,
-      max_context_messages: None,
+      ..config.default(),
       task_model: Some("base-task"),
       reasoning_model: Some("base-reasoning"),
-      config_path: None,
-      log_verbose: None,
-      skills_dirs: None,
-      write_anywhere: None,
-      gui: None,
-      dprime_enabled: None,
-      dprime_config: None,
-      narrative_dir: None,
-      archivist_model: None,
-      narrative_threading: None,
-      narrative_summaries: None,
-      narrative_summary_schedule: None,
-      profiles_dirs: None,
-      default_profile: None,
-      librarian_max_days: None,
-      cbr_cosine_weight: None,
-      cbr_symbolic_weight: None,
-      cbr_intent_weight: None,
-      cbr_keyword_weight: None,
-      cbr_entity_weight: None,
-      cbr_domain_weight: None,
-      cbr_recency_weight: None,
-      cbr_min_score: None,
-      cbr_recency_decay_days: None,
-      mailbox_warn_threshold: None,
-      housekeeping_tick_ms: None,
-      housekeeping_interval_ticks: None,
-      dedup_similarity: None,
-      pruning_confidence: None,
-      fact_confidence: None,
-      cbr_pruning_days: None,
-      log_retention_days: None,
-      max_artifact_chars: None,
-      recall_max_entries: None,
-      cbr_max_results: None,
-      sandbox_timeout_s: None,
-      tui_input_limit: None,
-      websocket_max_bytes: None,
     )
   let override =
-    AppConfig(
-      provider: None,
-      agent_name: None,
-      agent_version: None,
-      max_tokens: None,
-      max_turns: None,
-      max_consecutive_errors: None,
-      max_context_messages: None,
-      task_model: Some("override-task"),
-      reasoning_model: None,
-      config_path: None,
-      log_verbose: None,
-      skills_dirs: None,
-      write_anywhere: None,
-      gui: None,
-      dprime_enabled: None,
-      dprime_config: None,
-      narrative_dir: None,
-      archivist_model: None,
-      narrative_threading: None,
-      narrative_summaries: None,
-      narrative_summary_schedule: None,
-      profiles_dirs: None,
-      default_profile: None,
-      librarian_max_days: None,
-      cbr_cosine_weight: None,
-      cbr_symbolic_weight: None,
-      cbr_intent_weight: None,
-      cbr_keyword_weight: None,
-      cbr_entity_weight: None,
-      cbr_domain_weight: None,
-      cbr_recency_weight: None,
-      cbr_min_score: None,
-      cbr_recency_decay_days: None,
-      mailbox_warn_threshold: None,
-      housekeeping_tick_ms: None,
-      housekeeping_interval_ticks: None,
-      dedup_similarity: None,
-      pruning_confidence: None,
-      fact_confidence: None,
-      cbr_pruning_days: None,
-      log_retention_days: None,
-      max_artifact_chars: None,
-      recall_max_entries: None,
-      cbr_max_results: None,
-      sandbox_timeout_s: None,
-      tui_input_limit: None,
-      websocket_max_bytes: None,
-    )
+    AppConfig(..config.default(), task_model: Some("override-task"))
   let merged = config.merge(base, override:)
   merged.task_model |> should.equal(Some("override-task"))
   merged.reasoning_model |> should.equal(Some("base-reasoning"))
@@ -733,104 +261,11 @@ pub fn merge_model_fields_override_wins_test() {
 pub fn merge_model_fields_base_preserved_test() {
   let base =
     AppConfig(
-      provider: None,
-      agent_name: None,
-      agent_version: None,
-      max_tokens: None,
-      max_turns: None,
-      max_consecutive_errors: None,
-      max_context_messages: None,
+      ..config.default(),
       task_model: Some("haiku"),
       reasoning_model: Some("opus"),
-      config_path: None,
-      log_verbose: None,
-      skills_dirs: None,
-      write_anywhere: None,
-      gui: None,
-      dprime_enabled: None,
-      dprime_config: None,
-      narrative_dir: None,
-      archivist_model: None,
-      narrative_threading: None,
-      narrative_summaries: None,
-      narrative_summary_schedule: None,
-      profiles_dirs: None,
-      default_profile: None,
-      librarian_max_days: None,
-      cbr_cosine_weight: None,
-      cbr_symbolic_weight: None,
-      cbr_intent_weight: None,
-      cbr_keyword_weight: None,
-      cbr_entity_weight: None,
-      cbr_domain_weight: None,
-      cbr_recency_weight: None,
-      cbr_min_score: None,
-      cbr_recency_decay_days: None,
-      mailbox_warn_threshold: None,
-      housekeeping_tick_ms: None,
-      housekeeping_interval_ticks: None,
-      dedup_similarity: None,
-      pruning_confidence: None,
-      fact_confidence: None,
-      cbr_pruning_days: None,
-      log_retention_days: None,
-      max_artifact_chars: None,
-      recall_max_entries: None,
-      cbr_max_results: None,
-      sandbox_timeout_s: None,
-      tui_input_limit: None,
-      websocket_max_bytes: None,
     )
-  let override =
-    AppConfig(
-      provider: None,
-      agent_name: None,
-      agent_version: None,
-      max_tokens: None,
-      max_turns: None,
-      max_consecutive_errors: None,
-      max_context_messages: None,
-      task_model: None,
-      reasoning_model: None,
-      config_path: None,
-      log_verbose: None,
-      skills_dirs: None,
-      write_anywhere: None,
-      gui: None,
-      dprime_enabled: None,
-      dprime_config: None,
-      narrative_dir: None,
-      archivist_model: None,
-      narrative_threading: None,
-      narrative_summaries: None,
-      narrative_summary_schedule: None,
-      profiles_dirs: None,
-      default_profile: None,
-      librarian_max_days: None,
-      cbr_cosine_weight: None,
-      cbr_symbolic_weight: None,
-      cbr_intent_weight: None,
-      cbr_keyword_weight: None,
-      cbr_entity_weight: None,
-      cbr_domain_weight: None,
-      cbr_recency_weight: None,
-      cbr_min_score: None,
-      cbr_recency_decay_days: None,
-      mailbox_warn_threshold: None,
-      housekeeping_tick_ms: None,
-      housekeeping_interval_ticks: None,
-      dedup_similarity: None,
-      pruning_confidence: None,
-      fact_confidence: None,
-      cbr_pruning_days: None,
-      log_retention_days: None,
-      max_artifact_chars: None,
-      recall_max_entries: None,
-      cbr_max_results: None,
-      sandbox_timeout_s: None,
-      tui_input_limit: None,
-      websocket_max_bytes: None,
-    )
+  let override = config.default()
   let merged = config.merge(base, override:)
   merged.task_model |> should.equal(Some("haiku"))
   merged.reasoning_model |> should.equal(Some("opus"))
@@ -876,6 +311,7 @@ pub fn parse_config_toml_log_verbose_true_test() {
 pub fn to_string_fully_set_test() {
   let cfg =
     AppConfig(
+      ..config.default(),
       provider: Some("anthropic"),
       agent_name: Some("TestBot"),
       agent_version: Some("1.0"),
@@ -888,41 +324,6 @@ pub fn to_string_fully_set_test() {
       config_path: Some("/tmp/cfg.toml"),
       log_verbose: Some(True),
       skills_dirs: Some(["/tmp/skills"]),
-      write_anywhere: None,
-      gui: None,
-      dprime_enabled: None,
-      dprime_config: None,
-      narrative_dir: None,
-      archivist_model: None,
-      narrative_threading: None,
-      narrative_summaries: None,
-      narrative_summary_schedule: None,
-      profiles_dirs: None,
-      default_profile: None,
-      librarian_max_days: None,
-      cbr_cosine_weight: None,
-      cbr_symbolic_weight: None,
-      cbr_intent_weight: None,
-      cbr_keyword_weight: None,
-      cbr_entity_weight: None,
-      cbr_domain_weight: None,
-      cbr_recency_weight: None,
-      cbr_min_score: None,
-      cbr_recency_decay_days: None,
-      mailbox_warn_threshold: None,
-      housekeeping_tick_ms: None,
-      housekeeping_interval_ticks: None,
-      dedup_similarity: None,
-      pruning_confidence: None,
-      fact_confidence: None,
-      cbr_pruning_days: None,
-      log_retention_days: None,
-      max_artifact_chars: None,
-      recall_max_entries: None,
-      cbr_max_results: None,
-      sandbox_timeout_s: None,
-      tui_input_limit: None,
-      websocket_max_bytes: None,
     )
   let s = config.to_string(cfg)
   string.contains(s, "provider") |> should.be_true
@@ -1019,106 +420,8 @@ pub fn parse_config_toml_gui_test() {
 }
 
 pub fn merge_gui_override_wins_test() {
-  let base =
-    AppConfig(
-      provider: None,
-      agent_name: None,
-      agent_version: None,
-      max_tokens: None,
-      max_turns: None,
-      max_consecutive_errors: None,
-      max_context_messages: None,
-      task_model: None,
-      reasoning_model: None,
-      config_path: None,
-      log_verbose: None,
-      skills_dirs: None,
-      write_anywhere: None,
-      gui: Some("tui"),
-      dprime_enabled: None,
-      dprime_config: None,
-      narrative_dir: None,
-      archivist_model: None,
-      narrative_threading: None,
-      narrative_summaries: None,
-      narrative_summary_schedule: None,
-      profiles_dirs: None,
-      default_profile: None,
-      librarian_max_days: None,
-      cbr_cosine_weight: None,
-      cbr_symbolic_weight: None,
-      cbr_intent_weight: None,
-      cbr_keyword_weight: None,
-      cbr_entity_weight: None,
-      cbr_domain_weight: None,
-      cbr_recency_weight: None,
-      cbr_min_score: None,
-      cbr_recency_decay_days: None,
-      mailbox_warn_threshold: None,
-      housekeeping_tick_ms: None,
-      housekeeping_interval_ticks: None,
-      dedup_similarity: None,
-      pruning_confidence: None,
-      fact_confidence: None,
-      cbr_pruning_days: None,
-      log_retention_days: None,
-      max_artifact_chars: None,
-      recall_max_entries: None,
-      cbr_max_results: None,
-      sandbox_timeout_s: None,
-      tui_input_limit: None,
-      websocket_max_bytes: None,
-    )
-  let override =
-    AppConfig(
-      provider: None,
-      agent_name: None,
-      agent_version: None,
-      max_tokens: None,
-      max_turns: None,
-      max_consecutive_errors: None,
-      max_context_messages: None,
-      task_model: None,
-      reasoning_model: None,
-      config_path: None,
-      log_verbose: None,
-      skills_dirs: None,
-      write_anywhere: None,
-      gui: Some("web"),
-      dprime_enabled: None,
-      dprime_config: None,
-      narrative_dir: None,
-      archivist_model: None,
-      narrative_threading: None,
-      narrative_summaries: None,
-      narrative_summary_schedule: None,
-      profiles_dirs: None,
-      default_profile: None,
-      librarian_max_days: None,
-      cbr_cosine_weight: None,
-      cbr_symbolic_weight: None,
-      cbr_intent_weight: None,
-      cbr_keyword_weight: None,
-      cbr_entity_weight: None,
-      cbr_domain_weight: None,
-      cbr_recency_weight: None,
-      cbr_min_score: None,
-      cbr_recency_decay_days: None,
-      mailbox_warn_threshold: None,
-      housekeeping_tick_ms: None,
-      housekeeping_interval_ticks: None,
-      dedup_similarity: None,
-      pruning_confidence: None,
-      fact_confidence: None,
-      cbr_pruning_days: None,
-      log_retention_days: None,
-      max_artifact_chars: None,
-      recall_max_entries: None,
-      cbr_max_results: None,
-      sandbox_timeout_s: None,
-      tui_input_limit: None,
-      websocket_max_bytes: None,
-    )
+  let base = AppConfig(..config.default(), gui: Some("tui"))
+  let override = AppConfig(..config.default(), gui: Some("web"))
   let merged = config.merge(base, override:)
   merged.gui |> should.equal(Some("web"))
 }
@@ -1189,103 +492,15 @@ pub fn parse_config_toml_dprime_config_test() {
 pub fn merge_dprime_override_wins_test() {
   let base =
     AppConfig(
-      provider: None,
-      agent_name: None,
-      agent_version: None,
-      max_tokens: None,
-      max_turns: None,
-      max_consecutive_errors: None,
-      max_context_messages: None,
-      task_model: None,
-      reasoning_model: None,
-      config_path: None,
-      log_verbose: None,
-      skills_dirs: None,
-      write_anywhere: None,
-      gui: None,
+      ..config.default(),
       dprime_enabled: Some(False),
       dprime_config: Some("/old.json"),
-      narrative_dir: None,
-      archivist_model: None,
-      narrative_threading: None,
-      narrative_summaries: None,
-      narrative_summary_schedule: None,
-      profiles_dirs: None,
-      default_profile: None,
-      librarian_max_days: None,
-      cbr_cosine_weight: None,
-      cbr_symbolic_weight: None,
-      cbr_intent_weight: None,
-      cbr_keyword_weight: None,
-      cbr_entity_weight: None,
-      cbr_domain_weight: None,
-      cbr_recency_weight: None,
-      cbr_min_score: None,
-      cbr_recency_decay_days: None,
-      mailbox_warn_threshold: None,
-      housekeeping_tick_ms: None,
-      housekeeping_interval_ticks: None,
-      dedup_similarity: None,
-      pruning_confidence: None,
-      fact_confidence: None,
-      cbr_pruning_days: None,
-      log_retention_days: None,
-      max_artifact_chars: None,
-      recall_max_entries: None,
-      cbr_max_results: None,
-      sandbox_timeout_s: None,
-      tui_input_limit: None,
-      websocket_max_bytes: None,
     )
   let override =
     AppConfig(
-      provider: None,
-      agent_name: None,
-      agent_version: None,
-      max_tokens: None,
-      max_turns: None,
-      max_consecutive_errors: None,
-      max_context_messages: None,
-      task_model: None,
-      reasoning_model: None,
-      config_path: None,
-      log_verbose: None,
-      skills_dirs: None,
-      write_anywhere: None,
-      gui: None,
+      ..config.default(),
       dprime_enabled: Some(True),
       dprime_config: Some("/new.json"),
-      narrative_dir: None,
-      archivist_model: None,
-      narrative_threading: None,
-      narrative_summaries: None,
-      narrative_summary_schedule: None,
-      profiles_dirs: None,
-      default_profile: None,
-      librarian_max_days: None,
-      cbr_cosine_weight: None,
-      cbr_symbolic_weight: None,
-      cbr_intent_weight: None,
-      cbr_keyword_weight: None,
-      cbr_entity_weight: None,
-      cbr_domain_weight: None,
-      cbr_recency_weight: None,
-      cbr_min_score: None,
-      cbr_recency_decay_days: None,
-      mailbox_warn_threshold: None,
-      housekeeping_tick_ms: None,
-      housekeeping_interval_ticks: None,
-      dedup_similarity: None,
-      pruning_confidence: None,
-      fact_confidence: None,
-      cbr_pruning_days: None,
-      log_retention_days: None,
-      max_artifact_chars: None,
-      recall_max_entries: None,
-      cbr_max_results: None,
-      sandbox_timeout_s: None,
-      tui_input_limit: None,
-      websocket_max_bytes: None,
     )
   let merged = config.merge(base, override:)
   merged.dprime_enabled |> should.equal(Some(True))
@@ -1304,13 +519,11 @@ pub fn to_string_includes_dprime_test() {
 // ---------------------------------------------------------------------------
 
 pub fn parse_config_toml_unknown_key_still_ok_test() {
-  // Unknown keys should produce warnings but still return Ok
   let result = config.parse_config_toml("totally_bogus_key = \"hello\"")
   result |> should.be_ok
 }
 
 pub fn parse_config_toml_unknown_key_preserves_known_test() {
-  // Config with a mix of known and unknown keys should parse known ones
   let toml =
     "provider = \"anthropic\"
 bogus_key = \"ignored\"
@@ -1334,7 +547,6 @@ bogus_sub_key = \"hello\""
 }
 
 pub fn parse_config_toml_negative_max_tokens_still_ok_test() {
-  // Negative values should produce warnings but still return Ok
   let result = config.parse_config_toml("max_tokens = -5")
   result |> should.be_ok
   let assert Ok(cfg) = result
@@ -1363,7 +575,6 @@ pub fn parse_config_toml_unknown_gui_still_ok_test() {
 }
 
 pub fn parse_config_toml_valid_provider_no_warning_test() {
-  // Valid providers should not cause issues
   let result = config.parse_config_toml("provider = \"anthropic\"")
   result |> should.be_ok
   let assert Ok(cfg) = result
@@ -1390,4 +601,135 @@ max_context_messages = 100"
   cfg.max_turns |> should.equal(Some(10))
   cfg.max_consecutive_errors |> should.equal(Some(5))
   cfg.max_context_messages |> should.equal(Some(100))
+}
+
+// ---------------------------------------------------------------------------
+// New TOML sections: timeouts, retry, limits, scoring, embedding, agents, etc.
+// ---------------------------------------------------------------------------
+
+pub fn parse_config_toml_timeouts_test() {
+  let toml =
+    "[timeouts]
+llm_request_ms = 120000
+classify_ms = 5000
+inter_turn_delay_ms = 100"
+  let assert Ok(cfg) = config.parse_config_toml(toml)
+  cfg.llm_request_timeout_ms |> should.equal(Some(120_000))
+  cfg.classify_timeout_ms |> should.equal(Some(5000))
+  cfg.inter_turn_delay_ms |> should.equal(Some(100))
+}
+
+pub fn parse_config_toml_retry_test() {
+  let toml =
+    "[retry]
+max_retries = 5
+initial_delay_ms = 1000
+max_delay_ms = 30000"
+  let assert Ok(cfg) = config.parse_config_toml(toml)
+  cfg.retry_max_retries |> should.equal(Some(5))
+  cfg.retry_initial_delay_ms |> should.equal(Some(1000))
+  cfg.retry_max_delay_ms |> should.equal(Some(30_000))
+}
+
+pub fn parse_config_toml_limits_test() {
+  let toml =
+    "[limits]
+max_artifact_chars = 100000
+mailbox_warn_threshold = 100"
+  let assert Ok(cfg) = config.parse_config_toml(toml)
+  cfg.max_artifact_chars |> should.equal(Some(100_000))
+  cfg.mailbox_warn_threshold |> should.equal(Some(100))
+}
+
+pub fn parse_config_toml_embedding_test() {
+  let toml =
+    "[embedding]
+model = \"all-minilm\"
+base_url = \"http://myhost:11434\"
+dimensions = 384"
+  let assert Ok(cfg) = config.parse_config_toml(toml)
+  cfg.embedding_model |> should.equal(Some("all-minilm"))
+  cfg.embedding_base_url |> should.equal(Some("http://myhost:11434"))
+  cfg.embedding_dimensions |> should.equal(Some(384))
+}
+
+pub fn parse_config_toml_agents_test() {
+  let toml =
+    "[agents.planner]
+max_tokens = 1024
+max_turns = 2
+
+[agents.researcher]
+max_tokens = 4096
+max_context_messages = 20"
+  let assert Ok(cfg) = config.parse_config_toml(toml)
+  cfg.planner_max_tokens |> should.equal(Some(1024))
+  cfg.planner_max_turns |> should.equal(Some(2))
+  cfg.researcher_max_tokens |> should.equal(Some(4096))
+  cfg.researcher_max_context |> should.equal(Some(20))
+}
+
+pub fn parse_config_toml_web_port_test() {
+  let toml =
+    "[web]
+port = 9090"
+  let assert Ok(cfg) = config.parse_config_toml(toml)
+  cfg.web_port |> should.equal(Some(9090))
+}
+
+pub fn parse_config_toml_services_test() {
+  let toml =
+    "[services]
+exa_base_url = \"https://my-proxy.example.com\"
+tavily_base_url = \"https://tavily-proxy.example.com\""
+  let assert Ok(cfg) = config.parse_config_toml(toml)
+  cfg.exa_base_url |> should.equal(Some("https://my-proxy.example.com"))
+  cfg.tavily_base_url
+  |> should.equal(Some("https://tavily-proxy.example.com"))
+}
+
+pub fn parse_config_toml_scoring_threading_test() {
+  let toml =
+    "[scoring.threading]
+location_weight = 5
+threshold = 6"
+  let assert Ok(cfg) = config.parse_config_toml(toml)
+  cfg.threading_location_weight |> should.equal(Some(5))
+  cfg.threading_threshold |> should.equal(Some(6))
+}
+
+pub fn parse_config_toml_scoring_cbr_test() {
+  let toml =
+    "[scoring.cbr]
+cosine_weight = 0.5
+symbolic_weight = 0.5
+min_score = 0.2"
+  let assert Ok(cfg) = config.parse_config_toml(toml)
+  cfg.cbr_cosine_weight |> should.equal(Some(0.5))
+  cfg.cbr_symbolic_weight |> should.equal(Some(0.5))
+  cfg.cbr_min_score |> should.equal(Some(0.2))
+}
+
+pub fn parse_config_toml_housekeeping_test() {
+  let toml =
+    "[housekeeping]
+dedup_similarity = 0.95
+cbr_pruning_days = 90"
+  let assert Ok(cfg) = config.parse_config_toml(toml)
+  let assert Some(ds) = cfg.dedup_similarity
+  { ds >. 0.94 && ds <. 0.96 } |> should.be_true
+  cfg.cbr_pruning_days |> should.equal(Some(90))
+}
+
+pub fn merge_new_sections_test() {
+  let base =
+    AppConfig(
+      ..config.default(),
+      llm_request_timeout_ms: Some(300_000),
+      web_port: Some(8080),
+    )
+  let override = AppConfig(..config.default(), web_port: Some(9090))
+  let merged = config.merge(base, override:)
+  merged.llm_request_timeout_ms |> should.equal(Some(300_000))
+  merged.web_port |> should.equal(Some(9090))
 }

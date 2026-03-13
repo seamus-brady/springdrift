@@ -5,9 +5,11 @@ import embedding/types as embedding_types
 import gleam/erlang/process.{type Subject}
 import gleam/option.{type Option, None}
 import llm/provider.{type Provider}
+import llm/retry
 import llm/types as llm_types
 import narrative/curator.{type CuratorMessage}
 import narrative/librarian.{type LibrarianMessage}
+import narrative/threading
 import tools/memory
 
 /// Configuration record for starting the cognitive loop.
@@ -37,6 +39,9 @@ pub type CognitiveConfig {
     embedding_config: embedding_types.EmbeddingConfig,
     agent_uuid: String,
     session_since: String,
+    retry_config: retry.RetryConfig,
+    classify_timeout_ms: Int,
+    threading_config: threading.ThreadingConfig,
     memory_limits: memory.MemoryLimits,
   )
 }
@@ -70,6 +75,9 @@ pub fn default_test_config(
     embedding_config: embedding_types.default_config(),
     agent_uuid: "",
     session_since: "",
+    retry_config: retry.default_retry_config(),
+    classify_timeout_ms: 10_000,
+    threading_config: threading.default_config(),
     memory_limits: memory.default_limits(),
   )
 }

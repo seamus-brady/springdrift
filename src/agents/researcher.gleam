@@ -68,6 +68,7 @@ pub fn spec(
     tools:,
     restart: Permanent,
     tool_executor: researcher_executor(artifacts_dir, lib, max_artifact_chars),
+    inter_turn_delay_ms: 200,
   )
 }
 

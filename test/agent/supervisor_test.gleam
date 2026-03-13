@@ -32,6 +32,7 @@ fn make_spec(name: String, provider) -> AgentSpec {
     tools: [],
     restart: Temporary,
     tool_executor: noop_executor,
+    inter_turn_delay_ms: 200,
   )
 }
 
@@ -42,7 +43,7 @@ fn make_spec(name: String, provider) -> AgentSpec {
 pub fn start_child_test() {
   let cognitive_subj: process.Subject(CognitiveMessage) = process.new_subject()
   let provider = mock.provider_with_text("ok")
-  let assert Ok(sup) = supervisor.start(cognitive_subj, 3)
+  let assert Ok(sup) = supervisor.start(cognitive_subj, 3, 60_000)
 
   let reply_subj = process.new_subject()
   process.send(
@@ -68,7 +69,7 @@ pub fn start_child_test() {
 pub fn stop_child_test() {
   let cognitive_subj: process.Subject(CognitiveMessage) = process.new_subject()
   let provider = mock.provider_with_text("ok")
-  let assert Ok(sup) = supervisor.start(cognitive_subj, 3)
+  let assert Ok(sup) = supervisor.start(cognitive_subj, 3, 60_000)
 
   // Start a child first
   let reply_subj = process.new_subject()
@@ -102,7 +103,7 @@ pub fn stop_child_test() {
 pub fn shutdown_all_test() {
   let cognitive_subj: process.Subject(CognitiveMessage) = process.new_subject()
   let provider = mock.provider_with_text("ok")
-  let assert Ok(sup) = supervisor.start(cognitive_subj, 3)
+  let assert Ok(sup) = supervisor.start(cognitive_subj, 3, 60_000)
 
   // Start a child
   let reply_subj = process.new_subject()

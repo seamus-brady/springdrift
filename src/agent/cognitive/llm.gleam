@@ -77,7 +77,13 @@ pub fn proceed_with_model(
     None -> Nil
   }
 
-  worker.spawn_think(task_id, req, state.provider, state.self)
+  worker.spawn_think(
+    task_id,
+    req,
+    state.provider,
+    state.self,
+    state.retry_config,
+  )
 
   CognitiveState(
     ..state,
@@ -138,7 +144,13 @@ pub fn handle_think_error(
             True -> cycle_log.log_llm_request(cycle_id, req)
             False -> Nil
           }
-          worker.spawn_think(new_task_id, req, state.provider, state.self)
+          worker.spawn_think(
+            new_task_id,
+            req,
+            state.provider,
+            state.self,
+            state.retry_config,
+          )
           CognitiveState(
             ..state,
             status: Thinking(task_id: new_task_id),

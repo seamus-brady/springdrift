@@ -127,7 +127,8 @@ pub fn score_overlap_case_insensitive_test() {
 pub fn assign_creates_new_thread_when_empty_index_test() {
   let entry = make_entry("c1", "weather", ["Dublin"], ["rain"])
   let index = ThreadIndex(threads: [])
-  let #(updated_entry, updated_index) = threading.do_assign(entry, index)
+  let #(updated_entry, updated_index) =
+    threading.do_assign(entry, index, threading.default_config())
 
   // Entry should have a thread assigned
   should.be_true(option.is_some(updated_entry.thread))
@@ -148,7 +149,8 @@ pub fn assign_creates_new_thread_when_no_match_test() {
   let ts =
     make_thread_state("t1", "Dublin Weather", ["weather"], ["Dublin"], ["rain"])
   let index = ThreadIndex(threads: [ts])
-  let #(updated_entry, updated_index) = threading.do_assign(entry, index)
+  let #(updated_entry, updated_index) =
+    threading.do_assign(entry, index, threading.default_config())
 
   // Should create new thread (score=0 < threshold=4)
   let assert Some(thread) = updated_entry.thread
@@ -166,7 +168,8 @@ pub fn assign_joins_existing_thread_when_above_threshold_test() {
   let ts =
     make_thread_state("t1", "Dublin Weather", ["weather"], ["Dublin"], ["rain"])
   let index = ThreadIndex(threads: [ts])
-  let #(updated_entry, updated_index) = threading.do_assign(entry, index)
+  let #(updated_entry, updated_index) =
+    threading.do_assign(entry, index, threading.default_config())
 
   // Score = location(3) + domain(2) + keyword(1) = 6 >= 4
   let assert Some(thread) = updated_entry.thread
@@ -191,7 +194,8 @@ pub fn assign_picks_best_matching_thread_test() {
       "market",
     ])
   let index = ThreadIndex(threads: [ts1, ts2])
-  let #(updated_entry, _) = threading.do_assign(entry, index)
+  let #(updated_entry, _) =
+    threading.do_assign(entry, index, threading.default_config())
 
   let assert Some(thread) = updated_entry.thread
   thread.thread_id |> should.equal("t2")
@@ -204,7 +208,8 @@ pub fn assign_picks_best_matching_thread_test() {
 pub fn new_thread_name_from_domain_and_location_test() {
   let entry = make_entry("c1", "weather", ["Dublin"], [])
   let index = ThreadIndex(threads: [])
-  let #(updated_entry, _) = threading.do_assign(entry, index)
+  let #(updated_entry, _) =
+    threading.do_assign(entry, index, threading.default_config())
   let assert Some(thread) = updated_entry.thread
   thread.thread_name |> should.equal("weather — Dublin")
 }
@@ -212,7 +217,8 @@ pub fn new_thread_name_from_domain_and_location_test() {
 pub fn new_thread_name_domain_only_test() {
   let entry = make_entry("c1", "finance", [], [])
   let index = ThreadIndex(threads: [])
-  let #(updated_entry, _) = threading.do_assign(entry, index)
+  let #(updated_entry, _) =
+    threading.do_assign(entry, index, threading.default_config())
   let assert Some(thread) = updated_entry.thread
   thread.thread_name |> should.equal("finance")
 }
@@ -220,7 +226,8 @@ pub fn new_thread_name_domain_only_test() {
 pub fn new_thread_name_location_only_test() {
   let entry = make_entry("c1", "", ["Cork"], [])
   let index = ThreadIndex(threads: [])
-  let #(updated_entry, _) = threading.do_assign(entry, index)
+  let #(updated_entry, _) =
+    threading.do_assign(entry, index, threading.default_config())
   let assert Some(thread) = updated_entry.thread
   thread.thread_name |> should.equal("Cork")
 }
@@ -257,7 +264,8 @@ pub fn continuity_note_with_data_change_test() {
       ),
     )
   let index = ThreadIndex(threads: [ts])
-  let #(updated_entry, _) = threading.do_assign(entry, index)
+  let #(updated_entry, _) =
+    threading.do_assign(entry, index, threading.default_config())
   let assert Some(thread) = updated_entry.thread
   // Should mention location continuity and data change
   should.be_true(string.contains(thread.continuity_note, "Dublin"))
@@ -273,7 +281,8 @@ pub fn thread_state_merges_new_keywords_test() {
   let ts =
     make_thread_state("t1", "Dublin Weather", ["weather"], ["Dublin"], ["rain"])
   let index = ThreadIndex(threads: [ts])
-  let #(_, updated_index) = threading.do_assign(entry, index)
+  let #(_, updated_index) =
+    threading.do_assign(entry, index, threading.default_config())
   let assert [updated_ts] = updated_index.threads
   // "rain" already exists, "forecast" is new
   should.be_true(list.contains(updated_ts.keywords, "rain"))

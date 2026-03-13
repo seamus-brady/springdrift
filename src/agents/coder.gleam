@@ -85,6 +85,7 @@ pub fn spec(
     tools:,
     restart: Permanent,
     tool_executor: coder_executor(sandbox_timeout),
+    inter_turn_delay_ms: 200,
   )
 }
 

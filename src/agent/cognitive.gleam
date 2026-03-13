@@ -86,6 +86,9 @@ pub fn start(
         embedding_config: cfg.embedding_config,
         agent_uuid: cfg.agent_uuid,
         session_since: cfg.session_since,
+        retry_config: cfg.retry_config,
+        classify_timeout_ms: cfg.classify_timeout_ms,
+        threading_config: cfg.threading_config,
         memory_limits: cfg.memory_limits,
       )
     process.send(setup, self)
@@ -260,9 +263,17 @@ fn handle_user_input(
       let self = state.self
       let provider = state.provider
       let task_model = state.task_model
+      let classify_timeout_ms = state.classify_timeout_ms
       process.spawn_unlinked(fn() {
         let complexity = case
-          rescue(fn() { query_complexity.classify(text, provider, task_model) })
+          rescue(fn() {
+            query_complexity.classify(
+              text,
+              provider,
+              task_model,
+              classify_timeout_ms,
+            )
+          })
         {
           Ok(c) -> c
           Error(_) -> query_complexity.Simple
@@ -409,7 +420,13 @@ fn handle_think_complete(
                   req_model,
                   retry_messages,
                 )
-              worker.spawn_think(new_task_id, req, state.provider, state.self)
+              worker.spawn_think(
+                new_task_id,
+                req,
+                state.provider,
+                state.self,
+                state.retry_config,
+              )
               CognitiveState(
                 ..state,
                 status: Thinking(task_id: new_task_id),

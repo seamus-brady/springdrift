@@ -8,27 +8,8 @@
 //// All fields are optional. Unset fields fall back to built-in defaults
 //// applied in springdrift.gleam at startup.
 ////
-//// Config file format (all fields optional):
-////
-////   # LLM provider and models (provider is required for a real LLM)
-////   provider        = "anthropic"        # "anthropic" | "openrouter" | "openai" | "mistral" | "local" | "mock"
-////   task_model      = "claude-haiku-4-5-20251001"   # Model for Simple queries
-////   reasoning_model = "claude-opus-4-6"             # Model for Complex queries
-////   system_prompt   = "You are a helpful assistant."
-////   max_tokens      = 2048               # Max output tokens per LLM call
-////
-////   # Loop control
-////   max_turns              = 5            # React-loop iterations per message
-////   max_consecutive_errors = 3            # Tool failures before abort
-////   max_context_messages   = 50           # Sliding-window cap (omit for unlimited)
-////
-////   # Logging and filesystem
-////   log_verbose    = false                # Log full LLM payloads to cycle log
-////   write_anywhere = false                # Allow write_file outside CWD
-////   skills_dirs    = ["/path/to/skills"]  # Extra skill directories
-////
-////   # GUI
-////   gui = "tui"                           # "tui" (default) or "web"
+//// See .springdrift_example/config.toml for the full reference with all
+//// sections and defaults documented.
 ////
 //// CLI flags always override config file values.
 //// --skills-dir is repeatable and appends to (rather than replaces) the list.
@@ -49,41 +30,75 @@ import tom
 
 pub type AppConfig {
   AppConfig(
-    // LLM provider and models
+    // ── LLM provider and models ──
     provider: Option(String),
     task_model: Option(String),
     reasoning_model: Option(String),
     max_tokens: Option(Int),
-    // Loop control
+    // ── Loop control ──
     max_turns: Option(Int),
     max_consecutive_errors: Option(Int),
     max_context_messages: Option(Int),
-    // Logging and filesystem
+    // ── Logging and filesystem ──
     log_verbose: Option(Bool),
     write_anywhere: Option(Bool),
     skills_dirs: Option(List(String)),
-    // Session
+    log_retention_days: Option(Int),
+    log_max_file_bytes: Option(Int),
+    // ── Session ──
     config_path: Option(String),
-    // GUI
+    // ── GUI ──
     gui: Option(String),
-    // D' safety system
+    // ── D' safety system ──
     dprime_enabled: Option(Bool),
     dprime_config: Option(String),
-    // Narrative (always enabled — no opt-out)
+    // ── Narrative (always enabled) ──
     narrative_dir: Option(String),
     archivist_model: Option(String),
     narrative_threading: Option(Bool),
     narrative_summaries: Option(Bool),
     narrative_summary_schedule: Option(String),
-    // Profiles
+    // ── Profiles ──
     profiles_dirs: Option(List(String)),
     default_profile: Option(String),
-    // Agent identity
+    // ── Agent identity ──
     agent_name: Option(String),
     agent_version: Option(String),
-    // Librarian startup
+    // ── Librarian startup ──
     librarian_max_days: Option(Int),
-    // CBR scoring
+    // ── Timeouts (ms unless noted) ──
+    llm_request_timeout_ms: Option(Int),
+    classify_timeout_ms: Option(Int),
+    inter_turn_delay_ms: Option(Int),
+    startup_timeout_ms: Option(Int),
+    librarian_startup_timeout_ms: Option(Int),
+    scheduler_job_timeout_ms: Option(Int),
+    restart_window_ms: Option(Int),
+    sandbox_timeout_s: Option(Int),
+    housekeeping_tick_ms: Option(Int),
+    housekeeping_interval_ticks: Option(Int),
+    // ── Retry ──
+    retry_max_retries: Option(Int),
+    retry_initial_delay_ms: Option(Int),
+    retry_rate_limit_delay_ms: Option(Int),
+    retry_overload_delay_ms: Option(Int),
+    retry_max_delay_ms: Option(Int),
+    // ── Size limits ──
+    max_artifact_chars: Option(Int),
+    max_fetch_chars: Option(Int),
+    tui_input_limit: Option(Int),
+    websocket_max_bytes: Option(Int),
+    mailbox_warn_threshold: Option(Int),
+    recall_max_entries: Option(Int),
+    cbr_max_results: Option(Int),
+    web_search_max_results: Option(Int),
+    exa_search_max_results: Option(Int),
+    // ── Thread scoring ──
+    threading_location_weight: Option(Int),
+    threading_domain_weight: Option(Int),
+    threading_keyword_weight: Option(Int),
+    threading_threshold: Option(Int),
+    // ── CBR scoring ──
     cbr_cosine_weight: Option(Float),
     cbr_symbolic_weight: Option(Float),
     cbr_intent_weight: Option(Float),
@@ -93,22 +108,37 @@ pub type AppConfig {
     cbr_recency_weight: Option(Float),
     cbr_min_score: Option(Float),
     cbr_recency_decay_days: Option(Int),
-    mailbox_warn_threshold: Option(Int),
-    // Housekeeping
-    housekeeping_tick_ms: Option(Int),
-    housekeeping_interval_ticks: Option(Int),
+    // ── Housekeeping ──
     dedup_similarity: Option(Float),
     pruning_confidence: Option(Float),
     fact_confidence: Option(Float),
     cbr_pruning_days: Option(Int),
-    // Tuning knobs (simple scalars with sensible defaults)
-    log_retention_days: Option(Int),
-    max_artifact_chars: Option(Int),
-    recall_max_entries: Option(Int),
-    cbr_max_results: Option(Int),
-    sandbox_timeout_s: Option(Int),
-    tui_input_limit: Option(Int),
-    websocket_max_bytes: Option(Int),
+    // ── Embedding ──
+    embedding_model: Option(String),
+    embedding_base_url: Option(String),
+    embedding_dimensions: Option(Int),
+    // ── Agent specs ──
+    planner_max_tokens: Option(Int),
+    planner_max_turns: Option(Int),
+    planner_max_errors: Option(Int),
+    researcher_max_tokens: Option(Int),
+    researcher_max_turns: Option(Int),
+    researcher_max_errors: Option(Int),
+    researcher_max_context: Option(Int),
+    coder_max_tokens: Option(Int),
+    coder_max_turns: Option(Int),
+    coder_max_errors: Option(Int),
+    writer_max_tokens: Option(Int),
+    writer_max_turns: Option(Int),
+    writer_max_errors: Option(Int),
+    // ── Web GUI ──
+    web_port: Option(Int),
+    // ── External services ──
+    duckduckgo_url: Option(String),
+    exa_base_url: Option(String),
+    tavily_base_url: Option(String),
+    firecrawl_base_url: Option(String),
+    e2b_base_url: Option(String),
   )
 }
 
@@ -136,6 +166,8 @@ pub fn default() -> AppConfig {
     log_verbose: None,
     write_anywhere: None,
     skills_dirs: None,
+    log_retention_days: None,
+    log_max_file_bytes: None,
     config_path: None,
     gui: None,
     dprime_enabled: None,
@@ -150,6 +182,34 @@ pub fn default() -> AppConfig {
     agent_name: None,
     agent_version: None,
     librarian_max_days: None,
+    llm_request_timeout_ms: None,
+    classify_timeout_ms: None,
+    inter_turn_delay_ms: None,
+    startup_timeout_ms: None,
+    librarian_startup_timeout_ms: None,
+    scheduler_job_timeout_ms: None,
+    restart_window_ms: None,
+    sandbox_timeout_s: None,
+    housekeeping_tick_ms: None,
+    housekeeping_interval_ticks: None,
+    retry_max_retries: None,
+    retry_initial_delay_ms: None,
+    retry_rate_limit_delay_ms: None,
+    retry_overload_delay_ms: None,
+    retry_max_delay_ms: None,
+    max_artifact_chars: None,
+    max_fetch_chars: None,
+    tui_input_limit: None,
+    websocket_max_bytes: None,
+    mailbox_warn_threshold: None,
+    recall_max_entries: None,
+    cbr_max_results: None,
+    web_search_max_results: None,
+    exa_search_max_results: None,
+    threading_location_weight: None,
+    threading_domain_weight: None,
+    threading_keyword_weight: None,
+    threading_threshold: None,
     cbr_cosine_weight: None,
     cbr_symbolic_weight: None,
     cbr_intent_weight: None,
@@ -159,20 +219,32 @@ pub fn default() -> AppConfig {
     cbr_recency_weight: None,
     cbr_min_score: None,
     cbr_recency_decay_days: None,
-    mailbox_warn_threshold: None,
-    housekeeping_tick_ms: None,
-    housekeeping_interval_ticks: None,
     dedup_similarity: None,
     pruning_confidence: None,
     fact_confidence: None,
     cbr_pruning_days: None,
-    log_retention_days: None,
-    max_artifact_chars: None,
-    recall_max_entries: None,
-    cbr_max_results: None,
-    sandbox_timeout_s: None,
-    tui_input_limit: None,
-    websocket_max_bytes: None,
+    embedding_model: None,
+    embedding_base_url: None,
+    embedding_dimensions: None,
+    planner_max_tokens: None,
+    planner_max_turns: None,
+    planner_max_errors: None,
+    researcher_max_tokens: None,
+    researcher_max_turns: None,
+    researcher_max_errors: None,
+    researcher_max_context: None,
+    coder_max_tokens: None,
+    coder_max_turns: None,
+    coder_max_errors: None,
+    writer_max_tokens: None,
+    writer_max_turns: None,
+    writer_max_errors: None,
+    web_port: None,
+    duckduckgo_url: None,
+    exa_base_url: None,
+    tavily_base_url: None,
+    firecrawl_base_url: None,
+    e2b_base_url: None,
   )
 }
 
@@ -198,6 +270,14 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     log_verbose: option.or(override_cfg.log_verbose, base.log_verbose),
     write_anywhere: option.or(override_cfg.write_anywhere, base.write_anywhere),
     skills_dirs: option.or(override_cfg.skills_dirs, base.skills_dirs),
+    log_retention_days: option.or(
+      override_cfg.log_retention_days,
+      base.log_retention_days,
+    ),
+    log_max_file_bytes: option.or(
+      override_cfg.log_max_file_bytes,
+      base.log_max_file_bytes,
+    ),
     config_path: option.or(override_cfg.config_path, base.config_path),
     gui: option.or(override_cfg.gui, base.gui),
     dprime_enabled: option.or(override_cfg.dprime_enabled, base.dprime_enabled),
@@ -230,6 +310,123 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       override_cfg.librarian_max_days,
       base.librarian_max_days,
     ),
+    // Timeouts
+    llm_request_timeout_ms: option.or(
+      override_cfg.llm_request_timeout_ms,
+      base.llm_request_timeout_ms,
+    ),
+    classify_timeout_ms: option.or(
+      override_cfg.classify_timeout_ms,
+      base.classify_timeout_ms,
+    ),
+    inter_turn_delay_ms: option.or(
+      override_cfg.inter_turn_delay_ms,
+      base.inter_turn_delay_ms,
+    ),
+    startup_timeout_ms: option.or(
+      override_cfg.startup_timeout_ms,
+      base.startup_timeout_ms,
+    ),
+    librarian_startup_timeout_ms: option.or(
+      override_cfg.librarian_startup_timeout_ms,
+      base.librarian_startup_timeout_ms,
+    ),
+    scheduler_job_timeout_ms: option.or(
+      override_cfg.scheduler_job_timeout_ms,
+      base.scheduler_job_timeout_ms,
+    ),
+    restart_window_ms: option.or(
+      override_cfg.restart_window_ms,
+      base.restart_window_ms,
+    ),
+    sandbox_timeout_s: option.or(
+      override_cfg.sandbox_timeout_s,
+      base.sandbox_timeout_s,
+    ),
+    housekeeping_tick_ms: option.or(
+      override_cfg.housekeeping_tick_ms,
+      base.housekeeping_tick_ms,
+    ),
+    housekeeping_interval_ticks: option.or(
+      override_cfg.housekeeping_interval_ticks,
+      base.housekeeping_interval_ticks,
+    ),
+    // Retry
+    retry_max_retries: option.or(
+      override_cfg.retry_max_retries,
+      base.retry_max_retries,
+    ),
+    retry_initial_delay_ms: option.or(
+      override_cfg.retry_initial_delay_ms,
+      base.retry_initial_delay_ms,
+    ),
+    retry_rate_limit_delay_ms: option.or(
+      override_cfg.retry_rate_limit_delay_ms,
+      base.retry_rate_limit_delay_ms,
+    ),
+    retry_overload_delay_ms: option.or(
+      override_cfg.retry_overload_delay_ms,
+      base.retry_overload_delay_ms,
+    ),
+    retry_max_delay_ms: option.or(
+      override_cfg.retry_max_delay_ms,
+      base.retry_max_delay_ms,
+    ),
+    // Size limits
+    max_artifact_chars: option.or(
+      override_cfg.max_artifact_chars,
+      base.max_artifact_chars,
+    ),
+    max_fetch_chars: option.or(
+      override_cfg.max_fetch_chars,
+      base.max_fetch_chars,
+    ),
+    tui_input_limit: option.or(
+      override_cfg.tui_input_limit,
+      base.tui_input_limit,
+    ),
+    websocket_max_bytes: option.or(
+      override_cfg.websocket_max_bytes,
+      base.websocket_max_bytes,
+    ),
+    mailbox_warn_threshold: option.or(
+      override_cfg.mailbox_warn_threshold,
+      base.mailbox_warn_threshold,
+    ),
+    recall_max_entries: option.or(
+      override_cfg.recall_max_entries,
+      base.recall_max_entries,
+    ),
+    cbr_max_results: option.or(
+      override_cfg.cbr_max_results,
+      base.cbr_max_results,
+    ),
+    web_search_max_results: option.or(
+      override_cfg.web_search_max_results,
+      base.web_search_max_results,
+    ),
+    exa_search_max_results: option.or(
+      override_cfg.exa_search_max_results,
+      base.exa_search_max_results,
+    ),
+    // Thread scoring
+    threading_location_weight: option.or(
+      override_cfg.threading_location_weight,
+      base.threading_location_weight,
+    ),
+    threading_domain_weight: option.or(
+      override_cfg.threading_domain_weight,
+      base.threading_domain_weight,
+    ),
+    threading_keyword_weight: option.or(
+      override_cfg.threading_keyword_weight,
+      base.threading_keyword_weight,
+    ),
+    threading_threshold: option.or(
+      override_cfg.threading_threshold,
+      base.threading_threshold,
+    ),
+    // CBR scoring
     cbr_cosine_weight: option.or(
       override_cfg.cbr_cosine_weight,
       base.cbr_cosine_weight,
@@ -263,18 +460,7 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       override_cfg.cbr_recency_decay_days,
       base.cbr_recency_decay_days,
     ),
-    mailbox_warn_threshold: option.or(
-      override_cfg.mailbox_warn_threshold,
-      base.mailbox_warn_threshold,
-    ),
-    housekeeping_tick_ms: option.or(
-      override_cfg.housekeeping_tick_ms,
-      base.housekeeping_tick_ms,
-    ),
-    housekeeping_interval_ticks: option.or(
-      override_cfg.housekeeping_interval_ticks,
-      base.housekeeping_interval_ticks,
-    ),
+    // Housekeeping
     dedup_similarity: option.or(
       override_cfg.dedup_similarity,
       base.dedup_similarity,
@@ -291,34 +477,86 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       override_cfg.cbr_pruning_days,
       base.cbr_pruning_days,
     ),
-    log_retention_days: option.or(
-      override_cfg.log_retention_days,
-      base.log_retention_days,
+    // Embedding
+    embedding_model: option.or(
+      override_cfg.embedding_model,
+      base.embedding_model,
     ),
-    max_artifact_chars: option.or(
-      override_cfg.max_artifact_chars,
-      base.max_artifact_chars,
+    embedding_base_url: option.or(
+      override_cfg.embedding_base_url,
+      base.embedding_base_url,
     ),
-    recall_max_entries: option.or(
-      override_cfg.recall_max_entries,
-      base.recall_max_entries,
+    embedding_dimensions: option.or(
+      override_cfg.embedding_dimensions,
+      base.embedding_dimensions,
     ),
-    cbr_max_results: option.or(
-      override_cfg.cbr_max_results,
-      base.cbr_max_results,
+    // Agent specs
+    planner_max_tokens: option.or(
+      override_cfg.planner_max_tokens,
+      base.planner_max_tokens,
     ),
-    sandbox_timeout_s: option.or(
-      override_cfg.sandbox_timeout_s,
-      base.sandbox_timeout_s,
+    planner_max_turns: option.or(
+      override_cfg.planner_max_turns,
+      base.planner_max_turns,
     ),
-    tui_input_limit: option.or(
-      override_cfg.tui_input_limit,
-      base.tui_input_limit,
+    planner_max_errors: option.or(
+      override_cfg.planner_max_errors,
+      base.planner_max_errors,
     ),
-    websocket_max_bytes: option.or(
-      override_cfg.websocket_max_bytes,
-      base.websocket_max_bytes,
+    researcher_max_tokens: option.or(
+      override_cfg.researcher_max_tokens,
+      base.researcher_max_tokens,
     ),
+    researcher_max_turns: option.or(
+      override_cfg.researcher_max_turns,
+      base.researcher_max_turns,
+    ),
+    researcher_max_errors: option.or(
+      override_cfg.researcher_max_errors,
+      base.researcher_max_errors,
+    ),
+    researcher_max_context: option.or(
+      override_cfg.researcher_max_context,
+      base.researcher_max_context,
+    ),
+    coder_max_tokens: option.or(
+      override_cfg.coder_max_tokens,
+      base.coder_max_tokens,
+    ),
+    coder_max_turns: option.or(
+      override_cfg.coder_max_turns,
+      base.coder_max_turns,
+    ),
+    coder_max_errors: option.or(
+      override_cfg.coder_max_errors,
+      base.coder_max_errors,
+    ),
+    writer_max_tokens: option.or(
+      override_cfg.writer_max_tokens,
+      base.writer_max_tokens,
+    ),
+    writer_max_turns: option.or(
+      override_cfg.writer_max_turns,
+      base.writer_max_turns,
+    ),
+    writer_max_errors: option.or(
+      override_cfg.writer_max_errors,
+      base.writer_max_errors,
+    ),
+    // Web GUI
+    web_port: option.or(override_cfg.web_port, base.web_port),
+    // External services
+    duckduckgo_url: option.or(override_cfg.duckduckgo_url, base.duckduckgo_url),
+    exa_base_url: option.or(override_cfg.exa_base_url, base.exa_base_url),
+    tavily_base_url: option.or(
+      override_cfg.tavily_base_url,
+      base.tavily_base_url,
+    ),
+    firecrawl_base_url: option.or(
+      override_cfg.firecrawl_base_url,
+      base.firecrawl_base_url,
+    ),
+    e2b_base_url: option.or(override_cfg.e2b_base_url, base.e2b_base_url),
   )
 }
 
@@ -365,6 +603,12 @@ pub fn resolve() -> AppConfig {
 /// Produce a human-readable one-field-per-line summary of the config.
 /// Only fields that are set (non-None) are included.
 pub fn to_string(cfg: AppConfig) -> String {
+  let bool_str = fn(v) {
+    case v {
+      True -> "true"
+      False -> "false"
+    }
+  }
   [
     // LLM provider and models
     option.map(cfg.provider, fn(v) { "provider: " <> v }),
@@ -380,37 +624,25 @@ pub fn to_string(cfg: AppConfig) -> String {
       "max_context_messages: " <> int.to_string(v)
     }),
     // Logging and filesystem
-    option.map(cfg.log_verbose, fn(v) {
-      "log_verbose: "
-      <> case v {
-        True -> "true"
-        False -> "false"
-      }
-    }),
-    option.map(cfg.write_anywhere, fn(v) {
-      "write_anywhere: "
-      <> case v {
-        True -> "true"
-        False -> "false"
-      }
-    }),
+    option.map(cfg.log_verbose, fn(v) { "log_verbose: " <> bool_str(v) }),
+    option.map(cfg.write_anywhere, fn(v) { "write_anywhere: " <> bool_str(v) }),
     option.map(cfg.skills_dirs, fn(dirs) {
       "skills_dirs: " <> string.join(dirs, ", ")
+    }),
+    option.map(cfg.log_retention_days, fn(v) {
+      "log_retention_days: " <> int.to_string(v)
+    }),
+    option.map(cfg.log_max_file_bytes, fn(v) {
+      "log_max_file_bytes: " <> int.to_string(v)
     }),
     // Session
     option.map(cfg.config_path, fn(v) { "config_path: " <> v }),
     // GUI
     option.map(cfg.gui, fn(v) { "gui: " <> v }),
     // D' safety system
-    option.map(cfg.dprime_enabled, fn(v) {
-      "dprime_enabled: "
-      <> case v {
-        True -> "true"
-        False -> "false"
-      }
-    }),
+    option.map(cfg.dprime_enabled, fn(v) { "dprime_enabled: " <> bool_str(v) }),
     option.map(cfg.dprime_config, fn(v) { "dprime_config: " <> v }),
-    // Narrative (always enabled)
+    // Narrative
     option.map(cfg.narrative_dir, fn(v) { "narrative_dir: " <> v }),
     option.map(cfg.archivist_model, fn(v) { "archivist_model: " <> v }),
     // Profile
@@ -425,28 +657,44 @@ pub fn to_string(cfg: AppConfig) -> String {
     option.map(cfg.librarian_max_days, fn(v) {
       "librarian_max_days: " <> int.to_string(v)
     }),
-    // Tuning knobs
-    option.map(cfg.log_retention_days, fn(v) {
-      "log_retention_days: " <> int.to_string(v)
+    // Timeouts
+    option.map(cfg.llm_request_timeout_ms, fn(v) {
+      "llm_request_timeout_ms: " <> int.to_string(v)
     }),
+    option.map(cfg.classify_timeout_ms, fn(v) {
+      "classify_timeout_ms: " <> int.to_string(v)
+    }),
+    option.map(cfg.inter_turn_delay_ms, fn(v) {
+      "inter_turn_delay_ms: " <> int.to_string(v)
+    }),
+    option.map(cfg.restart_window_ms, fn(v) {
+      "restart_window_ms: " <> int.to_string(v)
+    }),
+    // Retry
+    option.map(cfg.retry_max_retries, fn(v) {
+      "retry.max_retries: " <> int.to_string(v)
+    }),
+    option.map(cfg.retry_initial_delay_ms, fn(v) {
+      "retry.initial_delay_ms: " <> int.to_string(v)
+    }),
+    // Limits
     option.map(cfg.max_artifact_chars, fn(v) {
       "max_artifact_chars: " <> int.to_string(v)
     }),
-    option.map(cfg.recall_max_entries, fn(v) {
-      "recall_max_entries: " <> int.to_string(v)
+    option.map(cfg.max_fetch_chars, fn(v) {
+      "max_fetch_chars: " <> int.to_string(v)
     }),
-    option.map(cfg.cbr_max_results, fn(v) {
-      "cbr_max_results: " <> int.to_string(v)
+    option.map(cfg.mailbox_warn_threshold, fn(v) {
+      "mailbox_warn_threshold: " <> int.to_string(v)
     }),
-    option.map(cfg.sandbox_timeout_s, fn(v) {
-      "sandbox_timeout_s: " <> int.to_string(v)
+    // Embedding
+    option.map(cfg.embedding_model, fn(v) { "embedding.model: " <> v }),
+    option.map(cfg.embedding_base_url, fn(v) { "embedding.base_url: " <> v }),
+    option.map(cfg.embedding_dimensions, fn(v) {
+      "embedding.dimensions: " <> int.to_string(v)
     }),
-    option.map(cfg.tui_input_limit, fn(v) {
-      "tui_input_limit: " <> int.to_string(v)
-    }),
-    option.map(cfg.websocket_max_bytes, fn(v) {
-      "websocket_max_bytes: " <> int.to_string(v)
-    }),
+    // Web
+    option.map(cfg.web_port, fn(v) { "web.port: " <> int.to_string(v) }),
   ]
   |> list.filter_map(fn(x) { option.to_result(x, Nil) })
   |> string.join("\n")
@@ -546,26 +794,55 @@ fn do_parse_args(args: List(String), acc: AppConfig) -> AppConfig {
   }
 }
 
-fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
-  let get_str = fn(key) {
-    case tom.get_string(table, [key]) {
-      Ok(v) -> Some(v)
-      Error(_) -> None
-    }
+// ---------------------------------------------------------------------------
+// TOML helpers
+// ---------------------------------------------------------------------------
+
+fn get_toml_str(
+  table: dict.Dict(String, tom.Toml),
+  path: List(String),
+) -> Option(String) {
+  case tom.get_string(table, path) {
+    Ok(v) -> Some(v)
+    Error(_) -> None
   }
-  let get_int = fn(key) {
-    case tom.get_int(table, [key]) {
-      Ok(v) -> Some(v)
-      Error(_) -> None
-    }
+}
+
+fn get_toml_int(
+  table: dict.Dict(String, tom.Toml),
+  path: List(String),
+) -> Option(Int) {
+  case tom.get_int(table, path) {
+    Ok(v) -> Some(v)
+    Error(_) -> None
   }
-  let get_bool = fn(key) {
-    case tom.get_bool(table, [key]) {
-      Ok(v) -> Some(v)
-      Error(_) -> None
-    }
+}
+
+fn get_toml_bool(
+  table: dict.Dict(String, tom.Toml),
+  path: List(String),
+) -> Option(Bool) {
+  case tom.get_bool(table, path) {
+    Ok(v) -> Some(v)
+    Error(_) -> None
   }
-  let skills_dirs = case tom.get_array(table, ["skills_dirs"]) {
+}
+
+fn get_toml_float(
+  table: dict.Dict(String, tom.Toml),
+  path: List(String),
+) -> Option(Float) {
+  case tom.get_float(table, path) {
+    Ok(v) -> Some(v)
+    Error(_) -> None
+  }
+}
+
+fn get_toml_string_array(
+  table: dict.Dict(String, tom.Toml),
+  path: List(String),
+) -> Option(List(String)) {
+  case tom.get_array(table, path) {
     Error(_) -> None
     Ok(items) ->
       Some(
@@ -577,7 +854,15 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
         }),
       )
   }
+}
+
+fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
+  let get_str = fn(key) { get_toml_str(table, [key]) }
+  let get_int = fn(key) { get_toml_int(table, [key]) }
+  let get_bool = fn(key) { get_toml_bool(table, [key]) }
+
   AppConfig(
+    // ── Top-level ──
     provider: get_str("provider"),
     task_model: get_str("task_model"),
     reasoning_model: get_str("reasoning_model"),
@@ -587,145 +872,142 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     max_context_messages: get_int("max_context_messages"),
     log_verbose: get_bool("log_verbose"),
     write_anywhere: get_bool("write_anywhere"),
-    skills_dirs:,
+    skills_dirs: get_toml_string_array(table, ["skills_dirs"]),
+    log_retention_days: get_int("log_retention_days"),
+    log_max_file_bytes: get_int("log_max_file_bytes"),
     config_path: None,
     gui: get_str("gui"),
     dprime_enabled: get_bool("dprime_enabled"),
     dprime_config: get_str("dprime_config"),
-    narrative_dir: case tom.get_string(table, ["narrative", "directory"]) {
-      Ok(v) -> Some(v)
-      Error(_) -> None
-    },
-    archivist_model: case
-      tom.get_string(table, ["narrative", "archivist_model"])
-    {
-      Ok(v) -> Some(v)
-      Error(_) -> None
-    },
-    narrative_threading: case tom.get_bool(table, ["narrative", "threading"]) {
-      Ok(v) -> Some(v)
-      Error(_) -> None
-    },
-    narrative_summaries: case tom.get_bool(table, ["narrative", "summaries"]) {
-      Ok(v) -> Some(v)
-      Error(_) -> None
-    },
-    narrative_summary_schedule: case
-      tom.get_string(table, ["narrative", "summary_schedule"])
-    {
-      Ok(v) -> Some(v)
-      Error(_) -> None
-    },
     default_profile: get_str("profile"),
-    agent_name: case tom.get_string(table, ["agent", "name"]) {
-      Ok(v) -> Some(v)
-      Error(_) -> None
-    },
-    agent_version: case tom.get_string(table, ["agent", "version"]) {
-      Ok(v) -> Some(v)
-      Error(_) -> None
-    },
-    librarian_max_days: case tom.get_int(table, ["narrative", "max_days"]) {
-      Ok(v) -> Some(v)
-      Error(_) -> None
-    },
-    log_retention_days: get_int("log_retention_days"),
-    max_artifact_chars: get_int("max_artifact_chars"),
-    recall_max_entries: get_int("recall_max_entries"),
-    cbr_max_results: get_int("cbr_max_results"),
-    sandbox_timeout_s: get_int("sandbox_timeout_s"),
-    tui_input_limit: get_int("tui_input_limit"),
-    websocket_max_bytes: get_int("websocket_max_bytes"),
-    profiles_dirs: case tom.get_array(table, ["profiles_dirs"]) {
-      Error(_) -> None
-      Ok(items) ->
-        Some(
-          list.filter_map(items, fn(item) {
-            case item {
-              tom.String(s) -> Ok(s)
-              _ -> Error(Nil)
-            }
-          }),
-        )
-    },
-    cbr_cosine_weight: case tom.get_float(table, ["cbr", "cosine_weight"]) {
-      Ok(v) -> Some(v)
-      Error(_) -> None
-    },
-    cbr_symbolic_weight: case tom.get_float(table, ["cbr", "symbolic_weight"]) {
-      Ok(v) -> Some(v)
-      Error(_) -> None
-    },
-    cbr_intent_weight: case tom.get_float(table, ["cbr", "intent_weight"]) {
-      Ok(v) -> Some(v)
-      Error(_) -> None
-    },
-    cbr_keyword_weight: case tom.get_float(table, ["cbr", "keyword_weight"]) {
-      Ok(v) -> Some(v)
-      Error(_) -> None
-    },
-    cbr_entity_weight: case tom.get_float(table, ["cbr", "entity_weight"]) {
-      Ok(v) -> Some(v)
-      Error(_) -> None
-    },
-    cbr_domain_weight: case tom.get_float(table, ["cbr", "domain_weight"]) {
-      Ok(v) -> Some(v)
-      Error(_) -> None
-    },
-    cbr_recency_weight: case tom.get_float(table, ["cbr", "recency_weight"]) {
-      Ok(v) -> Some(v)
-      Error(_) -> None
-    },
-    cbr_min_score: case tom.get_float(table, ["cbr", "min_score"]) {
-      Ok(v) -> Some(v)
-      Error(_) -> None
-    },
-    cbr_recency_decay_days: case
-      tom.get_int(table, ["cbr", "recency_decay_days"])
-    {
-      Ok(v) -> Some(v)
-      Error(_) -> None
-    },
-    housekeeping_tick_ms: case tom.get_int(table, ["housekeeping", "tick_ms"]) {
-      Ok(v) -> Some(v)
-      Error(_) -> None
-    },
-    housekeeping_interval_ticks: case
-      tom.get_int(table, ["housekeeping", "interval_ticks"])
-    {
-      Ok(v) -> Some(v)
-      Error(_) -> None
-    },
-    mailbox_warn_threshold: case
-      tom.get_int(table, ["cbr", "mailbox_warn_threshold"])
-    {
-      Ok(v) -> Some(v)
-      Error(_) -> None
-    },
-    dedup_similarity: case
-      tom.get_float(table, ["housekeeping", "dedup_similarity"])
-    {
-      Ok(v) -> Some(v)
-      Error(_) -> None
-    },
-    pruning_confidence: case
-      tom.get_float(table, ["housekeeping", "pruning_confidence"])
-    {
-      Ok(v) -> Some(v)
-      Error(_) -> None
-    },
-    fact_confidence: case
-      tom.get_float(table, ["housekeeping", "fact_confidence"])
-    {
-      Ok(v) -> Some(v)
-      Error(_) -> None
-    },
-    cbr_pruning_days: case
-      tom.get_int(table, ["housekeeping", "cbr_pruning_days"])
-    {
-      Ok(v) -> Some(v)
-      Error(_) -> None
-    },
+    profiles_dirs: get_toml_string_array(table, ["profiles_dirs"]),
+    // ── [agent] ──
+    agent_name: get_toml_str(table, ["agent", "name"]),
+    agent_version: get_toml_str(table, ["agent", "version"]),
+    // ── [narrative] ──
+    narrative_dir: get_toml_str(table, ["narrative", "directory"]),
+    archivist_model: get_toml_str(table, ["narrative", "archivist_model"]),
+    narrative_threading: get_toml_bool(table, ["narrative", "threading"]),
+    narrative_summaries: get_toml_bool(table, ["narrative", "summaries"]),
+    narrative_summary_schedule: get_toml_str(table, [
+      "narrative", "summary_schedule",
+    ]),
+    librarian_max_days: get_toml_int(table, ["narrative", "max_days"]),
+    // ── [timeouts] ──
+    llm_request_timeout_ms: get_toml_int(table, ["timeouts", "llm_request_ms"]),
+    classify_timeout_ms: get_toml_int(table, ["timeouts", "classify_ms"]),
+    inter_turn_delay_ms: get_toml_int(table, ["timeouts", "inter_turn_delay_ms"]),
+    startup_timeout_ms: get_toml_int(table, ["timeouts", "startup_ms"]),
+    librarian_startup_timeout_ms: get_toml_int(table, [
+      "timeouts", "librarian_startup_ms",
+    ]),
+    scheduler_job_timeout_ms: get_toml_int(table, [
+      "timeouts", "scheduler_job_ms",
+    ]),
+    restart_window_ms: get_toml_int(table, ["timeouts", "restart_window_ms"]),
+    sandbox_timeout_s: get_toml_int(table, ["timeouts", "sandbox_timeout_s"]),
+    housekeeping_tick_ms: get_toml_int(table, [
+      "timeouts", "housekeeping_tick_ms",
+    ]),
+    housekeeping_interval_ticks: get_toml_int(table, [
+      "timeouts", "housekeeping_interval_ticks",
+    ]),
+    // ── [retry] ──
+    retry_max_retries: get_toml_int(table, ["retry", "max_retries"]),
+    retry_initial_delay_ms: get_toml_int(table, ["retry", "initial_delay_ms"]),
+    retry_rate_limit_delay_ms: get_toml_int(table, [
+      "retry", "rate_limit_delay_ms",
+    ]),
+    retry_overload_delay_ms: get_toml_int(table, ["retry", "overload_delay_ms"]),
+    retry_max_delay_ms: get_toml_int(table, ["retry", "max_delay_ms"]),
+    // ── [limits] ──
+    max_artifact_chars: get_toml_int(table, ["limits", "max_artifact_chars"]),
+    max_fetch_chars: get_toml_int(table, ["limits", "max_fetch_chars"]),
+    tui_input_limit: get_toml_int(table, ["limits", "tui_input_limit"]),
+    websocket_max_bytes: get_toml_int(table, ["limits", "websocket_max_bytes"]),
+    mailbox_warn_threshold: get_toml_int(table, [
+      "limits", "mailbox_warn_threshold",
+    ]),
+    recall_max_entries: get_toml_int(table, ["limits", "recall_max_entries"]),
+    cbr_max_results: get_toml_int(table, ["limits", "cbr_max_results"]),
+    web_search_max_results: get_toml_int(table, [
+      "limits", "web_search_max_results",
+    ]),
+    exa_search_max_results: get_toml_int(table, [
+      "limits", "exa_search_max_results",
+    ]),
+    // ── [scoring.threading] ──
+    threading_location_weight: get_toml_int(table, [
+      "scoring", "threading", "location_weight",
+    ]),
+    threading_domain_weight: get_toml_int(table, [
+      "scoring", "threading", "domain_weight",
+    ]),
+    threading_keyword_weight: get_toml_int(table, [
+      "scoring", "threading", "keyword_weight",
+    ]),
+    threading_threshold: get_toml_int(table, [
+      "scoring", "threading", "threshold",
+    ]),
+    // ── [scoring.cbr] ──
+    cbr_cosine_weight: get_toml_float(table, ["scoring", "cbr", "cosine_weight"]),
+    cbr_symbolic_weight: get_toml_float(table, [
+      "scoring", "cbr", "symbolic_weight",
+    ]),
+    cbr_intent_weight: get_toml_float(table, ["scoring", "cbr", "intent_weight"]),
+    cbr_keyword_weight: get_toml_float(table, [
+      "scoring", "cbr", "keyword_weight",
+    ]),
+    cbr_entity_weight: get_toml_float(table, ["scoring", "cbr", "entity_weight"]),
+    cbr_domain_weight: get_toml_float(table, ["scoring", "cbr", "domain_weight"]),
+    cbr_recency_weight: get_toml_float(table, [
+      "scoring", "cbr", "recency_weight",
+    ]),
+    cbr_min_score: get_toml_float(table, ["scoring", "cbr", "min_score"]),
+    cbr_recency_decay_days: get_toml_int(table, [
+      "scoring", "cbr", "recency_decay_days",
+    ]),
+    // ── [housekeeping] ──
+    dedup_similarity: get_toml_float(table, ["housekeeping", "dedup_similarity"]),
+    pruning_confidence: get_toml_float(table, [
+      "housekeeping", "pruning_confidence",
+    ]),
+    fact_confidence: get_toml_float(table, ["housekeeping", "fact_confidence"]),
+    cbr_pruning_days: get_toml_int(table, ["housekeeping", "cbr_pruning_days"]),
+    // ── [embedding] ──
+    embedding_model: get_toml_str(table, ["embedding", "model"]),
+    embedding_base_url: get_toml_str(table, ["embedding", "base_url"]),
+    embedding_dimensions: get_toml_int(table, ["embedding", "dimensions"]),
+    // ── [agents.*] ──
+    planner_max_tokens: get_toml_int(table, ["agents", "planner", "max_tokens"]),
+    planner_max_turns: get_toml_int(table, ["agents", "planner", "max_turns"]),
+    planner_max_errors: get_toml_int(table, ["agents", "planner", "max_errors"]),
+    researcher_max_tokens: get_toml_int(table, [
+      "agents", "researcher", "max_tokens",
+    ]),
+    researcher_max_turns: get_toml_int(table, [
+      "agents", "researcher", "max_turns",
+    ]),
+    researcher_max_errors: get_toml_int(table, [
+      "agents", "researcher", "max_errors",
+    ]),
+    researcher_max_context: get_toml_int(table, [
+      "agents", "researcher", "max_context_messages",
+    ]),
+    coder_max_tokens: get_toml_int(table, ["agents", "coder", "max_tokens"]),
+    coder_max_turns: get_toml_int(table, ["agents", "coder", "max_turns"]),
+    coder_max_errors: get_toml_int(table, ["agents", "coder", "max_errors"]),
+    writer_max_tokens: get_toml_int(table, ["agents", "writer", "max_tokens"]),
+    writer_max_turns: get_toml_int(table, ["agents", "writer", "max_turns"]),
+    writer_max_errors: get_toml_int(table, ["agents", "writer", "max_errors"]),
+    // ── [web] ──
+    web_port: get_toml_int(table, ["web", "port"]),
+    // ── [services] ──
+    duckduckgo_url: get_toml_str(table, ["services", "duckduckgo_url"]),
+    exa_base_url: get_toml_str(table, ["services", "exa_base_url"]),
+    tavily_base_url: get_toml_str(table, ["services", "tavily_base_url"]),
+    firecrawl_base_url: get_toml_str(table, ["services", "firecrawl_base_url"]),
+    e2b_base_url: get_toml_str(table, ["services", "e2b_base_url"]),
   )
 }
 
@@ -756,15 +1038,9 @@ const known_keys = [
   "provider", "task_model", "reasoning_model", "max_tokens", "max_turns",
   "max_consecutive_errors", "max_context_messages", "log_verbose",
   "write_anywhere", "skills_dirs", "gui", "dprime_enabled", "dprime_config",
-  "narrative", "profile", "profiles_dirs", "agent", "cbr", "housekeeping",
-  "log_retention_days", "max_artifact_chars", "recall_max_entries",
-  "cbr_max_results", "sandbox_timeout_s", "tui_input_limit",
-  "websocket_max_bytes",
-]
-
-const known_housekeeping_keys = [
-  "tick_ms", "interval_ticks", "dedup_similarity", "pruning_confidence",
-  "fact_confidence", "cbr_pruning_days",
+  "narrative", "profile", "profiles_dirs", "agent", "log_retention_days",
+  "log_max_file_bytes", "timeouts", "retry", "limits", "scoring", "housekeeping",
+  "embedding", "agents", "web", "services",
 ]
 
 const known_narrative_keys = [
@@ -803,25 +1079,6 @@ fn validate_toml_keys(table: dict.Dict(String, tom.Toml)) -> Nil {
       })
     Error(_) -> Nil
   }
-  case tom.get_table(table, ["housekeeping"]) {
-    Ok(housekeeping_table) ->
-      dict.keys(housekeeping_table)
-      |> list.each(fn(key) {
-        case list.contains(known_housekeeping_keys, key) {
-          True -> Nil
-          False ->
-            slog.warn(
-              "config",
-              "validate",
-              "Unknown housekeeping config key: \""
-                <> key
-                <> "\" — possible typo?",
-              None,
-            )
-        }
-      })
-    Error(_) -> Nil
-  }
   case tom.get_table(table, ["agent"]) {
     Ok(agent_table) ->
       dict.keys(agent_table)
@@ -839,93 +1096,18 @@ fn validate_toml_keys(table: dict.Dict(String, tom.Toml)) -> Nil {
       })
     Error(_) -> Nil
   }
-  case tom.get_table(table, ["cbr"]) {
-    Ok(cbr_table) ->
-      dict.keys(cbr_table)
-      |> list.each(fn(key) {
-        case
-          list.contains(
-            [
-              "cosine_weight", "symbolic_weight", "intent_weight",
-              "keyword_weight", "entity_weight", "domain_weight",
-              "recency_weight", "min_score", "recency_decay_days",
-              "mailbox_warn_threshold",
-            ],
-            key,
-          )
-        {
-          True -> Nil
-          False ->
-            slog.warn(
-              "config",
-              "validate",
-              "Unknown cbr config key: \"" <> key <> "\" — possible typo?",
-              None,
-            )
-        }
-      })
-    Error(_) -> Nil
-  }
   Nil
 }
 
 fn validate_config_values(cfg: AppConfig) -> Nil {
-  case cfg.max_tokens {
-    Some(n) ->
-      case n <= 0 {
-        True ->
-          slog.warn(
-            "config",
-            "validate",
-            "max_tokens must be positive, got " <> int.to_string(n),
-            None,
-          )
-        False -> Nil
-      }
-    None -> Nil
-  }
-  case cfg.max_turns {
-    Some(n) ->
-      case n <= 0 {
-        True ->
-          slog.warn(
-            "config",
-            "validate",
-            "max_turns must be positive, got " <> int.to_string(n),
-            None,
-          )
-        False -> Nil
-      }
-    None -> Nil
-  }
-  case cfg.max_consecutive_errors {
-    Some(n) ->
-      case n <= 0 {
-        True ->
-          slog.warn(
-            "config",
-            "validate",
-            "max_consecutive_errors must be positive, got " <> int.to_string(n),
-            None,
-          )
-        False -> Nil
-      }
-    None -> Nil
-  }
-  case cfg.max_context_messages {
-    Some(n) ->
-      case n <= 0 {
-        True ->
-          slog.warn(
-            "config",
-            "validate",
-            "max_context_messages must be positive, got " <> int.to_string(n),
-            None,
-          )
-        False -> Nil
-      }
-    None -> Nil
-  }
+  validate_positive("max_tokens", cfg.max_tokens)
+  validate_positive("max_turns", cfg.max_turns)
+  validate_positive("max_consecutive_errors", cfg.max_consecutive_errors)
+  validate_positive("max_context_messages", cfg.max_context_messages)
+  validate_positive("llm_request_timeout_ms", cfg.llm_request_timeout_ms)
+  validate_positive("classify_timeout_ms", cfg.classify_timeout_ms)
+  validate_positive("retry.max_retries", cfg.retry_max_retries)
+  validate_positive("web.port", cfg.web_port)
   case cfg.provider {
     Some(p) ->
       case
@@ -962,4 +1144,17 @@ fn validate_config_values(cfg: AppConfig) -> Nil {
     None -> Nil
   }
   Nil
+}
+
+fn validate_positive(name: String, value: Option(Int)) -> Nil {
+  case value {
+    Some(n) if n <= 0 ->
+      slog.warn(
+        "config",
+        "validate",
+        name <> " must be positive, got " <> int.to_string(n),
+        None,
+      )
+    _ -> Nil
+  }
 }

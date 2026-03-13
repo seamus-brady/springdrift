@@ -36,11 +36,13 @@ type LlmClassification {
 /// Classify a query using a fast LLM call.
 /// Falls back to heuristic classification if the call fails or the
 /// response is unrecognised.
-/// Classify timeout in milliseconds. Falls back to heuristic if the LLM
-/// call takes longer than this.
-const classify_timeout_ms = 10_000
-
-pub fn classify(query: String, p: Provider, model: String) -> QueryComplexity {
+/// `timeout_ms` — how long to wait for the LLM before falling back to heuristic.
+pub fn classify(
+  query: String,
+  p: Provider,
+  model: String,
+  timeout_ms: Int,
+) -> QueryComplexity {
   slog.debug(
     "query_complexity",
     "classify",
@@ -58,7 +60,7 @@ pub fn classify(query: String, p: Provider, model: String) -> QueryComplexity {
     process.send(reply_subj, provider.chat_with(req, p))
   })
 
-  let result = case process.receive(reply_subj, classify_timeout_ms) {
+  let result = case process.receive(reply_subj, timeout_ms) {
     Error(_) -> {
       slog.warn(
         "query_complexity",

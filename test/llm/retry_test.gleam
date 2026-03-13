@@ -16,7 +16,8 @@ pub fn success_on_first_attempt_test() {
     request.new("mock", 256)
     |> request.with_user_message("test")
 
-  let assert Ok(resp) = retry.call_with_retry(req, provider, 3, 100)
+  let assert Ok(resp) =
+    retry.call_with_retry(req, provider, retry.default_retry_config())
   response.text(resp) |> should.equal("Hello!")
 }
 
@@ -30,7 +31,8 @@ pub fn non_retryable_error_fails_immediately_test() {
     request.new("mock", 256)
     |> request.with_user_message("test")
 
-  let assert Error(_) = retry.call_with_retry(req, provider, 3, 100)
+  let assert Error(_) =
+    retry.call_with_retry(req, provider, retry.default_retry_config())
 }
 
 // ---------------------------------------------------------------------------
@@ -48,7 +50,11 @@ pub fn retryable_error_exhausts_retries_test() {
     |> request.with_user_message("test")
 
   let assert Error(llm_types.ApiError(status_code: 529, ..)) =
-    retry.call_with_retry(req, provider, 0, 100)
+    retry.call_with_retry(
+      req,
+      provider,
+      retry.RetryConfig(..retry.default_retry_config(), max_retries: 0),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -168,6 +174,11 @@ pub fn retryable_error_succeeds_on_retry_test() {
     request.new("mock", 256)
     |> request.with_user_message("test")
 
-  let assert Ok(resp) = retry.call_with_retry(req, provider, 3, 50)
+  let assert Ok(resp) =
+    retry.call_with_retry(
+      req,
+      provider,
+      retry.RetryConfig(..retry.default_retry_config(), initial_delay_ms: 50),
+    )
   response.text(resp) |> should.equal("Recovered!")
 }

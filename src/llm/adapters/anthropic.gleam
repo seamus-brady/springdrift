@@ -21,12 +21,21 @@ pub const claude_sonnet_4 = "claude-sonnet-4-20250514"
 
 pub const claude_haiku_3_5 = "claude-haiku-3-5-20241022"
 
-const request_timeout_ms = 300_000
+/// Default request timeout (5 minutes).
+const default_timeout_ms = 300_000
 
-/// Create an Anthropic provider using the ANTHROPIC_API_KEY environment variable
+/// Create an Anthropic provider using the ANTHROPIC_API_KEY environment variable.
+/// Uses the default request timeout (300s).
 pub fn provider() -> Result(Provider, types.LlmError) {
+  provider_with_timeout(default_timeout_ms)
+}
+
+/// Create an Anthropic provider with a configurable request timeout.
+pub fn provider_with_timeout(
+  timeout_ms: Int,
+) -> Result(Provider, types.LlmError) {
   aconfig.config_options()
-  |> aconfig.with_timeout_ms(request_timeout_ms)
+  |> aconfig.with_timeout_ms(timeout_ms)
   |> aconfig.load_config()
   |> result.map(aclient.new)
   |> result.map_error(translate_error)
@@ -43,7 +52,7 @@ pub fn provider() -> Result(Provider, types.LlmError) {
 pub fn provider_with_key(api_key: String) -> Result(Provider, types.LlmError) {
   aconfig.config_options()
   |> aconfig.with_api_key(api_key)
-  |> aconfig.with_timeout_ms(request_timeout_ms)
+  |> aconfig.with_timeout_ms(default_timeout_ms)
   |> aconfig.load_config()
   |> result.map(aclient.new)
   |> result.map_error(translate_error)

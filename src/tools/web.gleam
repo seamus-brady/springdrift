@@ -15,6 +15,32 @@ import llm/types.{
 }
 import slog
 
+/// Configurable URLs and limits for web tools.
+pub type WebToolsConfig {
+  WebToolsConfig(
+    duckduckgo_url: String,
+    exa_base_url: String,
+    tavily_base_url: String,
+    firecrawl_base_url: String,
+    max_fetch_chars: Int,
+    web_search_max_results: Int,
+    exa_search_max_results: Int,
+  )
+}
+
+/// Default web tools configuration.
+pub fn default_config() -> WebToolsConfig {
+  WebToolsConfig(
+    duckduckgo_url: "https://html.duckduckgo.com/html/",
+    exa_base_url: "https://api.exa.ai",
+    tavily_base_url: "https://api.tavily.com",
+    firecrawl_base_url: "https://api.firecrawl.dev",
+    max_fetch_chars: 50_000,
+    web_search_max_results: 5,
+    exa_search_max_results: 10,
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Tool definitions
 // ---------------------------------------------------------------------------
@@ -109,13 +135,17 @@ pub fn is_web_tool(name: String) -> Bool {
 }
 
 pub fn execute(call: ToolCall) -> ToolResult {
+  execute_with_config(call, default_config())
+}
+
+pub fn execute_with_config(call: ToolCall, cfg: WebToolsConfig) -> ToolResult {
   slog.debug("web", "execute", "tool=" <> call.name, option.None)
   case call.name {
     "fetch_url" -> run_fetch_url(call)
-    "web_search" -> run_web_search(call)
-    "exa_search" -> run_exa_search(call)
-    "tavily_search" -> run_tavily_search(call)
-    "firecrawl_extract" -> run_firecrawl_extract(call)
+    "web_search" -> run_web_search(call, cfg)
+    "exa_search" -> run_exa_search(call, cfg)
+    "tavily_search" -> run_tavily_search(call, cfg)
+    "firecrawl_extract" -> run_firecrawl_extract(call, cfg)
     _ -> ToolFailure(tool_use_id: call.id, error: "Unknown tool: " <> call.name)
   }
 }
@@ -162,10 +192,14 @@ fn run_fetch_url(call: ToolCall) -> ToolResult {
 // web_search
 // ---------------------------------------------------------------------------
 
-fn run_web_search(call: ToolCall) -> ToolResult {
+fn run_web_search(call: ToolCall, cfg: WebToolsConfig) -> ToolResult {
   let decoder = {
     use query <- decode.field("query", decode.string)
-    use max <- decode.optional_field("max_results", 5, decode.int)
+    use max <- decode.optional_field(
+      "max_results",
+      cfg.web_search_max_results,
+      decode.int,
+    )
     decode.success(#(query, max))
   }
   case json.parse(call.input_json, decoder) {
@@ -176,7 +210,7 @@ fn run_web_search(call: ToolCall) -> ToolResult {
       )
     Ok(#(query, max_results)) -> {
       let clamped = int.min(10, int.max(1, max_results))
-      let url = "https://html.duckduckgo.com/html/?q=" <> uri_encode(query)
+      let url = cfg.duckduckgo_url <> "?q=" <> uri_encode(query)
       case fetch_url_ffi(url) {
         Error(reason) ->
           ToolFailure(tool_use_id: call.id, error: "web_search: " <> reason)
@@ -231,11 +265,18 @@ fn extract_ddg_results_ffi(html: String) -> List(SearchResult)
 @external(erlang, "springdrift_ffi", "get_env")
 fn get_env(name: String) -> Result(String, Nil)
 
+/// Strip https:// or http:// from a URL to get just the host.
+fn strip_scheme(url: String) -> String {
+  url
+  |> string.replace("https://", "")
+  |> string.replace("http://", "")
+}
+
 // ---------------------------------------------------------------------------
 // exa_search
 // ---------------------------------------------------------------------------
 
-fn run_exa_search(call: ToolCall) -> ToolResult {
+fn run_exa_search(call: ToolCall, cfg: WebToolsConfig) -> ToolResult {
   let decoder = {
     use query <- decode.field("query", decode.string)
     decode.success(query)
@@ -247,7 +288,7 @@ fn run_exa_search(call: ToolCall) -> ToolResult {
         error: "Invalid exa_search input: missing query",
       )
     Ok(query) ->
-      case exa_search(query, option.None) {
+      case exa_search_with_config(query, option.None, cfg) {
         Error(msg) -> ToolFailure(tool_use_id: call.id, error: msg)
         Ok(content) -> ToolSuccess(tool_use_id: call.id, content:)
       }
@@ -257,6 +298,14 @@ fn run_exa_search(call: ToolCall) -> ToolResult {
 pub fn exa_search(
   query: String,
   cycle_id: Option(String),
+) -> Result(String, String) {
+  exa_search_with_config(query, cycle_id, default_config())
+}
+
+pub fn exa_search_with_config(
+  query: String,
+  cycle_id: Option(String),
+  cfg: WebToolsConfig,
 ) -> Result(String, String) {
   use key <- result.try(
     get_env("EXA_API_KEY")
@@ -268,7 +317,7 @@ pub fn exa_search(
   let body =
     json.object([
       #("query", json.string(query)),
-      #("numResults", json.int(10)),
+      #("numResults", json.int(cfg.exa_search_max_results)),
       #(
         "contents",
         json.object([
@@ -282,7 +331,7 @@ pub fn exa_search(
   let req =
     request.new()
     |> request.set_method(http.Post)
-    |> request.set_host("api.exa.ai")
+    |> request.set_host(strip_scheme(cfg.exa_base_url))
     |> request.set_path("/search")
     |> request.set_scheme(http.Https)
     |> request.set_body(body)
@@ -364,7 +413,7 @@ fn parse_exa_response(body: String) -> Result(String, String) {
 // tavily_search
 // ---------------------------------------------------------------------------
 
-fn run_tavily_search(call: ToolCall) -> ToolResult {
+fn run_tavily_search(call: ToolCall, cfg: WebToolsConfig) -> ToolResult {
   let decoder = {
     use query <- decode.field("query", decode.string)
     decode.success(query)
@@ -376,7 +425,7 @@ fn run_tavily_search(call: ToolCall) -> ToolResult {
         error: "Invalid tavily_search input: missing query",
       )
     Ok(query) ->
-      case tavily_search(query, option.None) {
+      case tavily_search_with_config(query, option.None, cfg) {
         Error(msg) -> ToolFailure(tool_use_id: call.id, error: msg)
         Ok(content) -> ToolSuccess(tool_use_id: call.id, content:)
       }
@@ -386,6 +435,14 @@ fn run_tavily_search(call: ToolCall) -> ToolResult {
 pub fn tavily_search(
   query: String,
   cycle_id: Option(String),
+) -> Result(String, String) {
+  tavily_search_with_config(query, cycle_id, default_config())
+}
+
+pub fn tavily_search_with_config(
+  query: String,
+  cycle_id: Option(String),
+  cfg: WebToolsConfig,
 ) -> Result(String, String) {
   use key <- result.try(
     get_env("TAVILY_API_KEY")
@@ -406,7 +463,7 @@ pub fn tavily_search(
   let req =
     request.new()
     |> request.set_method(http.Post)
-    |> request.set_host("api.tavily.com")
+    |> request.set_host(strip_scheme(cfg.tavily_base_url))
     |> request.set_path("/search")
     |> request.set_scheme(http.Https)
     |> request.set_body(body)
@@ -484,7 +541,7 @@ fn parse_tavily_response(body: String) -> Result(String, String) {
 // firecrawl_extract
 // ---------------------------------------------------------------------------
 
-fn run_firecrawl_extract(call: ToolCall) -> ToolResult {
+fn run_firecrawl_extract(call: ToolCall, cfg: WebToolsConfig) -> ToolResult {
   let decoder = {
     use url <- decode.field("url", decode.string)
     decode.success(url)
@@ -496,7 +553,7 @@ fn run_firecrawl_extract(call: ToolCall) -> ToolResult {
         error: "Invalid firecrawl_extract input: missing url",
       )
     Ok(url) ->
-      case firecrawl_extract(url, option.None) {
+      case firecrawl_extract_with_config(url, option.None, cfg) {
         Error(msg) -> ToolFailure(tool_use_id: call.id, error: msg)
         Ok(content) -> ToolSuccess(tool_use_id: call.id, content:)
       }
@@ -506,6 +563,14 @@ fn run_firecrawl_extract(call: ToolCall) -> ToolResult {
 pub fn firecrawl_extract(
   url: String,
   cycle_id: Option(String),
+) -> Result(String, String) {
+  firecrawl_extract_with_config(url, cycle_id, default_config())
+}
+
+pub fn firecrawl_extract_with_config(
+  url: String,
+  cycle_id: Option(String),
+  cfg: WebToolsConfig,
 ) -> Result(String, String) {
   use key <- result.try(
     get_env("FIRECRAWL_API_KEY")
@@ -524,7 +589,7 @@ pub fn firecrawl_extract(
   let req =
     request.new()
     |> request.set_method(http.Post)
-    |> request.set_host("api.firecrawl.dev")
+    |> request.set_host(strip_scheme(cfg.firecrawl_base_url))
     |> request.set_path("/v1/scrape")
     |> request.set_scheme(http.Https)
     |> request.set_body(body)
@@ -541,7 +606,7 @@ pub fn firecrawl_extract(
     }
     Ok(resp) ->
       case resp.status {
-        200 -> parse_firecrawl_response(resp.body, url)
+        200 -> parse_firecrawl_response(resp.body, url, cfg.max_fetch_chars)
         429 -> Error("firecrawl_extract: rate limited. Retry after a moment.")
         status -> {
           let msg =
@@ -557,7 +622,11 @@ pub fn firecrawl_extract(
 }
 
 /// Parse Firecrawl v1 response envelope: { success, data: { markdown, metadata: { title } } }
-fn parse_firecrawl_response(body: String, url: String) -> Result(String, String) {
+fn parse_firecrawl_response(
+  body: String,
+  url: String,
+  max_chars: Int,
+) -> Result(String, String) {
   let data_decoder = {
     use markdown <- decode.field("markdown", decode.optional(decode.string))
     use title <- decode.field("metadata", {
@@ -581,9 +650,8 @@ fn parse_firecrawl_response(body: String, url: String) -> Result(String, String)
       let title_str = option.unwrap(title, url)
       let content = option.unwrap(markdown, "")
       // Cap at ~50KB to stay within context limits
-      let truncated = case string.length(content) > 50_000 {
-        True ->
-          string.slice(content, 0, 50_000) <> "\n\n[Content truncated at 50KB]"
+      let truncated = case string.length(content) > max_chars {
+        True -> string.slice(content, 0, max_chars) <> "\n\n[Content truncated]"
         False -> content
       }
       Ok("# " <> title_str <> "\nSource: " <> url <> "\n\n" <> truncated)

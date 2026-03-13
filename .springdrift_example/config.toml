@@ -1,7 +1,8 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Springdrift local config — .springdrift/config.toml
-# All fields are optional. CLI flags always take priority.
-# Run `gleam run -- --help` to see all available flags.
+# Springdrift — example config.toml
+# Copy to .springdrift/config.toml and customise.
+# All fields are optional — defaults (shown in comments) are applied at startup.
+# CLI flags always override config file values.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── LLM provider and models ─────────────────────────────────────────────────
@@ -35,7 +36,7 @@ max_consecutive_errors = 3
 
 # ── GUI ──────────────────────────────────────────────────────────────────────
 
-# GUI mode: "tui" (terminal, default) or "web" (browser on port 8080)
+# GUI mode: "tui" (terminal, default) or "web" (browser)
 gui = "tui"
 
 # ── Logging and filesystem ───────────────────────────────────────────────────
@@ -45,6 +46,12 @@ log_verbose = false
 
 # Allow write_file outside the project directory (default: false)
 write_anywhere = false
+
+# Days to retain system log files before cleanup (default: 30)
+# log_retention_days = 30
+
+# Maximum system log file size in bytes before rotation (default: 10485760 = 10MB)
+# log_max_file_bytes = 10485760
 
 # Extra directories to scan for SKILL.md files
 # Default dirs (.springdrift/skills and ~/.config/springdrift/skills) are always included
@@ -74,3 +81,202 @@ threading = true             # Auto-assign threads by overlap scoring
 summaries = false            # Enable periodic summaries
 summary_schedule = "weekly"  # "weekly" or "monthly"
 # max_days = 30              # Days of history replayed into ETS at startup
+
+# ── Timeouts ─────────────────────────────────────────────────────────────────
+# All values in milliseconds unless noted otherwise.
+
+[timeouts]
+# LLM request timeout — how long to wait for a single LLM API call (default: 300000 = 5 min)
+# llm_request_ms = 300000
+
+# Query complexity classification timeout (default: 10000 = 10s)
+# classify_ms = 10000
+
+# Agent inter-turn delay — pacing between react-loop iterations (default: 200)
+# inter_turn_delay_ms = 200
+
+# Process startup handshake timeout (default: 5000 = 5s)
+# startup_ms = 5000
+
+# Librarian/Curator startup timeout — larger due to ETS replay (default: 30000 = 30s)
+# librarian_startup_ms = 30000
+
+# Scheduler job completion timeout — max time for a scheduled job (default: 300000 = 5 min)
+# scheduler_job_ms = 300000
+
+# Supervisor restart window — sliding window for counting restart events (default: 60000 = 60s)
+# restart_window_ms = 60000
+
+# E2B sandbox execution timeout in seconds (default: 600 = 10 min)
+# sandbox_timeout_s = 600
+
+# Curator housekeeping tick — main loop receive timeout (default: 60000 = 60s)
+# housekeeping_tick_ms = 60000
+
+# Housekeeping interval in ticks — ticks before running housekeeping (default: 60)
+# housekeeping_interval_ticks = 60
+
+# ── Retry ────────────────────────────────────────────────────────────────────
+# LLM call retry configuration with exponential backoff.
+
+[retry]
+# Maximum number of retry attempts per LLM call (default: 3)
+# max_retries = 3
+
+# Base delay before first retry for server errors, in ms (default: 500)
+# initial_delay_ms = 500
+
+# Delay for rate limit errors (HTTP 429), in ms (default: 5000)
+# rate_limit_delay_ms = 5000
+
+# Delay for server overload errors (HTTP 529), in ms (default: 2000)
+# overload_delay_ms = 2000
+
+# Maximum backoff cap — exponential backoff will never exceed this, in ms (default: 60000)
+# max_delay_ms = 60000
+
+# ── Size limits ──────────────────────────────────────────────────────────────
+
+[limits]
+# Max artifact content size before truncation, in characters (default: 50000 = ~50KB)
+# max_artifact_chars = 50000
+
+# Max fetch_url response size before truncation, in characters (default: 50000 = ~50KB)
+# max_fetch_chars = 50000
+
+# TUI input buffer limit in bytes (default: 102400 = 100KB)
+# tui_input_limit = 102400
+
+# WebSocket message size limit in bytes (default: 1048576 = 1MB)
+# websocket_max_bytes = 1048576
+
+# Mailbox warning threshold — log a warning when actor mailbox exceeds this (default: 50)
+# mailbox_warn_threshold = 50
+
+# Max entries returned by recall_recent/recall_search (default: 20, max: 50)
+# recall_max_entries = 20
+
+# Max CBR cases returned by recall_cases (default: 5, max: 20)
+# cbr_max_results = 5
+
+# Max results from web_search (DuckDuckGo) (default: 5, max: 10)
+# web_search_max_results = 5
+
+# Max results from exa_search (default: 10)
+# exa_search_max_results = 10
+
+# ── Thread scoring ───────────────────────────────────────────────────────────
+# Overlap scoring weights for automatic thread assignment.
+
+[scoring.threading]
+# Weight for location overlap (default: 3)
+# location_weight = 3
+
+# Weight for domain overlap (default: 2)
+# domain_weight = 2
+
+# Weight for keyword overlap (default: 1)
+# keyword_weight = 1
+
+# Minimum overlap score to assign entry to existing thread (default: 4)
+# threshold = 4
+
+# ── CBR scoring ──────────────────────────────────────────────────────────────
+# Case-Based Reasoning retrieval scoring weights. Symbolic weights must sum to 1.0.
+
+[scoring.cbr]
+# Weight for embedding cosine similarity vs symbolic scoring (default: 0.4 / 0.6)
+# When embeddings are unavailable, pure symbolic scoring is used.
+# cosine_weight = 0.4
+# symbolic_weight = 0.6
+
+# Symbolic component weights (must sum to 1.0)
+# intent_weight = 0.35     # Intent/goal match
+# keyword_weight = 0.25    # Keyword Jaccard overlap
+# entity_weight = 0.20     # Entity Jaccard overlap
+# domain_weight = 0.15     # Domain match
+# recency_weight = 0.05    # Recency decay bonus
+
+# Minimum score for CBR result inclusion (default: 0.1)
+# min_score = 0.1
+
+# Days over which recency score decays to zero (default: 30)
+# recency_decay_days = 30
+
+# ── Housekeeping ─────────────────────────────────────────────────────────────
+# Maintenance thresholds for CBR dedup, pruning, and fact management.
+
+[housekeeping]
+# Cosine similarity threshold for CBR case deduplication (default: 0.92)
+# dedup_similarity = 0.92
+
+# Confidence below this triggers CBR case pruning (default: 0.3)
+# pruning_confidence = 0.3
+
+# Minimum fact confidence for Curator display (default: 0.7)
+# fact_confidence = 0.7
+
+# Days after which low-confidence CBR cases are pruned (default: 60)
+# cbr_pruning_days = 60
+
+# ── Embedding ────────────────────────────────────────────────────────────────
+# Ollama embedding service configuration.
+
+[embedding]
+# Embedding model name (default: "nomic-embed-text")
+# model = "nomic-embed-text"
+
+# Ollama base URL (default: "http://localhost:11434")
+# base_url = "http://localhost:11434"
+
+# Expected embedding dimensions (default: 768)
+# dimensions = 768
+
+# ── Agent specifications ─────────────────────────────────────────────────────
+# Per-agent configuration. Profiles override these when active.
+
+[agents.planner]
+# max_tokens = 2048
+# max_turns = 3
+# max_errors = 2
+
+[agents.researcher]
+# max_tokens = 2048
+# max_turns = 8
+# max_errors = 3
+# max_context_messages = 30   # Sliding window to keep context lean
+
+[agents.coder]
+# max_tokens = 4096
+# max_turns = 10
+# max_errors = 3
+
+[agents.writer]
+# max_tokens = 4096
+# max_turns = 5
+# max_errors = 2
+
+# ── Web GUI ──────────────────────────────────────────────────────────────────
+
+[web]
+# Port for the web GUI when gui = "web" (default: 8080)
+# port = 8080
+
+# ── External services ───────────────────────────────────────────────────────
+# Base URLs for third-party APIs. Override if using a proxy or self-hosted instance.
+
+[services]
+# DuckDuckGo HTML search endpoint
+# duckduckgo_url = "https://html.duckduckgo.com/html/"
+
+# Exa semantic search API
+# exa_base_url = "https://api.exa.ai"
+
+# Tavily search API
+# tavily_base_url = "https://api.tavily.com"
+
+# Firecrawl extraction API (v1)
+# firecrawl_base_url = "https://api.firecrawl.dev"
+
+# E2B sandbox API
+# e2b_base_url = "https://api.e2b.app"

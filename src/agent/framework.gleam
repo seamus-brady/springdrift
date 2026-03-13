@@ -18,9 +18,7 @@ import llm/retry
 import llm/types as llm_types
 import slog
 
-/// Minimum delay between react loop turns (ms).
-/// Prevents agents from hammering the API on rapid tool-use cycles.
-const inter_turn_delay_ms = 200
+// inter_turn_delay_ms is now on AgentSpec — no module constant needed.
 
 @external(erlang, "springdrift_ffi", "monotonic_now_ms")
 fn monotonic_now_ms() -> Int
@@ -247,7 +245,9 @@ fn do_react(
   case remaining {
     0 -> ReactResult(result: Error("max turns reached"), stats:)
     _ ->
-      case retry.call_with_retry(req, spec.provider, 3, 500) {
+      case
+        retry.call_with_retry(req, spec.provider, retry.default_retry_config())
+      {
         Error(e) ->
           ReactResult(result: Error(response.error_message(e)), stats:)
         Ok(resp) -> {
@@ -314,7 +314,7 @@ fn do_react(
                   )
                 False -> {
                   // Pace requests — brief pause between turns
-                  process.sleep(inter_turn_delay_ms)
+                  process.sleep(spec.inter_turn_delay_ms)
                   let next =
                     request.with_tool_results(req, resp.content, results)
                   // Apply context trimming if configured, always ensure alternation

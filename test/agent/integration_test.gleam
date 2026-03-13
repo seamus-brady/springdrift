@@ -46,6 +46,7 @@ fn make_spec(
     tools: [],
     restart:,
     tool_executor: noop_executor,
+    inter_turn_delay_ms: 200,
   )
 }
 
@@ -76,7 +77,7 @@ fn drain_event(
 
 pub fn multiple_agents_complete_tasks_test() {
   let cognitive: process.Subject(CognitiveMessage) = process.new_subject()
-  let assert Ok(sup) = supervisor.start(cognitive, 5)
+  let assert Ok(sup) = supervisor.start(cognitive, 5, 60_000)
 
   // Start three agents with different responses
   let counter = process.new_subject()
@@ -165,7 +166,7 @@ pub fn multiple_agents_complete_tasks_test() {
 
 pub fn mixed_success_and_failure_test() {
   let cognitive: process.Subject(CognitiveMessage) = process.new_subject()
-  let assert Ok(sup) = supervisor.start(cognitive, 3)
+  let assert Ok(sup) = supervisor.start(cognitive, 3, 60_000)
 
   let good_provider = mock.provider_with_text("success")
   let bad_provider = mock.provider_with_error("model overloaded")
@@ -237,7 +238,7 @@ pub fn mixed_success_and_failure_test() {
 
 pub fn shutdown_stops_running_agents_test() {
   let cognitive: process.Subject(CognitiveMessage) = process.new_subject()
-  let assert Ok(sup) = supervisor.start(cognitive, 3)
+  let assert Ok(sup) = supervisor.start(cognitive, 3, 60_000)
 
   let provider = mock.provider_with_text("ok")
   let spec_a = make_spec("agent-x", provider, Temporary)
@@ -303,6 +304,7 @@ pub fn agent_tool_execution_test() {
       max_context_messages: None,
       tools: [],
       restart: Temporary,
+      inter_turn_delay_ms: 200,
       tool_executor: fn(call: llm_types.ToolCall) -> llm_types.ToolResult {
         case call.name {
           "calculator" ->
@@ -343,7 +345,7 @@ pub fn agent_tool_execution_test() {
 
 pub fn stop_one_agent_others_continue_test() {
   let cognitive: process.Subject(CognitiveMessage) = process.new_subject()
-  let assert Ok(sup) = supervisor.start(cognitive, 3)
+  let assert Ok(sup) = supervisor.start(cognitive, 3, 60_000)
 
   let provider = mock.provider_with_text("still alive")
   let spec_keep = make_spec("keeper", provider, Temporary)

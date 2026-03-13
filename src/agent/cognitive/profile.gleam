@@ -208,6 +208,7 @@ fn profile_agent_specs(
       tools: tools_list,
       restart: types.Permanent,
       tool_executor:,
+      inter_turn_delay_ms: 200,
     )
   })
 }

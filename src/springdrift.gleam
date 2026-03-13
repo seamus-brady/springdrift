@@ -7,7 +7,6 @@ import agent_identity
 import agents/coder
 import agents/planner
 import agents/researcher
-import artifacts/log as artifacts_log
 import config.{type AppConfig}
 import dot_env
 import dprime/config as dprime_config_mod
@@ -26,9 +25,11 @@ import llm/adapters/mistral as mistral_adapter
 import llm/adapters/mock
 import llm/adapters/openai as openai_adapter
 import llm/provider.{type Provider}
+import llm/retry
 import llm/types as llm_types
 import narrative/curator
 import narrative/librarian
+import narrative/threading as narrative_threading
 import paths
 import profile
 import profile/types as profile_types
@@ -38,7 +39,6 @@ import skills
 import slog
 import storage
 import tools/builtin as tools_builtin
-import tools/e2b
 import tools/memory as tools_memory
 import tools/web as tools_web
 import tui
@@ -230,7 +230,9 @@ fn run(cfg: AppConfig) -> Nil {
     False -> Nil
   }
 
-  let #(p, default_task_model, default_reasoning_model) = select_provider(cfg)
+  let llm_timeout_ms = option.unwrap(cfg.llm_request_timeout_ms, 300_000)
+  let #(p, default_task_model, default_reasoning_model) =
+    select_provider(cfg, llm_timeout_ms)
 
   let task_model = option.unwrap(cfg.task_model, default_task_model)
   let reasoning_model =
@@ -245,24 +247,10 @@ fn run(cfg: AppConfig) -> Nil {
   let narrative_dir = option.unwrap(cfg.narrative_dir, paths.narrative_dir())
   let archivist_model = option.unwrap(cfg.archivist_model, task_model)
 
-  // Tuning knobs — resolve from config with defaults
-  let max_artifact_chars =
-    option.unwrap(
-      cfg.max_artifact_chars,
-      artifacts_log.default_max_content_chars,
-    )
-  let sandbox_timeout =
-    option.unwrap(cfg.sandbox_timeout_s, e2b.default_sandbox_timeout_s)
-  let tui_input_limit = option.unwrap(cfg.tui_input_limit, 102_400)
-  let ws_max_bytes = option.unwrap(cfg.websocket_max_bytes, 1_048_576)
-  let recall_max_entries = option.unwrap(cfg.recall_max_entries, 50)
-  let cbr_max_results = option.unwrap(cfg.cbr_max_results, 20)
-
   // Migrate legacy facts.jsonl to daily rotation (no-op if already done)
   facts_log.migrate_legacy(paths.facts_dir())
 
-  // Start the Librarian (supervised — auto-restarts on crash)
-  let librarian_max_days = option.unwrap(cfg.librarian_max_days, 90)
+  // Build CBR scoring config
   let default_sc = librarian.default_scoring_config()
   let scoring_config =
     librarian.CbrScoringConfig(
@@ -304,6 +292,9 @@ fn run(cfg: AppConfig) -> Nil {
         default_sc.mailbox_warn_threshold,
       ),
     )
+
+  // Start the Librarian (supervised — auto-restarts on crash)
+  let librarian_max_days = option.unwrap(cfg.librarian_max_days, 90)
   let librarian_subj = case
     librarian.start_supervised(
       narrative_dir,
@@ -352,25 +343,13 @@ fn run(cfg: AppConfig) -> Nil {
             <> ") — using defaults",
           )
           #(
-            default_agent_specs(
-              p,
-              task_model,
-              librarian_subj,
-              max_artifact_chars,
-              sandbox_timeout,
-            ),
+            default_agent_specs(cfg, p, task_model, librarian_subj),
             option.None,
           )
         }
       }
     option.None -> #(
-      default_agent_specs(
-        p,
-        task_model,
-        librarian_subj,
-        max_artifact_chars,
-        sandbox_timeout,
-      ),
+      default_agent_specs(cfg, p, task_model, librarian_subj),
       option.None,
     )
   }
@@ -401,7 +380,17 @@ fn run(cfg: AppConfig) -> Nil {
   }
 
   // Ollama embedding service — obligatory health check at startup
-  let embedding_config = embedding_types.default_config()
+  let default_embed = embedding_types.default_config()
+  let embedding_config =
+    embedding_types.EmbeddingConfig(
+      model: option.unwrap(cfg.embedding_model, default_embed.model),
+      base_url: option.unwrap(cfg.embedding_base_url, default_embed.base_url),
+      dimensions: option.unwrap(
+        cfg.embedding_dimensions,
+        default_embed.dimensions,
+      ),
+      fallback: default_embed.fallback,
+    )
   case embedding_health.check(embedding_config) {
     embedding_types.Healthy(model: m, dimensions: d) ->
       io.println(
@@ -440,7 +429,7 @@ fn run(cfg: AppConfig) -> Nil {
     }
   }
 
-  // Build housekeeping config from AppConfig
+  // Build housekeeping config
   let hk_default = curator.default_housekeeping_config()
   let housekeeping_config =
     curator.HousekeepingConfig(
@@ -495,6 +484,56 @@ fn run(cfg: AppConfig) -> Nil {
   let session_since = get_date_ffi()
 
   // Start cognitive loop with empty registry (supervisor will register agents)
+  // Build retry config from user settings
+  let default_retry = retry.default_retry_config()
+  let retry_config =
+    retry.RetryConfig(
+      max_retries: option.unwrap(
+        cfg.retry_max_retries,
+        default_retry.max_retries,
+      ),
+      initial_delay_ms: option.unwrap(
+        cfg.retry_initial_delay_ms,
+        default_retry.initial_delay_ms,
+      ),
+      rate_limit_delay_ms: option.unwrap(
+        cfg.retry_rate_limit_delay_ms,
+        default_retry.rate_limit_delay_ms,
+      ),
+      overload_delay_ms: option.unwrap(
+        cfg.retry_overload_delay_ms,
+        default_retry.overload_delay_ms,
+      ),
+      max_delay_ms: option.unwrap(
+        cfg.retry_max_delay_ms,
+        default_retry.max_delay_ms,
+      ),
+    )
+  let classify_timeout_ms = option.unwrap(cfg.classify_timeout_ms, 10_000)
+  let default_threading = narrative_threading.default_config()
+  let threading_config =
+    narrative_threading.ThreadingConfig(
+      location_weight: option.unwrap(
+        cfg.threading_location_weight,
+        default_threading.location_weight,
+      ),
+      domain_weight: option.unwrap(
+        cfg.threading_domain_weight,
+        default_threading.domain_weight,
+      ),
+      keyword_weight: option.unwrap(
+        cfg.threading_keyword_weight,
+        default_threading.keyword_weight,
+      ),
+      threshold: option.unwrap(
+        cfg.threading_threshold,
+        default_threading.threshold,
+      ),
+    )
+
+  let recall_max_entries = option.unwrap(cfg.recall_max_entries, 50)
+  let cbr_max_results = option.unwrap(cfg.cbr_max_results, 20)
+
   let cognitive_subj = case
     cognitive.start(CognitiveConfig(
       provider: p,
@@ -520,6 +559,9 @@ fn run(cfg: AppConfig) -> Nil {
       embedding_config:,
       agent_uuid: stable_identity.agent_uuid,
       session_since:,
+      retry_config:,
+      classify_timeout_ms:,
+      threading_config:,
       memory_limits: tools_memory.MemoryLimits(
         recall_max_entries:,
         cbr_max_results:,
@@ -534,7 +576,8 @@ fn run(cfg: AppConfig) -> Nil {
   }
 
   // Start supervisor and register agents via StartChild
-  let sup = case supervisor.start(cognitive_subj, 5) {
+  let restart_window_ms = option.unwrap(cfg.restart_window_ms, 60_000)
+  let sup = case supervisor.start(cognitive_subj, 5, restart_window_ms) {
     Ok(subj) -> subj
     Error(_) -> {
       io.println("Fatal: Supervisor failed to start")
@@ -616,10 +659,12 @@ fn run(cfg: AppConfig) -> Nil {
   }
 
   // Start GUI
+  let tui_input_limit = option.unwrap(cfg.tui_input_limit, 102_400)
+  let ws_max_bytes = option.unwrap(cfg.websocket_max_bytes, 1_048_576)
   let gui = option.unwrap(cfg.gui, "tui")
   case gui {
     "web" -> {
-      let port = 8080
+      let port = option.unwrap(cfg.web_port, 8080)
       io.println("Web GUI  : http://localhost:" <> int.to_string(port))
       web_gui.start(
         cognitive_subj,
@@ -652,7 +697,10 @@ fn run(cfg: AppConfig) -> Nil {
   Nil
 }
 
-fn select_provider(cfg: AppConfig) -> #(Provider, String, String) {
+fn select_provider(
+  cfg: AppConfig,
+  llm_timeout_ms: Int,
+) -> #(Provider, String, String) {
   slog.debug(
     "springdrift",
     "select_provider",
@@ -661,7 +709,7 @@ fn select_provider(cfg: AppConfig) -> #(Provider, String, String) {
   )
   case cfg.provider {
     option.Some("anthropic") -> {
-      case anthropic_adapter.provider() {
+      case anthropic_adapter.provider_with_timeout(llm_timeout_ms) {
         Ok(p) -> {
           io.println("Provider : Anthropic")
           #(p, "claude-haiku-4-5-20251001", "claude-opus-4-6")
@@ -748,22 +796,59 @@ fn mock_provider() -> Provider {
 }
 
 fn default_agent_specs(
+  cfg: AppConfig,
   provider: Provider,
   task_model: String,
   librarian_subj: process.Subject(librarian.LibrarianMessage),
-  max_artifact_chars: Int,
-  sandbox_timeout: Int,
 ) -> List(agent_types.AgentSpec) {
-  [
-    planner.spec(provider, task_model),
+  let delay = option.unwrap(cfg.inter_turn_delay_ms, 200)
+  let p_spec = planner.spec(provider, task_model)
+  let max_artifact_chars = option.unwrap(cfg.max_artifact_chars, 50_000)
+  let sandbox_timeout = option.unwrap(cfg.sandbox_timeout_s, 600)
+  let r_spec =
     researcher.spec(
       provider,
       task_model,
       paths.artifacts_dir(),
       librarian_subj,
       max_artifact_chars,
+    )
+  let c_spec = coder.spec(provider, task_model, sandbox_timeout)
+  [
+    agent_types.AgentSpec(
+      ..p_spec,
+      max_tokens: option.unwrap(cfg.planner_max_tokens, p_spec.max_tokens),
+      max_turns: option.unwrap(cfg.planner_max_turns, p_spec.max_turns),
+      max_consecutive_errors: option.unwrap(
+        cfg.planner_max_errors,
+        p_spec.max_consecutive_errors,
+      ),
+      inter_turn_delay_ms: delay,
     ),
-    coder.spec(provider, task_model, sandbox_timeout),
+    agent_types.AgentSpec(
+      ..r_spec,
+      max_tokens: option.unwrap(cfg.researcher_max_tokens, r_spec.max_tokens),
+      max_turns: option.unwrap(cfg.researcher_max_turns, r_spec.max_turns),
+      max_consecutive_errors: option.unwrap(
+        cfg.researcher_max_errors,
+        r_spec.max_consecutive_errors,
+      ),
+      max_context_messages: case cfg.researcher_max_context {
+        option.Some(n) -> option.Some(n)
+        option.None -> r_spec.max_context_messages
+      },
+      inter_turn_delay_ms: delay,
+    ),
+    agent_types.AgentSpec(
+      ..c_spec,
+      max_tokens: option.unwrap(cfg.coder_max_tokens, c_spec.max_tokens),
+      max_turns: option.unwrap(cfg.coder_max_turns, c_spec.max_turns),
+      max_consecutive_errors: option.unwrap(
+        cfg.coder_max_errors,
+        c_spec.max_consecutive_errors,
+      ),
+      inter_turn_delay_ms: delay,
+    ),
   ]
 }
 
@@ -796,6 +881,7 @@ fn build_profile_agent_specs(
       tools: tools_list,
       restart: agent_types.Permanent,
       tool_executor:,
+      inter_turn_delay_ms: 200,
     )
   })
 }
