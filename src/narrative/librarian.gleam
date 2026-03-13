@@ -34,7 +34,8 @@ import dag/types as dag_types
 import embedding/client as embedding_client
 import facts/log as facts_log
 import facts/types as facts_types
-import gleam/erlang/process.{type Subject}
+import gleam/dict
+import gleam/erlang/process.{type Pid, type Subject}
 import gleam/float
 import gleam/int
 import gleam/list
@@ -52,123 +53,178 @@ import slog
 // FFI — ETS operations (typed per value type)
 // ---------------------------------------------------------------------------
 
-pub type EtsTable
+// Domain-specific opaque ETS table types prevent cross-domain misuse.
+// Each domain has its own type so the compiler catches table/value mismatches.
+pub type NarrativeTable
+
+pub type CbrTable
+
+pub type FactTable
+
+pub type ScratchpadTable
+
+pub type DagTable
+
+pub type ArtifactTable
+
+@external(erlang, "springdrift_ffi", "days_between")
+fn days_between(date_a: String, date_b: String) -> Int
+
+@external(erlang, "springdrift_ffi", "mailbox_size")
+fn get_mailbox_size() -> Int
+
+@external(erlang, "springdrift_ffi", "add_days")
+fn add_days_to_date(date: String, days: Int) -> String
+
+// Table constructors — one per domain
+@external(erlang, "store_ffi", "new_unique_table")
+fn new_narrative_table(name: String, table_type: String) -> NarrativeTable
 
 @external(erlang, "store_ffi", "new_unique_table")
-fn new_table(name: String, table_type: String) -> EtsTable
+fn new_cbr_table(name: String, table_type: String) -> CbrTable
+
+@external(erlang, "store_ffi", "new_unique_table")
+fn new_fact_table(name: String, table_type: String) -> FactTable
+
+@external(erlang, "store_ffi", "new_unique_table")
+fn new_scratchpad_table(name: String, table_type: String) -> ScratchpadTable
+
+@external(erlang, "store_ffi", "new_unique_table")
+fn new_dag_table(name: String, table_type: String) -> DagTable
+
+@external(erlang, "store_ffi", "new_unique_table")
+fn new_artifact_table(name: String, table_type: String) -> ArtifactTable
 
 // Narrative-typed operations
 @external(erlang, "store_ffi", "insert")
-fn ets_insert(table: EtsTable, key: String, value: NarrativeEntry) -> Nil
+fn ets_insert(table: NarrativeTable, key: String, value: NarrativeEntry) -> Nil
 
 @external(erlang, "store_ffi", "lookup")
-fn ets_lookup(table: EtsTable, key: String) -> Result(NarrativeEntry, Nil)
+fn ets_lookup(table: NarrativeTable, key: String) -> Result(NarrativeEntry, Nil)
 
 @external(erlang, "store_ffi", "lookup_bag")
-fn ets_lookup_bag(table: EtsTable, key: String) -> List(NarrativeEntry)
+fn ets_lookup_bag(table: NarrativeTable, key: String) -> List(NarrativeEntry)
 
 @external(erlang, "store_ffi", "all_values")
-fn ets_all_values(table: EtsTable) -> List(NarrativeEntry)
+fn ets_all_values(table: NarrativeTable) -> List(NarrativeEntry)
 
 @external(erlang, "store_ffi", "last_n")
-fn ets_last_n(table: EtsTable, n: Int) -> List(NarrativeEntry)
+fn ets_last_n(table: NarrativeTable, n: Int) -> List(NarrativeEntry)
 
 @external(erlang, "store_ffi", "delete_table")
-fn ets_delete_table(table: EtsTable) -> Nil
+fn ets_delete_table(table: NarrativeTable) -> Nil
 
 @external(erlang, "store_ffi", "table_size")
-fn ets_table_size(table: EtsTable) -> Int
+fn ets_table_size(table: NarrativeTable) -> Int
 
-// CBR-typed operations (same Erlang functions, different Gleam types)
+// Generic delete/size for other domains
+@external(erlang, "store_ffi", "delete_table")
+fn cbr_delete_table(table: CbrTable) -> Nil
+
+@external(erlang, "store_ffi", "delete_table")
+fn fact_delete_table(table: FactTable) -> Nil
+
+@external(erlang, "store_ffi", "delete_table")
+fn scratchpad_delete_table(table: ScratchpadTable) -> Nil
+
+@external(erlang, "store_ffi", "delete_table")
+fn dag_delete_table(table: DagTable) -> Nil
+
+@external(erlang, "store_ffi", "delete_table")
+fn artifact_delete_table(table: ArtifactTable) -> Nil
+
+// CBR-typed operations
 @external(erlang, "store_ffi", "insert")
-fn cbr_insert(table: EtsTable, key: String, value: cbr_types.CbrCase) -> Nil
+fn cbr_insert(table: CbrTable, key: String, value: cbr_types.CbrCase) -> Nil
 
 @external(erlang, "store_ffi", "lookup")
-fn cbr_lookup(table: EtsTable, key: String) -> Result(cbr_types.CbrCase, Nil)
+fn cbr_lookup(table: CbrTable, key: String) -> Result(cbr_types.CbrCase, Nil)
 
 @external(erlang, "store_ffi", "lookup_bag")
-fn cbr_lookup_bag(table: EtsTable, key: String) -> List(cbr_types.CbrCase)
+fn cbr_lookup_bag(table: CbrTable, key: String) -> List(cbr_types.CbrCase)
 
 @external(erlang, "store_ffi", "all_values")
-fn cbr_all_values(table: EtsTable) -> List(cbr_types.CbrCase)
+fn cbr_all_values(table: CbrTable) -> List(cbr_types.CbrCase)
 
 @external(erlang, "store_ffi", "table_size")
-fn cbr_table_size(table: EtsTable) -> Int
+fn cbr_table_size(table: CbrTable) -> Int
+
+@external(erlang, "store_ffi", "delete_key")
+fn cbr_delete_key(table: CbrTable, key: String) -> Nil
 
 // Facts-typed operations
 @external(erlang, "store_ffi", "insert")
 fn fact_insert(
-  table: EtsTable,
+  table: FactTable,
   key: String,
   value: facts_types.MemoryFact,
 ) -> Nil
 
 @external(erlang, "store_ffi", "lookup")
 fn fact_lookup(
-  table: EtsTable,
+  table: FactTable,
   key: String,
 ) -> Result(facts_types.MemoryFact, Nil)
 
 @external(erlang, "store_ffi", "lookup_bag")
-fn fact_lookup_bag(table: EtsTable, key: String) -> List(facts_types.MemoryFact)
+fn fact_lookup_bag(
+  table: FactTable,
+  key: String,
+) -> List(facts_types.MemoryFact)
 
 @external(erlang, "store_ffi", "all_values")
-fn fact_all_values(table: EtsTable) -> List(facts_types.MemoryFact)
+fn fact_all_values(table: FactTable) -> List(facts_types.MemoryFact)
 
 @external(erlang, "store_ffi", "table_size")
-fn fact_table_size(table: EtsTable) -> Int
+fn fact_table_size(table: FactTable) -> Int
 
 @external(erlang, "store_ffi", "delete_key")
-fn fact_delete_key(table: EtsTable, key: String) -> Nil
+fn fact_delete_key(table: FactTable, key: String) -> Nil
 
 // AgentResult-typed operations (scratchpad)
 @external(erlang, "store_ffi", "insert")
 fn result_insert(
-  table: EtsTable,
+  table: ScratchpadTable,
   key: String,
   value: agent_types.AgentResult,
 ) -> Nil
 
 @external(erlang, "store_ffi", "lookup_bag")
 fn result_lookup_bag(
-  table: EtsTable,
+  table: ScratchpadTable,
   key: String,
 ) -> List(agent_types.AgentResult)
 
 @external(erlang, "store_ffi", "delete_key")
-fn result_delete_key(table: EtsTable, key: String) -> Nil
-
-// CBR delete
-@external(erlang, "store_ffi", "delete_key")
-fn cbr_delete_key(table: EtsTable, key: String) -> Nil
+fn result_delete_key(table: ScratchpadTable, key: String) -> Nil
 
 // DAG-typed operations (CycleNode)
 @external(erlang, "store_ffi", "insert")
-fn dag_insert(table: EtsTable, key: String, value: dag_types.CycleNode) -> Nil
+fn dag_insert(table: DagTable, key: String, value: dag_types.CycleNode) -> Nil
 
 @external(erlang, "store_ffi", "lookup")
-fn dag_lookup(table: EtsTable, key: String) -> Result(dag_types.CycleNode, Nil)
+fn dag_lookup(table: DagTable, key: String) -> Result(dag_types.CycleNode, Nil)
 
 @external(erlang, "store_ffi", "lookup_bag")
-fn dag_lookup_bag(table: EtsTable, key: String) -> List(dag_types.CycleNode)
+fn dag_lookup_bag(table: DagTable, key: String) -> List(dag_types.CycleNode)
 
 // Artifact-typed operations
 @external(erlang, "store_ffi", "insert")
 fn artifact_insert(
-  table: EtsTable,
+  table: ArtifactTable,
   key: String,
   value: artifacts_types.ArtifactMeta,
 ) -> Nil
 
 @external(erlang, "store_ffi", "lookup")
 fn artifact_lookup_one(
-  table: EtsTable,
+  table: ArtifactTable,
   key: String,
 ) -> Result(artifacts_types.ArtifactMeta, Nil)
 
 @external(erlang, "store_ffi", "lookup_bag")
 fn artifact_lookup_bag(
-  table: EtsTable,
+  table: ArtifactTable,
   key: String,
 ) -> List(artifacts_types.ArtifactMeta)
 
@@ -339,31 +395,31 @@ type LibrarianState {
     narrative_dir: String,
     cbr_dir: String,
     // Narrative ETS tables
-    entries: EtsTable,
-    by_thread: EtsTable,
-    by_date: EtsTable,
-    by_keyword: EtsTable,
-    by_recency: EtsTable,
+    entries: NarrativeTable,
+    by_thread: NarrativeTable,
+    by_date: NarrativeTable,
+    by_keyword: NarrativeTable,
+    by_recency: NarrativeTable,
     thread_index: ThreadIndex,
     // CBR ETS tables
-    cbr_cases: EtsTable,
-    cbr_by_intent: EtsTable,
-    cbr_by_keyword: EtsTable,
-    cbr_by_domain: EtsTable,
+    cbr_cases: CbrTable,
+    cbr_by_intent: CbrTable,
+    cbr_by_keyword: CbrTable,
+    cbr_by_domain: CbrTable,
     // Facts
     facts_dir: String,
-    facts_by_key: EtsTable,
-    facts_by_cycle: EtsTable,
+    facts_by_key: FactTable,
+    facts_by_cycle: FactTable,
     // Scratchpad — agent results per cycle (ephemeral, bag)
-    cycle_scratchpad: EtsTable,
+    cycle_scratchpad: ScratchpadTable,
     // DAG ETS tables
-    dag_nodes: EtsTable,
-    dag_by_parent: EtsTable,
-    dag_by_date: EtsTable,
+    dag_nodes: DagTable,
+    dag_by_parent: DagTable,
+    dag_by_date: DagTable,
     // Artifact ETS tables
     artifacts_dir: String,
-    artifacts: EtsTable,
-    artifacts_by_cycle: EtsTable,
+    artifacts: ArtifactTable,
+    artifacts_by_cycle: ArtifactTable,
   )
 }
 
@@ -381,109 +437,136 @@ pub fn start(
   artifacts_dir: String,
   max_files: Int,
 ) -> Subject(LibrarianMessage) {
+  let #(subj, _pid) =
+    start_with_pid(narrative_dir, cbr_dir, facts_dir, artifacts_dir, max_files)
+  subj
+}
+
+/// Start the Librarian actor, returning both the Subject and the Pid.
+/// Used by the supervisor to set up a process monitor.
+fn start_with_pid(
+  narrative_dir: String,
+  cbr_dir: String,
+  facts_dir: String,
+  artifacts_dir: String,
+  max_files: Int,
+) -> #(Subject(LibrarianMessage), Pid) {
   let setup: Subject(Subject(LibrarianMessage)) = process.new_subject()
-  process.spawn_unlinked(fn() {
-    let self: Subject(LibrarianMessage) = process.new_subject()
-    process.send(setup, self)
+  let pid =
+    process.spawn_unlinked(fn() {
+      let self: Subject(LibrarianMessage) = process.new_subject()
+      process.send(setup, self)
 
-    // Create narrative ETS tables
-    let entries_table = new_table("narrative_entries", "set")
-    let by_thread_table = new_table("narrative_by_thread", "bag")
-    let by_date_table = new_table("narrative_by_date", "bag")
-    let by_keyword_table = new_table("narrative_by_keyword", "bag")
-    let by_recency_table = new_table("narrative_by_recency", "ordered_set")
+      // Create narrative ETS tables
+      let entries_table = new_narrative_table("narrative_entries", "set")
+      let by_thread_table = new_narrative_table("narrative_by_thread", "bag")
+      let by_date_table = new_narrative_table("narrative_by_date", "bag")
+      let by_keyword_table = new_narrative_table("narrative_by_keyword", "bag")
+      let by_recency_table =
+        new_narrative_table("narrative_by_recency", "ordered_set")
 
-    // Create CBR ETS tables
-    let cbr_cases_table = new_table("cbr_cases", "set")
-    let cbr_intent_table = new_table("cbr_by_intent", "bag")
-    let cbr_keyword_table = new_table("cbr_by_keyword", "bag")
-    let cbr_domain_table = new_table("cbr_by_domain", "bag")
+      // Create CBR ETS tables
+      let cbr_cases_table = new_cbr_table("cbr_cases", "set")
+      let cbr_intent_table = new_cbr_table("cbr_by_intent", "bag")
+      let cbr_keyword_table = new_cbr_table("cbr_by_keyword", "bag")
+      let cbr_domain_table = new_cbr_table("cbr_by_domain", "bag")
 
-    // Create Facts ETS tables
-    let facts_key_table = new_table("facts_by_key", "set")
-    let facts_cycle_table = new_table("facts_by_cycle", "bag")
+      // Create Facts ETS tables
+      let facts_key_table = new_fact_table("facts_by_key", "set")
+      let facts_cycle_table = new_fact_table("facts_by_cycle", "bag")
 
-    // Create scratchpad table (bag — multiple results per cycle)
-    let scratchpad_table = new_table("cycle_scratchpad", "bag")
+      // Create scratchpad table (bag — multiple results per cycle)
+      let scratchpad_table = new_scratchpad_table("cycle_scratchpad", "bag")
 
-    // Create DAG ETS tables
-    let dag_nodes_table = new_table("dag_nodes", "set")
-    let dag_parent_table = new_table("dag_by_parent", "bag")
-    let dag_date_table = new_table("dag_by_date", "bag")
+      // Create DAG ETS tables
+      let dag_nodes_table = new_dag_table("dag_nodes", "set")
+      let dag_parent_table = new_dag_table("dag_by_parent", "bag")
+      let dag_date_table = new_dag_table("dag_by_date", "bag")
 
-    // Create Artifact ETS tables
-    let artifacts_table = new_table("artifacts", "set")
-    let artifacts_cycle_table = new_table("artifacts_by_cycle", "bag")
+      // Create Artifact ETS tables
+      let artifacts_table = new_artifact_table("artifacts", "set")
+      let artifacts_cycle_table =
+        new_artifact_table("artifacts_by_cycle", "bag")
 
-    let state =
-      LibrarianState(
-        self:,
-        narrative_dir:,
-        cbr_dir:,
-        entries: entries_table,
-        by_thread: by_thread_table,
-        by_date: by_date_table,
-        by_keyword: by_keyword_table,
-        by_recency: by_recency_table,
-        thread_index: ThreadIndex(threads: []),
-        cbr_cases: cbr_cases_table,
-        cbr_by_intent: cbr_intent_table,
-        cbr_by_keyword: cbr_keyword_table,
-        cbr_by_domain: cbr_domain_table,
-        facts_dir:,
-        facts_by_key: facts_key_table,
-        facts_by_cycle: facts_cycle_table,
-        cycle_scratchpad: scratchpad_table,
-        dag_nodes: dag_nodes_table,
-        dag_by_parent: dag_parent_table,
-        dag_by_date: dag_date_table,
-        artifacts_dir:,
-        artifacts: artifacts_table,
-        artifacts_by_cycle: artifacts_cycle_table,
+      let state =
+        LibrarianState(
+          self:,
+          narrative_dir:,
+          cbr_dir:,
+          entries: entries_table,
+          by_thread: by_thread_table,
+          by_date: by_date_table,
+          by_keyword: by_keyword_table,
+          by_recency: by_recency_table,
+          thread_index: ThreadIndex(threads: []),
+          cbr_cases: cbr_cases_table,
+          cbr_by_intent: cbr_intent_table,
+          cbr_by_keyword: cbr_keyword_table,
+          cbr_by_domain: cbr_domain_table,
+          facts_dir:,
+          facts_by_key: facts_key_table,
+          facts_by_cycle: facts_cycle_table,
+          cycle_scratchpad: scratchpad_table,
+          dag_nodes: dag_nodes_table,
+          dag_by_parent: dag_parent_table,
+          dag_by_date: dag_date_table,
+          artifacts_dir:,
+          artifacts: artifacts_table,
+          artifacts_by_cycle: artifacts_cycle_table,
+        )
+
+      // Replay narrative JSONL files
+      let state = replay_narrative_from_disk(state, max_files)
+
+      // Load thread index
+      let thread_index = narrative_log.load_thread_index(narrative_dir)
+      let state = LibrarianState(..state, thread_index:)
+
+      // Replay CBR JSONL files
+      replay_cbr_from_disk(state, max_files)
+
+      // Replay facts from disk
+      replay_facts_from_disk(state)
+
+      // Replay DAG from cycle log
+      replay_dag_from_cycle_log(state, max_files)
+
+      // Replay artifacts from disk
+      replay_artifacts_from_disk(state, max_files)
+
+      let narrative_count = ets_table_size(entries_table)
+      let cbr_count = cbr_table_size(cbr_cases_table)
+      let facts_count = fact_table_size(facts_key_table)
+      slog.info(
+        "narrative/librarian",
+        "start",
+        "Librarian ready — "
+          <> string.inspect(narrative_count)
+          <> " narrative entries, "
+          <> string.inspect(cbr_count)
+          <> " CBR cases, "
+          <> string.inspect(facts_count)
+          <> " facts",
+        None,
       )
 
-    // Replay narrative JSONL files
-    let state = replay_narrative_from_disk(state, max_files)
-
-    // Load thread index
-    let thread_index = narrative_log.load_thread_index(narrative_dir)
-    let state = LibrarianState(..state, thread_index:)
-
-    // Replay CBR JSONL files
-    replay_cbr_from_disk(state, max_files)
-
-    // Replay facts from disk
-    replay_facts_from_disk(state)
-
-    // Replay DAG from cycle log
-    replay_dag_from_cycle_log(state, max_files)
-
-    // Replay artifacts from disk
-    replay_artifacts_from_disk(state, max_files)
-
-    let narrative_count = ets_table_size(entries_table)
-    let cbr_count = cbr_table_size(cbr_cases_table)
-    let facts_count = fact_table_size(facts_key_table)
-    slog.info(
-      "narrative/librarian",
-      "start",
-      "Librarian ready — "
-        <> string.inspect(narrative_count)
-        <> " narrative entries, "
-        <> string.inspect(cbr_count)
-        <> " CBR cases, "
-        <> string.inspect(facts_count)
-        <> " facts",
-      None,
-    )
-
-    // Enter message loop
-    loop(state)
-  })
+      // Enter message loop
+      loop(state)
+    })
 
   // Wait for the actor to send back its Subject
-  let assert Ok(subj) = process.receive(setup, 30_000)
-  subj
+  case process.receive(setup, 30_000) {
+    Ok(subj) -> #(subj, pid)
+    Error(_) -> {
+      slog.log_error(
+        "librarian",
+        "start",
+        "Librarian failed to start within 30s",
+        None,
+      )
+      panic as "Librarian startup timeout"
+    }
+  }
 }
 
 /// Start a supervised Librarian. If the Librarian crashes, it is automatically
@@ -496,7 +579,7 @@ pub fn start_supervised(
   artifacts_dir: String,
   max_files: Int,
   max_restarts: Int,
-) -> Subject(LibrarianMessage) {
+) -> Result(Subject(LibrarianMessage), Nil) {
   // The proxy subject must be created inside the spawned process (owner rule),
   // then sent back to the caller via a setup channel.
   let setup: Subject(Subject(LibrarianMessage)) = process.new_subject()
@@ -514,8 +597,24 @@ pub fn start_supervised(
       proxy_subj,
     )
   })
-  let assert Ok(proxy_subj) = process.receive(setup, 30_000)
-  proxy_subj
+  case process.receive(setup, 30_000) {
+    Ok(proxy_subj) -> Ok(proxy_subj)
+    Error(_) -> {
+      slog.log_error(
+        "librarian",
+        "start_supervised",
+        "Supervised Librarian failed to start within 30s",
+        None,
+      )
+      Error(Nil)
+    }
+  }
+}
+
+/// Internal message type for the supervisor selector.
+type SupervisorEvent {
+  ForwardMsg(LibrarianMessage)
+  LibrarianDown
 }
 
 fn librarian_supervisor_loop(
@@ -528,14 +627,23 @@ fn librarian_supervisor_loop(
   restart_count: Int,
   proxy: Subject(LibrarianMessage),
 ) -> Nil {
-  // Start a fresh librarian
-  let librarian =
-    start(narrative_dir, cbr_dir, facts_dir, artifacts_dir, max_files)
+  // Start a fresh librarian, getting both Subject and Pid
+  let #(librarian, pid) =
+    start_with_pid(narrative_dir, cbr_dir, facts_dir, artifacts_dir, max_files)
 
-  // Forward messages and monitor the librarian process
+  // Set up OTP monitor — fires immediately when the process exits
+  let monitor = process.monitor(pid)
+
+  // Build a selector that handles both forwarded messages and DOWN signals
+  let sel =
+    process.new_selector()
+    |> process.select_map(proxy, fn(msg) { ForwardMsg(msg) })
+    |> process.select_specific_monitor(monitor, fn(_down) { LibrarianDown })
+
+  // Forward messages until the librarian dies
   forward_loop(
     librarian,
-    proxy,
+    sel,
     narrative_dir,
     cbr_dir,
     facts_dir,
@@ -543,12 +651,13 @@ fn librarian_supervisor_loop(
     max_files,
     max_restarts,
     restart_count,
+    proxy,
   )
 }
 
 fn forward_loop(
   librarian: Subject(LibrarianMessage),
-  proxy: Subject(LibrarianMessage),
+  sel: process.Selector(SupervisorEvent),
   narrative_dir: String,
   cbr_dir: String,
   facts_dir: String,
@@ -556,14 +665,14 @@ fn forward_loop(
   max_files: Int,
   max_restarts: Int,
   restart_count: Int,
+  proxy: Subject(LibrarianMessage),
 ) -> Nil {
-  // Select on proxy messages to forward, with a periodic liveness check
-  case process.receive(proxy, 5000) {
-    Ok(msg) -> {
+  case process.selector_receive_forever(sel) {
+    ForwardMsg(msg) -> {
       process.send(librarian, msg)
       forward_loop(
         librarian,
-        proxy,
+        sel,
         narrative_dir,
         cbr_dir,
         facts_dir,
@@ -571,58 +680,39 @@ fn forward_loop(
         max_files,
         max_restarts,
         restart_count,
+        proxy,
       )
     }
-    Error(_) -> {
-      // Timeout — check if librarian is still alive by sending a ping-like query
-      let test_subj: Subject(List(NarrativeEntry)) = process.new_subject()
-      process.send(librarian, QueryRecent(n: 0, reply_to: test_subj))
-      case process.receive(test_subj, 2000) {
-        Ok(_) ->
-          forward_loop(
-            librarian,
-            proxy,
+    LibrarianDown -> {
+      case restart_count < max_restarts {
+        True -> {
+          slog.warn(
+            "librarian",
+            "supervisor",
+            "Librarian process exited, restarting (attempt "
+              <> string.inspect(restart_count + 1)
+              <> ")",
+            None,
+          )
+          librarian_supervisor_loop(
             narrative_dir,
             cbr_dir,
             facts_dir,
             artifacts_dir,
             max_files,
             max_restarts,
-            restart_count,
+            restart_count + 1,
+            proxy,
           )
-        Error(_) -> {
-          // Librarian is dead
-          case restart_count < max_restarts {
-            True -> {
-              slog.warn(
-                "librarian",
-                "supervisor",
-                "Librarian unresponsive, restarting (attempt "
-                  <> string.inspect(restart_count + 1)
-                  <> ")",
-                None,
-              )
-              librarian_supervisor_loop(
-                narrative_dir,
-                cbr_dir,
-                facts_dir,
-                artifacts_dir,
-                max_files,
-                max_restarts,
-                restart_count + 1,
-                proxy,
-              )
-            }
-            False -> {
-              slog.log_error(
-                "librarian",
-                "supervisor",
-                "Librarian max restarts exceeded, giving up",
-                None,
-              )
-              Nil
-            }
-          }
+        }
+        False -> {
+          slog.log_error(
+            "librarian",
+            "supervisor",
+            "Librarian max restarts exceeded, giving up",
+            None,
+          )
+          Nil
         }
       }
     }
@@ -1097,7 +1187,25 @@ pub fn lookup_artifact(
 // Message loop
 // ---------------------------------------------------------------------------
 
+const mailbox_warn_threshold = 50
+
 fn loop(state: LibrarianState) -> Nil {
+  // Periodic mailbox backpressure check
+  let mbox_size = get_mailbox_size()
+  case mbox_size > mailbox_warn_threshold {
+    True ->
+      slog.warn(
+        "librarian",
+        "loop",
+        "Mailbox backpressure: "
+          <> int.to_string(mbox_size)
+          <> " messages queued (threshold="
+          <> int.to_string(mailbox_warn_threshold)
+          <> ")",
+        None,
+      )
+    False -> Nil
+  }
   case process.receive(state.self, 60_000) {
     Error(_) -> {
       // Timeout — just keep looping (idle heartbeat)
@@ -1113,22 +1221,22 @@ fn loop(state: LibrarianState) -> Nil {
           ets_delete_table(state.by_keyword)
           ets_delete_table(state.by_recency)
           // Delete CBR tables
-          ets_delete_table(state.cbr_cases)
-          ets_delete_table(state.cbr_by_intent)
-          ets_delete_table(state.cbr_by_keyword)
-          ets_delete_table(state.cbr_by_domain)
+          cbr_delete_table(state.cbr_cases)
+          cbr_delete_table(state.cbr_by_intent)
+          cbr_delete_table(state.cbr_by_keyword)
+          cbr_delete_table(state.cbr_by_domain)
           // Delete Facts tables
-          ets_delete_table(state.facts_by_key)
-          ets_delete_table(state.facts_by_cycle)
+          fact_delete_table(state.facts_by_key)
+          fact_delete_table(state.facts_by_cycle)
           // Delete scratchpad
-          ets_delete_table(state.cycle_scratchpad)
+          scratchpad_delete_table(state.cycle_scratchpad)
           // Delete DAG tables
-          ets_delete_table(state.dag_nodes)
-          ets_delete_table(state.dag_by_parent)
-          ets_delete_table(state.dag_by_date)
+          dag_delete_table(state.dag_nodes)
+          dag_delete_table(state.dag_by_parent)
+          dag_delete_table(state.dag_by_date)
           // Delete Artifact tables
-          ets_delete_table(state.artifacts)
-          ets_delete_table(state.artifacts_by_cycle)
+          artifact_delete_table(state.artifacts)
+          artifact_delete_table(state.artifacts_by_cycle)
           slog.info(
             "narrative/librarian",
             "shutdown",
@@ -1396,16 +1504,23 @@ fn do_query_date_range(
   from: String,
   to: String,
 ) -> List(NarrativeEntry) {
-  let all = ets_all_values(state.entries)
-  list.filter(all, fn(entry) {
-    let date = extract_date(entry.timestamp)
-    case string.compare(date, from), string.compare(date, to) {
-      order.Lt, _ -> False
-      _, order.Gt -> False
-      _, _ -> True
-    }
-  })
+  // Use the by_date bag index instead of scanning all entries.
+  // Generate each date in [from, to] and look up entries per date.
+  let dates = generate_date_range(from, to)
+  list.flat_map(dates, fn(date) { ets_lookup_bag(state.by_date, date) })
   |> list.sort(fn(a, b) { string.compare(a.timestamp, b.timestamp) })
+}
+
+/// Generate a list of "YYYY-MM-DD" strings from `from` to `to` inclusive.
+fn generate_date_range(from: String, to: String) -> List(String) {
+  case string.compare(from, to) {
+    order.Gt -> []
+    _ -> {
+      let days = days_between(from, to)
+      generate_offsets(0, days)
+      |> list.map(fn(offset) { add_days_to_date(from, offset) })
+    }
+  }
 }
 
 fn do_search(state: LibrarianState, keyword: String) -> List(NarrativeEntry) {
@@ -1566,24 +1681,16 @@ fn compute_recency(timestamp: String) -> Float {
   }
 }
 
-/// Rough age estimate in days by comparing YYYY-MM-DD date strings.
+/// Exact age in days between two YYYY-MM-DD date strings using Erlang calendar.
 fn estimate_age_days(case_date: String, today: String) -> Int {
-  // Parse year, month, day from both dates
-  let cy = parse_int_slice(case_date, 0, 4)
-  let cm = parse_int_slice(case_date, 5, 7)
-  let cd = parse_int_slice(case_date, 8, 10)
-  let ty = parse_int_slice(today, 0, 4)
-  let tm = parse_int_slice(today, 5, 7)
-  let td = parse_int_slice(today, 8, 10)
-  // Approximate: (year_diff * 365) + (month_diff * 30) + day_diff
-  { ty - cy } * 365 + { tm - cm } * 30 + { td - cd }
+  days_between(case_date, today)
 }
 
-fn parse_int_slice(s: String, from: Int, to: Int) -> Int {
-  let slice = string.slice(s, from, to - from)
-  case int.parse(slice) {
-    Ok(n) -> n
-    Error(_) -> 0
+/// Generate a list [from..to] inclusive.
+fn generate_offsets(from: Int, to: Int) -> List(Int) {
+  case from > to {
+    True -> []
+    False -> [from, ..generate_offsets(from + 1, to)]
   }
 }
 
@@ -1813,8 +1920,9 @@ fn merge_unique_entries(
   a: List(NarrativeEntry),
   b: List(NarrativeEntry),
 ) -> List(NarrativeEntry) {
-  let ids = list.map(a, fn(e) { e.cycle_id })
-  let unique_b = list.filter(b, fn(e) { !list.contains(ids, e.cycle_id) })
+  let id_set =
+    list.fold(a, dict.new(), fn(d, e) { dict.insert(d, e.cycle_id, Nil) })
+  let unique_b = list.filter(b, fn(e) { !dict.has_key(id_set, e.cycle_id) })
   list.append(a, unique_b)
 }
 
@@ -1822,8 +1930,9 @@ fn merge_unique_cases(
   a: List(cbr_types.CbrCase),
   b: List(cbr_types.CbrCase),
 ) -> List(cbr_types.CbrCase) {
-  let ids = list.map(a, fn(c) { c.case_id })
-  let unique_b = list.filter(b, fn(c) { !list.contains(ids, c.case_id) })
+  let id_set =
+    list.fold(a, dict.new(), fn(d, c) { dict.insert(d, c.case_id, Nil) })
+  let unique_b = list.filter(b, fn(c) { !dict.has_key(id_set, c.case_id) })
   list.append(a, unique_b)
 }
 
@@ -1938,43 +2047,33 @@ fn compute_tool_activity(
     list.flat_map(all, fn(node) {
       list.map(node.tool_calls, fn(t) { #(t.name, t.success, node.cycle_id) })
     })
-  // Group by tool name using list-based accumulation
-  list.fold(triples, [], fn(acc, triple) {
-    let #(name, success, cycle_id) = triple
-    upsert_tool_record(acc, name, success, cycle_id, [])
-  })
-}
-
-fn upsert_tool_record(
-  records: List(dag_types.ToolActivityRecord),
-  name: String,
-  success: Bool,
-  cycle_id: String,
-  checked: List(dag_types.ToolActivityRecord),
-) -> List(dag_types.ToolActivityRecord) {
-  case records {
-    [] -> {
-      // Not found — create new record
-      let new =
-        dag_types.ToolActivityRecord(
-          name:,
-          total_calls: 1,
-          success_count: case success {
-            True -> 1
-            False -> 0
-          },
-          failure_count: case success {
-            True -> 0
-            False -> 1
-          },
-          cycle_ids: [cycle_id],
-        )
-      [new, ..checked]
-    }
-    [rec, ..rest] ->
-      case rec.name == name {
-        True -> {
-          let updated =
+  // Group by tool name using Dict for O(n) aggregation
+  let records_dict =
+    list.fold(triples, dict.new(), fn(acc, triple) {
+      let #(name, success, cycle_id) = triple
+      case dict.get(acc, name) {
+        Error(_) ->
+          dict.insert(
+            acc,
+            name,
+            dag_types.ToolActivityRecord(
+              name:,
+              total_calls: 1,
+              success_count: case success {
+                True -> 1
+                False -> 0
+              },
+              failure_count: case success {
+                True -> 0
+                False -> 1
+              },
+              cycle_ids: [cycle_id],
+            ),
+          )
+        Ok(rec) ->
+          dict.insert(
+            acc,
+            name,
             dag_types.ToolActivityRecord(
               ..rec,
               total_calls: rec.total_calls + 1,
@@ -1992,13 +2091,11 @@ fn upsert_tool_record(
                 True -> rec.cycle_ids
                 False -> [cycle_id, ..rec.cycle_ids]
               },
-            )
-          list.append(checked, [updated, ..rest])
-        }
-        False ->
-          upsert_tool_record(rest, name, success, cycle_id, [rec, ..checked])
+            ),
+          )
       }
-  }
+    })
+  dict.values(records_dict)
 }
 
 fn replay_dag_from_cycle_log(state: LibrarianState, max_files: Int) -> Nil {

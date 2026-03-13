@@ -19,7 +19,7 @@ import llm/types as llm_types
 fn start_cognitive(provider) {
   let notify_subj: process.Subject(Notification) = process.new_subject()
   let cfg = cognitive_config.default_test_config(provider, notify_subj)
-  let subj = cognitive.start(cfg)
+  let assert Ok(subj) = cognitive.start(cfg)
   #(subj, notify_subj)
 }
 
@@ -251,7 +251,7 @@ pub fn model_fallback_on_retryable_error_test() {
       reasoning_model: "mock-reasoning",
       archivist_model: "mock-task",
     )
-  let cognitive = cognitive.start(cfg)
+  let assert Ok(cognitive) = cognitive.start(cfg)
 
   // Use a query with complexity keywords so heuristic classifies as Complex,
   // routing to reasoning_model (mock-reasoning) which returns 529

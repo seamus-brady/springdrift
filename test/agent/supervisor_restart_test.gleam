@@ -80,7 +80,7 @@ fn drain_event(
 pub fn permanent_agent_starts_test() {
   let cognitive: process.Subject(CognitiveMessage) = process.new_subject()
   let provider = mock.provider_with_text("ok")
-  let sup = supervisor.start(cognitive, 3)
+  let assert Ok(sup) = supervisor.start(cognitive, 3)
   let spec = make_spec("perm-agent", provider, Permanent)
 
   let _task_subj = start_child(sup, spec)
@@ -95,7 +95,7 @@ pub fn permanent_agent_starts_test() {
 pub fn transient_agent_starts_test() {
   let cognitive: process.Subject(CognitiveMessage) = process.new_subject()
   let provider = mock.provider_with_text("ok")
-  let sup = supervisor.start(cognitive, 3)
+  let assert Ok(sup) = supervisor.start(cognitive, 3)
   let spec = make_spec("trans-agent", provider, Transient)
 
   let _task_subj = start_child(sup, spec)
@@ -110,7 +110,7 @@ pub fn transient_agent_starts_test() {
 pub fn temporary_agent_starts_test() {
   let cognitive: process.Subject(CognitiveMessage) = process.new_subject()
   let provider = mock.provider_with_text("ok")
-  let sup = supervisor.start(cognitive, 3)
+  let assert Ok(sup) = supervisor.start(cognitive, 3)
   let spec = make_spec("temp-agent", provider, Temporary)
 
   let _task_subj = start_child(sup, spec)
@@ -125,7 +125,7 @@ pub fn temporary_agent_starts_test() {
 pub fn mixed_strategy_agents_test() {
   let cognitive: process.Subject(CognitiveMessage) = process.new_subject()
   let provider = mock.provider_with_text("ok")
-  let sup = supervisor.start(cognitive, 5)
+  let assert Ok(sup) = supervisor.start(cognitive, 5)
 
   let _t1 = start_child(sup, make_spec("perm", provider, Permanent))
   let assert Ok(AgentStarted(name: "perm", ..)) = drain_event(cognitive, 5000)
@@ -144,7 +144,7 @@ pub fn mixed_strategy_agents_test() {
 pub fn stop_and_restart_same_name_test() {
   let cognitive: process.Subject(CognitiveMessage) = process.new_subject()
   let provider = mock.provider_with_text("ok")
-  let sup = supervisor.start(cognitive, 3)
+  let assert Ok(sup) = supervisor.start(cognitive, 3)
   let spec = make_spec("recyclable", provider, Temporary)
 
   let _task_subj1 = start_child(sup, spec)
@@ -168,7 +168,7 @@ pub fn stop_and_restart_same_name_test() {
 pub fn agent_survives_task_completion_test() {
   let cognitive: process.Subject(CognitiveMessage) = process.new_subject()
   let provider = mock.provider_with_text("result")
-  let sup = supervisor.start(cognitive, 3)
+  let assert Ok(sup) = supervisor.start(cognitive, 3)
   let spec = make_spec("survivor", provider, Permanent)
 
   let task_subj = start_child(sup, spec)
@@ -214,7 +214,7 @@ pub fn agent_survives_task_completion_test() {
 pub fn shutdown_all_mixed_strategies_test() {
   let cognitive: process.Subject(CognitiveMessage) = process.new_subject()
   let provider = mock.provider_with_text("ok")
-  let sup = supervisor.start(cognitive, 5)
+  let assert Ok(sup) = supervisor.start(cognitive, 5)
 
   let _t1 = start_child(sup, make_spec("a", provider, Permanent))
   let assert Ok(AgentStarted(..)) = drain_event(cognitive, 5000)
@@ -239,7 +239,7 @@ pub fn shutdown_all_mixed_strategies_test() {
 
 pub fn stop_nonexistent_child_test() {
   let cognitive: process.Subject(CognitiveMessage) = process.new_subject()
-  let sup = supervisor.start(cognitive, 3)
+  let assert Ok(sup) = supervisor.start(cognitive, 3)
 
   // This should not crash the supervisor
   process.send(sup, StopChild(name: "does-not-exist"))

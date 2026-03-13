@@ -58,7 +58,7 @@ fn restarts_in_window(timestamps: List(Int), now: Int) -> #(Int, List(Int)) {
 pub fn start(
   cognitive: Subject(CognitiveMessage),
   max_restarts: Int,
-) -> Subject(SupervisorMessage) {
+) -> Result(Subject(SupervisorMessage), Nil) {
   slog.info("supervisor", "start", "Starting supervisor", None)
   let setup = process.new_subject()
   process.spawn_unlinked(fn() {
@@ -68,8 +68,18 @@ pub fn start(
     process.send(setup, self)
     supervisor_loop(state)
   })
-  let assert Ok(subj) = process.receive(setup, 5000)
-  subj
+  case process.receive(setup, 5000) {
+    Ok(subj) -> Ok(subj)
+    Error(_) -> {
+      slog.log_error(
+        "supervisor",
+        "start",
+        "Supervisor failed to start within 5s",
+        None,
+      )
+      Error(Nil)
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

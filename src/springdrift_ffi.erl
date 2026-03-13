@@ -11,7 +11,8 @@
          file_size/1, days_ago_date/1,
          uri_encode/1, extract_ddg_results/1,
          http_get/1, cosine_similarity/2,
-         ensure_utf8/1]).
+         ensure_utf8/1, days_between/2,
+         mailbox_size/0, add_days/2]).
 
 %% Read one line from stdin.
 %% Returns {ok, Binary} (including trailing newline) or {error, nil} on EOF.
@@ -129,7 +130,7 @@ read_char() ->
 fetch_url(Url) ->
     application:ensure_all_started(inets),
     application:ensure_all_started(ssl),
-    Opts = [{timeout, 10000}],
+    Opts = [{timeout, 30000}],
     UrlStr = case is_binary(Url) of
         true  -> binary_to_list(Url);
         false -> Url
@@ -157,7 +158,7 @@ http_post(Url, Headers, Body) ->
         false -> Body
     end,
     HeaderList = [{binary_to_list(K), binary_to_list(V)} || {K, V} <- Headers],
-    Opts = [{timeout, 60000}],
+    Opts = [{timeout, 300000}],
     case httpc:request(post, {UrlStr, HeaderList, "application/json", BodyStr}, Opts, [{body_format, binary}]) of
         {ok, {{_, StatusCode, _}, _, RespBody}} ->
             {ok, {StatusCode, RespBody}};
@@ -394,7 +395,7 @@ http_get(Url) ->
         true  -> binary_to_list(Url);
         false -> Url
     end,
-    Opts = [{timeout, 5000}],
+    Opts = [{timeout, 30000}],
     case httpc:request(get, {UrlStr, []}, Opts, [{body_format, binary}]) of
         {ok, {{_, StatusCode, _}, _, Body}} ->
             {ok, {StatusCode, Body}};
@@ -453,4 +454,30 @@ ensure_utf8_loop(<<C/utf8, Rest/binary>>, Acc) ->
 ensure_utf8_loop(<<_, Rest/binary>>, Acc) ->
     %% Replace invalid byte with U+FFFD (replacement character)
     ensure_utf8_loop(Rest, <<Acc/binary, 16#EF, 16#BF, 16#BD>>).
+
+%% Compute exact number of days between two "YYYY-MM-DD" date strings.
+%% Returns an integer (positive if DateB is after DateA).
+days_between(DateA, DateB) ->
+    {YA, MA, DA} = parse_date_bin(DateA),
+    {YB, MB, DB} = parse_date_bin(DateB),
+    GregA = calendar:date_to_gregorian_days({YA, MA, DA}),
+    GregB = calendar:date_to_gregorian_days({YB, MB, DB}),
+    GregB - GregA.
+
+parse_date_bin(<<Y:4/binary, $-, M:2/binary, $-, D:2/binary, _/binary>>) ->
+    {binary_to_integer(Y), binary_to_integer(M), binary_to_integer(D)};
+parse_date_bin(_) ->
+    {1970, 1, 1}.
+
+%% Return the current process's mailbox size.
+mailbox_size() ->
+    {message_queue_len, Len} = erlang:process_info(self(), message_queue_len),
+    Len.
+
+%% Add N days to a "YYYY-MM-DD" date string, return new "YYYY-MM-DD" string.
+add_days(DateBin, Days) ->
+    {Y, M, D} = parse_date_bin(DateBin),
+    Greg = calendar:date_to_gregorian_days({Y, M, D}),
+    {NY, NM, ND} = calendar:gregorian_days_to_date(Greg + Days),
+    iolist_to_binary(io_lib:format("~4..0B-~2..0B-~2..0B", [NY, NM, ND])).
 

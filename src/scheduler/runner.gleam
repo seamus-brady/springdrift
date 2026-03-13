@@ -32,7 +32,7 @@ pub fn start(
   tasks: List(profile_types.ScheduleTaskConfig),
   cognitive: Subject(agent_types.CognitiveMessage),
   checkpoint_path: String,
-) -> Subject(SchedulerMessage) {
+) -> Result(Subject(SchedulerMessage), Nil) {
   let setup = process.new_subject()
   process.spawn_unlinked(fn() {
     let self: Subject(SchedulerMessage) = process.new_subject()
@@ -112,8 +112,18 @@ pub fn start(
     scheduler_loop(self, jobs, cognitive, checkpoint_path)
   })
 
-  let assert Ok(subj) = process.receive(setup, 5000)
-  subj
+  case process.receive(setup, 5000) {
+    Ok(subj) -> Ok(subj)
+    Error(_) -> {
+      slog.log_error(
+        "scheduler",
+        "start",
+        "Scheduler failed to start within 5s",
+        None,
+      )
+      Error(Nil)
+    }
+  }
 }
 
 fn scheduler_loop(

@@ -36,7 +36,9 @@ fn rescue(body: fn() -> a) -> Result(a, String)
 // ---------------------------------------------------------------------------
 
 /// Start the cognitive loop process. Returns a Subject for sending messages.
-pub fn start(cfg: cognitive_config.CognitiveConfig) -> Subject(CognitiveMessage) {
+pub fn start(
+  cfg: cognitive_config.CognitiveConfig,
+) -> Result(Subject(CognitiveMessage), Nil) {
   // The cognitive loop gets agent tools + request_human_input + memory tools
   let tools =
     list.flatten([
@@ -88,8 +90,18 @@ pub fn start(cfg: cognitive_config.CognitiveConfig) -> Subject(CognitiveMessage)
     process.send(setup, self)
     cognitive_loop(state)
   })
-  let assert Ok(subj) = process.receive(setup, 5000)
-  subj
+  case process.receive(setup, 5000) {
+    Ok(subj) -> Ok(subj)
+    Error(_) -> {
+      slog.log_error(
+        "cognitive",
+        "start",
+        "Cognitive loop failed to start within 5s",
+        None,
+      )
+      Error(Nil)
+    }
+  }
 }
 
 /// Build a Tool definition from an AgentSpec so the LLM can call agents.
@@ -262,7 +274,23 @@ fn handle_user_input(
 
       CognitiveState(..state, status: Classifying(cycle_id:))
     }
-    _ -> state
+    _ -> {
+      slog.warn(
+        "cognitive",
+        "handle_user_input",
+        "Input dropped: loop busy (status not Idle)",
+        state.cycle_id,
+      )
+      process.send(
+        reply_to,
+        CognitiveReply(
+          response: "[System: still processing previous request, please wait.]",
+          model: state.model,
+          usage: None,
+        ),
+      )
+      state
+    }
   }
 }
 

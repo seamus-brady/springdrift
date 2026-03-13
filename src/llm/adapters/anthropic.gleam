@@ -21,7 +21,7 @@ pub const claude_sonnet_4 = "claude-sonnet-4-20250514"
 
 pub const claude_haiku_3_5 = "claude-haiku-3-5-20241022"
 
-const request_timeout_ms = 120_000
+const request_timeout_ms = 300_000
 
 /// Create an Anthropic provider using the ANTHROPIC_API_KEY environment variable
 pub fn provider() -> Result(Provider, types.LlmError) {

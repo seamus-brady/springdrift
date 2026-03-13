@@ -39,7 +39,7 @@ fn start_both(suffix: String) {
   let _ = simplifile.create_directory_all(cbr_dir)
   let _ = simplifile.create_directory_all(facts_dir)
   let lib = librarian.start(dir, cbr_dir, facts_dir, dir <> "/artifacts", 0)
-  let cur = curator.start(lib, dir, cbr_dir, facts_dir)
+  let assert Ok(cur) = curator.start(lib, dir, cbr_dir, facts_dir)
   #(lib, cur)
 }
 
@@ -504,7 +504,7 @@ pub fn build_system_prompt_fallback_when_no_identity_test() {
   let _ = simplifile.create_directory_all(facts_dir)
   let lib = librarian.start(dir, cbr_dir, facts_dir, dir <> "/artifacts", 0)
   // Use empty identity dirs to force fallback (no priv/ lookup)
-  let cur =
+  let assert Ok(cur) =
     curator.start_with_identity(
       lib,
       dir,
@@ -532,7 +532,7 @@ pub fn build_system_prompt_with_persona_test() {
   let _ = simplifile.create_directory_all(cbr_dir)
   let _ = simplifile.create_directory_all(facts_dir)
   let lib = librarian.start(dir, cbr_dir, facts_dir, dir <> "/artifacts", 0)
-  let cur =
+  let assert Ok(cur) =
     curator.start_with_identity(
       lib,
       dir,

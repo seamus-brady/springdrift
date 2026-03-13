@@ -111,7 +111,7 @@ pub fn start(
   narrative_dir: String,
   cbr_dir: String,
   facts_dir: String,
-) -> Subject(CuratorMessage) {
+) -> Result(Subject(CuratorMessage), Nil) {
   start_with_identity(
     librarian,
     narrative_dir,
@@ -136,7 +136,7 @@ pub fn start_with_identity(
   active_profile: Option(String),
   agent_name: String,
   agent_version: String,
-) -> Subject(CuratorMessage) {
+) -> Result(Subject(CuratorMessage), Nil) {
   let setup: Subject(Subject(CuratorMessage)) = process.new_subject()
   process.spawn_unlinked(fn() {
     let self: Subject(CuratorMessage) = process.new_subject()
@@ -166,8 +166,18 @@ pub fn start_with_identity(
     loop(state)
   })
 
-  let assert Ok(subj) = process.receive(setup, 30_000)
-  subj
+  case process.receive(setup, 30_000) {
+    Ok(subj) -> Ok(subj)
+    Error(_) -> {
+      slog.log_error(
+        "narrative/curator",
+        "start",
+        "Curator failed to start within 30s",
+        None,
+      )
+      Error(Nil)
+    }
+  }
 }
 
 /// Inject context into an agent task. Blocks until reply.

@@ -14,44 +14,96 @@ import llm/types as llm_types
 import narrative/curator.{type CuratorMessage}
 import narrative/librarian.{type LibrarianMessage}
 
+/// Model selection and generation parameters — extracted for documentation
+/// and potential future refactoring into a sub-record.
+pub type ModelConfig {
+  ModelConfig(
+    model: String,
+    task_model: String,
+    reasoning_model: String,
+    max_tokens: Int,
+    archivist_model: String,
+  )
+}
+
+/// Memory subsystem references — extracted for documentation
+/// and potential future refactoring into a sub-record.
+pub type MemoryContext {
+  MemoryContext(
+    narrative_dir: String,
+    cbr_dir: String,
+    librarian: Option(Subject(LibrarianMessage)),
+    curator: Option(Subject(CuratorMessage)),
+    embedding_config: embedding_types.EmbeddingConfig,
+  )
+}
+
 pub type CognitiveState {
   CognitiveState(
+    // --- Core process ---
     self: Subject(CognitiveMessage),
     provider: Provider,
+    notify: Subject(Notification),
+    // --- Model config (see ModelConfig) ---
     model: String,
-    system: String,
+    task_model: String,
+    reasoning_model: String,
     max_tokens: Int,
+    archivist_model: String,
+    // --- Conversation ---
+    system: String,
     max_context_messages: Option(Int),
     tools: List(llm_types.Tool),
     messages: List(llm_types.Message),
-    registry: Registry,
-    pending: Dict(String, PendingTask),
+    // --- Loop control ---
     status: CognitiveStatus,
     cycle_id: Option(String),
-    verbose: Bool,
-    notify: Subject(Notification),
-    task_model: String,
-    reasoning_model: String,
+    pending: Dict(String, PendingTask),
     save_in_progress: Bool,
     save_pending: Option(List(llm_types.Message)),
-    dprime_state: Option(dprime_types.DprimeState),
-    // Narrative (always enabled)
+    verbose: Bool,
+    // --- Memory context (see MemoryContext) ---
     narrative_dir: String,
     cbr_dir: String,
-    archivist_model: String,
     librarian: Option(Subject(LibrarianMessage)),
-    agent_completions: List(AgentCompletionRecord),
-    last_user_input: String,
-    // Profile
-    active_profile: Option(String),
-    supervisor: Option(Subject(SupervisorMessage)),
-    profile_dirs: List(String),
-    write_anywhere: Bool,
-    output_dprime_state: Option(dprime_types.DprimeState),
-    dprime_decisions: List(dag_types.DprimeDecisionRecord),
     curator: Option(Subject(CuratorMessage)),
     embedding_config: embedding_types.EmbeddingConfig,
+    // --- Agent subsystem ---
+    registry: Registry,
+    agent_completions: List(AgentCompletionRecord),
+    last_user_input: String,
+    supervisor: Option(Subject(SupervisorMessage)),
+    // --- D' safety ---
+    dprime_state: Option(dprime_types.DprimeState),
+    output_dprime_state: Option(dprime_types.DprimeState),
+    dprime_decisions: List(dag_types.DprimeDecisionRecord),
+    // --- Profile and identity ---
+    active_profile: Option(String),
+    profile_dirs: List(String),
+    write_anywhere: Bool,
     agent_uuid: String,
     session_since: String,
+  )
+}
+
+/// Extract model config from state.
+pub fn model_config(state: CognitiveState) -> ModelConfig {
+  ModelConfig(
+    model: state.model,
+    task_model: state.task_model,
+    reasoning_model: state.reasoning_model,
+    max_tokens: state.max_tokens,
+    archivist_model: state.archivist_model,
+  )
+}
+
+/// Extract memory context from state.
+pub fn memory_context(state: CognitiveState) -> MemoryContext {
+  MemoryContext(
+    narrative_dir: state.narrative_dir,
+    cbr_dir: state.cbr_dir,
+    librarian: state.librarian,
+    curator: state.curator,
+    embedding_config: state.embedding_config,
   )
 }

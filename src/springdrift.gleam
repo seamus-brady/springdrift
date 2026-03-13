@@ -215,6 +215,16 @@ fn run(cfg: AppConfig) -> Nil {
   let agent_version = option.unwrap(cfg.agent_version, "")
   let max_tokens = option.unwrap(cfg.max_tokens, 2048)
   let write_anywhere = option.unwrap(cfg.write_anywhere, False)
+  case write_anywhere {
+    True ->
+      slog.warn(
+        "springdrift",
+        "run",
+        "write_anywhere is ENABLED — file writes are not restricted to CWD",
+        option.None,
+      )
+    False -> Nil
+  }
 
   let #(p, default_task_model, default_reasoning_model) = select_provider(cfg)
 
@@ -236,7 +246,7 @@ fn run(cfg: AppConfig) -> Nil {
 
   // Start the Librarian (supervised — auto-restarts on crash)
   let librarian_max_days = option.unwrap(cfg.librarian_max_days, 90)
-  let librarian_subj =
+  let librarian_subj = case
     librarian.start_supervised(
       narrative_dir,
       paths.cbr_dir(),
@@ -245,6 +255,13 @@ fn run(cfg: AppConfig) -> Nil {
       librarian_max_days,
       5,
     )
+  {
+    Ok(subj) -> subj
+    Error(_) -> {
+      io.println("Fatal: Librarian failed to start")
+      panic as "Librarian startup failed"
+    }
+  }
   let lib = option.Some(librarian_subj)
 
   // Profile system
@@ -350,7 +367,7 @@ fn run(cfg: AppConfig) -> Nil {
   }
 
   // Start Curator (stays alive for dynamic system prompt assembly)
-  let curator_subj =
+  let curator_subj = case
     curator.start_with_identity(
       librarian_subj,
       narrative_dir,
@@ -362,6 +379,13 @@ fn run(cfg: AppConfig) -> Nil {
       agent_name,
       agent_version,
     )
+  {
+    Ok(subj) -> subj
+    Error(_) -> {
+      io.println("Fatal: Curator failed to start")
+      panic as "Curator startup failed"
+    }
+  }
 
   // Load or create stable agent identity
   let stable_identity = agent_identity.load_or_create()
@@ -369,7 +393,7 @@ fn run(cfg: AppConfig) -> Nil {
   let session_since = get_date_ffi()
 
   // Start cognitive loop with empty registry (supervisor will register agents)
-  let cognitive_subj =
+  let cognitive_subj = case
     cognitive.start(CognitiveConfig(
       provider: p,
       system:,
@@ -395,9 +419,22 @@ fn run(cfg: AppConfig) -> Nil {
       agent_uuid: stable_identity.agent_uuid,
       session_since:,
     ))
+  {
+    Ok(subj) -> subj
+    Error(_) -> {
+      io.println("Fatal: Cognitive loop failed to start")
+      panic as "Cognitive loop startup failed"
+    }
+  }
 
   // Start supervisor and register agents via StartChild
-  let sup = supervisor.start(cognitive_subj, 5)
+  let sup = case supervisor.start(cognitive_subj, 5) {
+    Ok(subj) -> subj
+    Error(_) -> {
+      io.println("Fatal: Supervisor failed to start")
+      panic as "Supervisor startup failed"
+    }
+  }
   list.each(agent_specs, fn(spec) {
     let reply_subj = process.new_subject()
     process.send(sup, agent_types.StartChild(spec:, reply_to: reply_subj))
@@ -446,17 +483,21 @@ fn run(cfg: AppConfig) -> Nil {
                     _ -> {
                       let checkpoint_path =
                         ".springdrift/scheduler-checkpoint.json"
-                      let _scheduler =
+                      case
                         scheduler_runner.start(
                           tasks,
                           cognitive_subj,
                           checkpoint_path,
                         )
-                      io.println(
-                        "Scheduler: "
-                        <> int.to_string(list.length(tasks))
-                        <> " task(s) scheduled",
-                      )
+                      {
+                        Ok(_) ->
+                          io.println(
+                            "Scheduler: "
+                            <> int.to_string(list.length(tasks))
+                            <> " task(s) scheduled",
+                          )
+                        Error(_) -> io.println("Scheduler: failed to start")
+                      }
                     }
                   }
                 Error(_) -> Nil

@@ -88,7 +88,8 @@ fn do_chat(
 // Request encoding
 // ---------------------------------------------------------------------------
 
-fn encode_request(req: types.LlmRequest) -> String {
+@internal
+pub fn encode_request(req: types.LlmRequest) -> String {
   let messages = encode_messages(req)
   let base = [
     #("model", json.string(req.model)),
@@ -129,7 +130,32 @@ fn encode_request(req: types.LlmRequest) -> String {
       list.append(with_tools, [
         #("tool_choice", encode_tool_choice(choice)),
       ])
-    None -> with_tools
+    None ->
+      // Mistral Small ignores tools with "auto" on initial turns.
+      // Use "any" (force tool call) when no tool results exist yet,
+      // then switch to "auto" once the conversation has tool context
+      // so the model can produce a final text reply.
+      case req.tools {
+        Some([_, ..]) -> {
+          let has_tool_results =
+            list.any(req.messages, fn(msg) {
+              list.any(msg.content, fn(block) {
+                case block {
+                  types.ToolResultContent(..) -> True
+                  _ -> False
+                }
+              })
+            })
+          let choice = case has_tool_results {
+            True -> "auto"
+            False -> "any"
+          }
+          list.append(with_tools, [
+            #("tool_choice", json.string(choice)),
+          ])
+        }
+        _ -> with_tools
+      }
   }
 
   json.object(with_tool_choice)
