@@ -109,6 +109,12 @@ pub fn merge_override_wins_test() {
       profiles_dirs: None,
       default_profile: None,
       librarian_max_days: None,
+      housekeeping_tick_ms: None,
+      housekeeping_interval_ticks: None,
+      dedup_similarity: None,
+      pruning_confidence: None,
+      fact_confidence: None,
+      cbr_pruning_days: None,
     )
   let override =
     AppConfig(
@@ -136,6 +142,12 @@ pub fn merge_override_wins_test() {
       profiles_dirs: None,
       default_profile: None,
       librarian_max_days: None,
+      housekeeping_tick_ms: None,
+      housekeeping_interval_ticks: None,
+      dedup_similarity: None,
+      pruning_confidence: None,
+      fact_confidence: None,
+      cbr_pruning_days: None,
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("openai"))
@@ -168,6 +180,12 @@ pub fn merge_base_preserved_when_override_none_test() {
       profiles_dirs: None,
       default_profile: None,
       librarian_max_days: None,
+      housekeeping_tick_ms: None,
+      housekeeping_interval_ticks: None,
+      dedup_similarity: None,
+      pruning_confidence: None,
+      fact_confidence: None,
+      cbr_pruning_days: None,
     )
   let override =
     AppConfig(
@@ -195,6 +213,12 @@ pub fn merge_base_preserved_when_override_none_test() {
       profiles_dirs: None,
       default_profile: None,
       librarian_max_days: None,
+      housekeeping_tick_ms: None,
+      housekeeping_interval_ticks: None,
+      dedup_similarity: None,
+      pruning_confidence: None,
+      fact_confidence: None,
+      cbr_pruning_days: None,
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("anthropic"))
@@ -227,6 +251,12 @@ pub fn merge_combines_different_fields_test() {
       profiles_dirs: None,
       default_profile: None,
       librarian_max_days: None,
+      housekeeping_tick_ms: None,
+      housekeeping_interval_ticks: None,
+      dedup_similarity: None,
+      pruning_confidence: None,
+      fact_confidence: None,
+      cbr_pruning_days: None,
     )
   let override =
     AppConfig(
@@ -254,6 +284,12 @@ pub fn merge_combines_different_fields_test() {
       profiles_dirs: None,
       default_profile: None,
       librarian_max_days: None,
+      housekeeping_tick_ms: None,
+      housekeeping_interval_ticks: None,
+      dedup_similarity: None,
+      pruning_confidence: None,
+      fact_confidence: None,
+      cbr_pruning_days: None,
     )
   let merged = config.merge(base, override:)
   merged.provider |> should.equal(Some("anthropic"))
@@ -366,6 +402,12 @@ pub fn merge_new_fields_test() {
       profiles_dirs: None,
       default_profile: None,
       librarian_max_days: None,
+      housekeeping_tick_ms: None,
+      housekeeping_interval_ticks: None,
+      dedup_similarity: None,
+      pruning_confidence: None,
+      fact_confidence: None,
+      cbr_pruning_days: None,
     )
   let override =
     AppConfig(
@@ -393,6 +435,12 @@ pub fn merge_new_fields_test() {
       profiles_dirs: None,
       default_profile: None,
       librarian_max_days: None,
+      housekeeping_tick_ms: None,
+      housekeeping_interval_ticks: None,
+      dedup_similarity: None,
+      pruning_confidence: None,
+      fact_confidence: None,
+      cbr_pruning_days: None,
     )
   let merged = config.merge(base, override:)
   merged.max_turns |> should.equal(Some(10))
@@ -467,6 +515,12 @@ pub fn merge_model_fields_override_wins_test() {
       profiles_dirs: None,
       default_profile: None,
       librarian_max_days: None,
+      housekeeping_tick_ms: None,
+      housekeeping_interval_ticks: None,
+      dedup_similarity: None,
+      pruning_confidence: None,
+      fact_confidence: None,
+      cbr_pruning_days: None,
     )
   let override =
     AppConfig(
@@ -494,6 +548,12 @@ pub fn merge_model_fields_override_wins_test() {
       profiles_dirs: None,
       default_profile: None,
       librarian_max_days: None,
+      housekeeping_tick_ms: None,
+      housekeeping_interval_ticks: None,
+      dedup_similarity: None,
+      pruning_confidence: None,
+      fact_confidence: None,
+      cbr_pruning_days: None,
     )
   let merged = config.merge(base, override:)
   merged.task_model |> should.equal(Some("override-task"))
@@ -527,6 +587,12 @@ pub fn merge_model_fields_base_preserved_test() {
       profiles_dirs: None,
       default_profile: None,
       librarian_max_days: None,
+      housekeeping_tick_ms: None,
+      housekeeping_interval_ticks: None,
+      dedup_similarity: None,
+      pruning_confidence: None,
+      fact_confidence: None,
+      cbr_pruning_days: None,
     )
   let override =
     AppConfig(
@@ -554,6 +620,12 @@ pub fn merge_model_fields_base_preserved_test() {
       profiles_dirs: None,
       default_profile: None,
       librarian_max_days: None,
+      housekeeping_tick_ms: None,
+      housekeeping_interval_ticks: None,
+      dedup_similarity: None,
+      pruning_confidence: None,
+      fact_confidence: None,
+      cbr_pruning_days: None,
     )
   let merged = config.merge(base, override:)
   merged.task_model |> should.equal(Some("haiku"))
@@ -624,6 +696,12 @@ pub fn to_string_fully_set_test() {
       profiles_dirs: None,
       default_profile: None,
       librarian_max_days: None,
+      housekeeping_tick_ms: None,
+      housekeeping_interval_ticks: None,
+      dedup_similarity: None,
+      pruning_confidence: None,
+      fact_confidence: None,
+      cbr_pruning_days: None,
     )
   let s = config.to_string(cfg)
   string.contains(s, "provider") |> should.be_true
@@ -746,6 +824,12 @@ pub fn merge_gui_override_wins_test() {
       profiles_dirs: None,
       default_profile: None,
       librarian_max_days: None,
+      housekeeping_tick_ms: None,
+      housekeeping_interval_ticks: None,
+      dedup_similarity: None,
+      pruning_confidence: None,
+      fact_confidence: None,
+      cbr_pruning_days: None,
     )
   let override =
     AppConfig(
@@ -773,6 +857,12 @@ pub fn merge_gui_override_wins_test() {
       profiles_dirs: None,
       default_profile: None,
       librarian_max_days: None,
+      housekeeping_tick_ms: None,
+      housekeeping_interval_ticks: None,
+      dedup_similarity: None,
+      pruning_confidence: None,
+      fact_confidence: None,
+      cbr_pruning_days: None,
     )
   let merged = config.merge(base, override:)
   merged.gui |> should.equal(Some("web"))
@@ -868,6 +958,12 @@ pub fn merge_dprime_override_wins_test() {
       profiles_dirs: None,
       default_profile: None,
       librarian_max_days: None,
+      housekeeping_tick_ms: None,
+      housekeeping_interval_ticks: None,
+      dedup_similarity: None,
+      pruning_confidence: None,
+      fact_confidence: None,
+      cbr_pruning_days: None,
     )
   let override =
     AppConfig(
@@ -895,6 +991,12 @@ pub fn merge_dprime_override_wins_test() {
       profiles_dirs: None,
       default_profile: None,
       librarian_max_days: None,
+      housekeeping_tick_ms: None,
+      housekeeping_interval_ticks: None,
+      dedup_similarity: None,
+      pruning_confidence: None,
+      fact_confidence: None,
+      cbr_pruning_days: None,
     )
   let merged = config.merge(base, override:)
   merged.dprime_enabled |> should.equal(Some(True))

@@ -33,6 +33,32 @@ import paths
 import slog
 
 // ---------------------------------------------------------------------------
+// Housekeeping config
+// ---------------------------------------------------------------------------
+
+pub type HousekeepingConfig {
+  HousekeepingConfig(
+    tick_ms: Int,
+    interval_ticks: Int,
+    dedup_similarity: Float,
+    pruning_confidence: Float,
+    fact_confidence: Float,
+    cbr_pruning_days: Int,
+  )
+}
+
+pub fn default_housekeeping_config() -> HousekeepingConfig {
+  HousekeepingConfig(
+    tick_ms: 86_400_000,
+    interval_ticks: 60,
+    dedup_similarity: 0.92,
+    pruning_confidence: 0.3,
+    fact_confidence: 0.7,
+    cbr_pruning_days: 60,
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Messages
 // ---------------------------------------------------------------------------
 
@@ -89,9 +115,8 @@ type CuratorState {
     narrative_dir: String,
     cbr_dir: String,
     facts_dir: String,
-    housekeeping_interval_ms: Int,
+    housekeeping_config: HousekeepingConfig,
     housekeeping_ticks: Int,
-    housekeeping_tick_target: Int,
     vm: VirtualMemory,
     identity_dirs: List(String),
     memory_tag: String,
@@ -122,6 +147,7 @@ pub fn start(
     None,
     "Springdrift",
     "",
+    default_housekeeping_config(),
   )
 }
 
@@ -136,6 +162,7 @@ pub fn start_with_identity(
   active_profile: Option(String),
   agent_name: String,
   agent_version: String,
+  housekeeping_config: HousekeepingConfig,
 ) -> Result(Subject(CuratorMessage), Nil) {
   let setup: Subject(Subject(CuratorMessage)) = process.new_subject()
   process.spawn_unlinked(fn() {
@@ -149,10 +176,8 @@ pub fn start_with_identity(
         narrative_dir:,
         cbr_dir:,
         facts_dir:,
-        housekeeping_interval_ms: 86_400_000,
+        housekeeping_config:,
         housekeeping_ticks: 0,
-        // 60 ticks × 60s timeout = ~1 hour between housekeeping passes
-        housekeeping_tick_target: 60,
         vm: virtual_memory.empty(),
         identity_dirs:,
         memory_tag:,
@@ -313,7 +338,7 @@ fn loop(state: CuratorState) -> Nil {
     Error(_) -> {
       // Timeout — idle heartbeat; check if housekeeping is due
       let ticks = state.housekeeping_ticks + 1
-      case ticks >= state.housekeeping_tick_target {
+      case ticks >= state.housekeeping_config.interval_ticks {
         True -> {
           do_housekeeping(state)
           loop(CuratorState(..state, housekeeping_ticks: 0))
@@ -529,7 +554,7 @@ fn write_extracted_facts(
   case facts {
     [] -> Nil
     [fact, ..rest] -> {
-      case fact.confidence >=. 0.7 {
+      case fact.confidence >=. state.housekeeping_config.fact_confidence {
         True -> {
           let memory_fact =
             make_memory_fact(
@@ -591,17 +616,25 @@ fn do_housekeeping(state: CuratorState) -> Nil {
 
   // 1. CBR deduplication
   let all_cases = librarian.load_all_cases(state.librarian)
-  let dedup_results = housekeeping.find_duplicate_cases(all_cases, 0.92)
+  let dedup_results =
+    housekeeping.find_duplicate_cases(
+      all_cases,
+      state.housekeeping_config.dedup_similarity,
+    )
   let dedup_count = list.length(dedup_results)
   list.each(dedup_results, fn(d: housekeeping.DedupResult) {
     librarian.remove_case(state.librarian, d.supersede_id)
   })
 
   // 2. CBR pruning
-  let cutoff_date = days_ago_date(60)
+  let cutoff_date = days_ago_date(state.housekeeping_config.cbr_pruning_days)
   let remaining_cases = librarian.load_all_cases(state.librarian)
   let prune_results =
-    housekeeping.find_prunable_cases(remaining_cases, cutoff_date)
+    housekeeping.find_prunable_cases(
+      remaining_cases,
+      cutoff_date,
+      state.housekeeping_config.pruning_confidence,
+    )
   let prune_count = list.length(prune_results)
   list.each(prune_results, fn(p: housekeeping.PruneResult) {
     librarian.remove_case(state.librarian, p.case_id)

@@ -119,7 +119,8 @@ pub fn dedup_empty_list_test() {
 pub fn prune_finds_old_failures_test() {
   let old_failure =
     make_case("old-fail", "2025-01-01T10:00:00Z", [], "failure", 0.2, [])
-  let results = housekeeping.find_prunable_cases([old_failure], "2025-12-01")
+  let results =
+    housekeeping.find_prunable_cases([old_failure], "2025-12-01", 0.3)
   list.length(results) |> should.equal(1)
   let assert [r] = results
   r.case_id |> should.equal("old-fail")
@@ -128,7 +129,8 @@ pub fn prune_finds_old_failures_test() {
 pub fn prune_keeps_recent_failures_test() {
   let recent_failure =
     make_case("recent-fail", "2026-03-01T10:00:00Z", [], "failure", 0.2, [])
-  let results = housekeeping.find_prunable_cases([recent_failure], "2026-01-01")
+  let results =
+    housekeeping.find_prunable_cases([recent_failure], "2026-01-01", 0.3)
   results |> should.equal([])
 }
 
@@ -138,7 +140,11 @@ pub fn prune_keeps_failures_with_pitfalls_test() {
       "API rate limited",
     ])
   let results =
-    housekeeping.find_prunable_cases([old_failure_with_pitfalls], "2025-12-01")
+    housekeeping.find_prunable_cases(
+      [old_failure_with_pitfalls],
+      "2025-12-01",
+      0.3,
+    )
   results |> should.equal([])
 }
 
@@ -146,14 +152,15 @@ pub fn prune_keeps_high_confidence_failures_test() {
   let high_conf_failure =
     make_case("hi-fail", "2025-01-01T10:00:00Z", [], "failure", 0.5, [])
   let results =
-    housekeeping.find_prunable_cases([high_conf_failure], "2025-12-01")
+    housekeeping.find_prunable_cases([high_conf_failure], "2025-12-01", 0.3)
   results |> should.equal([])
 }
 
 pub fn prune_keeps_successes_test() {
   let old_success =
     make_case("old-success", "2025-01-01T10:00:00Z", [], "success", 0.2, [])
-  let results = housekeeping.find_prunable_cases([old_success], "2025-12-01")
+  let results =
+    housekeeping.find_prunable_cases([old_success], "2025-12-01", 0.3)
   results |> should.equal([])
 }
 

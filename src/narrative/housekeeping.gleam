@@ -128,16 +128,17 @@ pub type PruneResult {
 
 /// Find CBR cases eligible for pruning:
 /// - outcome.status == "failure"
-/// - confidence < 0.3
+/// - confidence < pruning_confidence threshold
 /// - timestamp older than cutoff_date (YYYY-MM-DD string comparison)
 /// - empty pitfalls list
 pub fn find_prunable_cases(
   cases: List(cbr_types.CbrCase),
   cutoff_date: String,
+  pruning_confidence: Float,
 ) -> List(PruneResult) {
   list.filter_map(cases, fn(c) {
     let is_failure = c.outcome.status == "failure"
-    let is_low_confidence = c.outcome.confidence <. 0.3
+    let is_low_confidence = c.outcome.confidence <. pruning_confidence
     let is_old =
       string.compare(extract_date(c.timestamp), cutoff_date) == order.Lt
     let has_no_pitfalls = list.is_empty(c.outcome.pitfalls)

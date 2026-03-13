@@ -366,6 +366,33 @@ fn run(cfg: AppConfig) -> Nil {
     }
   }
 
+  // Build housekeeping config from AppConfig
+  let hk_default = curator.default_housekeeping_config()
+  let housekeeping_config =
+    curator.HousekeepingConfig(
+      tick_ms: option.unwrap(cfg.housekeeping_tick_ms, hk_default.tick_ms),
+      interval_ticks: option.unwrap(
+        cfg.housekeeping_interval_ticks,
+        hk_default.interval_ticks,
+      ),
+      dedup_similarity: option.unwrap(
+        cfg.dedup_similarity,
+        hk_default.dedup_similarity,
+      ),
+      pruning_confidence: option.unwrap(
+        cfg.pruning_confidence,
+        hk_default.pruning_confidence,
+      ),
+      fact_confidence: option.unwrap(
+        cfg.fact_confidence,
+        hk_default.fact_confidence,
+      ),
+      cbr_pruning_days: option.unwrap(
+        cfg.cbr_pruning_days,
+        hk_default.cbr_pruning_days,
+      ),
+    )
+
   // Start Curator (stays alive for dynamic system prompt assembly)
   let curator_subj = case
     curator.start_with_identity(
@@ -378,6 +405,7 @@ fn run(cfg: AppConfig) -> Nil {
       active_profile,
       agent_name,
       agent_version,
+      housekeeping_config,
     )
   {
     Ok(subj) -> subj
