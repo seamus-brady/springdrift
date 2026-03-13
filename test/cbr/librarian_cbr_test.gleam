@@ -74,7 +74,14 @@ pub fn librarian_starts_with_no_cases_test() {
   let cbr_dir = dir <> "/cbr"
   let _ = simplifile.create_directory_all(cbr_dir)
   let lib =
-    librarian.start(dir, cbr_dir, dir <> "/facts", dir <> "/artifacts", 0)
+    librarian.start(
+      dir,
+      cbr_dir,
+      dir <> "/facts",
+      dir <> "/artifacts",
+      0,
+      librarian.default_scoring_config(),
+    )
   let cases = librarian.load_all_cases(lib)
   cases |> should.equal([])
   process.send(lib, librarian.Shutdown)
@@ -85,7 +92,14 @@ pub fn librarian_index_and_query_case_test() {
   let cbr_dir = dir <> "/cbr"
   let _ = simplifile.create_directory_all(cbr_dir)
   let lib =
-    librarian.start(dir, cbr_dir, dir <> "/facts", dir <> "/artifacts", 0)
+    librarian.start(
+      dir,
+      cbr_dir,
+      dir <> "/facts",
+      dir <> "/artifacts",
+      0,
+      librarian.default_scoring_config(),
+    )
 
   let c = make_case("case-001", "research", "property", ["market"], ["Dublin"])
   librarian.notify_new_case(lib, c)
@@ -104,7 +118,14 @@ pub fn librarian_retrieve_by_intent_test() {
   let cbr_dir = dir <> "/cbr"
   let _ = simplifile.create_directory_all(cbr_dir)
   let lib =
-    librarian.start(dir, cbr_dir, dir <> "/facts", dir <> "/artifacts", 0)
+    librarian.start(
+      dir,
+      cbr_dir,
+      dir <> "/facts",
+      dir <> "/artifacts",
+      0,
+      librarian.default_scoring_config(),
+    )
 
   let c1 = make_case("case-i1", "research", "property", ["market"], ["Dublin"])
   let c2 = make_case("case-i2", "analysis", "finance", ["stocks"], ["NYSE"])
@@ -141,7 +162,14 @@ pub fn librarian_retrieve_by_keywords_test() {
   let cbr_dir = dir <> "/cbr"
   let _ = simplifile.create_directory_all(cbr_dir)
   let lib =
-    librarian.start(dir, cbr_dir, dir <> "/facts", dir <> "/artifacts", 0)
+    librarian.start(
+      dir,
+      cbr_dir,
+      dir <> "/facts",
+      dir <> "/artifacts",
+      0,
+      librarian.default_scoring_config(),
+    )
 
   let c1 =
     make_case("case-k1", "research", "property", ["market", "rental"], [
@@ -178,7 +206,14 @@ pub fn librarian_retrieve_max_results_test() {
   let cbr_dir = dir <> "/cbr"
   let _ = simplifile.create_directory_all(cbr_dir)
   let lib =
-    librarian.start(dir, cbr_dir, dir <> "/facts", dir <> "/artifacts", 0)
+    librarian.start(
+      dir,
+      cbr_dir,
+      dir <> "/facts",
+      dir <> "/artifacts",
+      0,
+      librarian.default_scoring_config(),
+    )
 
   // Insert 5 cases with the same intent
   list.each(["c1", "c2", "c3", "c4", "c5"], fn(id) {
@@ -208,7 +243,14 @@ pub fn librarian_retrieve_no_match_test() {
   let cbr_dir = dir <> "/cbr"
   let _ = simplifile.create_directory_all(cbr_dir)
   let lib =
-    librarian.start(dir, cbr_dir, dir <> "/facts", dir <> "/artifacts", 0)
+    librarian.start(
+      dir,
+      cbr_dir,
+      dir <> "/facts",
+      dir <> "/artifacts",
+      0,
+      librarian.default_scoring_config(),
+    )
 
   let c = make_case("case-nm1", "research", "property", ["market"], ["Dublin"])
   librarian.notify_new_case(lib, c)
@@ -252,7 +294,14 @@ pub fn librarian_cbr_replay_from_disk_test() {
 
   // Start Librarian — should replay CBR cases
   let lib =
-    librarian.start(dir, cbr_dir, dir <> "/facts", dir <> "/artifacts", 0)
+    librarian.start(
+      dir,
+      cbr_dir,
+      dir <> "/facts",
+      dir <> "/artifacts",
+      0,
+      librarian.default_scoring_config(),
+    )
   let cases = librarian.load_all_cases(lib)
   list.length(cases) |> should.equal(2)
 
@@ -264,7 +313,14 @@ pub fn librarian_domain_scoring_test() {
   let cbr_dir = dir <> "/cbr"
   let _ = simplifile.create_directory_all(cbr_dir)
   let lib =
-    librarian.start(dir, cbr_dir, dir <> "/facts", dir <> "/artifacts", 0)
+    librarian.start(
+      dir,
+      cbr_dir,
+      dir <> "/facts",
+      dir <> "/artifacts",
+      0,
+      librarian.default_scoring_config(),
+    )
 
   let c1 = make_case("case-d1", "research", "property", ["market"], [])
   let c2 = make_case("case-d2", "research", "finance", ["market"], [])
@@ -295,7 +351,14 @@ pub fn librarian_entity_scoring_test() {
   let cbr_dir = dir <> "/cbr"
   let _ = simplifile.create_directory_all(cbr_dir)
   let lib =
-    librarian.start(dir, cbr_dir, dir <> "/facts", dir <> "/artifacts", 0)
+    librarian.start(
+      dir,
+      cbr_dir,
+      dir <> "/facts",
+      dir <> "/artifacts",
+      0,
+      librarian.default_scoring_config(),
+    )
 
   let c1 =
     make_case("case-e1", "research", "property", ["market"], ["Dublin", "Cork"])

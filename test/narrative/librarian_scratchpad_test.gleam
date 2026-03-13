@@ -32,7 +32,15 @@ fn start_lib(suffix: String) {
   let facts_dir = dir <> "/facts"
   let _ = simplifile.create_directory_all(cbr_dir)
   let _ = simplifile.create_directory_all(facts_dir)
-  let lib = librarian.start(dir, cbr_dir, facts_dir, dir <> "/artifacts", 0)
+  let lib =
+    librarian.start(
+      dir,
+      cbr_dir,
+      facts_dir,
+      dir <> "/artifacts",
+      0,
+      librarian.default_scoring_config(),
+    )
   lib
 }
 

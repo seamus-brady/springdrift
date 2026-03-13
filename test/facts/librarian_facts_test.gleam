@@ -49,7 +49,15 @@ fn start_lib(suffix: String) {
   let facts_dir = dir <> "/facts"
   let _ = simplifile.create_directory_all(cbr_dir)
   let _ = simplifile.create_directory_all(facts_dir)
-  let lib = librarian.start(dir, cbr_dir, facts_dir, dir <> "/artifacts", 0)
+  let lib =
+    librarian.start(
+      dir,
+      cbr_dir,
+      facts_dir,
+      dir <> "/artifacts",
+      0,
+      librarian.default_scoring_config(),
+    )
   #(lib, dir, facts_dir)
 }
 
@@ -178,7 +186,15 @@ pub fn librarian_replay_facts_from_disk_test() {
       json1 <> "\n" <> json2 <> "\n",
     )
 
-  let lib = librarian.start(dir, cbr_dir, facts_dir, dir <> "/artifacts", 0)
+  let lib =
+    librarian.start(
+      dir,
+      cbr_dir,
+      facts_dir,
+      dir <> "/artifacts",
+      0,
+      librarian.default_scoring_config(),
+    )
   let facts = librarian.get_all_facts(lib)
   list.length(facts) |> should.equal(2)
 

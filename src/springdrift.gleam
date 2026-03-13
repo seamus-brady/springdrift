@@ -246,6 +246,47 @@ fn run(cfg: AppConfig) -> Nil {
 
   // Start the Librarian (supervised — auto-restarts on crash)
   let librarian_max_days = option.unwrap(cfg.librarian_max_days, 90)
+  let default_sc = librarian.default_scoring_config()
+  let scoring_config =
+    librarian.CbrScoringConfig(
+      cosine_weight: option.unwrap(
+        cfg.cbr_cosine_weight,
+        default_sc.cosine_weight,
+      ),
+      symbolic_weight: option.unwrap(
+        cfg.cbr_symbolic_weight,
+        default_sc.symbolic_weight,
+      ),
+      intent_weight: option.unwrap(
+        cfg.cbr_intent_weight,
+        default_sc.intent_weight,
+      ),
+      keyword_weight: option.unwrap(
+        cfg.cbr_keyword_weight,
+        default_sc.keyword_weight,
+      ),
+      entity_weight: option.unwrap(
+        cfg.cbr_entity_weight,
+        default_sc.entity_weight,
+      ),
+      domain_weight: option.unwrap(
+        cfg.cbr_domain_weight,
+        default_sc.domain_weight,
+      ),
+      recency_weight: option.unwrap(
+        cfg.cbr_recency_weight,
+        default_sc.recency_weight,
+      ),
+      min_score: option.unwrap(cfg.cbr_min_score, default_sc.min_score),
+      recency_decay_days: option.unwrap(
+        cfg.cbr_recency_decay_days,
+        default_sc.recency_decay_days,
+      ),
+      mailbox_warn_threshold: option.unwrap(
+        cfg.mailbox_warn_threshold,
+        default_sc.mailbox_warn_threshold,
+      ),
+    )
   let librarian_subj = case
     librarian.start_supervised(
       narrative_dir,
@@ -254,6 +295,7 @@ fn run(cfg: AppConfig) -> Nil {
       paths.artifacts_dir(),
       librarian_max_days,
       5,
+      scoring_config,
     )
   {
     Ok(subj) -> subj

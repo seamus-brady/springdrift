@@ -50,6 +50,40 @@ import simplifile
 import slog
 
 // ---------------------------------------------------------------------------
+// CBR Scoring Configuration
+// ---------------------------------------------------------------------------
+
+pub type CbrScoringConfig {
+  CbrScoringConfig(
+    cosine_weight: Float,
+    symbolic_weight: Float,
+    intent_weight: Float,
+    keyword_weight: Float,
+    entity_weight: Float,
+    domain_weight: Float,
+    recency_weight: Float,
+    min_score: Float,
+    recency_decay_days: Int,
+    mailbox_warn_threshold: Int,
+  )
+}
+
+pub fn default_scoring_config() -> CbrScoringConfig {
+  CbrScoringConfig(
+    cosine_weight: 0.4,
+    symbolic_weight: 0.6,
+    intent_weight: 0.35,
+    keyword_weight: 0.25,
+    entity_weight: 0.2,
+    domain_weight: 0.15,
+    recency_weight: 0.05,
+    min_score: 0.1,
+    recency_decay_days: 30,
+    mailbox_warn_threshold: 50,
+  )
+}
+
+// ---------------------------------------------------------------------------
 // FFI — ETS operations (typed per value type)
 // ---------------------------------------------------------------------------
 
@@ -420,6 +454,8 @@ type LibrarianState {
     artifacts_dir: String,
     artifacts: ArtifactTable,
     artifacts_by_cycle: ArtifactTable,
+    // CBR scoring configuration
+    scoring_config: CbrScoringConfig,
   )
 }
 
@@ -436,9 +472,17 @@ pub fn start(
   facts_dir: String,
   artifacts_dir: String,
   max_files: Int,
+  scoring_config: CbrScoringConfig,
 ) -> Subject(LibrarianMessage) {
   let #(subj, _pid) =
-    start_with_pid(narrative_dir, cbr_dir, facts_dir, artifacts_dir, max_files)
+    start_with_pid(
+      narrative_dir,
+      cbr_dir,
+      facts_dir,
+      artifacts_dir,
+      max_files,
+      scoring_config,
+    )
   subj
 }
 
@@ -450,6 +494,7 @@ fn start_with_pid(
   facts_dir: String,
   artifacts_dir: String,
   max_files: Int,
+  scoring_config: CbrScoringConfig,
 ) -> #(Subject(LibrarianMessage), Pid) {
   let setup: Subject(Subject(LibrarianMessage)) = process.new_subject()
   let pid =
@@ -513,6 +558,7 @@ fn start_with_pid(
           artifacts_dir:,
           artifacts: artifacts_table,
           artifacts_by_cycle: artifacts_cycle_table,
+          scoring_config:,
         )
 
       // Replay narrative JSONL files
@@ -579,6 +625,7 @@ pub fn start_supervised(
   artifacts_dir: String,
   max_files: Int,
   max_restarts: Int,
+  scoring_config: CbrScoringConfig,
 ) -> Result(Subject(LibrarianMessage), Nil) {
   // The proxy subject must be created inside the spawned process (owner rule),
   // then sent back to the caller via a setup channel.
@@ -595,6 +642,7 @@ pub fn start_supervised(
       max_restarts,
       0,
       proxy_subj,
+      scoring_config,
     )
   })
   case process.receive(setup, 30_000) {
@@ -626,10 +674,18 @@ fn librarian_supervisor_loop(
   max_restarts: Int,
   restart_count: Int,
   proxy: Subject(LibrarianMessage),
+  scoring_config: CbrScoringConfig,
 ) -> Nil {
   // Start a fresh librarian, getting both Subject and Pid
   let #(librarian, pid) =
-    start_with_pid(narrative_dir, cbr_dir, facts_dir, artifacts_dir, max_files)
+    start_with_pid(
+      narrative_dir,
+      cbr_dir,
+      facts_dir,
+      artifacts_dir,
+      max_files,
+      scoring_config,
+    )
 
   // Set up OTP monitor — fires immediately when the process exits
   let monitor = process.monitor(pid)
@@ -652,6 +708,7 @@ fn librarian_supervisor_loop(
     max_restarts,
     restart_count,
     proxy,
+    scoring_config,
   )
 }
 
@@ -666,6 +723,7 @@ fn forward_loop(
   max_restarts: Int,
   restart_count: Int,
   proxy: Subject(LibrarianMessage),
+  scoring_config: CbrScoringConfig,
 ) -> Nil {
   case process.selector_receive_forever(sel) {
     ForwardMsg(msg) -> {
@@ -681,6 +739,7 @@ fn forward_loop(
         max_restarts,
         restart_count,
         proxy,
+        scoring_config,
       )
     }
     LibrarianDown -> {
@@ -703,6 +762,7 @@ fn forward_loop(
             max_restarts,
             restart_count + 1,
             proxy,
+            scoring_config,
           )
         }
         False -> {
@@ -1187,12 +1247,11 @@ pub fn lookup_artifact(
 // Message loop
 // ---------------------------------------------------------------------------
 
-const mailbox_warn_threshold = 50
-
 fn loop(state: LibrarianState) -> Nil {
   // Periodic mailbox backpressure check
   let mbox_size = get_mailbox_size()
-  case mbox_size > mailbox_warn_threshold {
+  let threshold = state.scoring_config.mailbox_warn_threshold
+  case mbox_size > threshold {
     True ->
       slog.warn(
         "librarian",
@@ -1200,7 +1259,7 @@ fn loop(state: LibrarianState) -> Nil {
         "Mailbox backpressure: "
           <> int.to_string(mbox_size)
           <> " messages queued (threshold="
-          <> int.to_string(mailbox_warn_threshold)
+          <> int.to_string(threshold)
           <> ")",
         None,
       )
@@ -1566,15 +1625,16 @@ fn do_retrieve_cases(
   }
 
   // Stage 2: Score each candidate (hybrid when embeddings available)
+  let cfg = state.scoring_config
   let scored =
     list.map(candidates, fn(c) {
-      let score = score_case(c, query)
+      let score = score_case(c, query, cfg)
       cbr_types.ScoredCase(score:, cbr_case: c)
     })
 
   // Filter by minimum score and sort descending
   scored
-  |> list.filter(fn(sc) { sc.score >. 0.1 })
+  |> list.filter(fn(sc) { sc.score >. cfg.min_score })
   |> list.sort(fn(a, b) {
     case a.score >. b.score {
       True -> order.Lt
@@ -1589,24 +1649,31 @@ fn do_retrieve_cases(
 }
 
 /// Hybrid scoring: when both query and case have embeddings, blend
-/// cosine similarity (0.40) with symbolic (0.60). Otherwise pure symbolic.
-fn score_case(c: cbr_types.CbrCase, query: cbr_types.CbrQuery) -> Float {
-  let symbolic = score_case_symbolic(c, query)
+/// cosine similarity with symbolic. Otherwise pure symbolic.
+fn score_case(
+  c: cbr_types.CbrCase,
+  query: cbr_types.CbrQuery,
+  cfg: CbrScoringConfig,
+) -> Float {
+  let symbolic = score_case_symbolic(c, query, cfg)
   case query.embedding, c.embedding {
     Some(q_emb), [_, ..] -> {
       let cosine = embedding_client.cosine_similarity(q_emb, c.embedding)
       // Clamp cosine to [0, 1] for scoring
       let clamped = float.max(0.0, float.min(1.0, cosine))
-      { symbolic *. 0.6 } +. { clamped *. 0.4 }
+      { symbolic *. cfg.symbolic_weight } +. { clamped *. cfg.cosine_weight }
     }
     _, _ -> symbolic
   }
 }
 
 /// Symbolic scoring fallback (no embeddings).
-/// Weights: intent=0.35, keyword_jaccard=0.25, entity_jaccard=0.20,
-///          domain=0.15, recency=0.05
-fn score_case_symbolic(c: cbr_types.CbrCase, query: cbr_types.CbrQuery) -> Float {
+/// Weights are drawn from CbrScoringConfig.
+fn score_case_symbolic(
+  c: cbr_types.CbrCase,
+  query: cbr_types.CbrQuery,
+  cfg: CbrScoringConfig,
+) -> Float {
   let intent_score = case c.problem.intent == query.intent {
     True -> 1.0
     False -> 0.0
@@ -1632,14 +1699,14 @@ fn score_case_symbolic(c: cbr_types.CbrCase, query: cbr_types.CbrQuery) -> Float
   }
 
   // Recency score: compare case timestamp against current date.
-  // Recent cases (today) score 1.0, decaying to 0.0 over 30 days.
-  let recency_score = compute_recency(c.timestamp)
+  // Recent cases (today) score 1.0, decaying to 0.0 over recency_decay_days.
+  let recency_score = compute_recency(c.timestamp, cfg)
 
-  { intent_score *. 0.35 }
-  +. { keyword_score *. 0.25 }
-  +. { entity_score *. 0.2 }
-  +. { domain_score *. 0.15 }
-  +. { recency_score *. 0.05 }
+  { intent_score *. cfg.intent_weight }
+  +. { keyword_score *. cfg.keyword_weight }
+  +. { entity_score *. cfg.entity_weight }
+  +. { domain_score *. cfg.domain_weight }
+  +. { recency_score *. cfg.recency_weight }
 }
 
 /// Jaccard similarity: |A ∩ B| / |A ∪ B|
@@ -1661,18 +1728,19 @@ fn jaccard(a: List(String), b: List(String)) -> Float {
 }
 
 /// Compute recency score from a timestamp string (ISO 8601 or YYYY-MM-DD prefix).
-/// Returns 1.0 for today, decaying linearly to 0.0 over 30 days.
-fn compute_recency(timestamp: String) -> Float {
+/// Returns 1.0 for today, decaying linearly to 0.0 over recency_decay_days.
+fn compute_recency(timestamp: String, cfg: CbrScoringConfig) -> Float {
   let case_date = string.slice(timestamp, 0, 10)
   let today = get_date()
   case case_date == today {
     True -> 1.0
     False -> {
       // Compare date strings lexicographically as a rough age approximation.
-      // Dates older than 30 days get 0.0; we approximate by checking a few
-      // reference dates via the FFI.
+      // Dates older than recency_decay_days get 0.0; we approximate by checking
+      // a few reference dates via the FFI.
       let age_days = estimate_age_days(case_date, today)
-      let decay = 1.0 -. { int.to_float(age_days) /. 30.0 }
+      let decay_days = int.to_float(cfg.recency_decay_days)
+      let decay = 1.0 -. { int.to_float(age_days) /. decay_days }
       case decay <. 0.0 {
         True -> 0.0
         False -> decay

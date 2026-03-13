@@ -83,6 +83,17 @@ pub type AppConfig {
     agent_version: Option(String),
     // Librarian startup
     librarian_max_days: Option(Int),
+    // CBR scoring
+    cbr_cosine_weight: Option(Float),
+    cbr_symbolic_weight: Option(Float),
+    cbr_intent_weight: Option(Float),
+    cbr_keyword_weight: Option(Float),
+    cbr_entity_weight: Option(Float),
+    cbr_domain_weight: Option(Float),
+    cbr_recency_weight: Option(Float),
+    cbr_min_score: Option(Float),
+    cbr_recency_decay_days: Option(Int),
+    mailbox_warn_threshold: Option(Int),
   )
 }
 
@@ -124,6 +135,16 @@ pub fn default() -> AppConfig {
     agent_name: None,
     agent_version: None,
     librarian_max_days: None,
+    cbr_cosine_weight: None,
+    cbr_symbolic_weight: None,
+    cbr_intent_weight: None,
+    cbr_keyword_weight: None,
+    cbr_entity_weight: None,
+    cbr_domain_weight: None,
+    cbr_recency_weight: None,
+    cbr_min_score: None,
+    cbr_recency_decay_days: None,
+    mailbox_warn_threshold: None,
   )
 }
 
@@ -180,6 +201,43 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     librarian_max_days: option.or(
       override_cfg.librarian_max_days,
       base.librarian_max_days,
+    ),
+    cbr_cosine_weight: option.or(
+      override_cfg.cbr_cosine_weight,
+      base.cbr_cosine_weight,
+    ),
+    cbr_symbolic_weight: option.or(
+      override_cfg.cbr_symbolic_weight,
+      base.cbr_symbolic_weight,
+    ),
+    cbr_intent_weight: option.or(
+      override_cfg.cbr_intent_weight,
+      base.cbr_intent_weight,
+    ),
+    cbr_keyword_weight: option.or(
+      override_cfg.cbr_keyword_weight,
+      base.cbr_keyword_weight,
+    ),
+    cbr_entity_weight: option.or(
+      override_cfg.cbr_entity_weight,
+      base.cbr_entity_weight,
+    ),
+    cbr_domain_weight: option.or(
+      override_cfg.cbr_domain_weight,
+      base.cbr_domain_weight,
+    ),
+    cbr_recency_weight: option.or(
+      override_cfg.cbr_recency_weight,
+      base.cbr_recency_weight,
+    ),
+    cbr_min_score: option.or(override_cfg.cbr_min_score, base.cbr_min_score),
+    cbr_recency_decay_days: option.or(
+      override_cfg.cbr_recency_decay_days,
+      base.cbr_recency_decay_days,
+    ),
+    mailbox_warn_threshold: option.or(
+      override_cfg.mailbox_warn_threshold,
+      base.mailbox_warn_threshold,
     ),
   )
 }
@@ -481,6 +539,50 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
           }),
         )
     },
+    cbr_cosine_weight: case tom.get_float(table, ["cbr", "cosine_weight"]) {
+      Ok(v) -> Some(v)
+      Error(_) -> None
+    },
+    cbr_symbolic_weight: case tom.get_float(table, ["cbr", "symbolic_weight"]) {
+      Ok(v) -> Some(v)
+      Error(_) -> None
+    },
+    cbr_intent_weight: case tom.get_float(table, ["cbr", "intent_weight"]) {
+      Ok(v) -> Some(v)
+      Error(_) -> None
+    },
+    cbr_keyword_weight: case tom.get_float(table, ["cbr", "keyword_weight"]) {
+      Ok(v) -> Some(v)
+      Error(_) -> None
+    },
+    cbr_entity_weight: case tom.get_float(table, ["cbr", "entity_weight"]) {
+      Ok(v) -> Some(v)
+      Error(_) -> None
+    },
+    cbr_domain_weight: case tom.get_float(table, ["cbr", "domain_weight"]) {
+      Ok(v) -> Some(v)
+      Error(_) -> None
+    },
+    cbr_recency_weight: case tom.get_float(table, ["cbr", "recency_weight"]) {
+      Ok(v) -> Some(v)
+      Error(_) -> None
+    },
+    cbr_min_score: case tom.get_float(table, ["cbr", "min_score"]) {
+      Ok(v) -> Some(v)
+      Error(_) -> None
+    },
+    cbr_recency_decay_days: case
+      tom.get_int(table, ["cbr", "recency_decay_days"])
+    {
+      Ok(v) -> Some(v)
+      Error(_) -> None
+    },
+    mailbox_warn_threshold: case
+      tom.get_int(table, ["cbr", "mailbox_warn_threshold"])
+    {
+      Ok(v) -> Some(v)
+      Error(_) -> None
+    },
   )
 }
 
@@ -511,7 +613,7 @@ const known_keys = [
   "provider", "task_model", "reasoning_model", "max_tokens", "max_turns",
   "max_consecutive_errors", "max_context_messages", "log_verbose",
   "write_anywhere", "skills_dirs", "gui", "dprime_enabled", "dprime_config",
-  "narrative", "profile", "profiles_dirs", "agent",
+  "narrative", "profile", "profiles_dirs", "agent", "cbr",
 ]
 
 const known_narrative_keys = [
@@ -561,6 +663,33 @@ fn validate_toml_keys(table: dict.Dict(String, tom.Toml)) -> Nil {
               "config",
               "validate",
               "Unknown agent config key: \"" <> key <> "\" — possible typo?",
+              None,
+            )
+        }
+      })
+    Error(_) -> Nil
+  }
+  case tom.get_table(table, ["cbr"]) {
+    Ok(cbr_table) ->
+      dict.keys(cbr_table)
+      |> list.each(fn(key) {
+        case
+          list.contains(
+            [
+              "cosine_weight", "symbolic_weight", "intent_weight",
+              "keyword_weight", "entity_weight", "domain_weight",
+              "recency_weight", "min_score", "recency_decay_days",
+              "mailbox_warn_threshold",
+            ],
+            key,
+          )
+        {
+          True -> Nil
+          False ->
+            slog.warn(
+              "config",
+              "validate",
+              "Unknown cbr config key: \"" <> key <> "\" — possible typo?",
               None,
             )
         }
