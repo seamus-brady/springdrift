@@ -66,6 +66,7 @@ type TuiState {
     narrative_entries: List(narrative_types.NarrativeEntry),
     narrative_scroll: Int,
     librarian: Option(Subject(LibrarianMessage)),
+    input_limit: Int,
   )
 }
 
@@ -98,6 +99,7 @@ pub fn start(
   initial_messages: List(Message),
   narrative_dir: String,
   lib: Option(Subject(LibrarianMessage)),
+  input_limit: Int,
 ) -> Nil {
   let size = terminal.window_size()
   let #(w, h) = result.unwrap(size, #(80, 24))
@@ -156,6 +158,7 @@ pub fn start(
       narrative_entries: [],
       narrative_scroll: 0,
       librarian: lib,
+      input_limit:,
     )
   render(state)
   tui_run(fn() { event_loop(state) }, cleanup)
@@ -295,7 +298,7 @@ fn handle_stdin_byte(state: TuiState, byte: String) -> Nil {
         ChatTab ->
           case is_printable(byte) {
             True ->
-              case string.byte_size(state.input_buf) < 102_400 {
+              case string.byte_size(state.input_buf) < state.input_limit {
                 True ->
                   continue_loop(
                     TuiState(..state, input_buf: state.input_buf <> byte),

@@ -147,6 +147,7 @@ fn handle_memory_tools(
           facts_ctx,
           state.embedding_config,
           introspect_ctx,
+          state.memory_limits,
         )
       case result {
         llm_types.ToolSuccess(tool_use_id: id, content: c) ->

@@ -37,7 +37,12 @@ fn make_record(
 pub fn append_creates_dated_file_test() {
   let dir = test_dir("append")
   let record = make_record("art-001", "cycle-001", "2026-03-10T12:00:00Z")
-  artifacts_log.append(dir, record, "Hello, world!")
+  artifacts_log.append(
+    dir,
+    record,
+    "Hello, world!",
+    artifacts_log.default_max_content_chars,
+  )
 
   // File should exist with the date prefix
   case simplifile.read(dir <> "/artifacts-2026-03-10.jsonl") {
@@ -56,8 +61,18 @@ pub fn load_date_meta_returns_metadata_test() {
   let dir = test_dir("meta")
   let r1 = make_record("art-m1", "cycle-001", "2026-03-10T10:00:00Z")
   let r2 = make_record("art-m2", "cycle-001", "2026-03-10T11:00:00Z")
-  artifacts_log.append(dir, r1, "Content one")
-  artifacts_log.append(dir, r2, "Content two")
+  artifacts_log.append(
+    dir,
+    r1,
+    "Content one",
+    artifacts_log.default_max_content_chars,
+  )
+  artifacts_log.append(
+    dir,
+    r2,
+    "Content two",
+    artifacts_log.default_max_content_chars,
+  )
 
   let metas = artifacts_log.load_date_meta(dir, "2026-03-10")
   list.length(metas) |> should.equal(2)
@@ -81,8 +96,18 @@ pub fn read_content_finds_by_id_test() {
   let dir = test_dir("readcontent")
   let r1 = make_record("art-r1", "cycle-001", "2026-03-10T10:00:00Z")
   let r2 = make_record("art-r2", "cycle-001", "2026-03-10T11:00:00Z")
-  artifacts_log.append(dir, r1, "First content")
-  artifacts_log.append(dir, r2, "Second content")
+  artifacts_log.append(
+    dir,
+    r1,
+    "First content",
+    artifacts_log.default_max_content_chars,
+  )
+  artifacts_log.append(
+    dir,
+    r2,
+    "Second content",
+    artifacts_log.default_max_content_chars,
+  )
 
   case artifacts_log.read_content(dir, "art-r2", "2026-03-10") {
     Ok(content) -> content |> should.equal("Second content")
@@ -96,7 +121,12 @@ pub fn read_content_finds_by_id_test() {
 pub fn read_content_returns_error_for_missing_id_test() {
   let dir = test_dir("missing")
   let record = make_record("art-x1", "cycle-001", "2026-03-10T10:00:00Z")
-  artifacts_log.append(dir, record, "Some content")
+  artifacts_log.append(
+    dir,
+    record,
+    "Some content",
+    artifacts_log.default_max_content_chars,
+  )
 
   case artifacts_log.read_content(dir, "art-nonexistent", "2026-03-10") {
     Error(Nil) -> Nil
@@ -112,7 +142,12 @@ pub fn truncation_caps_at_max_chars_test() {
   // Create content larger than max_content_chars (50000)
   let big_content = string.repeat("x", 60_000)
   let record = make_record("art-big", "cycle-001", "2026-03-10T10:00:00Z")
-  artifacts_log.append(dir, record, big_content)
+  artifacts_log.append(
+    dir,
+    record,
+    big_content,
+    artifacts_log.default_max_content_chars,
+  )
 
   // Metadata should show truncated=true
   let metas = artifacts_log.load_date_meta(dir, "2026-03-10")

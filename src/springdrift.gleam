@@ -7,6 +7,7 @@ import agent_identity
 import agents/coder
 import agents/planner
 import agents/researcher
+import artifacts/log as artifacts_log
 import config.{type AppConfig}
 import dot_env
 import dprime/config as dprime_config_mod
@@ -37,6 +38,8 @@ import skills
 import slog
 import storage
 import tools/builtin as tools_builtin
+import tools/e2b
+import tools/memory as tools_memory
 import tools/web as tools_web
 import tui
 import web/gui as web_gui
@@ -202,7 +205,8 @@ fn print_help() -> Nil {
 fn run(cfg: AppConfig) -> Nil {
   let verbose = option.unwrap(cfg.log_verbose, False)
   slog.init(verbose)
-  slog.cleanup_old_logs()
+  let log_retention_days = option.unwrap(cfg.log_retention_days, 30)
+  slog.cleanup_old_logs(log_retention_days)
   slog.info("springdrift", "run", "Starting springdrift", option.None)
 
   let skill_dirs = option.unwrap(cfg.skills_dirs, default_skill_dirs())
@@ -240,6 +244,19 @@ fn run(cfg: AppConfig) -> Nil {
   // Narrative config (always enabled)
   let narrative_dir = option.unwrap(cfg.narrative_dir, paths.narrative_dir())
   let archivist_model = option.unwrap(cfg.archivist_model, task_model)
+
+  // Tuning knobs — resolve from config with defaults
+  let max_artifact_chars =
+    option.unwrap(
+      cfg.max_artifact_chars,
+      artifacts_log.default_max_content_chars,
+    )
+  let sandbox_timeout =
+    option.unwrap(cfg.sandbox_timeout_s, e2b.default_sandbox_timeout_s)
+  let tui_input_limit = option.unwrap(cfg.tui_input_limit, 102_400)
+  let ws_max_bytes = option.unwrap(cfg.websocket_max_bytes, 1_048_576)
+  let recall_max_entries = option.unwrap(cfg.recall_max_entries, 50)
+  let cbr_max_results = option.unwrap(cfg.cbr_max_results, 20)
 
   // Migrate legacy facts.jsonl to daily rotation (no-op if already done)
   facts_log.migrate_legacy(paths.facts_dir())
@@ -334,11 +351,26 @@ fn run(cfg: AppConfig) -> Nil {
             <> msg
             <> ") — using defaults",
           )
-          #(default_agent_specs(p, task_model, librarian_subj), option.None)
+          #(
+            default_agent_specs(
+              p,
+              task_model,
+              librarian_subj,
+              max_artifact_chars,
+              sandbox_timeout,
+            ),
+            option.None,
+          )
         }
       }
     option.None -> #(
-      default_agent_specs(p, task_model, librarian_subj),
+      default_agent_specs(
+        p,
+        task_model,
+        librarian_subj,
+        max_artifact_chars,
+        sandbox_timeout,
+      ),
       option.None,
     )
   }
@@ -488,6 +520,10 @@ fn run(cfg: AppConfig) -> Nil {
       embedding_config:,
       agent_uuid: stable_identity.agent_uuid,
       session_since:,
+      memory_limits: tools_memory.MemoryLimits(
+        recall_max_entries:,
+        cbr_max_results:,
+      ),
     ))
   {
     Ok(subj) -> subj
@@ -597,6 +633,7 @@ fn run(cfg: AppConfig) -> Nil {
         lib,
         agent_name,
         agent_version,
+        ws_max_bytes,
       )
     }
     _ ->
@@ -609,6 +646,7 @@ fn run(cfg: AppConfig) -> Nil {
         initial_messages,
         narrative_dir,
         lib,
+        tui_input_limit,
       )
   }
   Nil
@@ -713,11 +751,19 @@ fn default_agent_specs(
   provider: Provider,
   task_model: String,
   librarian_subj: process.Subject(librarian.LibrarianMessage),
+  max_artifact_chars: Int,
+  sandbox_timeout: Int,
 ) -> List(agent_types.AgentSpec) {
   [
     planner.spec(provider, task_model),
-    researcher.spec(provider, task_model, paths.artifacts_dir(), librarian_subj),
-    coder.spec(provider, task_model),
+    researcher.spec(
+      provider,
+      task_model,
+      paths.artifacts_dir(),
+      librarian_subj,
+      max_artifact_chars,
+    ),
+    coder.spec(provider, task_model, sandbox_timeout),
   ]
 }
 

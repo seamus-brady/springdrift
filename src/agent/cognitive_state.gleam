@@ -13,6 +13,7 @@ import llm/provider.{type Provider}
 import llm/types as llm_types
 import narrative/curator.{type CuratorMessage}
 import narrative/librarian.{type LibrarianMessage}
+import tools/memory
 
 /// Model selection and generation parameters — extracted for documentation
 /// and potential future refactoring into a sub-record.
@@ -83,6 +84,8 @@ pub type CognitiveState {
     write_anywhere: Bool,
     agent_uuid: String,
     session_since: String,
+    // --- Memory tool limits ---
+    memory_limits: memory.MemoryLimits,
   )
 }
 

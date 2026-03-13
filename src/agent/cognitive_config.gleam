@@ -8,6 +8,7 @@ import llm/provider.{type Provider}
 import llm/types as llm_types
 import narrative/curator.{type CuratorMessage}
 import narrative/librarian.{type LibrarianMessage}
+import tools/memory
 
 /// Configuration record for starting the cognitive loop.
 /// Replaces the 19-parameter `cognitive.start()` signature.
@@ -36,6 +37,7 @@ pub type CognitiveConfig {
     embedding_config: embedding_types.EmbeddingConfig,
     agent_uuid: String,
     session_since: String,
+    memory_limits: memory.MemoryLimits,
   )
 }
 
@@ -68,5 +70,6 @@ pub fn default_test_config(
     embedding_config: embedding_types.default_config(),
     agent_uuid: "",
     session_since: "",
+    memory_limits: memory.default_limits(),
   )
 }

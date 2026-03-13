@@ -101,6 +101,14 @@ pub type AppConfig {
     pruning_confidence: Option(Float),
     fact_confidence: Option(Float),
     cbr_pruning_days: Option(Int),
+    // Tuning knobs (simple scalars with sensible defaults)
+    log_retention_days: Option(Int),
+    max_artifact_chars: Option(Int),
+    recall_max_entries: Option(Int),
+    cbr_max_results: Option(Int),
+    sandbox_timeout_s: Option(Int),
+    tui_input_limit: Option(Int),
+    websocket_max_bytes: Option(Int),
   )
 }
 
@@ -158,6 +166,13 @@ pub fn default() -> AppConfig {
     pruning_confidence: None,
     fact_confidence: None,
     cbr_pruning_days: None,
+    log_retention_days: None,
+    max_artifact_chars: None,
+    recall_max_entries: None,
+    cbr_max_results: None,
+    sandbox_timeout_s: None,
+    tui_input_limit: None,
+    websocket_max_bytes: None,
   )
 }
 
@@ -276,6 +291,34 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       override_cfg.cbr_pruning_days,
       base.cbr_pruning_days,
     ),
+    log_retention_days: option.or(
+      override_cfg.log_retention_days,
+      base.log_retention_days,
+    ),
+    max_artifact_chars: option.or(
+      override_cfg.max_artifact_chars,
+      base.max_artifact_chars,
+    ),
+    recall_max_entries: option.or(
+      override_cfg.recall_max_entries,
+      base.recall_max_entries,
+    ),
+    cbr_max_results: option.or(
+      override_cfg.cbr_max_results,
+      base.cbr_max_results,
+    ),
+    sandbox_timeout_s: option.or(
+      override_cfg.sandbox_timeout_s,
+      base.sandbox_timeout_s,
+    ),
+    tui_input_limit: option.or(
+      override_cfg.tui_input_limit,
+      base.tui_input_limit,
+    ),
+    websocket_max_bytes: option.or(
+      override_cfg.websocket_max_bytes,
+      base.websocket_max_bytes,
+    ),
   )
 }
 
@@ -381,6 +424,28 @@ pub fn to_string(cfg: AppConfig) -> String {
     // Librarian
     option.map(cfg.librarian_max_days, fn(v) {
       "librarian_max_days: " <> int.to_string(v)
+    }),
+    // Tuning knobs
+    option.map(cfg.log_retention_days, fn(v) {
+      "log_retention_days: " <> int.to_string(v)
+    }),
+    option.map(cfg.max_artifact_chars, fn(v) {
+      "max_artifact_chars: " <> int.to_string(v)
+    }),
+    option.map(cfg.recall_max_entries, fn(v) {
+      "recall_max_entries: " <> int.to_string(v)
+    }),
+    option.map(cfg.cbr_max_results, fn(v) {
+      "cbr_max_results: " <> int.to_string(v)
+    }),
+    option.map(cfg.sandbox_timeout_s, fn(v) {
+      "sandbox_timeout_s: " <> int.to_string(v)
+    }),
+    option.map(cfg.tui_input_limit, fn(v) {
+      "tui_input_limit: " <> int.to_string(v)
+    }),
+    option.map(cfg.websocket_max_bytes, fn(v) {
+      "websocket_max_bytes: " <> int.to_string(v)
     }),
   ]
   |> list.filter_map(fn(x) { option.to_result(x, Nil) })
@@ -564,6 +629,13 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
       Ok(v) -> Some(v)
       Error(_) -> None
     },
+    log_retention_days: get_int("log_retention_days"),
+    max_artifact_chars: get_int("max_artifact_chars"),
+    recall_max_entries: get_int("recall_max_entries"),
+    cbr_max_results: get_int("cbr_max_results"),
+    sandbox_timeout_s: get_int("sandbox_timeout_s"),
+    tui_input_limit: get_int("tui_input_limit"),
+    websocket_max_bytes: get_int("websocket_max_bytes"),
     profiles_dirs: case tom.get_array(table, ["profiles_dirs"]) {
       Error(_) -> None
       Ok(items) ->
@@ -684,8 +756,10 @@ const known_keys = [
   "provider", "task_model", "reasoning_model", "max_tokens", "max_turns",
   "max_consecutive_errors", "max_context_messages", "log_verbose",
   "write_anywhere", "skills_dirs", "gui", "dprime_enabled", "dprime_config",
-  "narrative", "profile", "profiles_dirs", "agent", "cbr",
-  "narrative", "profile", "profiles_dirs", "agent", "housekeeping",
+  "narrative", "profile", "profiles_dirs", "agent", "cbr", "housekeeping",
+  "log_retention_days", "max_artifact_chars", "recall_max_entries",
+  "cbr_max_results", "sandbox_timeout_s", "tui_input_limit",
+  "websocket_max_bytes",
 ]
 
 const known_housekeeping_keys = [
