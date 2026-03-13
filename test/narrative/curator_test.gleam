@@ -531,6 +531,7 @@ pub fn build_system_prompt_fallback_when_no_identity_test() {
       option.None,
       "Springdrift",
       "",
+      curator.default_housekeeping_config(),
     )
   let prompt = curator.build_system_prompt(cur, "You are helpful.")
   prompt |> should.equal("You are helpful.")
@@ -567,6 +568,7 @@ pub fn build_system_prompt_with_persona_test() {
       option.None,
       "Springdrift",
       "",
+      curator.default_housekeeping_config(),
     )
   let prompt = curator.build_system_prompt(cur, "fallback")
   should.be_true(string.contains(prompt, "I am Springdrift."))

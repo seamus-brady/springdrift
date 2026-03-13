@@ -94,6 +94,13 @@ pub type AppConfig {
     cbr_min_score: Option(Float),
     cbr_recency_decay_days: Option(Int),
     mailbox_warn_threshold: Option(Int),
+    // Housekeeping
+    housekeeping_tick_ms: Option(Int),
+    housekeeping_interval_ticks: Option(Int),
+    dedup_similarity: Option(Float),
+    pruning_confidence: Option(Float),
+    fact_confidence: Option(Float),
+    cbr_pruning_days: Option(Int),
   )
 }
 
@@ -145,6 +152,12 @@ pub fn default() -> AppConfig {
     cbr_min_score: None,
     cbr_recency_decay_days: None,
     mailbox_warn_threshold: None,
+    housekeeping_tick_ms: None,
+    housekeeping_interval_ticks: None,
+    dedup_similarity: None,
+    pruning_confidence: None,
+    fact_confidence: None,
+    cbr_pruning_days: None,
   )
 }
 
@@ -238,6 +251,30 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     mailbox_warn_threshold: option.or(
       override_cfg.mailbox_warn_threshold,
       base.mailbox_warn_threshold,
+    ),
+    housekeeping_tick_ms: option.or(
+      override_cfg.housekeeping_tick_ms,
+      base.housekeeping_tick_ms,
+    ),
+    housekeeping_interval_ticks: option.or(
+      override_cfg.housekeeping_interval_ticks,
+      base.housekeeping_interval_ticks,
+    ),
+    dedup_similarity: option.or(
+      override_cfg.dedup_similarity,
+      base.dedup_similarity,
+    ),
+    pruning_confidence: option.or(
+      override_cfg.pruning_confidence,
+      base.pruning_confidence,
+    ),
+    fact_confidence: option.or(
+      override_cfg.fact_confidence,
+      base.fact_confidence,
+    ),
+    cbr_pruning_days: option.or(
+      override_cfg.cbr_pruning_days,
+      base.cbr_pruning_days,
     ),
   )
 }
@@ -577,8 +614,42 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
       Ok(v) -> Some(v)
       Error(_) -> None
     },
+    housekeeping_tick_ms: case tom.get_int(table, ["housekeeping", "tick_ms"]) {
+      Ok(v) -> Some(v)
+      Error(_) -> None
+    },
+    housekeeping_interval_ticks: case
+      tom.get_int(table, ["housekeeping", "interval_ticks"])
+    {
+      Ok(v) -> Some(v)
+      Error(_) -> None
+    },
     mailbox_warn_threshold: case
       tom.get_int(table, ["cbr", "mailbox_warn_threshold"])
+    {
+      Ok(v) -> Some(v)
+      Error(_) -> None
+    },
+    dedup_similarity: case
+      tom.get_float(table, ["housekeeping", "dedup_similarity"])
+    {
+      Ok(v) -> Some(v)
+      Error(_) -> None
+    },
+    pruning_confidence: case
+      tom.get_float(table, ["housekeeping", "pruning_confidence"])
+    {
+      Ok(v) -> Some(v)
+      Error(_) -> None
+    },
+    fact_confidence: case
+      tom.get_float(table, ["housekeeping", "fact_confidence"])
+    {
+      Ok(v) -> Some(v)
+      Error(_) -> None
+    },
+    cbr_pruning_days: case
+      tom.get_int(table, ["housekeeping", "cbr_pruning_days"])
     {
       Ok(v) -> Some(v)
       Error(_) -> None
@@ -614,6 +685,12 @@ const known_keys = [
   "max_consecutive_errors", "max_context_messages", "log_verbose",
   "write_anywhere", "skills_dirs", "gui", "dprime_enabled", "dprime_config",
   "narrative", "profile", "profiles_dirs", "agent", "cbr",
+  "narrative", "profile", "profiles_dirs", "agent", "housekeeping",
+]
+
+const known_housekeeping_keys = [
+  "tick_ms", "interval_ticks", "dedup_similarity", "pruning_confidence",
+  "fact_confidence", "cbr_pruning_days",
 ]
 
 const known_narrative_keys = [
@@ -646,6 +723,25 @@ fn validate_toml_keys(table: dict.Dict(String, tom.Toml)) -> Nil {
               "config",
               "validate",
               "Unknown narrative config key: \"" <> key <> "\" — possible typo?",
+              None,
+            )
+        }
+      })
+    Error(_) -> Nil
+  }
+  case tom.get_table(table, ["housekeeping"]) {
+    Ok(housekeeping_table) ->
+      dict.keys(housekeeping_table)
+      |> list.each(fn(key) {
+        case list.contains(known_housekeeping_keys, key) {
+          True -> Nil
+          False ->
+            slog.warn(
+              "config",
+              "validate",
+              "Unknown housekeeping config key: \""
+                <> key
+                <> "\" — possible typo?",
               None,
             )
         }
