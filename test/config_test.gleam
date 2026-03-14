@@ -680,12 +680,10 @@ port = 9090"
 pub fn parse_config_toml_services_test() {
   let toml =
     "[services]
-exa_base_url = \"https://my-proxy.example.com\"
-tavily_base_url = \"https://tavily-proxy.example.com\""
+duckduckgo_url = \"https://my-proxy.example.com/html/\""
   let assert Ok(cfg) = config.parse_config_toml(toml)
-  cfg.exa_base_url |> should.equal(Some("https://my-proxy.example.com"))
-  cfg.tavily_base_url
-  |> should.equal(Some("https://tavily-proxy.example.com"))
+  cfg.duckduckgo_url
+  |> should.equal(Some("https://my-proxy.example.com/html/"))
 }
 
 pub fn parse_config_toml_scoring_threading_test() {

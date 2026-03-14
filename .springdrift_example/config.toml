@@ -162,9 +162,6 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 # Max results from web_search (DuckDuckGo) (default: 5, max: 10)
 # web_search_max_results = 5
 
-# Max results from exa_search (default: 10)
-# exa_search_max_results = 10
-
 # ── Thread scoring ───────────────────────────────────────────────────────────
 # Overlap scoring weights for automatic thread assignment.
 
@@ -268,15 +265,6 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 [services]
 # DuckDuckGo HTML search endpoint
 # duckduckgo_url = "https://html.duckduckgo.com/html/"
-
-# Exa semantic search API
-# exa_base_url = "https://api.exa.ai"
-
-# Tavily search API
-# tavily_base_url = "https://api.tavily.com"
-
-# Firecrawl extraction API (v1)
-# firecrawl_base_url = "https://api.firecrawl.dev"
 
 # E2B sandbox API
 # e2b_base_url = "https://api.e2b.app"

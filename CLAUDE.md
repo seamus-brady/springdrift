@@ -99,7 +99,7 @@ src/
 │
 ├── tools/builtin.gleam        Built-in tools: calculator, get_current_datetime,
 │                              request_human_input, read_skill
-├── tools/web.gleam            Web tools: fetch_url, web_search, exa_search, tavily_search, firecrawl_extract
+├── tools/web.gleam            Web tools: fetch_url, web_search
 ├── tools/artifacts.gleam      Artifact tools: store_result, retrieve_result (researcher agent)
 ├── tui.gleam                  Alternate-screen TUI; Chat + Log + Narrative tabs
 │
@@ -473,17 +473,11 @@ legacy plain-array format. Corruption is detected and logged.
 require authentication via `Authorization: Bearer <token>` header or `?token=` query
 parameter. No auth required when the env var is unset.
 
-**Web research tools** — `tools/web.gleam` provides five tools. `exa_search` (Exa API,
-semantic neural search, `EXA_API_KEY`), `tavily_search` (Tavily API, fast factual
-lookup, `TAVILY_API_KEY`), `firecrawl_extract` (Firecrawl v1 `/v1/scrape`, deep page
-extraction to markdown, `FIRECRAWL_API_KEY`), `web_search` (DuckDuckGo, no key), and
-`fetch_url` (raw HTTP GET, no key). All keyed tools use `gleam/httpc` for HTTP and
-return `Result(String, String)`. Missing API keys produce a clear error message. The
-Firecrawl response parser assumes the v1 envelope shape (`success`, `data.markdown`,
-`data.metadata.title`). The researcher agent dispatches all five tools. A `web-research`
-skill (`.springdrift/skills/web-research/SKILL.md`) teaches the agent the decision tree
-for tool selection: discovery (exa/tavily) → extraction (firecrawl/fetch_url) → fallback
-(web_search).
+**Web research tools** — `tools/web.gleam` provides two tools. `web_search`
+(DuckDuckGo, no key) and `fetch_url` (raw HTTP GET, no key). The researcher agent
+dispatches both tools. A `web-research` skill
+(`.springdrift/skills/web-research/SKILL.md`) teaches the agent the decision tree
+for tool selection: discovery (web_search) → extraction (fetch_url).
 
 ## Config file format
 
@@ -510,7 +504,7 @@ The config is organized into these TOML sections:
 | `[agents.coder]` | Coder agent: max_tokens, max_turns, max_errors |
 | `[agents.writer]` | Writer agent: max_tokens, max_turns, max_errors |
 | `[web]` | Web GUI port |
-| `[services]` | External API base URLs (DuckDuckGo, Exa, Tavily, Firecrawl, E2B) |
+| `[services]` | External API base URLs (DuckDuckGo, E2B) |
 
 Quick example (top-level fields only):
 

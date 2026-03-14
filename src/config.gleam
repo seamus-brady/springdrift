@@ -92,7 +92,6 @@ pub type AppConfig {
     recall_max_entries: Option(Int),
     cbr_max_results: Option(Int),
     web_search_max_results: Option(Int),
-    exa_search_max_results: Option(Int),
     // ── Thread scoring ──
     threading_location_weight: Option(Int),
     threading_domain_weight: Option(Int),
@@ -135,9 +134,6 @@ pub type AppConfig {
     web_port: Option(Int),
     // ── External services ──
     duckduckgo_url: Option(String),
-    exa_base_url: Option(String),
-    tavily_base_url: Option(String),
-    firecrawl_base_url: Option(String),
     e2b_base_url: Option(String),
   )
 }
@@ -205,7 +201,6 @@ pub fn default() -> AppConfig {
     recall_max_entries: None,
     cbr_max_results: None,
     web_search_max_results: None,
-    exa_search_max_results: None,
     threading_location_weight: None,
     threading_domain_weight: None,
     threading_keyword_weight: None,
@@ -241,9 +236,6 @@ pub fn default() -> AppConfig {
     writer_max_errors: None,
     web_port: None,
     duckduckgo_url: None,
-    exa_base_url: None,
-    tavily_base_url: None,
-    firecrawl_base_url: None,
     e2b_base_url: None,
   )
 }
@@ -405,10 +397,6 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       override_cfg.web_search_max_results,
       base.web_search_max_results,
     ),
-    exa_search_max_results: option.or(
-      override_cfg.exa_search_max_results,
-      base.exa_search_max_results,
-    ),
     // Thread scoring
     threading_location_weight: option.or(
       override_cfg.threading_location_weight,
@@ -547,15 +535,6 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     web_port: option.or(override_cfg.web_port, base.web_port),
     // External services
     duckduckgo_url: option.or(override_cfg.duckduckgo_url, base.duckduckgo_url),
-    exa_base_url: option.or(override_cfg.exa_base_url, base.exa_base_url),
-    tavily_base_url: option.or(
-      override_cfg.tavily_base_url,
-      base.tavily_base_url,
-    ),
-    firecrawl_base_url: option.or(
-      override_cfg.firecrawl_base_url,
-      base.firecrawl_base_url,
-    ),
     e2b_base_url: option.or(override_cfg.e2b_base_url, base.e2b_base_url),
   )
 }
@@ -933,9 +912,6 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     web_search_max_results: get_toml_int(table, [
       "limits", "web_search_max_results",
     ]),
-    exa_search_max_results: get_toml_int(table, [
-      "limits", "exa_search_max_results",
-    ]),
     // ── [scoring.threading] ──
     threading_location_weight: get_toml_int(table, [
       "scoring", "threading", "location_weight",
@@ -1004,9 +980,6 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     web_port: get_toml_int(table, ["web", "port"]),
     // ── [services] ──
     duckduckgo_url: get_toml_str(table, ["services", "duckduckgo_url"]),
-    exa_base_url: get_toml_str(table, ["services", "exa_base_url"]),
-    tavily_base_url: get_toml_str(table, ["services", "tavily_base_url"]),
-    firecrawl_base_url: get_toml_str(table, ["services", "firecrawl_base_url"]),
     e2b_base_url: get_toml_str(table, ["services", "e2b_base_url"]),
   )
 }

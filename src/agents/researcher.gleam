@@ -16,25 +16,14 @@ const system_prompt = "You are a research agent. Your job is to gather informati
 Work in two stages: discover sources first, then extract content.
 
 ### Stage 1 — Discovery
-- **exa_search**: Semantic neural search. Best for exploratory queries where you need to discover relevant sources by meaning. Write queries as natural language descriptions, not keywords. Example: \"recent arguments against central bank digital currencies\" outperforms \"CBDC criticism\".
-- **tavily_search**: Fast factual lookup optimised for specific questions. Use for prices, dates, status checks, recent news. Returns a direct answer plus ranked sources. Example: \"What is the current ECB deposit rate?\"
-- **web_search**: DuckDuckGo fallback. Use only when exa and tavily are unavailable or return no results.
+- **web_search**: DuckDuckGo keyword search. Use for finding relevant sources, current information, and factual lookups.
 
 ### Stage 2 — Extraction
-- **firecrawl_extract**: Deep page extraction to clean markdown. Use only after Stage 1 returns a URL worth reading in full — a primary document, detailed report, or a snippet that was cut off. Never call speculatively.
-- **fetch_url**: Lightweight HTTP GET. Use for simple HTML pages that don't need JavaScript rendering.
+- **fetch_url**: HTTP GET to retrieve full page content from a URL found in Stage 1. Returns the response body (truncated to 50 KB).
 
 ### Decision tree
-- Need to find sources? → exa_search
-- Need a quick fact? → tavily_search
-- Have a URL, complex page? → firecrawl_extract
-- Have a URL, simple page? → fetch_url
-- Nothing else worked? → web_search
-
-### Cost awareness
-- tavily_search = 1 credit per call (cheapest for grounding)
-- exa_search = billed per result (use when semantic precision matters)
-- firecrawl_extract = 1 credit per page (never call speculatively)
+- Need to find sources? → web_search
+- Have a URL, need full content? → fetch_url
 
 ## Context management
 When fetching large pages, immediately use **store_result** to save the content and work with the artifact_id. Use **retrieve_result** to re-read stored content. This keeps your context window lean across multi-turn research.
@@ -57,7 +46,7 @@ pub fn spec(
   AgentSpec(
     name: "researcher",
     human_name: "Researcher",
-    description: "Search the web and extract content from pages. Has exa_search (semantic discovery), tavily_search (fast factual lookup), firecrawl_extract (deep page extraction), web_search (DuckDuckGo), and fetch_url. Can store and retrieve large content via artifacts.",
+    description: "Search the web and extract content from pages. Has web_search (DuckDuckGo) and fetch_url. Can store and retrieve large content via artifacts.",
     system_prompt:,
     provider:,
     model:,
@@ -79,11 +68,7 @@ fn researcher_executor(
 ) -> fn(llm_types.ToolCall) -> llm_types.ToolResult {
   fn(call: llm_types.ToolCall) -> llm_types.ToolResult {
     case call.name {
-      "fetch_url"
-      | "web_search"
-      | "exa_search"
-      | "tavily_search"
-      | "firecrawl_extract" -> web.execute(call)
+      "fetch_url" | "web_search" -> web.execute(call)
       "store_result" | "retrieve_result" ->
         artifacts.execute(
           call,
