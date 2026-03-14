@@ -10,7 +10,7 @@
          resolve_symlinks/1,
          file_size/1, days_ago_date/1,
          uri_encode/1, extract_ddg_results/1,
-         http_get/1, cosine_similarity/2,
+         http_get/1, http_get_with_headers/2, cosine_similarity/2,
          ensure_utf8/1, days_between/2,
          mailbox_size/0, add_days/2]).
 
@@ -397,6 +397,25 @@ http_get(Url) ->
     end,
     Opts = [{timeout, 30000}],
     case httpc:request(get, {UrlStr, []}, Opts, [{body_format, binary}]) of
+        {ok, {{_, StatusCode, _}, _, Body}} ->
+            {ok, {StatusCode, Body}};
+        {error, Reason} ->
+            {error, list_to_binary(io_lib:format("~p", [Reason]))}
+    end.
+
+%% HTTP GET request with custom headers via httpc.
+%% Headers is a list of {Name, Value} tuples (binaries).
+%% Returns {ok, {StatusCode, Body}} or {error, Reason}.
+http_get_with_headers(Url, Headers) ->
+    application:ensure_all_started(inets),
+    application:ensure_all_started(ssl),
+    UrlStr = case is_binary(Url) of
+        true  -> binary_to_list(Url);
+        false -> Url
+    end,
+    HeaderList = [{binary_to_list(K), binary_to_list(V)} || {K, V} <- Headers],
+    Opts = [{timeout, 30000}],
+    case httpc:request(get, {UrlStr, HeaderList}, Opts, [{body_format, binary}]) of
         {ok, {{_, StatusCode, _}, _, Body}} ->
             {ok, {StatusCode, Body}};
         {error, Reason} ->

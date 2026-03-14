@@ -162,6 +162,18 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 # Max results from web_search (DuckDuckGo) (default: 5, max: 10)
 # web_search_max_results = 5
 
+# Max results from Brave Search (default: 20, max: 20)
+# brave_search_max_results = 20
+
+# Brave Search rate limit in requests per second (default: 20)
+# brave_rate_limit_rps = 20
+
+# Brave Answers rate limit in requests per second (default: 2)
+# brave_answers_rate_limit_rps = 2
+
+# Brave Search cache TTL in milliseconds (default: 300000 = 5 min)
+# brave_cache_ttl_ms = 300000
+
 # ── Thread scoring ───────────────────────────────────────────────────────────
 # Overlap scoring weights for automatic thread assignment.
 
@@ -265,6 +277,15 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 [services]
 # DuckDuckGo HTML search endpoint
 # duckduckgo_url = "https://html.duckduckgo.com/html/"
+
+# Brave Search API
+# brave_search_base_url = "https://api.search.brave.com"
+
+# Brave Answers API (same base, different endpoint)
+# brave_answers_base_url = "https://api.search.brave.com"
+
+# Jina Reader API
+# jina_reader_base_url = "https://r.jina.ai/"
 
 # E2B sandbox API
 # e2b_base_url = "https://api.e2b.app"

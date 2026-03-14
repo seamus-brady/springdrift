@@ -135,6 +135,14 @@ pub type AppConfig {
     // ── External services ──
     duckduckgo_url: Option(String),
     e2b_base_url: Option(String),
+    brave_search_base_url: Option(String),
+    brave_answers_base_url: Option(String),
+    jina_reader_base_url: Option(String),
+    // ── Brave API settings ──
+    brave_search_max_results: Option(Int),
+    brave_rate_limit_rps: Option(Int),
+    brave_answers_rate_limit_rps: Option(Int),
+    brave_cache_ttl_ms: Option(Int),
   )
 }
 
@@ -237,6 +245,13 @@ pub fn default() -> AppConfig {
     web_port: None,
     duckduckgo_url: None,
     e2b_base_url: None,
+    brave_search_base_url: None,
+    brave_answers_base_url: None,
+    jina_reader_base_url: None,
+    brave_search_max_results: None,
+    brave_rate_limit_rps: None,
+    brave_answers_rate_limit_rps: None,
+    brave_cache_ttl_ms: None,
   )
 }
 
@@ -536,6 +551,34 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     // External services
     duckduckgo_url: option.or(override_cfg.duckduckgo_url, base.duckduckgo_url),
     e2b_base_url: option.or(override_cfg.e2b_base_url, base.e2b_base_url),
+    brave_search_base_url: option.or(
+      override_cfg.brave_search_base_url,
+      base.brave_search_base_url,
+    ),
+    brave_answers_base_url: option.or(
+      override_cfg.brave_answers_base_url,
+      base.brave_answers_base_url,
+    ),
+    jina_reader_base_url: option.or(
+      override_cfg.jina_reader_base_url,
+      base.jina_reader_base_url,
+    ),
+    brave_search_max_results: option.or(
+      override_cfg.brave_search_max_results,
+      base.brave_search_max_results,
+    ),
+    brave_rate_limit_rps: option.or(
+      override_cfg.brave_rate_limit_rps,
+      base.brave_rate_limit_rps,
+    ),
+    brave_answers_rate_limit_rps: option.or(
+      override_cfg.brave_answers_rate_limit_rps,
+      base.brave_answers_rate_limit_rps,
+    ),
+    brave_cache_ttl_ms: option.or(
+      override_cfg.brave_cache_ttl_ms,
+      base.brave_cache_ttl_ms,
+    ),
   )
 }
 
@@ -981,6 +1024,24 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     // ── [services] ──
     duckduckgo_url: get_toml_str(table, ["services", "duckduckgo_url"]),
     e2b_base_url: get_toml_str(table, ["services", "e2b_base_url"]),
+    brave_search_base_url: get_toml_str(table, [
+      "services", "brave_search_base_url",
+    ]),
+    brave_answers_base_url: get_toml_str(table, [
+      "services", "brave_answers_base_url",
+    ]),
+    jina_reader_base_url: get_toml_str(table, [
+      "services", "jina_reader_base_url",
+    ]),
+    // ── [limits] brave ──
+    brave_search_max_results: get_toml_int(table, [
+      "limits", "brave_search_max_results",
+    ]),
+    brave_rate_limit_rps: get_toml_int(table, ["limits", "brave_rate_limit_rps"]),
+    brave_answers_rate_limit_rps: get_toml_int(table, [
+      "limits", "brave_answers_rate_limit_rps",
+    ]),
+    brave_cache_ttl_ms: get_toml_int(table, ["limits", "brave_cache_ttl_ms"]),
   )
 }
 

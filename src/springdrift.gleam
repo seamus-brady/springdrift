@@ -38,7 +38,9 @@ import simplifile
 import skills
 import slog
 import storage
+import tools/brave as tools_brave
 import tools/builtin as tools_builtin
+import tools/jina as tools_jina
 import tools/memory as tools_memory
 import tools/web as tools_web
 import tui
@@ -889,7 +891,12 @@ fn build_profile_agent_specs(
 fn resolve_profile_tools(tool_groups: List(String)) -> List(llm_types.Tool) {
   list.flat_map(tool_groups, fn(group) {
     case group {
-      "web" -> tools_web.all()
+      "web" ->
+        list.flatten([
+          tools_brave.all(),
+          tools_jina.all(),
+          tools_web.all(),
+        ])
       "builtin" -> tools_builtin.all()
       _ -> []
     }
@@ -902,8 +909,18 @@ fn build_profile_tool_executor(
 ) -> fn(llm_types.ToolCall) -> llm_types.ToolResult {
   let has_web = list.contains(tool_groups, "web")
   fn(call: llm_types.ToolCall) -> llm_types.ToolResult {
-    case has_web && tools_web.is_web_tool(call.name) {
-      True -> tools_web.execute(call)
+    case has_web {
+      True ->
+        case call.name {
+          "brave_web_search"
+          | "brave_news_search"
+          | "brave_llm_context"
+          | "brave_summarizer"
+          | "brave_answer" -> tools_brave.execute(call)
+          "jina_reader" -> tools_jina.execute(call)
+          "fetch_url" | "web_search" -> tools_web.execute(call)
+          _ -> tools_builtin.execute(call)
+        }
       False -> tools_builtin.execute(call)
     }
   }

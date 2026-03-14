@@ -105,3 +105,28 @@ pub fn unknown_web_tool_returns_failure_test() {
     _ -> should.fail()
   }
 }
+
+// ---------------------------------------------------------------------------
+// is_web_tool covers all tool sets
+// ---------------------------------------------------------------------------
+
+pub fn is_web_tool_covers_ddg_test() {
+  web.is_web_tool("fetch_url") |> should.be_true
+  web.is_web_tool("web_search") |> should.be_true
+}
+
+pub fn is_web_tool_covers_brave_test() {
+  web.is_web_tool("brave_web_search") |> should.be_true
+  web.is_web_tool("brave_news_search") |> should.be_true
+  web.is_web_tool("brave_llm_context") |> should.be_true
+  web.is_web_tool("brave_summarizer") |> should.be_true
+  web.is_web_tool("brave_answer") |> should.be_true
+}
+
+pub fn is_web_tool_covers_jina_test() {
+  web.is_web_tool("jina_reader") |> should.be_true
+}
+
+pub fn is_web_tool_rejects_unknown_test() {
+  web.is_web_tool("unknown_tool") |> should.be_false
+}

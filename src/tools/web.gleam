@@ -10,6 +10,8 @@ import llm/types.{
   type Tool, type ToolCall, type ToolResult, ToolFailure, ToolSuccess,
 }
 import slog
+import tools/brave
+import tools/jina
 
 /// Configurable URLs and limits for web tools.
 pub type WebToolsConfig {
@@ -68,9 +70,12 @@ fn web_search_tool() -> Tool {
 // Executor
 // ---------------------------------------------------------------------------
 
-/// Whether a tool name belongs to the web tool set.
+/// Whether a tool name belongs to any web tool set (DDG, Brave, or Jina).
 pub fn is_web_tool(name: String) -> Bool {
-  name == "fetch_url" || name == "web_search"
+  name == "fetch_url"
+  || name == "web_search"
+  || brave.is_brave_tool(name)
+  || jina.is_jina_tool(name)
 }
 
 pub fn execute(call: ToolCall) -> ToolResult {

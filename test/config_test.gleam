@@ -731,3 +731,65 @@ pub fn merge_new_sections_test() {
   merged.llm_request_timeout_ms |> should.equal(Some(300_000))
   merged.web_port |> should.equal(Some(9090))
 }
+
+// ---------------------------------------------------------------------------
+// Brave/Jina service URLs and limits
+// ---------------------------------------------------------------------------
+
+pub fn parse_config_toml_brave_services_test() {
+  let toml =
+    "[services]
+brave_search_base_url = \"https://my-brave-proxy.example.com\"
+brave_answers_base_url = \"https://my-answers-proxy.example.com\"
+jina_reader_base_url = \"https://my-jina-proxy.example.com/\""
+  let assert Ok(cfg) = config.parse_config_toml(toml)
+  cfg.brave_search_base_url
+  |> should.equal(Some("https://my-brave-proxy.example.com"))
+  cfg.brave_answers_base_url
+  |> should.equal(Some("https://my-answers-proxy.example.com"))
+  cfg.jina_reader_base_url
+  |> should.equal(Some("https://my-jina-proxy.example.com/"))
+}
+
+pub fn parse_config_toml_brave_limits_test() {
+  let toml =
+    "[limits]
+brave_search_max_results = 10
+brave_rate_limit_rps = 15
+brave_answers_rate_limit_rps = 1
+brave_cache_ttl_ms = 600000"
+  let assert Ok(cfg) = config.parse_config_toml(toml)
+  cfg.brave_search_max_results |> should.equal(Some(10))
+  cfg.brave_rate_limit_rps |> should.equal(Some(15))
+  cfg.brave_answers_rate_limit_rps |> should.equal(Some(1))
+  cfg.brave_cache_ttl_ms |> should.equal(Some(600_000))
+}
+
+pub fn default_brave_fields_none_test() {
+  let cfg = config.default()
+  cfg.brave_search_base_url |> should.equal(None)
+  cfg.brave_answers_base_url |> should.equal(None)
+  cfg.jina_reader_base_url |> should.equal(None)
+  cfg.brave_search_max_results |> should.equal(None)
+  cfg.brave_rate_limit_rps |> should.equal(None)
+  cfg.brave_answers_rate_limit_rps |> should.equal(None)
+  cfg.brave_cache_ttl_ms |> should.equal(None)
+}
+
+pub fn merge_brave_fields_test() {
+  let base =
+    AppConfig(
+      ..config.default(),
+      brave_search_base_url: Some("https://base.example.com"),
+      brave_rate_limit_rps: Some(10),
+    )
+  let override =
+    AppConfig(
+      ..config.default(),
+      brave_search_base_url: Some("https://override.example.com"),
+    )
+  let merged = config.merge(base, override:)
+  merged.brave_search_base_url
+  |> should.equal(Some("https://override.example.com"))
+  merged.brave_rate_limit_rps |> should.equal(Some(10))
+}
