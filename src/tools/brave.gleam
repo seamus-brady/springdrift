@@ -46,6 +46,13 @@ fn http_get_with_headers(
   headers: List(#(String, String)),
 ) -> Result(#(Int, String), String)
 
+@external(erlang, "springdrift_ffi", "http_post")
+fn http_post(
+  url: String,
+  headers: List(#(String, String)),
+  body: String,
+) -> Result(#(Int, String), String)
+
 @external(erlang, "springdrift_ffi", "uri_encode")
 fn uri_encode(text: String) -> String
 
@@ -251,10 +258,7 @@ fn run_brave_llm_context(call: ToolCall, cfg: BraveConfig) -> ToolResult {
           )
         Ok(query) -> {
           let url =
-            cfg.search_base_url
-            <> "/res/v1/web/search?q="
-            <> uri_encode(query)
-            <> "&result_filter=llm_context"
+            cfg.search_base_url <> "/res/v1/llm/context?q=" <> uri_encode(query)
           do_brave_get(call, url, api_key, "brave_llm_context", fn(body) {
             parse_brave_llm_context(body)
           })
@@ -306,7 +310,7 @@ fn run_brave_summarizer(call: ToolCall, cfg: BraveConfig) -> ToolResult {
 // brave_answer
 // ---------------------------------------------------------------------------
 
-fn run_brave_answer(call: ToolCall, _cfg: BraveConfig) -> ToolResult {
+fn run_brave_answer(call: ToolCall, cfg: BraveConfig) -> ToolResult {
   case get_env("BRAVE_ANSWERS_API_KEY") {
     Error(_) ->
       ToolFailure(
@@ -325,12 +329,55 @@ fn run_brave_answer(call: ToolCall, _cfg: BraveConfig) -> ToolResult {
             error: "Invalid brave_answer input: missing query",
           )
         Ok(query) -> {
-          let url =
-            "https://api.search.brave.com/res/v1/answers?q="
-            <> uri_encode(query)
-          do_brave_get(call, url, api_key, "brave_answer", fn(body) {
-            parse_brave_answer(body)
-          })
+          // Brave Answers uses OpenAI-compatible chat completions endpoint
+          let url = cfg.answers_base_url <> "/res/v1/chat/completions"
+          let request_body =
+            json.to_string(
+              json.object([
+                #("model", json.string("brave")),
+                #(
+                  "messages",
+                  json.array(
+                    [
+                      #("role", json.string("user")),
+                      #("content", json.string(query)),
+                    ],
+                    fn(pair) {
+                      json.object([
+                        #(pair.0, pair.1),
+                      ])
+                    },
+                  ),
+                ),
+              ]),
+            )
+          let headers = [
+            #("X-Subscription-Token", api_key),
+            #("Accept", "application/json"),
+          ]
+          case http_post(url, headers, request_body) {
+            Error(reason) ->
+              ToolFailure(
+                tool_use_id: call.id,
+                error: "brave_answer: " <> reason,
+              )
+            Ok(#(status, body)) ->
+              case status >= 200 && status < 300 {
+                True ->
+                  ToolSuccess(
+                    tool_use_id: call.id,
+                    content: parse_brave_answer(body),
+                  )
+                False ->
+                  ToolFailure(
+                    tool_use_id: call.id,
+                    error: "brave_answer: HTTP "
+                      <> int.to_string(status)
+                      <> " — "
+                      <> string.slice(body, 0, 500),
+                  )
+              }
+          }
         }
       }
     }
@@ -420,29 +467,49 @@ fn parse_brave_news_results(body: String) -> String {
 }
 
 fn parse_brave_llm_context(body: String) -> String {
-  // LLM context returns enriched results optimized for machine consumption
-  let results_decoder = {
-    use title <- decode.field("title", decode.string)
-    use url <- decode.field("url", decode.string)
-    use description <- decode.optional_field("description", "", decode.string)
-    use extra_snippets <- decode.optional_field(
-      "extra_snippets",
-      [],
-      decode.list(decode.string),
-    )
-    decode.success(#(title, url, description, extra_snippets))
+  // LLM context endpoint returns structured context optimized for LLMs.
+  // Try multiple response shapes: direct text, structured results, or raw body.
+  let text_decoder = {
+    use text <- decode.field("text", decode.string)
+    decode.success(text)
   }
-  let decoder = {
-    use results <- decode.optional_field(
-      "web",
-      [],
-      decode.at(["results"], decode.list(results_decoder)),
-    )
-    decode.success(results)
-  }
-  case json.parse(body, decoder) {
-    Error(_) -> "No LLM context available or invalid response."
-    Ok(results) -> format_llm_context_results(results)
+  case json.parse(body, text_decoder) {
+    Ok(text) -> text
+    Error(_) -> {
+      // Fallback: try structured results with snippets
+      let results_decoder = {
+        use title <- decode.field("title", decode.string)
+        use url <- decode.field("url", decode.string)
+        use description <- decode.optional_field(
+          "description",
+          "",
+          decode.string,
+        )
+        use extra_snippets <- decode.optional_field(
+          "extra_snippets",
+          [],
+          decode.list(decode.string),
+        )
+        decode.success(#(title, url, description, extra_snippets))
+      }
+      let decoder = {
+        use results <- decode.optional_field(
+          "results",
+          [],
+          decode.list(results_decoder),
+        )
+        decode.success(results)
+      }
+      case json.parse(body, decoder) {
+        Ok(results) if results != [] -> format_llm_context_results(results)
+        _ ->
+          // Last resort: return the raw body (truncated) as context
+          case string.length(body) > 0 {
+            True -> string.slice(body, 0, 50_000)
+            False -> "No LLM context available or invalid response."
+          }
+      }
+    }
   }
 }
 
@@ -489,27 +556,16 @@ fn parse_brave_summarizer(body: String) -> String {
 }
 
 fn parse_brave_answer(body: String) -> String {
-  // Answers API returns a direct answer
+  // Brave Answers returns OpenAI chat completions format:
+  // { "choices": [{ "message": { "content": "..." } }] }
+  let choice_decoder = decode.at(["message", "content"], decode.string)
   let decoder = {
-    use answer <- decode.optional_field("answer", "", decode.string)
-    use title <- decode.optional_field("title", "", decode.string)
-    use url <- decode.optional_field("url", "", decode.string)
-    decode.success(#(answer, title, url))
+    use choices <- decode.field("choices", decode.list(choice_decoder))
+    decode.success(choices)
   }
   case json.parse(body, decoder) {
-    Error(_) -> "No answer available or invalid response."
-    Ok(#(answer, title, url)) -> {
-      let parts = [answer]
-      let parts = case title {
-        "" -> parts
-        t -> list.append(parts, ["\nSource: " <> t])
-      }
-      let parts = case url {
-        "" -> parts
-        u -> list.append(parts, [u])
-      }
-      string.join(parts, "\n")
-    }
+    Ok([content, ..]) -> content
+    _ -> "No answer available or invalid response."
   }
 }
 

@@ -1,14 +1,16 @@
 import agent/types.{type AgentSpec, AgentSpec, Permanent}
 import gleam/erlang/process.{type Subject}
 import gleam/list
-import gleam/option.{Some}
+import gleam/option.{type Option, Some}
 import llm/provider.{type Provider}
 import llm/types as llm_types
 import narrative/librarian.{type LibrarianMessage}
 import tools/artifacts
 import tools/brave
 import tools/builtin
+import tools/cache
 import tools/jina
+import tools/rate_limiter
 import tools/web
 
 const system_prompt = "You are a research agent. Your job is to gather information using web search and extraction tools.
@@ -55,6 +57,10 @@ pub fn spec(
   artifacts_dir: String,
   lib: Subject(LibrarianMessage),
   max_artifact_chars: Int,
+  brave_cache: Option(Subject(cache.CacheMessage)),
+  brave_search_limiter: Option(Subject(rate_limiter.RateLimiterMessage)),
+  brave_answers_limiter: Option(Subject(rate_limiter.RateLimiterMessage)),
+  brave_cache_ttl_ms: Int,
 ) -> AgentSpec {
   let tools =
     list.flatten([
@@ -78,7 +84,15 @@ pub fn spec(
     max_context_messages: Some(30),
     tools:,
     restart: Permanent,
-    tool_executor: researcher_executor(artifacts_dir, lib, max_artifact_chars),
+    tool_executor: researcher_executor(
+      artifacts_dir,
+      lib,
+      max_artifact_chars,
+      brave_cache,
+      brave_search_limiter,
+      brave_answers_limiter,
+      brave_cache_ttl_ms,
+    ),
     inter_turn_delay_ms: 200,
   )
 }
@@ -87,6 +101,10 @@ fn researcher_executor(
   artifacts_dir: String,
   lib: Subject(LibrarianMessage),
   max_artifact_chars: Int,
+  brave_cache: Option(Subject(cache.CacheMessage)),
+  brave_search_limiter: Option(Subject(rate_limiter.RateLimiterMessage)),
+  brave_answers_limiter: Option(Subject(rate_limiter.RateLimiterMessage)),
+  brave_cache_ttl_ms: Int,
 ) -> fn(llm_types.ToolCall) -> llm_types.ToolResult {
   fn(call: llm_types.ToolCall) -> llm_types.ToolResult {
     case call.name {
@@ -94,8 +112,20 @@ fn researcher_executor(
       "brave_web_search"
       | "brave_news_search"
       | "brave_llm_context"
-      | "brave_summarizer"
-      | "brave_answer" -> brave.execute(call)
+      | "brave_summarizer" ->
+        execute_brave_cached(
+          call,
+          brave_cache,
+          brave_search_limiter,
+          brave_cache_ttl_ms,
+        )
+      "brave_answer" ->
+        execute_brave_cached(
+          call,
+          brave_cache,
+          brave_answers_limiter,
+          brave_cache_ttl_ms,
+        )
       "jina_reader" -> jina.execute(call)
       "store_result" | "retrieve_result" ->
         artifacts.execute(
@@ -106,6 +136,41 @@ fn researcher_executor(
           max_artifact_chars,
         )
       _ -> builtin.execute(call)
+    }
+  }
+}
+
+fn execute_brave_cached(
+  call: llm_types.ToolCall,
+  brave_cache: Option(Subject(cache.CacheMessage)),
+  limiter: Option(Subject(rate_limiter.RateLimiterMessage)),
+  cache_ttl_ms: Int,
+) -> llm_types.ToolResult {
+  // Build a cache key from tool name + input
+  let cache_key = call.name <> ":" <> call.input_json
+
+  // Check cache first
+  case cache.maybe_get(brave_cache, cache_key, 1000) {
+    Ok(cached) -> llm_types.ToolSuccess(tool_use_id: call.id, content: cached)
+    Error(_) -> {
+      // Acquire rate limit token
+      case rate_limiter.maybe_acquire(limiter, 5000) {
+        Error(_) ->
+          llm_types.ToolFailure(
+            tool_use_id: call.id,
+            error: call.name <> ": rate limited — try again shortly",
+          )
+        Ok(_) -> {
+          let result = brave.execute(call)
+          // Cache successful results
+          case result {
+            llm_types.ToolSuccess(content: content, ..) ->
+              cache.maybe_put(brave_cache, cache_key, content, cache_ttl_ms)
+            _ -> Nil
+          }
+          result
+        }
+      }
     }
   }
 }

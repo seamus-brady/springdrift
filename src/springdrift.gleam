@@ -40,8 +40,10 @@ import slog
 import storage
 import tools/brave as tools_brave
 import tools/builtin as tools_builtin
+import tools/cache
 import tools/jina as tools_jina
 import tools/memory as tools_memory
+import tools/rate_limiter
 import tools/web as tools_web
 import tui
 import web/gui as web_gui
@@ -316,6 +318,31 @@ fn run(cfg: AppConfig) -> Nil {
   }
   let lib = option.Some(librarian_subj)
 
+  // Start cache and rate limiter actors for web tools
+  let brave_cache = case cache.start() {
+    Ok(subj) -> option.Some(subj)
+    Error(_) -> option.None
+  }
+  let brave_rate_limit_rps = option.unwrap(cfg.brave_rate_limit_rps, 20)
+  let brave_search_limiter = case
+    rate_limiter.start(brave_rate_limit_rps, 1000 / brave_rate_limit_rps)
+  {
+    Ok(subj) -> option.Some(subj)
+    Error(_) -> option.None
+  }
+  let brave_answers_rate_limit_rps =
+    option.unwrap(cfg.brave_answers_rate_limit_rps, 2)
+  let brave_answers_limiter = case
+    rate_limiter.start(
+      brave_answers_rate_limit_rps,
+      1000 / brave_answers_rate_limit_rps,
+    )
+  {
+    Ok(subj) -> option.Some(subj)
+    Error(_) -> option.None
+  }
+  let brave_cache_ttl_ms = option.unwrap(cfg.brave_cache_ttl_ms, 300_000)
+
   // Profile system
   let profile_dirs =
     option.unwrap(cfg.profiles_dirs, profile.default_profile_dirs())
@@ -345,13 +372,31 @@ fn run(cfg: AppConfig) -> Nil {
             <> ") — using defaults",
           )
           #(
-            default_agent_specs(cfg, p, task_model, librarian_subj),
+            default_agent_specs(
+              cfg,
+              p,
+              task_model,
+              librarian_subj,
+              brave_cache,
+              brave_search_limiter,
+              brave_answers_limiter,
+              brave_cache_ttl_ms,
+            ),
             option.None,
           )
         }
       }
     option.None -> #(
-      default_agent_specs(cfg, p, task_model, librarian_subj),
+      default_agent_specs(
+        cfg,
+        p,
+        task_model,
+        librarian_subj,
+        brave_cache,
+        brave_search_limiter,
+        brave_answers_limiter,
+        brave_cache_ttl_ms,
+      ),
       option.None,
     )
   }
@@ -802,6 +847,14 @@ fn default_agent_specs(
   provider: Provider,
   task_model: String,
   librarian_subj: process.Subject(librarian.LibrarianMessage),
+  brave_cache: option.Option(process.Subject(cache.CacheMessage)),
+  brave_search_limiter: option.Option(
+    process.Subject(rate_limiter.RateLimiterMessage),
+  ),
+  brave_answers_limiter: option.Option(
+    process.Subject(rate_limiter.RateLimiterMessage),
+  ),
+  brave_cache_ttl_ms: Int,
 ) -> List(agent_types.AgentSpec) {
   let delay = option.unwrap(cfg.inter_turn_delay_ms, 200)
   let p_spec = planner.spec(provider, task_model)
@@ -814,6 +867,10 @@ fn default_agent_specs(
       paths.artifacts_dir(),
       librarian_subj,
       max_artifact_chars,
+      brave_cache,
+      brave_search_limiter,
+      brave_answers_limiter,
+      brave_cache_ttl_ms,
     )
   let c_spec = coder.spec(provider, task_model, sandbox_timeout)
   [
