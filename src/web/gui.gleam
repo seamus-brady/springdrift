@@ -153,13 +153,29 @@ fn handle_request(
       )
     True ->
       case request.path_segments(req) {
-        // Serve the HTML page
+        // Root redirects to /chat
         [] ->
+          response.new(302)
+          |> response.set_header("location", "/chat")
+          |> response.set_body(mist.Bytes(bytes_tree.new()))
+
+        // Chat page
+        ["chat"] ->
           response.new(200)
           |> response.set_header("content-type", "text/html; charset=utf-8")
           |> response.set_body(
             mist.Bytes(
-              bytes_tree.from_string(html.page(agent_name, agent_version)),
+              bytes_tree.from_string(html.chat_page(agent_name, agent_version)),
+            ),
+          )
+
+        // Admin page (narrative + log)
+        ["admin"] ->
+          response.new(200)
+          |> response.set_header("content-type", "text/html; charset=utf-8")
+          |> response.set_body(
+            mist.Bytes(
+              bytes_tree.from_string(html.admin_page(agent_name, agent_version)),
             ),
           )
 
