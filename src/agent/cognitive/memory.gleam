@@ -112,12 +112,12 @@ pub fn maybe_spawn_archivist(
     ctx,
     state.provider,
     state.archivist_model,
-    state.narrative_dir,
-    state.cbr_dir,
+    state.memory.narrative_dir,
+    state.memory.cbr_dir,
     state.verbose,
-    state.librarian,
-    state.embedding_config,
-    state.curator,
-    state.threading_config,
+    state.memory.librarian,
+    state.memory.embedding_config,
+    state.memory.curator,
+    state.config.threading_config,
   )
 }

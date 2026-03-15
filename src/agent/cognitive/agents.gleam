@@ -124,9 +124,9 @@ fn handle_memory_tools(
         })
       let introspect_ctx =
         Some(memory.IntrospectContext(
-          agent_uuid: state.agent_uuid,
-          session_since: state.session_since,
-          active_profile: state.active_profile,
+          agent_uuid: state.identity.agent_uuid,
+          session_since: state.identity.session_since,
+          active_profile: state.identity.active_profile,
           agents: agent_entries,
           dprime_enabled: option.is_some(state.dprime_state),
           dprime_modify_threshold: case state.dprime_state {
@@ -142,12 +142,12 @@ fn handle_memory_tools(
       let result =
         memory.execute(
           call,
-          state.narrative_dir,
-          state.librarian,
+          state.memory.narrative_dir,
+          state.memory.librarian,
           facts_ctx,
-          state.embedding_config,
+          state.memory.embedding_config,
           introspect_ctx,
-          state.memory_limits,
+          state.config.memory_limits,
         )
       case result {
         llm_types.ToolSuccess(tool_use_id: id, content: c) ->
@@ -193,7 +193,7 @@ fn handle_memory_tools(
         req,
         state.provider,
         state.self,
-        state.retry_config,
+        state.config.retry_config,
       )
 
       CognitiveState(
@@ -254,7 +254,7 @@ fn handle_memory_tools(
             req,
             state.provider,
             state.self,
-            state.retry_config,
+            state.config.retry_config,
           )
           CognitiveState(
             ..new_state,
@@ -381,14 +381,14 @@ fn do_dispatch_agents(
               reply_to: state.self,
             )
           // Enrich task with prior agent results via Curator
-          let enriched_task = case state.curator {
+          let enriched_task = case state.memory.curator {
             Some(cur) -> curator.inject_context(cur, base_task)
             None -> base_task
           }
           process.send(task_subject, enriched_task)
           process.send(state.notify, ToolCalling(name: call.name))
           // Index agent cycle as NodePending in DAG
-          case state.librarian {
+          case state.memory.librarian {
             Some(lib) ->
               process.send(
                 lib,
@@ -562,7 +562,7 @@ pub fn handle_agent_complete(
     ])
 
   // Write back to Curator scratchpad for inter-agent context
-  case state.curator {
+  case state.memory.curator {
     Some(cur) -> {
       let cycle_id = option.unwrap(state.cycle_id, outcome_task_id)
       let findings = case outcome {
@@ -585,7 +585,7 @@ pub fn handle_agent_complete(
   }
 
   // Update DAG node with agent outcome
-  case state.librarian {
+  case state.memory.librarian {
     Some(lib) -> {
       let node_outcome = case outcome {
         AgentSuccess(..) -> dag_types.NodeSuccess
@@ -753,7 +753,7 @@ pub fn handle_agent_complete(
             req,
             state.provider,
             state.self,
-            state.retry_config,
+            state.config.retry_config,
           )
 
           CognitiveState(
@@ -830,7 +830,7 @@ pub fn handle_user_answer(
         req,
         state.provider,
         state.self,
-        state.retry_config,
+        state.config.retry_config,
       )
 
       CognitiveState(
@@ -888,7 +888,7 @@ pub fn handle_agent_event(
     types.AgentCrashed(name:, ..)
     | types.AgentRestartFailed(name:, ..)
     | types.AgentStopped(name:) -> {
-      case state.curator {
+      case state.memory.curator {
         Some(cur) -> curator.update_agent_health(cur, name <> " " <> event_type)
         None -> Nil
       }

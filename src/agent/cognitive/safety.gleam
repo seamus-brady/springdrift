@@ -225,7 +225,7 @@ pub fn handle_safety_gate_complete(
         req,
         state.provider,
         state.self,
-        state.retry_config,
+        state.config.retry_config,
       )
 
       CognitiveState(
@@ -278,7 +278,7 @@ pub fn handle_safety_gate_complete(
         req,
         state.provider,
         state.self,
-        state.retry_config,
+        state.config.retry_config,
       )
 
       CognitiveState(
@@ -737,7 +737,7 @@ pub fn handle_output_gate_complete(
             req,
             new_state.provider,
             new_state.self,
-            new_state.retry_config,
+            new_state.config.retry_config,
           )
           CognitiveState(
             ..new_state,
