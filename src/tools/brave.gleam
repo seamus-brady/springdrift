@@ -258,7 +258,10 @@ fn run_brave_llm_context(call: ToolCall, cfg: BraveConfig) -> ToolResult {
           )
         Ok(query) -> {
           let url =
-            cfg.search_base_url <> "/res/v1/llm/context?q=" <> uri_encode(query)
+            cfg.search_base_url
+            <> "/res/v1/web/search?q="
+            <> uri_encode(query)
+            <> "&extra_snippets=true"
           do_brave_get(call, url, api_key, "brave_llm_context", fn(body) {
             parse_brave_llm_context(body)
           })
@@ -337,17 +340,12 @@ fn run_brave_answer(call: ToolCall, cfg: BraveConfig) -> ToolResult {
                 #("model", json.string("brave")),
                 #(
                   "messages",
-                  json.array(
-                    [
+                  json.preprocessed_array([
+                    json.object([
                       #("role", json.string("user")),
                       #("content", json.string(query)),
-                    ],
-                    fn(pair) {
-                      json.object([
-                        #(pair.0, pair.1),
-                      ])
-                    },
-                  ),
+                    ]),
+                  ]),
                 ),
               ]),
             )
@@ -467,49 +465,34 @@ fn parse_brave_news_results(body: String) -> String {
 }
 
 fn parse_brave_llm_context(body: String) -> String {
-  // LLM context endpoint returns structured context optimized for LLMs.
-  // Try multiple response shapes: direct text, structured results, or raw body.
-  let text_decoder = {
-    use text <- decode.field("text", decode.string)
-    decode.success(text)
+  // Uses web search with extra_snippets=true for LLM-optimized context.
+  // Response has results under web.results with extra_snippets arrays.
+  let results_decoder = {
+    use title <- decode.field("title", decode.string)
+    use url <- decode.field("url", decode.string)
+    use description <- decode.optional_field("description", "", decode.string)
+    use extra_snippets <- decode.optional_field(
+      "extra_snippets",
+      [],
+      decode.list(decode.string),
+    )
+    decode.success(#(title, url, description, extra_snippets))
   }
-  case json.parse(body, text_decoder) {
-    Ok(text) -> text
-    Error(_) -> {
-      // Fallback: try structured results with snippets
-      let results_decoder = {
-        use title <- decode.field("title", decode.string)
-        use url <- decode.field("url", decode.string)
-        use description <- decode.optional_field(
-          "description",
-          "",
-          decode.string,
-        )
-        use extra_snippets <- decode.optional_field(
-          "extra_snippets",
-          [],
-          decode.list(decode.string),
-        )
-        decode.success(#(title, url, description, extra_snippets))
+  let decoder = {
+    use results <- decode.optional_field(
+      "web",
+      [],
+      decode.at(["results"], decode.list(results_decoder)),
+    )
+    decode.success(results)
+  }
+  case json.parse(body, decoder) {
+    Ok(results) if results != [] -> format_llm_context_results(results)
+    _ ->
+      case string.length(body) > 0 {
+        True -> string.slice(body, 0, 50_000)
+        False -> "No LLM context available or invalid response."
       }
-      let decoder = {
-        use results <- decode.optional_field(
-          "results",
-          [],
-          decode.list(results_decoder),
-        )
-        decode.success(results)
-      }
-      case json.parse(body, decoder) {
-        Ok(results) if results != [] -> format_llm_context_results(results)
-        _ ->
-          // Last resort: return the raw body (truncated) as context
-          case string.length(body) > 0 {
-            True -> string.slice(body, 0, 50_000)
-            False -> "No LLM context available or invalid response."
-          }
-      }
-    }
   }
 }
 
