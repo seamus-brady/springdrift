@@ -452,7 +452,9 @@ pub type CycleData {
     timestamp: String,
     human_input: String,
     tool_names: List(String),
+    tool_successes: List(#(String, Bool)),
     response_text: String,
+    model: String,
     input_tokens: Int,
     output_tokens: Int,
     thinking_tokens: Int,
@@ -467,7 +469,9 @@ type CycleAcc {
     timestamp: String,
     human_input: String,
     tool_names: List(String),
+    tool_successes: List(#(String, Bool)),
     response_text: String,
+    model: String,
     input_tokens: Int,
     output_tokens: Int,
     thinking_tokens: Int,
@@ -484,12 +488,14 @@ type RawEvent {
   )
   LlmResponseEvent(
     cycle_id: String,
+    model: String,
     content_text: String,
     input_tokens: Int,
     output_tokens: Int,
     thinking_tokens: Int,
   )
   ToolCallEvent(cycle_id: String, name: String)
+  ToolResultEvent(cycle_id: String, tool_use_id: String, success: Bool)
   ClassificationEvent(cycle_id: String, complexity: String)
   OtherEvent
 }
@@ -571,7 +577,9 @@ fn build_cycles(events: List(RawEvent)) -> List(CycleData) {
             timestamp:,
             human_input: text,
             tool_names: [],
+            tool_successes: [],
             response_text: "",
+            model: "",
             input_tokens: 0,
             output_tokens: 0,
             thinking_tokens: 0,
@@ -580,6 +588,7 @@ fn build_cycles(events: List(RawEvent)) -> List(CycleData) {
         ])
       LlmResponseEvent(
         cycle_id:,
+        model:,
         content_text:,
         input_tokens:,
         output_tokens:,
@@ -591,6 +600,10 @@ fn build_cycles(events: List(RawEvent)) -> List(CycleData) {
               CycleAcc(
                 ..c,
                 response_text: content_text,
+                model: case model {
+                  "" -> c.model
+                  m -> m
+                },
                 input_tokens: c.input_tokens + input_tokens,
                 output_tokens: c.output_tokens + output_tokens,
                 thinking_tokens: c.thinking_tokens + thinking_tokens,
@@ -602,6 +615,19 @@ fn build_cycles(events: List(RawEvent)) -> List(CycleData) {
         list.map(acc, fn(c) {
           case c.cycle_id == cycle_id {
             True -> CycleAcc(..c, tool_names: list.append(c.tool_names, [name]))
+            False -> c
+          }
+        })
+      ToolResultEvent(cycle_id:, tool_use_id: _, success:) ->
+        list.map(acc, fn(c) {
+          case c.cycle_id == cycle_id {
+            True ->
+              CycleAcc(
+                ..c,
+                tool_successes: list.append(c.tool_successes, [
+                  #(c.cycle_id, success),
+                ]),
+              )
             False -> c
           }
         })
@@ -622,7 +648,9 @@ fn build_cycles(events: List(RawEvent)) -> List(CycleData) {
       timestamp: c.timestamp,
       human_input: c.human_input,
       tool_names: c.tool_names,
+      tool_successes: c.tool_successes,
       response_text: c.response_text,
+      model: c.model,
       input_tokens: c.input_tokens,
       output_tokens: c.output_tokens,
       thinking_tokens: c.thinking_tokens,
@@ -647,6 +675,7 @@ fn event_decoder() -> decode.Decoder(RawEvent) {
     }
     "llm_response" -> {
       use cycle_id <- decode.field("cycle_id", decode.string)
+      use model <- decode.optional_field("model", "", decode.string)
       use parts <- decode.field(
         "content",
         decode.list(content_block_text_decoder()),
@@ -660,6 +689,7 @@ fn event_decoder() -> decode.Decoder(RawEvent) {
       )
       decode.success(LlmResponseEvent(
         cycle_id:,
+        model:,
         content_text: string.join(parts, ""),
         input_tokens:,
         output_tokens:,
@@ -670,6 +700,12 @@ fn event_decoder() -> decode.Decoder(RawEvent) {
       use cycle_id <- decode.field("cycle_id", decode.string)
       use name <- decode.field("name", decode.string)
       decode.success(ToolCallEvent(cycle_id:, name:))
+    }
+    "tool_result" -> {
+      use cycle_id <- decode.field("cycle_id", decode.string)
+      use tool_use_id <- decode.field("tool_use_id", decode.string)
+      use success <- decode.field("success", decode.bool)
+      decode.success(ToolResultEvent(cycle_id:, tool_use_id:, success:))
     }
     "classification" -> {
       use cycle_id <- decode.field("cycle_id", decode.string)
