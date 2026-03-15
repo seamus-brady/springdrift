@@ -71,6 +71,7 @@ pub fn start(
         task_model: cfg.task_model,
         reasoning_model: cfg.reasoning_model,
         archivist_model: cfg.archivist_model,
+        archivist_max_tokens: cfg.archivist_max_tokens,
         save_in_progress: False,
         save_pending: None,
         dprime_state: cfg.dprime_state,

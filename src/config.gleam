@@ -55,6 +55,7 @@ pub type AppConfig {
     // ── Narrative (always enabled) ──
     narrative_dir: Option(String),
     archivist_model: Option(String),
+    archivist_max_tokens: Option(Int),
     narrative_threading: Option(Bool),
     narrative_summaries: Option(Bool),
     narrative_summary_schedule: Option(String),
@@ -178,6 +179,7 @@ pub fn default() -> AppConfig {
     dprime_config: None,
     narrative_dir: None,
     archivist_model: None,
+    archivist_max_tokens: None,
     narrative_threading: None,
     narrative_summaries: None,
     narrative_summary_schedule: None,
@@ -293,6 +295,10 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     archivist_model: option.or(
       override_cfg.archivist_model,
       base.archivist_model,
+    ),
+    archivist_max_tokens: option.or(
+      override_cfg.archivist_max_tokens,
+      base.archivist_max_tokens,
     ),
     narrative_threading: option.or(
       override_cfg.narrative_threading,
@@ -667,6 +673,9 @@ pub fn to_string(cfg: AppConfig) -> String {
     // Narrative
     option.map(cfg.narrative_dir, fn(v) { "narrative_dir: " <> v }),
     option.map(cfg.archivist_model, fn(v) { "archivist_model: " <> v }),
+    option.map(cfg.archivist_max_tokens, fn(v) {
+      "archivist_max_tokens: " <> int.to_string(v)
+    }),
     // Profile
     option.map(cfg.default_profile, fn(v) { "profile: " <> v }),
     option.map(cfg.profiles_dirs, fn(dirs) {
@@ -909,6 +918,9 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     // ── [narrative] ──
     narrative_dir: get_toml_str(table, ["narrative", "directory"]),
     archivist_model: get_toml_str(table, ["narrative", "archivist_model"]),
+    archivist_max_tokens: get_toml_int(table, [
+      "narrative", "archivist_max_tokens",
+    ]),
     narrative_threading: get_toml_bool(table, ["narrative", "threading"]),
     narrative_summaries: get_toml_bool(table, ["narrative", "summaries"]),
     narrative_summary_schedule: get_toml_str(table, [
@@ -1078,8 +1090,8 @@ const known_keys = [
 ]
 
 const known_narrative_keys = [
-  "directory", "archivist_model", "threading", "summaries", "summary_schedule",
-  "max_days",
+  "directory", "archivist_model", "archivist_max_tokens", "threading",
+  "summaries", "summary_schedule", "max_days",
 ]
 
 fn validate_toml_keys(table: dict.Dict(String, tom.Toml)) -> Nil {

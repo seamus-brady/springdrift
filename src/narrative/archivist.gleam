@@ -66,11 +66,12 @@ pub fn generate(
   ctx: ArchivistContext,
   provider: Provider,
   model: String,
+  max_tokens: Int,
   _verbose: Bool,
 ) -> Option(NarrativeEntry) {
   let prompt = build_prompt(ctx)
   let req =
-    request.new(model, 2048)
+    request.new(model, max_tokens)
     |> request.with_system(archivist_system_prompt())
     |> request.with_user_message(prompt)
 
@@ -119,6 +120,7 @@ pub fn spawn(
   ctx: ArchivistContext,
   provider: Provider,
   model: String,
+  max_tokens: Int,
   narrative_dir: String,
   cbr_dir: String,
   verbose: Bool,
@@ -129,7 +131,7 @@ pub fn spawn(
 ) -> Nil {
   let _ =
     process.spawn_unlinked(fn() {
-      case generate(ctx, provider, model, verbose) {
+      case generate(ctx, provider, model, max_tokens, verbose) {
         Some(entry) -> {
           let threaded =
             threading.assign_thread(entry, narrative_dir, lib, threading_config)
@@ -309,7 +311,8 @@ fn parse_narrative_entry(
   text: String,
   ctx: ArchivistContext,
 ) -> Result(NarrativeEntry, Nil) {
-  let extracted = extract_json_object(string.trim(text))
+  let stripped = strip_markdown_fences(string.trim(text))
+  let extracted = extract_json_object(stripped)
   // Sanitize control characters that LLMs sometimes leave unescaped in JSON strings
   let cleaned = sanitize_json_string(extracted)
   // Use the lenient decoder that defaults missing required fields
@@ -329,7 +332,27 @@ fn parse_narrative_entry(
           entry_type: Narrative,
         ),
       )
-    Error(_) -> Error(Nil)
+    Error(_) -> {
+      // Try repairing truncated JSON before giving up
+      let repaired = repair_truncated_json(cleaned)
+      case json.parse(repaired, lenient_entry_decoder()) {
+        Ok(partial) ->
+          Ok(
+            NarrativeEntry(
+              ..partial,
+              schema_version: 1,
+              cycle_id: ctx.cycle_id,
+              parent_cycle_id: ctx.parent_cycle_id,
+              timestamp: case partial.timestamp {
+                "" -> get_datetime()
+                ts -> ts
+              },
+              entry_type: Narrative,
+            ),
+          )
+        Error(_) -> Error(Nil)
+      }
+    }
   }
 }
 
@@ -829,7 +852,8 @@ fn parse_cbr_case(
   ctx: ArchivistContext,
   entry: NarrativeEntry,
 ) -> Result(cbr_types.CbrCase, Nil) {
-  let extracted = extract_json_object(string.trim(text))
+  let stripped = strip_markdown_fences(string.trim(text))
+  let extracted = extract_json_object(stripped)
   let cleaned = sanitize_json_string(extracted)
   case json.parse(cleaned, lenient_cbr_decoder()) {
     Ok(partial) ->
@@ -1105,6 +1129,123 @@ fn extract_simple_keywords(text: String) -> List(String) {
   })
   |> list.unique
   |> list.take(10)
+}
+
+/// Strip markdown code fences (```json ... ```) from LLM output.
+fn strip_markdown_fences(text: String) -> String {
+  case string.starts_with(text, "```") {
+    True -> {
+      // Remove opening fence line (```json or ``` etc.)
+      let after_open = case string.split_once(text, "\n") {
+        Ok(#(_, rest)) -> rest
+        Error(_) -> text
+      }
+      // Remove closing fence if present
+      case string.ends_with(string.trim_end(after_open), "```") {
+        True -> {
+          let trimmed = string.trim_end(after_open)
+          string.slice(trimmed, 0, string.length(trimmed) - 3)
+          |> string.trim_end
+        }
+        False -> after_open
+      }
+    }
+    False -> text
+  }
+}
+
+/// Attempt to repair truncated JSON by closing unclosed strings, arrays,
+/// and objects. Best-effort — if the JSON is too broken, returns it unchanged.
+fn repair_truncated_json(text: String) -> String {
+  let graphemes = string.to_graphemes(text)
+  let #(open_braces, open_brackets, in_string) =
+    count_open_structures(graphemes, 0, 0, False, False)
+  case open_braces > 0 || open_brackets > 0 || in_string {
+    False -> text
+    True -> {
+      // Close unclosed string first
+      let base = case in_string {
+        True -> text <> "\""
+        False -> text
+      }
+      // Close arrays then objects
+      let with_brackets = close_n(base, "]", open_brackets)
+      close_n(with_brackets, "}", open_braces)
+    }
+  }
+}
+
+fn count_open_structures(
+  graphemes: List(String),
+  braces: Int,
+  brackets: Int,
+  in_string: Bool,
+  escaped: Bool,
+) -> #(Int, Int, Bool) {
+  case graphemes {
+    [] -> #(braces, brackets, in_string)
+    [g, ..rest] -> {
+      case escaped {
+        True -> count_open_structures(rest, braces, brackets, in_string, False)
+        False ->
+          case in_string {
+            True ->
+              case g {
+                "\\" ->
+                  count_open_structures(rest, braces, brackets, True, True)
+                "\"" ->
+                  count_open_structures(rest, braces, brackets, False, False)
+                _ -> count_open_structures(rest, braces, brackets, True, False)
+              }
+            False ->
+              case g {
+                "\"" ->
+                  count_open_structures(rest, braces, brackets, True, False)
+                "{" ->
+                  count_open_structures(
+                    rest,
+                    braces + 1,
+                    brackets,
+                    False,
+                    False,
+                  )
+                "}" ->
+                  count_open_structures(
+                    rest,
+                    int.max(0, braces - 1),
+                    brackets,
+                    False,
+                    False,
+                  )
+                "[" ->
+                  count_open_structures(
+                    rest,
+                    braces,
+                    brackets + 1,
+                    False,
+                    False,
+                  )
+                "]" ->
+                  count_open_structures(
+                    rest,
+                    braces,
+                    int.max(0, brackets - 1),
+                    False,
+                    False,
+                  )
+                _ -> count_open_structures(rest, braces, brackets, False, False)
+              }
+          }
+      }
+    }
+  }
+}
+
+fn close_n(text: String, closer: String, n: Int) -> String {
+  case n > 0 {
+    True -> close_n(text <> closer, closer, n - 1)
+    False -> text
+  }
 }
 
 /// Extract a JSON object from text that may contain markdown fences,

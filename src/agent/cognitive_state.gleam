@@ -25,6 +25,7 @@ pub type ModelConfig {
     reasoning_model: String,
     max_tokens: Int,
     archivist_model: String,
+    archivist_max_tokens: Int,
   )
 }
 
@@ -72,6 +73,7 @@ pub type CognitiveState {
     reasoning_model: String,
     max_tokens: Int,
     archivist_model: String,
+    archivist_max_tokens: Int,
     // --- Conversation ---
     system: String,
     max_context_messages: Option(Int),
@@ -110,6 +112,7 @@ pub fn model_config(state: CognitiveState) -> ModelConfig {
     reasoning_model: state.reasoning_model,
     max_tokens: state.max_tokens,
     archivist_model: state.archivist_model,
+    archivist_max_tokens: state.archivist_max_tokens,
   )
 }
 

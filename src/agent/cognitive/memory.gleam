@@ -112,6 +112,7 @@ pub fn maybe_spawn_archivist(
     ctx,
     state.provider,
     state.archivist_model,
+    state.archivist_max_tokens,
     state.memory.narrative_dir,
     state.memory.cbr_dir,
     state.verbose,

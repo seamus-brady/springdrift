@@ -77,6 +77,7 @@ name = "Springdrift"
 [narrative]
 # directory = ".springdrift/memory/narrative"  # Default location
 # archivist_model = ""       # Defaults to task_model
+# archivist_max_tokens = 4096  # Max output tokens for archivist LLM calls
 threading = true             # Auto-assign threads by overlap scoring
 summaries = false            # Enable periodic summaries
 summary_schedule = "weekly"  # "weekly" or "monthly"

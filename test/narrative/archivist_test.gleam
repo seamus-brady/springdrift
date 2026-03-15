@@ -83,7 +83,7 @@ pub fn generate_valid_json_response_test() {
     "{\"summary\": \"I greeted the user.\", \"intent\": {\"classification\": \"conversation\", \"description\": \"greeting\", \"domain\": \"general\"}, \"outcome\": {\"status\": \"success\", \"confidence\": 0.9, \"assessment\": \"Simple greeting handled\"}, \"keywords\": [\"greeting\"], \"metrics\": {\"total_duration_ms\": 0, \"input_tokens\": 100, \"output_tokens\": 50, \"thinking_tokens\": 0, \"tool_calls\": 0, \"agent_delegations\": 0, \"dprime_evaluations\": 0, \"model_used\": \"mock-model\"}}"
   let provider = mock.provider_with_text(json)
   let ctx = make_ctx()
-  let result = archivist.generate(ctx, provider, "mock-model", False)
+  let result = archivist.generate(ctx, provider, "mock-model", 4096, False)
   result |> should.be_some
   let assert Some(entry) = result
   entry.summary |> should.equal("I greeted the user.")
@@ -96,7 +96,7 @@ pub fn generate_markdown_wrapped_json_test() {
     "```json\n{\"summary\": \"I helped with a task.\", \"intent\": {\"classification\": \"exploration\"}, \"outcome\": {\"status\": \"success\", \"confidence\": 0.8}, \"keywords\": [\"help\"]}\n```"
   let provider = mock.provider_with_text(json)
   let ctx = make_ctx()
-  let result = archivist.generate(ctx, provider, "mock-model", False)
+  let result = archivist.generate(ctx, provider, "mock-model", 4096, False)
   result |> should.be_some
   let assert Some(entry) = result
   entry.summary |> should.equal("I helped with a task.")
@@ -107,7 +107,7 @@ pub fn generate_with_preamble_text_test() {
     "Here is the narrative entry:\n{\"summary\": \"Processed a greeting.\", \"intent\": {\"classification\": \"conversation\"}, \"outcome\": {\"status\": \"success\", \"confidence\": 0.7}, \"keywords\": []}"
   let provider = mock.provider_with_text(json)
   let ctx = make_ctx()
-  let result = archivist.generate(ctx, provider, "mock-model", False)
+  let result = archivist.generate(ctx, provider, "mock-model", 4096, False)
   result |> should.be_some
   let assert Some(entry) = result
   entry.summary |> should.equal("Processed a greeting.")
@@ -118,7 +118,7 @@ pub fn generate_minimal_json_uses_defaults_test() {
   let json = "{\"summary\": \"Minimal entry.\"}"
   let provider = mock.provider_with_text(json)
   let ctx = make_ctx()
-  let result = archivist.generate(ctx, provider, "mock-model", False)
+  let result = archivist.generate(ctx, provider, "mock-model", 4096, False)
   result |> should.be_some
   let assert Some(entry) = result
   entry.summary |> should.equal("Minimal entry.")
@@ -130,7 +130,7 @@ pub fn generate_minimal_json_uses_defaults_test() {
 pub fn generate_completely_invalid_response_falls_back_test() {
   let provider = mock.provider_with_text("I cannot produce JSON, sorry!")
   let ctx = make_ctx()
-  let result = archivist.generate(ctx, provider, "mock-model", False)
+  let result = archivist.generate(ctx, provider, "mock-model", 4096, False)
   result |> should.be_some
   let assert Some(entry) = result
   // Fallback entry — should contain the user input and a factual summary
@@ -142,7 +142,7 @@ pub fn generate_completely_invalid_response_falls_back_test() {
 pub fn generate_llm_failure_returns_none_test() {
   let provider = mock.provider_with_error("connection refused")
   let ctx = make_ctx()
-  let result = archivist.generate(ctx, provider, "mock-model", False)
+  let result = archivist.generate(ctx, provider, "mock-model", 4096, False)
   result |> should.be_none
 }
 
@@ -152,7 +152,7 @@ pub fn generate_overrides_cycle_id_from_context_test() {
     "{\"cycle_id\": \"wrong-id\", \"summary\": \"Test.\", \"intent\": {\"classification\": \"conversation\"}, \"outcome\": {\"status\": \"success\", \"confidence\": 0.5}, \"keywords\": []}"
   let provider = mock.provider_with_text(json)
   let ctx = make_ctx()
-  let result = archivist.generate(ctx, provider, "mock-model", False)
+  let result = archivist.generate(ctx, provider, "mock-model", 4096, False)
   result |> should.be_some
   let assert Some(entry) = result
   entry.cycle_id |> should.equal("test-cycle-123")
@@ -163,7 +163,7 @@ pub fn generate_with_delegation_chain_test() {
     "{\"summary\": \"Delegated research.\", \"intent\": {\"classification\": \"data_query\"}, \"outcome\": {\"status\": \"success\", \"confidence\": 0.8}, \"delegation_chain\": [{\"agent\": \"researcher\", \"instruction\": \"find info\", \"outcome\": \"success\", \"contribution\": \"found data\"}], \"keywords\": [\"research\"]}"
   let provider = mock.provider_with_text(json)
   let ctx = make_ctx()
-  let result = archivist.generate(ctx, provider, "mock-model", False)
+  let result = archivist.generate(ctx, provider, "mock-model", 4096, False)
   result |> should.be_some
   let assert Some(entry) = result
   entry.summary |> should.equal("Delegated research.")
@@ -176,7 +176,7 @@ pub fn generate_empty_json_object_uses_all_defaults_test() {
   let json = "{}"
   let provider = mock.provider_with_text(json)
   let ctx = make_ctx()
-  let result = archivist.generate(ctx, provider, "mock-model", False)
+  let result = archivist.generate(ctx, provider, "mock-model", 4096, False)
   result |> should.be_some
   let assert Some(entry) = result
   entry.summary |> should.equal("")
@@ -248,7 +248,7 @@ pub fn generate_json_with_literal_newlines_in_summary_test() {
     "{\"summary\": \"I explained how to create a planet.\nIt was a detailed response.\", \"intent\": {\"classification\": \"conversation\"}, \"outcome\": {\"status\": \"success\", \"confidence\": 0.8}, \"keywords\": [\"planet\"]}"
   let provider = mock.provider_with_text(json)
   let ctx = make_ctx()
-  let result = archivist.generate(ctx, provider, "mock-model", False)
+  let result = archivist.generate(ctx, provider, "mock-model", 4096, False)
   result |> should.be_some
   let assert Some(entry) = result
   entry.summary
