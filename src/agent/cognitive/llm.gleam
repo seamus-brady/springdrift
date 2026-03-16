@@ -33,7 +33,7 @@ pub fn proceed_with_model(
     Some(cycle_id),
   )
   // Refresh system prompt from Curator if available
-  let state = case state.curator {
+  let state = case state.memory.curator {
     Some(cur) -> {
       let prompt = curator.build_system_prompt(cur, state.system)
       CognitiveState(..state, system: prompt)
@@ -54,7 +54,7 @@ pub fn proceed_with_model(
     False -> Nil
   }
   // Index NodePending in DAG
-  case state.librarian {
+  case state.memory.librarian {
     Some(lib) ->
       process.send(
         lib,
@@ -82,7 +82,7 @@ pub fn proceed_with_model(
     req,
     state.provider,
     state.self,
-    state.retry_config,
+    state.config.retry_config,
   )
 
   CognitiveState(
@@ -149,7 +149,7 @@ pub fn handle_think_error(
             req,
             state.provider,
             state.self,
-            state.retry_config,
+            state.config.retry_config,
           )
           CognitiveState(
             ..state,

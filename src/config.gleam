@@ -55,6 +55,7 @@ pub type AppConfig {
     // ── Narrative (always enabled) ──
     narrative_dir: Option(String),
     archivist_model: Option(String),
+    archivist_max_tokens: Option(Int),
     narrative_threading: Option(Bool),
     narrative_summaries: Option(Bool),
     narrative_summary_schedule: Option(String),
@@ -92,7 +93,6 @@ pub type AppConfig {
     recall_max_entries: Option(Int),
     cbr_max_results: Option(Int),
     web_search_max_results: Option(Int),
-    exa_search_max_results: Option(Int),
     // ── Thread scoring ──
     threading_location_weight: Option(Int),
     threading_domain_weight: Option(Int),
@@ -135,10 +135,15 @@ pub type AppConfig {
     web_port: Option(Int),
     // ── External services ──
     duckduckgo_url: Option(String),
-    exa_base_url: Option(String),
-    tavily_base_url: Option(String),
-    firecrawl_base_url: Option(String),
     e2b_base_url: Option(String),
+    brave_search_base_url: Option(String),
+    brave_answers_base_url: Option(String),
+    jina_reader_base_url: Option(String),
+    // ── Brave API settings ──
+    brave_search_max_results: Option(Int),
+    brave_rate_limit_rps: Option(Int),
+    brave_answers_rate_limit_rps: Option(Int),
+    brave_cache_ttl_ms: Option(Int),
   )
 }
 
@@ -174,6 +179,7 @@ pub fn default() -> AppConfig {
     dprime_config: None,
     narrative_dir: None,
     archivist_model: None,
+    archivist_max_tokens: None,
     narrative_threading: None,
     narrative_summaries: None,
     narrative_summary_schedule: None,
@@ -205,7 +211,6 @@ pub fn default() -> AppConfig {
     recall_max_entries: None,
     cbr_max_results: None,
     web_search_max_results: None,
-    exa_search_max_results: None,
     threading_location_weight: None,
     threading_domain_weight: None,
     threading_keyword_weight: None,
@@ -241,10 +246,14 @@ pub fn default() -> AppConfig {
     writer_max_errors: None,
     web_port: None,
     duckduckgo_url: None,
-    exa_base_url: None,
-    tavily_base_url: None,
-    firecrawl_base_url: None,
     e2b_base_url: None,
+    brave_search_base_url: None,
+    brave_answers_base_url: None,
+    jina_reader_base_url: None,
+    brave_search_max_results: None,
+    brave_rate_limit_rps: None,
+    brave_answers_rate_limit_rps: None,
+    brave_cache_ttl_ms: None,
   )
 }
 
@@ -286,6 +295,10 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     archivist_model: option.or(
       override_cfg.archivist_model,
       base.archivist_model,
+    ),
+    archivist_max_tokens: option.or(
+      override_cfg.archivist_max_tokens,
+      base.archivist_max_tokens,
     ),
     narrative_threading: option.or(
       override_cfg.narrative_threading,
@@ -404,10 +417,6 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     web_search_max_results: option.or(
       override_cfg.web_search_max_results,
       base.web_search_max_results,
-    ),
-    exa_search_max_results: option.or(
-      override_cfg.exa_search_max_results,
-      base.exa_search_max_results,
     ),
     // Thread scoring
     threading_location_weight: option.or(
@@ -547,16 +556,35 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     web_port: option.or(override_cfg.web_port, base.web_port),
     // External services
     duckduckgo_url: option.or(override_cfg.duckduckgo_url, base.duckduckgo_url),
-    exa_base_url: option.or(override_cfg.exa_base_url, base.exa_base_url),
-    tavily_base_url: option.or(
-      override_cfg.tavily_base_url,
-      base.tavily_base_url,
-    ),
-    firecrawl_base_url: option.or(
-      override_cfg.firecrawl_base_url,
-      base.firecrawl_base_url,
-    ),
     e2b_base_url: option.or(override_cfg.e2b_base_url, base.e2b_base_url),
+    brave_search_base_url: option.or(
+      override_cfg.brave_search_base_url,
+      base.brave_search_base_url,
+    ),
+    brave_answers_base_url: option.or(
+      override_cfg.brave_answers_base_url,
+      base.brave_answers_base_url,
+    ),
+    jina_reader_base_url: option.or(
+      override_cfg.jina_reader_base_url,
+      base.jina_reader_base_url,
+    ),
+    brave_search_max_results: option.or(
+      override_cfg.brave_search_max_results,
+      base.brave_search_max_results,
+    ),
+    brave_rate_limit_rps: option.or(
+      override_cfg.brave_rate_limit_rps,
+      base.brave_rate_limit_rps,
+    ),
+    brave_answers_rate_limit_rps: option.or(
+      override_cfg.brave_answers_rate_limit_rps,
+      base.brave_answers_rate_limit_rps,
+    ),
+    brave_cache_ttl_ms: option.or(
+      override_cfg.brave_cache_ttl_ms,
+      base.brave_cache_ttl_ms,
+    ),
   )
 }
 
@@ -645,6 +673,9 @@ pub fn to_string(cfg: AppConfig) -> String {
     // Narrative
     option.map(cfg.narrative_dir, fn(v) { "narrative_dir: " <> v }),
     option.map(cfg.archivist_model, fn(v) { "archivist_model: " <> v }),
+    option.map(cfg.archivist_max_tokens, fn(v) {
+      "archivist_max_tokens: " <> int.to_string(v)
+    }),
     // Profile
     option.map(cfg.default_profile, fn(v) { "profile: " <> v }),
     option.map(cfg.profiles_dirs, fn(dirs) {
@@ -887,6 +918,9 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     // ── [narrative] ──
     narrative_dir: get_toml_str(table, ["narrative", "directory"]),
     archivist_model: get_toml_str(table, ["narrative", "archivist_model"]),
+    archivist_max_tokens: get_toml_int(table, [
+      "narrative", "archivist_max_tokens",
+    ]),
     narrative_threading: get_toml_bool(table, ["narrative", "threading"]),
     narrative_summaries: get_toml_bool(table, ["narrative", "summaries"]),
     narrative_summary_schedule: get_toml_str(table, [
@@ -932,9 +966,6 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     cbr_max_results: get_toml_int(table, ["limits", "cbr_max_results"]),
     web_search_max_results: get_toml_int(table, [
       "limits", "web_search_max_results",
-    ]),
-    exa_search_max_results: get_toml_int(table, [
-      "limits", "exa_search_max_results",
     ]),
     // ── [scoring.threading] ──
     threading_location_weight: get_toml_int(table, [
@@ -1004,10 +1035,25 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     web_port: get_toml_int(table, ["web", "port"]),
     // ── [services] ──
     duckduckgo_url: get_toml_str(table, ["services", "duckduckgo_url"]),
-    exa_base_url: get_toml_str(table, ["services", "exa_base_url"]),
-    tavily_base_url: get_toml_str(table, ["services", "tavily_base_url"]),
-    firecrawl_base_url: get_toml_str(table, ["services", "firecrawl_base_url"]),
     e2b_base_url: get_toml_str(table, ["services", "e2b_base_url"]),
+    brave_search_base_url: get_toml_str(table, [
+      "services", "brave_search_base_url",
+    ]),
+    brave_answers_base_url: get_toml_str(table, [
+      "services", "brave_answers_base_url",
+    ]),
+    jina_reader_base_url: get_toml_str(table, [
+      "services", "jina_reader_base_url",
+    ]),
+    // ── [limits] brave ──
+    brave_search_max_results: get_toml_int(table, [
+      "limits", "brave_search_max_results",
+    ]),
+    brave_rate_limit_rps: get_toml_int(table, ["limits", "brave_rate_limit_rps"]),
+    brave_answers_rate_limit_rps: get_toml_int(table, [
+      "limits", "brave_answers_rate_limit_rps",
+    ]),
+    brave_cache_ttl_ms: get_toml_int(table, ["limits", "brave_cache_ttl_ms"]),
   )
 }
 
@@ -1044,8 +1090,8 @@ const known_keys = [
 ]
 
 const known_narrative_keys = [
-  "directory", "archivist_model", "threading", "summaries", "summary_schedule",
-  "max_days",
+  "directory", "archivist_model", "archivist_max_tokens", "threading",
+  "summaries", "summary_schedule", "max_days",
 ]
 
 fn validate_toml_keys(table: dict.Dict(String, tom.Toml)) -> Nil {

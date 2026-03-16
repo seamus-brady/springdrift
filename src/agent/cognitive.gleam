@@ -4,7 +4,10 @@ import agent/cognitive/memory as cognitive_memory
 import agent/cognitive/profile as cognitive_profile
 import agent/cognitive/safety as cognitive_safety
 import agent/cognitive_config
-import agent/cognitive_state.{type CognitiveState, CognitiveState}
+import agent/cognitive_state.{
+  type CognitiveState, CognitiveState, IdentityContext, MemoryContext,
+  RuntimeConfig,
+}
 import agent/types.{
   type CognitiveMessage, type CognitiveReply, AgentComplete, AgentEvent,
   Classifying, CognitiveReply, Idle, PendingThink, RestoreMessages, SaveResult,
@@ -67,29 +70,36 @@ pub fn start(
         notify: cfg.notify,
         task_model: cfg.task_model,
         reasoning_model: cfg.reasoning_model,
+        archivist_model: cfg.archivist_model,
+        archivist_max_tokens: cfg.archivist_max_tokens,
         save_in_progress: False,
         save_pending: None,
         dprime_state: cfg.dprime_state,
-        narrative_dir: cfg.narrative_dir,
-        cbr_dir: cfg.cbr_dir,
-        archivist_model: cfg.archivist_model,
-        librarian: cfg.librarian,
-        agent_completions: [],
-        last_user_input: "",
-        active_profile: None,
-        supervisor: None,
-        profile_dirs: cfg.profile_dirs,
-        write_anywhere: cfg.write_anywhere,
         output_dprime_state: cfg.output_dprime_state,
         dprime_decisions: [],
-        curator: cfg.curator,
-        embedding_config: cfg.embedding_config,
-        agent_uuid: cfg.agent_uuid,
-        session_since: cfg.session_since,
-        retry_config: cfg.retry_config,
-        classify_timeout_ms: cfg.classify_timeout_ms,
-        threading_config: cfg.threading_config,
-        memory_limits: cfg.memory_limits,
+        memory: MemoryContext(
+          narrative_dir: cfg.narrative_dir,
+          cbr_dir: cfg.cbr_dir,
+          librarian: cfg.librarian,
+          curator: cfg.curator,
+          embedding_config: cfg.embedding_config,
+        ),
+        agent_completions: [],
+        last_user_input: "",
+        supervisor: None,
+        identity: IdentityContext(
+          agent_uuid: cfg.agent_uuid,
+          session_since: cfg.session_since,
+          active_profile: None,
+          profile_dirs: cfg.profile_dirs,
+          write_anywhere: cfg.write_anywhere,
+        ),
+        config: RuntimeConfig(
+          retry_config: cfg.retry_config,
+          classify_timeout_ms: cfg.classify_timeout_ms,
+          threading_config: cfg.threading_config,
+          memory_limits: cfg.memory_limits,
+        ),
       )
     process.send(setup, self)
     cognitive_loop(state)
@@ -246,7 +256,7 @@ fn handle_user_input(
       let cycle_id = cycle_log.generate_uuid()
       cycle_log.log_human_input(cycle_id, state.cycle_id, text)
       // Clear Curator scratchpad from previous cycle
-      case state.curator {
+      case state.memory.curator {
         option.Some(cur) ->
           narrative_curator.clear_cycle(cur, option.unwrap(state.cycle_id, ""))
         option.None -> Nil
@@ -263,7 +273,7 @@ fn handle_user_input(
       let self = state.self
       let provider = state.provider
       let task_model = state.task_model
-      let classify_timeout_ms = state.classify_timeout_ms
+      let classify_timeout_ms = state.config.classify_timeout_ms
       process.spawn_unlinked(fn() {
         let complexity = case
           rescue(fn() {
@@ -425,7 +435,7 @@ fn handle_think_complete(
                 req,
                 state.provider,
                 state.self,
-                state.retry_config,
+                state.config.retry_config,
               )
               CognitiveState(
                 ..state,
@@ -492,7 +502,7 @@ fn handle_think_complete(
                 }
                 None -> {
                   // Update DAG node with final outcome
-                  case state.librarian {
+                  case state.memory.librarian {
                     Some(lib) ->
                       process.send(
                         lib,

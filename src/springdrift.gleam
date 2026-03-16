@@ -38,8 +38,12 @@ import simplifile
 import skills
 import slog
 import storage
+import tools/brave as tools_brave
 import tools/builtin as tools_builtin
+import tools/cache
+import tools/jina as tools_jina
 import tools/memory as tools_memory
+import tools/rate_limiter
 import tools/web as tools_web
 import tui
 import web/gui as web_gui
@@ -246,6 +250,7 @@ fn run(cfg: AppConfig) -> Nil {
   // Narrative config (always enabled)
   let narrative_dir = option.unwrap(cfg.narrative_dir, paths.narrative_dir())
   let archivist_model = option.unwrap(cfg.archivist_model, task_model)
+  let archivist_max_tokens = option.unwrap(cfg.archivist_max_tokens, 4096)
 
   // Migrate legacy facts.jsonl to daily rotation (no-op if already done)
   facts_log.migrate_legacy(paths.facts_dir())
@@ -314,6 +319,31 @@ fn run(cfg: AppConfig) -> Nil {
   }
   let lib = option.Some(librarian_subj)
 
+  // Start cache and rate limiter actors for web tools
+  let brave_cache = case cache.start() {
+    Ok(subj) -> option.Some(subj)
+    Error(_) -> option.None
+  }
+  let brave_rate_limit_rps = option.unwrap(cfg.brave_rate_limit_rps, 20)
+  let brave_search_limiter = case
+    rate_limiter.start(brave_rate_limit_rps, 1000 / brave_rate_limit_rps)
+  {
+    Ok(subj) -> option.Some(subj)
+    Error(_) -> option.None
+  }
+  let brave_answers_rate_limit_rps =
+    option.unwrap(cfg.brave_answers_rate_limit_rps, 2)
+  let brave_answers_limiter = case
+    rate_limiter.start(
+      brave_answers_rate_limit_rps,
+      1000 / brave_answers_rate_limit_rps,
+    )
+  {
+    Ok(subj) -> option.Some(subj)
+    Error(_) -> option.None
+  }
+  let brave_cache_ttl_ms = option.unwrap(cfg.brave_cache_ttl_ms, 300_000)
+
   // Profile system
   let profile_dirs =
     option.unwrap(cfg.profiles_dirs, profile.default_profile_dirs())
@@ -343,13 +373,31 @@ fn run(cfg: AppConfig) -> Nil {
             <> ") — using defaults",
           )
           #(
-            default_agent_specs(cfg, p, task_model, librarian_subj),
+            default_agent_specs(
+              cfg,
+              p,
+              task_model,
+              librarian_subj,
+              brave_cache,
+              brave_search_limiter,
+              brave_answers_limiter,
+              brave_cache_ttl_ms,
+            ),
             option.None,
           )
         }
       }
     option.None -> #(
-      default_agent_specs(cfg, p, task_model, librarian_subj),
+      default_agent_specs(
+        cfg,
+        p,
+        task_model,
+        librarian_subj,
+        brave_cache,
+        brave_search_limiter,
+        brave_answers_limiter,
+        brave_cache_ttl_ms,
+      ),
       option.None,
     )
   }
@@ -552,6 +600,7 @@ fn run(cfg: AppConfig) -> Nil {
       narrative_dir:,
       cbr_dir: paths.cbr_dir(),
       archivist_model:,
+      archivist_max_tokens:,
       librarian: lib,
       profile_dirs:,
       write_anywhere:,
@@ -800,6 +849,14 @@ fn default_agent_specs(
   provider: Provider,
   task_model: String,
   librarian_subj: process.Subject(librarian.LibrarianMessage),
+  brave_cache: option.Option(process.Subject(cache.CacheMessage)),
+  brave_search_limiter: option.Option(
+    process.Subject(rate_limiter.RateLimiterMessage),
+  ),
+  brave_answers_limiter: option.Option(
+    process.Subject(rate_limiter.RateLimiterMessage),
+  ),
+  brave_cache_ttl_ms: Int,
 ) -> List(agent_types.AgentSpec) {
   let delay = option.unwrap(cfg.inter_turn_delay_ms, 200)
   let p_spec = planner.spec(provider, task_model)
@@ -812,6 +869,10 @@ fn default_agent_specs(
       paths.artifacts_dir(),
       librarian_subj,
       max_artifact_chars,
+      brave_cache,
+      brave_search_limiter,
+      brave_answers_limiter,
+      brave_cache_ttl_ms,
     )
   let c_spec = coder.spec(provider, task_model, sandbox_timeout)
   [
@@ -889,7 +950,12 @@ fn build_profile_agent_specs(
 fn resolve_profile_tools(tool_groups: List(String)) -> List(llm_types.Tool) {
   list.flat_map(tool_groups, fn(group) {
     case group {
-      "web" -> tools_web.all()
+      "web" ->
+        list.flatten([
+          tools_brave.all(),
+          tools_jina.all(),
+          tools_web.all(),
+        ])
       "builtin" -> tools_builtin.all()
       _ -> []
     }
@@ -902,8 +968,18 @@ fn build_profile_tool_executor(
 ) -> fn(llm_types.ToolCall) -> llm_types.ToolResult {
   let has_web = list.contains(tool_groups, "web")
   fn(call: llm_types.ToolCall) -> llm_types.ToolResult {
-    case has_web && tools_web.is_web_tool(call.name) {
-      True -> tools_web.execute(call)
+    case has_web {
+      True ->
+        case call.name {
+          "brave_web_search"
+          | "brave_news_search"
+          | "brave_llm_context"
+          | "brave_summarizer"
+          | "brave_answer" -> tools_brave.execute(call)
+          "jina_reader" -> tools_jina.execute(call)
+          "fetch_url" | "web_search" -> tools_web.execute(call)
+          _ -> tools_builtin.execute(call)
+        }
       False -> tools_builtin.execute(call)
     }
   }

@@ -40,7 +40,7 @@ fn store_result_tool() -> llm_types.Tool {
   |> tool.add_string_param("content", "The content to store", True)
   |> tool.add_string_param(
     "tool",
-    "The tool that produced this content (e.g. fetch_url, firecrawl_extract)",
+    "The tool that produced this content (e.g. fetch_url, web_search)",
     True,
   )
   |> tool.add_string_param("url", "Source URL, if applicable", False)

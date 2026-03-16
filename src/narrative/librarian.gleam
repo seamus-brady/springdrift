@@ -1475,7 +1475,46 @@ fn loop(state: LibrarianState) -> Nil {
         }
 
         UpdateNode(node:) -> {
-          index_dag_node(state, node)
+          // Merge update into existing node from the set table, then update
+          // the set only. Bag tables (dag_by_date, dag_by_parent) keep the
+          // original entry — do_query_dag_day deduplicates via set lookup.
+          let merged = case dag_lookup(state.dag_nodes, node.cycle_id) {
+            Ok(existing) ->
+              dag_types.CycleNode(
+                ..existing,
+                outcome: node.outcome,
+                model: case node.model {
+                  "" -> existing.model
+                  m -> m
+                },
+                tokens_in: case node.tokens_in {
+                  0 -> existing.tokens_in
+                  t -> t
+                },
+                tokens_out: case node.tokens_out {
+                  0 -> existing.tokens_out
+                  t -> t
+                },
+                duration_ms: case node.duration_ms {
+                  0 -> existing.duration_ms
+                  d -> d
+                },
+                tool_calls: case node.tool_calls {
+                  [] -> existing.tool_calls
+                  tc -> tc
+                },
+                dprime_gates: case node.dprime_gates {
+                  [] -> existing.dprime_gates
+                  g -> g
+                },
+                agent_output: case node.agent_output {
+                  option.None -> existing.agent_output
+                  some -> some
+                },
+              )
+            Error(_) -> node
+          }
+          dag_insert(state.dag_nodes, merged.cycle_id, merged)
           loop(state)
         }
 
@@ -2043,7 +2082,18 @@ fn do_query_dag_day(
         }
       }
     }
-    found -> found
+    found -> {
+      // Deduplicate bag entries by cycle_id, looking up the authoritative
+      // version from the dag_nodes set table. This handles stale pending
+      // entries and UpdateNode duplicates.
+      let unique_ids = list.map(found, fn(n) { n.cycle_id }) |> list.unique()
+      list.filter_map(unique_ids, fn(id) {
+        case dag_lookup(state.dag_nodes, id) {
+          Ok(node) -> Ok(node)
+          Error(_) -> Error(Nil)
+        }
+      })
+    }
   }
 }
 
@@ -2199,17 +2249,15 @@ fn cycle_data_to_node(c: cycle_log.CycleData) -> dag_types.CycleNode {
     Some(_) -> dag_types.AgentCycle
     None -> dag_types.CognitiveCycle
   }
-  let tool_calls =
-    list.map(c.tool_names, fn(name) {
-      dag_types.ToolSummary(name:, success: True, error: None)
-    })
+  // Merge tool_names with tool_successes (by position) to get proper success status
+  let tool_calls = build_tool_summaries(c.tool_names, c.tool_successes, [])
   dag_types.CycleNode(
     cycle_id: c.cycle_id,
     parent_id: c.parent_id,
     node_type:,
     timestamp: c.timestamp,
     outcome:,
-    model: "",
+    model: c.model,
     complexity: option.unwrap(c.complexity, ""),
     tool_calls:,
     dprime_gates: [],
@@ -2218,4 +2266,25 @@ fn cycle_data_to_node(c: cycle_log.CycleData) -> dag_types.CycleNode {
     duration_ms: 0,
     agent_output: None,
   )
+}
+
+/// Pair tool_call names with tool_result successes positionally.
+fn build_tool_summaries(
+  names: List(String),
+  results: List(#(String, Bool)),
+  acc: List(dag_types.ToolSummary),
+) -> List(dag_types.ToolSummary) {
+  case names {
+    [] -> list.reverse(acc)
+    [name, ..rest_names] -> {
+      let #(success, rest_results) = case results {
+        [#(_, s), ..rest] -> #(s, rest)
+        [] -> #(True, [])
+      }
+      build_tool_summaries(rest_names, rest_results, [
+        dag_types.ToolSummary(name:, success:, error: None),
+        ..acc
+      ])
+    }
+  }
 }

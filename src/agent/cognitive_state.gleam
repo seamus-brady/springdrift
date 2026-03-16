@@ -17,8 +17,7 @@ import narrative/librarian.{type LibrarianMessage}
 import narrative/threading
 import tools/memory
 
-/// Model selection and generation parameters — extracted for documentation
-/// and potential future refactoring into a sub-record.
+/// Model selection and generation parameters.
 pub type ModelConfig {
   ModelConfig(
     model: String,
@@ -26,11 +25,11 @@ pub type ModelConfig {
     reasoning_model: String,
     max_tokens: Int,
     archivist_model: String,
+    archivist_max_tokens: Int,
   )
 }
 
-/// Memory subsystem references — extracted for documentation
-/// and potential future refactoring into a sub-record.
+/// Memory subsystem references — set once at startup, never mutated.
 pub type MemoryContext {
   MemoryContext(
     narrative_dir: String,
@@ -41,18 +40,40 @@ pub type MemoryContext {
   )
 }
 
+/// Identity and profile context — set at startup, rarely mutated.
+pub type IdentityContext {
+  IdentityContext(
+    agent_uuid: String,
+    session_since: String,
+    active_profile: Option(String),
+    profile_dirs: List(String),
+    write_anywhere: Bool,
+  )
+}
+
+/// Runtime configuration — set at startup, never mutated.
+pub type RuntimeConfig {
+  RuntimeConfig(
+    retry_config: retry.RetryConfig,
+    classify_timeout_ms: Int,
+    threading_config: threading.ThreadingConfig,
+    memory_limits: memory.MemoryLimits,
+  )
+}
+
 pub type CognitiveState {
   CognitiveState(
     // --- Core process ---
     self: Subject(CognitiveMessage),
     provider: Provider,
     notify: Subject(Notification),
-    // --- Model config (see ModelConfig) ---
+    // --- Model config ---
     model: String,
     task_model: String,
     reasoning_model: String,
     max_tokens: Int,
     archivist_model: String,
+    archivist_max_tokens: Int,
     // --- Conversation ---
     system: String,
     max_context_messages: Option(Int),
@@ -65,12 +86,8 @@ pub type CognitiveState {
     save_in_progress: Bool,
     save_pending: Option(List(llm_types.Message)),
     verbose: Bool,
-    // --- Memory context (see MemoryContext) ---
-    narrative_dir: String,
-    cbr_dir: String,
-    librarian: Option(Subject(LibrarianMessage)),
-    curator: Option(Subject(CuratorMessage)),
-    embedding_config: embedding_types.EmbeddingConfig,
+    // --- Memory context (read-only after init) ---
+    memory: MemoryContext,
     // --- Agent subsystem ---
     registry: Registry,
     agent_completions: List(AgentCompletionRecord),
@@ -80,18 +97,10 @@ pub type CognitiveState {
     dprime_state: Option(dprime_types.DprimeState),
     output_dprime_state: Option(dprime_types.DprimeState),
     dprime_decisions: List(dag_types.DprimeDecisionRecord),
-    // --- Profile and identity ---
-    active_profile: Option(String),
-    profile_dirs: List(String),
-    write_anywhere: Bool,
-    agent_uuid: String,
-    session_since: String,
-    // --- Retry and timeouts ---
-    retry_config: retry.RetryConfig,
-    classify_timeout_ms: Int,
-    threading_config: threading.ThreadingConfig,
-    // --- Memory tool limits ---
-    memory_limits: memory.MemoryLimits,
+    // --- Identity and profile (read-only after init) ---
+    identity: IdentityContext,
+    // --- Runtime config (read-only after init) ---
+    config: RuntimeConfig,
   )
 }
 
@@ -103,16 +112,11 @@ pub fn model_config(state: CognitiveState) -> ModelConfig {
     reasoning_model: state.reasoning_model,
     max_tokens: state.max_tokens,
     archivist_model: state.archivist_model,
+    archivist_max_tokens: state.archivist_max_tokens,
   )
 }
 
 /// Extract memory context from state.
 pub fn memory_context(state: CognitiveState) -> MemoryContext {
-  MemoryContext(
-    narrative_dir: state.narrative_dir,
-    cbr_dir: state.cbr_dir,
-    librarian: state.librarian,
-    curator: state.curator,
-    embedding_config: state.embedding_config,
-  )
+  state.memory
 }

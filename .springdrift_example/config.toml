@@ -77,6 +77,7 @@ name = "Springdrift"
 [narrative]
 # directory = ".springdrift/memory/narrative"  # Default location
 # archivist_model = ""       # Defaults to task_model
+# archivist_max_tokens = 4096  # Max output tokens for archivist LLM calls
 threading = true             # Auto-assign threads by overlap scoring
 summaries = false            # Enable periodic summaries
 summary_schedule = "weekly"  # "weekly" or "monthly"
@@ -162,8 +163,17 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 # Max results from web_search (DuckDuckGo) (default: 5, max: 10)
 # web_search_max_results = 5
 
-# Max results from exa_search (default: 10)
-# exa_search_max_results = 10
+# Max results from Brave Search (default: 20, max: 20)
+# brave_search_max_results = 20
+
+# Brave Search rate limit in requests per second (default: 20)
+# brave_rate_limit_rps = 20
+
+# Brave Answers rate limit in requests per second (default: 2)
+# brave_answers_rate_limit_rps = 2
+
+# Brave Search cache TTL in milliseconds (default: 300000 = 5 min)
+# brave_cache_ttl_ms = 300000
 
 # ── Thread scoring ───────────────────────────────────────────────────────────
 # Overlap scoring weights for automatic thread assignment.
@@ -269,14 +279,14 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 # DuckDuckGo HTML search endpoint
 # duckduckgo_url = "https://html.duckduckgo.com/html/"
 
-# Exa semantic search API
-# exa_base_url = "https://api.exa.ai"
+# Brave Search API
+# brave_search_base_url = "https://api.search.brave.com"
 
-# Tavily search API
-# tavily_base_url = "https://api.tavily.com"
+# Brave Answers API (same base, different endpoint)
+# brave_answers_base_url = "https://api.search.brave.com"
 
-# Firecrawl extraction API (v1)
-# firecrawl_base_url = "https://api.firecrawl.dev"
+# Jina Reader API
+# jina_reader_base_url = "https://r.jina.ai/"
 
 # E2B sandbox API
 # e2b_base_url = "https://api.e2b.app"

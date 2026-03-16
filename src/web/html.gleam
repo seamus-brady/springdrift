@@ -1,8 +1,13 @@
 //// Embedded HTML/CSS/JS for the web chat GUI.
+//// Split into two pages: /chat (chat only) and /admin (narrative + log).
 
 import gleam/string
 
-pub fn page(agent_name: String, agent_version: String) -> String {
+// ---------------------------------------------------------------------------
+// Public page functions
+// ---------------------------------------------------------------------------
+
+pub fn chat_page(agent_name: String, agent_version: String) -> String {
   let version_display = case agent_version {
     "" -> ""
     v -> " v" <> v
@@ -16,10 +21,449 @@ pub fn page(agent_name: String, agent_version: String) -> String {
 <head>
 <meta charset=\"UTF-8\">
 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
-<title>" <> title <> "</title>
+<title>" <> title <> " — Chat</title>
 <script src=\"https://cdn.jsdelivr.net/npm/marked/marked.min.js\"></script>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+" <> shared_css() <> sidebar_css() <> "
+</style>
+</head>
+<body>
+<div id=\"layout\">
+" <> sidebar_html("chat") <> "
+<div id=\"main-content\">
+" <> header_html(title, version) <> "
+<div id=\"tab-bar\">
+  <button class=\"tab-btn active\" data-tab=\"chat\">Chat</button>
+</div>
+<div id=\"content-area\">
+  <div id=\"chat-tab\" class=\"tab-content active\">
+    <div id=\"thinking-overlay\"></div>
+    <div id=\"messages\"></div>
+    <div id=\"input-area\">
+      <form id=\"chat-form\">
+        <textarea id=\"chat-input\" rows=\"1\" placeholder=\"" <> placeholder <> "\" autofocus></textarea>
+        <button type=\"submit\" aria-label=\"Send\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><line x1=\"22\" y1=\"2\" x2=\"11\" y2=\"13\"/><polygon points=\"22 2 15 22 11 13 2 9 22 2\"/></svg></button>
+      </form>
+      <div id=\"input-hint\">Enter to send, Shift+Enter for new line</div>
+    </div>
+  </div>
+</div>
+</div>
+</div>
+<script>
+" <> sidebar_js() <> "
+(function() {
+  var STORAGE_KEY = 'springdrift_chat_history';
+  var msgs = document.getElementById('messages');
+  var form = document.getElementById('chat-form');
+  var input = document.getElementById('chat-input');
+  var statusEl = document.getElementById('status');
+  var statusDot = document.getElementById('status-dot');
+  var thinkingOverlay = document.getElementById('thinking-overlay');
+  var ws = null;
+  var thinkingEl = null;
+  var questionEl = null;
+  var isThinking = false;
+  var reconnectDelay = 1000;
+  var chatHistory = [];
+
+  marked.setOptions({ breaks: true, gfm: true });
+
+  function renderMarkdown(text) {
+    try { return marked.parse(text); }
+    catch(e) { return escapeHtml(text); }
+  }
+
+  function saveChatHistory() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(chatHistory)); }
+    catch(e) {}
+  }
+
+  function loadChatHistory() {
+    try {
+      var stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        chatHistory = JSON.parse(stored);
+        chatHistory.forEach(function(item) {
+          if (item.role === 'user') renderUserMessage(item.text);
+          else if (item.role === 'assistant') renderAssistantMessage(item.text, item.model, item.usage);
+          else if (item.role === 'notification') renderNotification(item.text);
+        });
+        scrollBottom();
+      }
+    } catch(e) { chatHistory = []; }
+  }
+
+  " <> ws_connect_js() <> "
+
+  function handleServerMessage(data) {
+    switch (data.type) {
+      case 'assistant_message':
+        removeThinking();
+        removeQuestion();
+        addAssistantMessage(data.text, data.model, data.usage);
+        break;
+      case 'thinking':
+        showThinking();
+        break;
+      case 'question':
+        removeThinking();
+        showQuestion(data.text, data.source);
+        break;
+      case 'notification':
+        if (data.kind === 'tool_calling') {
+          addNotification('Using tool: ' + data.name);
+        } else if (data.kind === 'save_warning') {
+          addNotification(data.message);
+        } else if (data.kind === 'safety') {
+          var badge = data.decision === 'ACCEPT' ? '\\u2705' : data.decision === 'REJECT' ? '\\u274C' : '\\u26A0\\uFE0F';
+          addNotification(badge + ' D\\' ' + data.decision + ' (score: ' + data.score.toFixed(2) + ')');
+        }
+        break;
+    }
+  }
+
+  function renderUserMessage(text) {
+    var el = document.createElement('div');
+    el.className = 'msg user';
+    el.textContent = text;
+    msgs.appendChild(el);
+  }
+
+  function renderAssistantMessage(text, model, usage) {
+    var el = document.createElement('div');
+    el.className = 'msg assistant';
+    var body = document.createElement('div');
+    body.className = 'md-body';
+    body.innerHTML = renderMarkdown(text);
+    el.appendChild(body);
+    if (model || usage) {
+      var meta = document.createElement('div');
+      meta.className = 'meta';
+      var parts = [];
+      if (model) parts.push(model);
+      if (usage) parts.push(usage.input + ' in / ' + usage.output + ' out');
+      meta.textContent = parts.join(' | ');
+      el.appendChild(meta);
+    }
+    msgs.appendChild(el);
+  }
+
+  function renderNotification(text) {
+    var el = document.createElement('div');
+    el.className = 'notification';
+    el.textContent = text;
+    msgs.appendChild(el);
+  }
+
+  function addUserMessage(text) {
+    renderUserMessage(text);
+    chatHistory.push({ role: 'user', text: text });
+    saveChatHistory();
+    scrollBottom();
+  }
+
+  function addAssistantMessage(text, model, usage) {
+    renderAssistantMessage(text, model, usage);
+    chatHistory.push({ role: 'assistant', text: text, model: model, usage: usage });
+    saveChatHistory();
+    scrollBottom();
+  }
+
+  function addNotification(text) {
+    renderNotification(text);
+    chatHistory.push({ role: 'notification', text: text });
+    saveChatHistory();
+    scrollBottom();
+  }
+
+  function setThinkingLock(locked) {
+    isThinking = locked;
+    if (locked) {
+      thinkingOverlay.classList.add('active');
+    } else {
+      thinkingOverlay.classList.remove('active');
+    }
+  }
+
+  function showThinking() {
+    if (thinkingEl) return;
+    thinkingEl = document.createElement('div');
+    thinkingEl.className = 'thinking';
+    thinkingEl.innerHTML = '<span class=\"dots\"><span>.</span><span>.</span><span>.</span></span> Thinking';
+    msgs.appendChild(thinkingEl);
+    scrollBottom();
+    setThinkingLock(true);
+  }
+
+  function removeThinking() {
+    if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; }
+    setThinkingLock(false);
+  }
+
+  function showQuestion(text, source) {
+    removeQuestion();
+    questionEl = document.createElement('div');
+    questionEl.className = 'question-prompt';
+    var srcLabel = source === 'cognitive' ? 'Cognitive' : source.replace('agent:', '');
+    questionEl.innerHTML =
+      '<div class=\"q-source\">' + escapeHtml(srcLabel) + ' asks:</div>' +
+      '<div class=\"q-text\">' + escapeHtml(text) + '</div>' +
+      '<input type=\"text\" placeholder=\"Type your answer...\" autofocus>';
+    var qInput = questionEl.querySelector('input');
+    qInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && qInput.value.trim()) {
+        var answer = qInput.value.trim();
+        ws.send(JSON.stringify({ type: 'user_answer', text: answer }));
+        addUserMessage(answer);
+        removeQuestion();
+        input.focus();
+      }
+    });
+    msgs.appendChild(questionEl);
+    scrollBottom();
+    qInput.focus();
+  }
+
+  function removeQuestion() {
+    if (questionEl) { questionEl.remove(); questionEl = null; }
+  }
+
+  function scrollBottom() {
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+
+  function escapeHtml(s) {
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function sendMessage() {
+    var text = input.value.trim();
+    if (!text || !ws || ws.readyState !== WebSocket.OPEN || isThinking) return;
+    ws.send(JSON.stringify({ type: 'user_message', text: text }));
+    addUserMessage(text);
+    input.value = '';
+    input.style.height = 'auto';
+  }
+
+  function autoResize() {
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 200) + 'px';
+  }
+  input.addEventListener('input', autoResize);
+
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  });
+
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    sendMessage();
+  });
+
+  loadChatHistory();
+  connect();
+})();
+</script>
+</body>
+</html>"
+}
+
+pub fn admin_page(agent_name: String, agent_version: String) -> String {
+  let version_display = case agent_version {
+    "" -> ""
+    v -> " v" <> v
+  }
+  let title = escape(agent_name)
+  let version = escape(version_display)
+
+  "<!DOCTYPE html>
+<html lang=\"en\">
+<head>
+<meta charset=\"UTF-8\">
+<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
+<title>" <> title <> " — Admin</title>
+<style>
+" <> shared_css() <> sidebar_css() <> "
+</style>
+</head>
+<body>
+<div id=\"layout\">
+" <> sidebar_html("admin") <> "
+<div id=\"main-content\">
+" <> header_html(title, version) <> "
+<div id=\"tab-bar\">
+  <button class=\"tab-btn active\" data-tab=\"narrative\">Narrative</button>
+  <button class=\"tab-btn\" data-tab=\"log\">Log</button>
+</div>
+<div id=\"content-area\">
+  <div id=\"narrative-tab\" class=\"tab-content active\">
+    <button class=\"refresh-btn\" id=\"narrative-refresh\">Refresh</button>
+    <div id=\"narrative-container\"><div class=\"narrative-empty\">Loading narrative entries...</div></div>
+  </div>
+  <div id=\"log-tab\" class=\"tab-content\">
+    <button class=\"refresh-btn\" id=\"log-refresh\">Refresh</button>
+    <div id=\"log-container\">Loading...</div>
+  </div>
+</div>
+</div>
+</div>
+<script>
+" <> sidebar_js() <> "
+(function() {
+  var statusEl = document.getElementById('status');
+  var statusDot = document.getElementById('status-dot');
+  var logContainer = document.getElementById('log-container');
+  var narrativeContainer = document.getElementById('narrative-container');
+  var tabBtns = document.querySelectorAll('.tab-btn');
+  var ws = null;
+  var reconnectDelay = 1000;
+
+  tabBtns.forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var tab = btn.getAttribute('data-tab');
+      tabBtns.forEach(function(b) { b.classList.remove('active'); });
+      document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
+      btn.classList.add('active');
+      document.getElementById(tab + '-tab').classList.add('active');
+      if (tab === 'log') requestLogData();
+      else if (tab === 'narrative') requestNarrativeData();
+    });
+  });
+
+  document.getElementById('log-refresh').addEventListener('click', requestLogData);
+  document.getElementById('narrative-refresh').addEventListener('click', requestNarrativeData);
+
+  function requestLogData() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'request_log_data' }));
+    }
+  }
+
+  function requestNarrativeData() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'request_narrative_data' }));
+    }
+  }
+
+  function renderNarrativeEntries(entries) {
+    if (!entries || entries.length === 0) {
+      narrativeContainer.innerHTML = '<div class=\"narrative-empty\">No narrative entries yet. Entries appear after conversations.</div>';
+      return;
+    }
+    var html = '';
+    var sorted = entries.slice().reverse();
+    sorted.forEach(function(e) {
+      var cycleShort = (e.cycle_id || '').substring(0, 8);
+      var time = (e.timestamp || '').substring(0, 19).replace('T', ' ');
+      var st = (e.outcome && e.outcome.status) || 'unknown';
+      var statusLabel = st.charAt(0).toUpperCase() + st.slice(1);
+      var threadHtml = '';
+      if (e.thread && e.thread.thread_name) {
+        threadHtml = '<span class=\"narrative-thread\">' + escapeHtml(e.thread.thread_name) + ' #' + (e.thread.position || 0) + '</span>';
+      }
+      var keywordsHtml = '';
+      if (e.keywords && e.keywords.length > 0) {
+        keywordsHtml = '<div class=\"narrative-keywords\">' +
+          e.keywords.map(function(k) { return '<span class=\"narrative-keyword\">' + escapeHtml(k) + '</span>'; }).join('') +
+          '</div>';
+      }
+      var delegationHtml = '';
+      if (e.delegation_chain && e.delegation_chain.length > 0) {
+        var agents = e.delegation_chain.map(function(d) {
+          return '<span class=\"agent-name\">' + escapeHtml(d.agent_human_name || d.agent) + '</span>';
+        }).join(' \\u2192 ');
+        delegationHtml = '<div class=\"narrative-delegation\">Delegated to: ' + agents + '</div>';
+      }
+      html += '<div class=\"narrative-entry\">' +
+        '<div class=\"narrative-header\">' +
+          '<span class=\"narrative-cycle\">' + escapeHtml(cycleShort) + '</span>' +
+          '<span class=\"narrative-time\">' + escapeHtml(time) + '</span>' +
+          '<span class=\"narrative-status ' + st + '\">' + statusLabel + '</span>' +
+          threadHtml +
+        '</div>' +
+        '<div class=\"narrative-summary\">' + escapeHtml(e.summary || '') + '</div>' +
+        keywordsHtml +
+        delegationHtml +
+        '</div>';
+    });
+    narrativeContainer.innerHTML = html;
+  }
+
+  function renderLogEntries(entries) {
+    if (!entries || entries.length === 0) {
+      logContainer.innerHTML = '<div style=\"color:var(--text-dim);padding:20px;\">No log entries today.</div>';
+      return;
+    }
+    var html = '';
+    entries.forEach(function(e) {
+      var time = (e.timestamp || '').substring(11, 19);
+      var lvl = e.level || 'debug';
+      var badge = lvl.toUpperCase().substring(0, 3);
+      var cycleHtml = e.cycle_id ? '<span class=\"log-cycle\">' + escapeHtml(e.cycle_id.substring(0, 8)) + '</span>' : '';
+      html += '<div class=\"log-entry\">' +
+        '<span class=\"log-time\">' + escapeHtml(time) + '</span>' +
+        '<span class=\"log-level ' + lvl + '\">' + badge + '</span>' +
+        '<span class=\"log-mod\">' + escapeHtml(e.module + '::' + e.function) + '</span>' +
+        '<span class=\"log-msg\">' + escapeHtml(e.message) + '</span>' +
+        cycleHtml +
+        '</div>';
+    });
+    logContainer.innerHTML = html;
+    logContainer.scrollTop = logContainer.scrollHeight;
+  }
+
+  " <> ws_connect_js() <> "
+
+  function handleServerMessage(data) {
+    switch (data.type) {
+      case 'log_data':
+        renderLogEntries(data.entries);
+        break;
+      case 'narrative_data':
+        renderNarrativeEntries(data.entries);
+        break;
+    }
+  }
+
+  function escapeHtml(s) {
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  connect();
+  requestNarrativeData();
+})();
+</script>
+</body>
+</html>"
+}
+
+// ---------------------------------------------------------------------------
+// Shared HTML/CSS/JS helpers
+// ---------------------------------------------------------------------------
+
+fn header_html(title: String, version: String) -> String {
+  "<div id=\"header\">
+  <div id=\"header-left\">
+    <h1>" <> title <> "</h1>
+    <span class=\"version\">" <> version <> "</span>
+  </div>
+  <div id=\"header-right\">
+    <span class=\"dot\" id=\"status-dot\"></span>
+    <span id=\"status\">connecting...</span>
+  </div>
+</div>"
+}
+
+fn shared_css() -> String {
+  "  * { margin: 0; padding: 0; box-sizing: border-box; }
   :root {
     --bg: #f7f7f8;
     --surface: #ffffff;
@@ -47,9 +491,20 @@ pub fn page(agent_name: String, agent_version: String) -> String {
     background: var(--bg);
     color: var(--text);
     height: 100vh;
+    margin: 0;
+    font-size: 17px;
+  }
+
+  /* ── Layout ──────────────────────────────────────── */
+  #layout {
+    display: flex;
+    height: 100vh;
+  }
+  #main-content {
+    flex: 1;
     display: flex;
     flex-direction: column;
-    font-size: 17px;
+    min-width: 0;
   }
 
   /* ── Header ──────────────────────────────────────── */
@@ -100,7 +555,7 @@ pub fn page(agent_name: String, agent_version: String) -> String {
     gap: 0;
     border-bottom: 1px solid var(--border);
     background: var(--surface);
-    padding: 0 10%;
+    padding: 0 24px;
     flex-shrink: 0;
   }
   .tab-btn {
@@ -119,10 +574,6 @@ pub fn page(agent_name: String, agent_version: String) -> String {
   .tab-btn.active {
     color: var(--accent);
     border-bottom-color: var(--accent);
-  }
-  .tab-btn.chat-disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
   }
 
   /* ── Tab content ─────────────────────────────────── */
@@ -519,198 +970,159 @@ pub fn page(agent_name: String, agent_version: String) -> String {
   .log-mod { color: var(--text-secondary); white-space: nowrap; }
   .log-msg { color: var(--text); word-break: break-all; }
   .log-cycle { color: var(--text-dim); white-space: nowrap; }
-</style>
-</head>
-<body>
-<div id=\"header\">
-  <div id=\"header-left\">
-    <h1>" <> title <> "</h1>
-    <span class=\"version\">" <> version <> "</span>
-  </div>
-  <div id=\"header-right\">
-    <span class=\"dot\" id=\"status-dot\"></span>
-    <span id=\"status\">connecting...</span>
-  </div>
-</div>
-<div id=\"tab-bar\">
-  <button class=\"tab-btn active\" data-tab=\"chat\">Chat</button>
-  <button class=\"tab-btn\" data-tab=\"narrative\">Narrative</button>
-  <button class=\"tab-btn\" data-tab=\"log\">Log</button>
-</div>
-<div id=\"content-area\">
-  <div id=\"chat-tab\" class=\"tab-content active\">
-    <div id=\"thinking-overlay\"></div>
-    <div id=\"messages\"></div>
-    <div id=\"input-area\">
-      <form id=\"chat-form\">
-        <textarea id=\"chat-input\" rows=\"1\" placeholder=\"" <> placeholder <> "\" autofocus></textarea>
-        <button type=\"submit\" aria-label=\"Send\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><line x1=\"22\" y1=\"2\" x2=\"11\" y2=\"13\"/><polygon points=\"22 2 15 22 11 13 2 9 22 2\"/></svg></button>
-      </form>
-      <div id=\"input-hint\">Enter to send, Shift+Enter for new line</div>
-    </div>
-  </div>
-  <div id=\"narrative-tab\" class=\"tab-content\">
-    <button class=\"refresh-btn\" id=\"narrative-refresh\">Refresh</button>
-    <div id=\"narrative-container\"><div class=\"narrative-empty\">Loading narrative entries...</div></div>
-  </div>
-  <div id=\"log-tab\" class=\"tab-content\">
-    <button class=\"refresh-btn\" id=\"log-refresh\">Refresh</button>
-    <div id=\"log-container\">Loading...</div>
-  </div>
-</div>
-<script>
-(function() {
-  var STORAGE_KEY = 'springdrift_chat_history';
-  var msgs = document.getElementById('messages');
-  var form = document.getElementById('chat-form');
-  var input = document.getElementById('chat-input');
-  var statusEl = document.getElementById('status');
-  var statusDot = document.getElementById('status-dot');
-  var logContainer = document.getElementById('log-container');
-  var narrativeContainer = document.getElementById('narrative-container');
-  var thinkingOverlay = document.getElementById('thinking-overlay');
-  var tabBtns = document.querySelectorAll('.tab-btn');
-  var ws = null;
-  var thinkingEl = null;
-  var questionEl = null;
-  var isThinking = false;
-  var reconnectDelay = 1000;
-  var chatHistory = [];
+"
+}
 
-  // Configure marked for safe rendering
-  marked.setOptions({ breaks: true, gfm: true });
-
-  function renderMarkdown(text) {
-    try { return marked.parse(text); }
-    catch(e) { return escapeHtml(text); }
+fn sidebar_css() -> String {
+  "
+  /* ── Sidebar ──────────────────────────────────────── */
+  #sidebar {
+    width: 200px;
+    background: var(--header-bg);
+    border-right: 1px solid var(--header-border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    transition: width 0.2s ease;
+    overflow: hidden;
   }
+  #sidebar.collapsed {
+    width: 48px;
+  }
+  #sidebar-toggle {
+    width: 100%;
+    padding: 14px 12px;
+    border: none;
+    background: none;
+    cursor: pointer;
+    text-align: left;
+    font-size: 18px;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  #sidebar-toggle:hover {
+    background: rgba(0,0,0,0.04);
+  }
+  #sidebar-toggle .toggle-icon {
+    flex-shrink: 0;
+    width: 24px;
+    text-align: center;
+  }
+  #sidebar-toggle .toggle-label {
+    white-space: nowrap;
+    font-size: 14px;
+    font-weight: 600;
+    font-family: inherit;
+  }
+  #sidebar.collapsed .toggle-label {
+    display: none;
+  }
+  #sidebar nav {
+    display: flex;
+    flex-direction: column;
+    padding: 4px 8px;
+    gap: 2px;
+  }
+  #sidebar nav a {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    text-decoration: none;
+    color: var(--text-secondary);
+    font-size: 14px;
+    font-weight: 500;
+    font-family: inherit;
+    white-space: nowrap;
+    transition: background 0.15s, color 0.15s;
+  }
+  #sidebar nav a:hover {
+    background: rgba(0,0,0,0.04);
+    color: var(--text);
+  }
+  #sidebar nav a.active {
+    background: var(--accent-light);
+    color: var(--accent);
+    font-weight: 600;
+  }
+  #sidebar nav a .nav-icon {
+    flex-shrink: 0;
+    width: 20px;
+    text-align: center;
+    font-size: 16px;
+  }
+  #sidebar nav a .nav-label {
+    overflow: hidden;
+  }
+  #sidebar.collapsed nav a .nav-label {
+    display: none;
+  }
+"
+}
 
-  // ── localStorage persistence ──
-  function saveChatHistory() {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(chatHistory)); }
+fn sidebar_html(active: String) -> String {
+  let chat_active = case active {
+    "chat" -> " active"
+    _ -> ""
+  }
+  let admin_active = case active {
+    "admin" -> " active"
+    _ -> ""
+  }
+  "<div id=\"sidebar\">
+  <button id=\"sidebar-toggle\">
+    <span class=\"toggle-icon\">&laquo;</span>
+    <span class=\"toggle-label\">Menu</span>
+  </button>
+  <nav>
+    <a href=\"/chat\" target=\"_blank\" class=\"" <> chat_active <> "\">
+      <span class=\"nav-icon\">&bull;</span>
+      <span class=\"nav-label\">Chat</span>
+    </a>
+    <a href=\"/admin\" target=\"_blank\" class=\"" <> admin_active <> "\">
+      <span class=\"nav-icon\">&bull;</span>
+      <span class=\"nav-label\">Admin</span>
+    </a>
+  </nav>
+</div>"
+}
+
+fn sidebar_js() -> String {
+  "(function() {
+  var SIDEBAR_KEY = 'springdrift_sidebar';
+  var sidebar = document.getElementById('sidebar');
+  var toggle = document.getElementById('sidebar-toggle');
+  var toggleIcon = toggle.querySelector('.toggle-icon');
+
+  function setSidebarState(collapsed) {
+    if (collapsed) {
+      sidebar.classList.add('collapsed');
+      toggleIcon.innerHTML = '&raquo;';
+    } else {
+      sidebar.classList.remove('collapsed');
+      toggleIcon.innerHTML = '&laquo;';
+    }
+    try { localStorage.setItem(SIDEBAR_KEY, collapsed ? 'collapsed' : 'expanded'); }
     catch(e) {}
   }
 
-  function loadChatHistory() {
-    try {
-      var stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        chatHistory = JSON.parse(stored);
-        chatHistory.forEach(function(item) {
-          if (item.role === 'user') renderUserMessage(item.text);
-          else if (item.role === 'assistant') renderAssistantMessage(item.text, item.model, item.usage);
-          else if (item.role === 'notification') renderNotification(item.text);
-        });
-        scrollBottom();
-      }
-    } catch(e) { chatHistory = []; }
-  }
-
-  // ── Tab switching ──
-  tabBtns.forEach(function(btn) {
-    btn.addEventListener('click', function() {
-      var tab = btn.getAttribute('data-tab');
-      // During thinking, only the chat tab is locked — allow switching to others
-      if (isThinking && tab === 'chat') return;
-      tabBtns.forEach(function(b) { b.classList.remove('active'); });
-      document.querySelectorAll('.tab-content').forEach(function(c) { c.classList.remove('active'); });
-      btn.classList.add('active');
-      document.getElementById(tab + '-tab').classList.add('active');
-      if (tab === 'log') requestLogData();
-      else if (tab === 'narrative') requestNarrativeData();
-    });
+  toggle.addEventListener('click', function() {
+    setSidebarState(!sidebar.classList.contains('collapsed'));
   });
 
-  document.getElementById('log-refresh').addEventListener('click', requestLogData);
-  document.getElementById('narrative-refresh').addEventListener('click', requestNarrativeData);
+  try {
+    var stored = localStorage.getItem(SIDEBAR_KEY);
+    if (stored === 'collapsed') setSidebarState(true);
+  } catch(e) {}
+})();
+"
+}
 
-  function requestLogData() {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'request_log_data' }));
-    }
-  }
-
-  function requestNarrativeData() {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'request_narrative_data' }));
-    }
-  }
-
-  function renderNarrativeEntries(entries) {
-    if (!entries || entries.length === 0) {
-      narrativeContainer.innerHTML = '<div class=\"narrative-empty\">No narrative entries yet. Entries appear after conversations.</div>';
-      return;
-    }
-    var html = '';
-    var sorted = entries.slice().reverse();
-    sorted.forEach(function(e) {
-      var cycleShort = (e.cycle_id || '').substring(0, 8);
-      var time = (e.timestamp || '').substring(0, 19).replace('T', ' ');
-      var st = (e.outcome && e.outcome.status) || 'unknown';
-      var statusLabel = st.charAt(0).toUpperCase() + st.slice(1);
-      var threadHtml = '';
-      if (e.thread && e.thread.thread_name) {
-        threadHtml = '<span class=\"narrative-thread\">' + escapeHtml(e.thread.thread_name) + ' #' + (e.thread.position || 0) + '</span>';
-      }
-      var keywordsHtml = '';
-      if (e.keywords && e.keywords.length > 0) {
-        keywordsHtml = '<div class=\"narrative-keywords\">' +
-          e.keywords.map(function(k) { return '<span class=\"narrative-keyword\">' + escapeHtml(k) + '</span>'; }).join('') +
-          '</div>';
-      }
-      var delegationHtml = '';
-      if (e.delegation_chain && e.delegation_chain.length > 0) {
-        var agents = e.delegation_chain.map(function(d) {
-          return '<span class=\"agent-name\">' + escapeHtml(d.agent_human_name || d.agent) + '</span>';
-        }).join(' \\u2192 ');
-        delegationHtml = '<div class=\"narrative-delegation\">Delegated to: ' + agents + '</div>';
-      }
-      html += '<div class=\"narrative-entry\">' +
-        '<div class=\"narrative-header\">' +
-          '<span class=\"narrative-cycle\">' + escapeHtml(cycleShort) + '</span>' +
-          '<span class=\"narrative-time\">' + escapeHtml(time) + '</span>' +
-          '<span class=\"narrative-status ' + st + '\">' + statusLabel + '</span>' +
-          threadHtml +
-        '</div>' +
-        '<div class=\"narrative-summary\">' + escapeHtml(e.summary || '') + '</div>' +
-        keywordsHtml +
-        delegationHtml +
-        '</div>';
-    });
-    narrativeContainer.innerHTML = html;
-  }
-
-  function renderLogEntries(entries) {
-    if (!entries || entries.length === 0) {
-      logContainer.innerHTML = '<div style=\"color:var(--text-dim);padding:20px;\">No log entries today.</div>';
-      return;
-    }
-    var html = '';
-    entries.forEach(function(e) {
-      var time = (e.timestamp || '').substring(11, 19);
-      var lvl = e.level || 'debug';
-      var badge = lvl.toUpperCase().substring(0, 3);
-      var cycleHtml = e.cycle_id ? '<span class=\"log-cycle\">' + escapeHtml(e.cycle_id.substring(0, 8)) + '</span>' : '';
-      html += '<div class=\"log-entry\">' +
-        '<span class=\"log-time\">' + escapeHtml(time) + '</span>' +
-        '<span class=\"log-level ' + lvl + '\">' + badge + '</span>' +
-        '<span class=\"log-mod\">' + escapeHtml(e.module + '::' + e.function) + '</span>' +
-        '<span class=\"log-msg\">' + escapeHtml(e.message) + '</span>' +
-        cycleHtml +
-        '</div>';
-    });
-    logContainer.innerHTML = html;
-    logContainer.scrollTop = logContainer.scrollHeight;
-  }
-
-  // ── Auto-resize textarea ──
-  function autoResize() {
-    input.style.height = 'auto';
-    input.style.height = Math.min(input.scrollHeight, 200) + 'px';
-  }
-  input.addEventListener('input', autoResize);
-
-  function connect() {
+fn ws_connect_js() -> String {
+  "function connect() {
     var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     var params = new URLSearchParams(location.search);
     var token = params.get('token');
@@ -737,190 +1149,7 @@ pub fn page(agent_name: String, agent_version: String) -> String {
       try { data = JSON.parse(evt.data); } catch(e) { return; }
       handleServerMessage(data);
     };
-  }
-
-  function handleServerMessage(data) {
-    switch (data.type) {
-      case 'assistant_message':
-        removeThinking();
-        removeQuestion();
-        addAssistantMessage(data.text, data.model, data.usage);
-        break;
-      case 'thinking':
-        showThinking();
-        break;
-      case 'question':
-        removeThinking();
-        showQuestion(data.text, data.source);
-        break;
-      case 'notification':
-        if (data.kind === 'tool_calling') {
-          addNotification('Using tool: ' + data.name);
-        } else if (data.kind === 'save_warning') {
-          addNotification(data.message);
-        } else if (data.kind === 'safety') {
-          var badge = data.decision === 'ACCEPT' ? '\\u2705' : data.decision === 'REJECT' ? '\\u274C' : '\\u26A0\\uFE0F';
-          addNotification(badge + ' D\\' ' + data.decision + ' (score: ' + data.score.toFixed(2) + ')');
-        }
-        break;
-      case 'log_data':
-        renderLogEntries(data.entries);
-        break;
-      case 'narrative_data':
-        renderNarrativeEntries(data.entries);
-        break;
-    }
-  }
-
-  // ── Render helpers (no state mutation) ──
-  function renderUserMessage(text) {
-    var el = document.createElement('div');
-    el.className = 'msg user';
-    el.textContent = text;
-    msgs.appendChild(el);
-  }
-
-  function renderAssistantMessage(text, model, usage) {
-    var el = document.createElement('div');
-    el.className = 'msg assistant';
-    var body = document.createElement('div');
-    body.className = 'md-body';
-    body.innerHTML = renderMarkdown(text);
-    el.appendChild(body);
-    if (model || usage) {
-      var meta = document.createElement('div');
-      meta.className = 'meta';
-      var parts = [];
-      if (model) parts.push(model);
-      if (usage) parts.push(usage.input + ' in / ' + usage.output + ' out');
-      meta.textContent = parts.join(' | ');
-      el.appendChild(meta);
-    }
-    msgs.appendChild(el);
-  }
-
-  function renderNotification(text) {
-    var el = document.createElement('div');
-    el.className = 'notification';
-    el.textContent = text;
-    msgs.appendChild(el);
-  }
-
-  // ── State-mutating message adders ──
-  function addUserMessage(text) {
-    renderUserMessage(text);
-    chatHistory.push({ role: 'user', text: text });
-    saveChatHistory();
-    scrollBottom();
-  }
-
-  function addAssistantMessage(text, model, usage) {
-    renderAssistantMessage(text, model, usage);
-    chatHistory.push({ role: 'assistant', text: text, model: model, usage: usage });
-    saveChatHistory();
-    scrollBottom();
-  }
-
-  function addNotification(text) {
-    renderNotification(text);
-    chatHistory.push({ role: 'notification', text: text });
-    saveChatHistory();
-    scrollBottom();
-  }
-
-  function setThinkingLock(locked) {
-    isThinking = locked;
-    var chatBtn = document.querySelector('.tab-btn[data-tab=\"chat\"]');
-    if (locked) {
-      thinkingOverlay.classList.add('active');
-      chatBtn.classList.add('chat-disabled');
-    } else {
-      thinkingOverlay.classList.remove('active');
-      chatBtn.classList.remove('chat-disabled');
-    }
-  }
-
-  function showThinking() {
-    if (thinkingEl) return;
-    thinkingEl = document.createElement('div');
-    thinkingEl.className = 'thinking';
-    thinkingEl.innerHTML = '<span class=\"dots\"><span>.</span><span>.</span><span>.</span></span> Thinking';
-    msgs.appendChild(thinkingEl);
-    scrollBottom();
-    setThinkingLock(true);
-  }
-
-  function removeThinking() {
-    if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; }
-    setThinkingLock(false);
-  }
-
-  function showQuestion(text, source) {
-    removeQuestion();
-    questionEl = document.createElement('div');
-    questionEl.className = 'question-prompt';
-    var srcLabel = source === 'cognitive' ? 'Cognitive' : source.replace('agent:', '');
-    questionEl.innerHTML =
-      '<div class=\"q-source\">' + escapeHtml(srcLabel) + ' asks:</div>' +
-      '<div class=\"q-text\">' + escapeHtml(text) + '</div>' +
-      '<input type=\"text\" placeholder=\"Type your answer...\" autofocus>';
-    var qInput = questionEl.querySelector('input');
-    qInput.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter' && qInput.value.trim()) {
-        var answer = qInput.value.trim();
-        ws.send(JSON.stringify({ type: 'user_answer', text: answer }));
-        addUserMessage(answer);
-        removeQuestion();
-        input.focus();
-      }
-    });
-    msgs.appendChild(questionEl);
-    scrollBottom();
-    qInput.focus();
-  }
-
-  function removeQuestion() {
-    if (questionEl) { questionEl.remove(); questionEl = null; }
-  }
-
-  function scrollBottom() {
-    msgs.scrollTop = msgs.scrollHeight;
-  }
-
-  function escapeHtml(s) {
-    var d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
-  }
-
-  function sendMessage() {
-    var text = input.value.trim();
-    if (!text || !ws || ws.readyState !== WebSocket.OPEN || isThinking) return;
-    ws.send(JSON.stringify({ type: 'user_message', text: text }));
-    addUserMessage(text);
-    input.value = '';
-    input.style.height = 'auto';
-  }
-
-  input.addEventListener('keydown', function(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
-  });
-
-  form.addEventListener('submit', function(e) {
-    e.preventDefault();
-    sendMessage();
-  });
-
-  // Load history from localStorage, then connect
-  loadChatHistory();
-  connect();
-})();
-</script>
-</body>
-</html>"
+  }"
 }
 
 fn escape(s: String) -> String {

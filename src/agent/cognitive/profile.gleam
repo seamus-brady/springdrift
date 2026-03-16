@@ -1,4 +1,6 @@
-import agent/cognitive_state.{type CognitiveState, CognitiveState}
+import agent/cognitive_state.{
+  type CognitiveState, CognitiveState, IdentityContext,
+}
 import agent/types.{type CognitiveReply, CognitiveReply}
 import dprime/config as dprime_config_mod
 import gleam/erlang/process.{type Subject}
@@ -42,7 +44,7 @@ fn do_load_profile(
   name: String,
   reply_to: Subject(CognitiveReply),
 ) -> CognitiveState {
-  case profile.load(name, state.profile_dirs) {
+  case profile.load(name, state.identity.profile_dirs) {
     Error(msg) -> {
       slog.warn("cognitive", "do_load_profile", msg, state.cycle_id)
       process.send(
@@ -84,7 +86,7 @@ fn do_load_profile(
           loaded_profile,
           state.provider,
           task_model,
-          state.write_anywhere,
+          state.identity.write_anywhere,
         )
       let agent_tools = list.map(agent_specs, types.agent_to_tool)
       let tools = [builtin.human_input_tool(), ..agent_tools]
@@ -173,7 +175,7 @@ fn do_load_profile(
         messages: [],
         dprime_state:,
         output_dprime_state:,
-        active_profile: Some(name),
+        identity: IdentityContext(..state.identity, active_profile: Some(name)),
       )
     }
   }
