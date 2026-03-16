@@ -15,6 +15,7 @@ import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/result
 import gleam/string
 import llm/provider.{type Provider}
 import llm/request
@@ -379,44 +380,99 @@ fn parse_narrative_entry(
   let extracted = extract_json_object(stripped)
   // Sanitize control characters that LLMs sometimes leave unescaped in JSON strings
   let cleaned = sanitize_json_string(extracted)
-  // Use the lenient decoder that defaults missing required fields
-  case json.parse(cleaned, lenient_entry_decoder()) {
-    Ok(partial) ->
-      // Override fields the Archivist shouldn't control
-      Ok(
-        NarrativeEntry(
-          ..partial,
-          schema_version: 1,
-          cycle_id: ctx.cycle_id,
-          parent_cycle_id: ctx.parent_cycle_id,
-          timestamp: case partial.timestamp {
-            "" -> get_datetime()
-            ts -> ts
-          },
-          entry_type: Narrative,
-        ),
-      )
+  // Try parsing as-is first, then with single-quote repair
+  case try_parse_entry(cleaned) {
+    Ok(entry) -> apply_overrides(entry, ctx) |> Ok
     Error(_) -> {
-      // Try repairing truncated JSON before giving up
-      let repaired = repair_truncated_json(cleaned)
-      case json.parse(repaired, lenient_entry_decoder()) {
-        Ok(partial) ->
-          Ok(
-            NarrativeEntry(
-              ..partial,
-              schema_version: 1,
-              cycle_id: ctx.cycle_id,
-              parent_cycle_id: ctx.parent_cycle_id,
-              timestamp: case partial.timestamp {
-                "" -> get_datetime()
-                ts -> ts
-              },
-              entry_type: Narrative,
-            ),
-          )
-        Error(_) -> Error(Nil)
+      // Try repairing single quotes to double quotes
+      let sq_repaired = replace_single_quotes(cleaned)
+      let sq_cleaned = sanitize_json_string(sq_repaired)
+      case try_parse_entry(sq_cleaned) {
+        Ok(entry) -> apply_overrides(entry, ctx) |> Ok
+        Error(_) -> {
+          // Try repairing truncated JSON on original
+          let repaired = repair_truncated_json(cleaned)
+          case try_parse_entry(repaired) {
+            Ok(entry) -> apply_overrides(entry, ctx) |> Ok
+            Error(_) -> Error(Nil)
+          }
+        }
       }
     }
+  }
+}
+
+/// Try parsing JSON text into a NarrativeEntry using the lenient decoder.
+fn try_parse_entry(text: String) -> Result(NarrativeEntry, Nil) {
+  json.parse(text, lenient_entry_decoder())
+  |> result.replace_error(Nil)
+}
+
+/// Apply archivist overrides (cycle_id, timestamp, schema_version, entry_type).
+fn apply_overrides(
+  partial: NarrativeEntry,
+  ctx: ArchivistContext,
+) -> NarrativeEntry {
+  NarrativeEntry(
+    ..partial,
+    schema_version: 1,
+    cycle_id: ctx.cycle_id,
+    parent_cycle_id: ctx.parent_cycle_id,
+    timestamp: case partial.timestamp {
+      "" -> get_datetime()
+      ts -> ts
+    },
+    entry_type: Narrative,
+  )
+}
+
+/// Replace single-quoted JSON keys and string values with double quotes.
+/// This is a best-effort repair for LLMs that produce Python-style JSON.
+/// Walks the string character by character, swapping ' for " when it appears
+/// to be a JSON string delimiter (not inside a double-quoted string, and not
+/// an apostrophe in text like "don't").
+fn replace_single_quotes(text: String) -> String {
+  replace_sq_walk(string.to_graphemes(text), False, False, False, [])
+  |> list.reverse
+  |> string.join("")
+}
+
+fn replace_sq_walk(
+  graphemes: List(String),
+  in_double: Bool,
+  in_single: Bool,
+  escaped: Bool,
+  acc: List(String),
+) -> List(String) {
+  case graphemes {
+    [] -> acc
+    [g, ..rest] ->
+      case escaped {
+        True -> replace_sq_walk(rest, in_double, in_single, False, [g, ..acc])
+        False ->
+          case g {
+            "\\" ->
+              replace_sq_walk(rest, in_double, in_single, True, [g, ..acc])
+            "\"" ->
+              case in_single {
+                // Inside a single-quoted string, keep literal "
+                True ->
+                  replace_sq_walk(rest, False, True, False, ["\\\"", ..acc])
+                False ->
+                  replace_sq_walk(rest, !in_double, False, False, ["\"", ..acc])
+              }
+            "'" ->
+              case in_double {
+                // Inside a double-quoted string, keep as apostrophe
+                True -> replace_sq_walk(rest, True, False, False, ["'", ..acc])
+                False ->
+                  // Swap single quote for double quote
+                  replace_sq_walk(rest, False, !in_single, False, ["\"", ..acc])
+              }
+            _ ->
+              replace_sq_walk(rest, in_double, in_single, escaped, [g, ..acc])
+          }
+      }
   }
 }
 
@@ -1050,6 +1106,61 @@ fn lenient_cbr_outcome_decoder() -> decode.Decoder(cbr_types.CbrOutcome) {
   ))
 }
 
+fn extract_fallback_domain(text: String) -> String {
+  let lower = string.lowercase(text)
+  // Check for common domain indicators
+  let domains = [
+    #("research", "research"),
+    #("search", "research"),
+    #("find", "research"),
+    #("look up", "research"),
+    #("code", "software"),
+    #("programming", "software"),
+    #("bug", "software"),
+    #("function", "software"),
+    #("write", "creative_work"),
+    #("draft", "creative_work"),
+    #("poem", "creative_work"),
+    #("story", "creative_work"),
+    #("data", "data_analysis"),
+    #("number", "data_analysis"),
+    #("statistic", "data_analysis"),
+    #("trend", "data_analysis"),
+    #("weather", "environment"),
+    #("climate", "environment"),
+    #("price", "economics"),
+    #("cost", "economics"),
+    #("market", "economics"),
+    #("cook", "food"),
+    #("recipe", "food"),
+    #("travel", "travel"),
+    #("flight", "travel"),
+    #("health", "health"),
+    #("medical", "health"),
+  ]
+  case list.find(domains, fn(pair) { string.contains(lower, pair.0) }) {
+    Ok(#(_, domain)) -> domain
+    Error(_) -> ""
+  }
+}
+
+fn extract_fallback_topics(text: String) -> List(String) {
+  // Take the first 100 chars, split into rough phrases
+  let truncated = string.slice(text, 0, 100)
+  let words =
+    string.split(truncated, " ")
+    |> list.filter(fn(w) { string.length(w) > 2 })
+    |> list.take(8)
+  // Create 1-2 topic phrases from groups of 2-3 words
+  case words {
+    [a, b, c, d, ..] -> [a <> " " <> b <> " " <> c, d]
+    [a, b, c] -> [a <> " " <> b <> " " <> c]
+    [a, b] -> [a <> " " <> b]
+    [a] -> [a]
+    [] -> []
+  }
+}
+
 fn fallback_entry(ctx: ArchivistContext) -> NarrativeEntry {
   // Build a factual summary from the cycle context
   let user_part =
@@ -1109,7 +1220,11 @@ fn fallback_entry(ctx: ArchivistContext) -> NarrativeEntry {
     timestamp: get_datetime(),
     entry_type: Narrative,
     summary: summary,
-    intent: Intent(classification:, description: "", domain: ""),
+    intent: Intent(
+      classification:,
+      description: "",
+      domain: extract_fallback_domain(ctx.user_input),
+    ),
     outcome: Outcome(
       status:,
       confidence: 0.4,
@@ -1139,7 +1254,7 @@ fn fallback_entry(ctx: ArchivistContext) -> NarrativeEntry {
     }),
     decisions: [],
     keywords: extract_simple_keywords(ctx.user_input),
-    topics: [],
+    topics: extract_fallback_topics(ctx.user_input),
     entities: Entities(
       locations: [],
       organisations: [],
@@ -1198,25 +1313,72 @@ fn extract_simple_keywords(text: String) -> List(String) {
 }
 
 /// Strip markdown code fences (```json ... ```) from LLM output.
+/// Handles: ```json, ```JSON, ``` with whitespace, fences not at start of text,
+/// and multiple fenced blocks (takes content from the first one).
 fn strip_markdown_fences(text: String) -> String {
-  case string.starts_with(text, "```") {
-    True -> {
-      // Remove opening fence line (```json or ``` etc.)
-      let after_open = case string.split_once(text, "\n") {
-        Ok(#(_, rest)) -> rest
-        Error(_) -> text
-      }
-      // Remove closing fence if present
-      case string.ends_with(string.trim_end(after_open), "```") {
-        True -> {
-          let trimmed = string.trim_end(after_open)
-          string.slice(trimmed, 0, string.length(trimmed) - 3)
-          |> string.trim_end
-        }
-        False -> after_open
+  // Try to find a code fence anywhere in the text, not just at the start
+  case find_fence_start(string.split(text, "\n"), []) {
+    Ok(#(content_lines, _after_close)) -> {
+      content_lines
+      |> list.reverse
+      |> string.join("\n")
+      |> string.trim
+    }
+    Error(_) -> text
+  }
+}
+
+/// Walk lines looking for an opening fence. When found, collect lines until
+/// the closing fence and return the content between them plus remaining lines.
+fn find_fence_start(
+  lines: List(String),
+  skipped: List(String),
+) -> Result(#(List(String), List(String)), Nil) {
+  case lines {
+    [] -> Error(Nil)
+    [line, ..rest] -> {
+      let trimmed = string.trim(line)
+      case is_opening_fence(trimmed) {
+        True -> collect_until_close(rest, [])
+        False -> find_fence_start(rest, [line, ..skipped])
       }
     }
-    False -> text
+  }
+}
+
+/// Check if a line is an opening code fence: ``` optionally followed by
+/// a language tag like json, JSON, jsonc, etc.
+fn is_opening_fence(line: String) -> Bool {
+  case string.starts_with(line, "```") {
+    True -> {
+      let after_ticks = string.drop_start(line, 3)
+      let tag = string.trim(after_ticks)
+      // Opening fence: bare ``` or ``` followed by a simple language tag
+      tag == ""
+      || {
+        !string.contains(tag, " ")
+        && !string.contains(tag, "}")
+        && !string.contains(tag, "{")
+      }
+    }
+    False -> False
+  }
+}
+
+/// Collect lines until a closing ``` fence is found.
+fn collect_until_close(
+  lines: List(String),
+  acc: List(String),
+) -> Result(#(List(String), List(String)), Nil) {
+  case lines {
+    // No closing fence found — return what we collected anyway
+    [] -> Ok(#(acc, []))
+    [line, ..rest] -> {
+      case string.trim(line) == "```" {
+        True -> Ok(#(acc, rest))
+        False -> collect_until_close(rest, [line, ..acc])
+      }
+    }
   }
 }
 
@@ -1314,41 +1476,86 @@ fn close_n(text: String, closer: String, n: Int) -> String {
   }
 }
 
-/// Extract a JSON object from text that may contain markdown fences,
-/// preamble, or trailing content. Finds the first '{' and last '}'.
+/// Extract a JSON object from text that may contain preamble or trailing
+/// content. Finds the first '{' and tracks brace depth to find its matching
+/// '}', correctly ignoring braces inside JSON string literals.
 pub fn extract_json_object(text: String) -> String {
   let graphemes = string.to_graphemes(text)
-  let first_brace = find_index(graphemes, "{", 0)
-  let last_brace = find_last_index(graphemes, "}", 0, -1)
-  case first_brace >= 0 && last_brace > first_brace {
-    True -> string.slice(text, first_brace, last_brace - first_brace + 1)
-    False -> text
-  }
-}
-
-fn find_index(graphemes: List(String), target: String, idx: Int) -> Int {
-  case graphemes {
-    [] -> -1
-    [g, ..rest] ->
-      case g == target {
-        True -> idx
-        False -> find_index(rest, target, idx + 1)
+  // Skip to the first '{' character
+  case skip_to_open_brace(graphemes, 0) {
+    Error(_) -> text
+    Ok(#(start_idx, rest_graphemes)) -> {
+      // Track depth starting at 1 (we consumed the opening brace)
+      case find_matching_close(rest_graphemes, 1, False, False, start_idx + 1) {
+        Error(_) ->
+          // No matching close found — return from first brace to end
+          string.slice(text, start_idx, string.length(text) - start_idx)
+        Ok(end_idx) -> string.slice(text, start_idx, end_idx - start_idx + 1)
       }
+    }
   }
 }
 
-fn find_last_index(
+/// Skip graphemes until the first '{' is found.
+/// Returns the index and the remaining graphemes after the '{'.
+fn skip_to_open_brace(
   graphemes: List(String),
-  target: String,
   idx: Int,
-  last: Int,
-) -> Int {
+) -> Result(#(Int, List(String)), Nil) {
   case graphemes {
-    [] -> last
+    [] -> Error(Nil)
     [g, ..rest] ->
-      case g == target {
-        True -> find_last_index(rest, target, idx + 1, idx)
-        False -> find_last_index(rest, target, idx + 1, last)
+      case g == "{" {
+        True -> Ok(#(idx, rest))
+        False -> skip_to_open_brace(rest, idx + 1)
       }
+  }
+}
+
+/// Walk graphemes tracking brace depth, respecting JSON string literals.
+/// Returns the index of the closing '}' that brings depth to 0.
+fn find_matching_close(
+  graphemes: List(String),
+  depth: Int,
+  in_string: Bool,
+  escaped: Bool,
+  idx: Int,
+) -> Result(Int, Nil) {
+  case graphemes {
+    [] -> Error(Nil)
+    [g, ..rest] -> {
+      case escaped {
+        // Previous char was backslash inside a string — skip this char
+        True -> find_matching_close(rest, depth, in_string, False, idx + 1)
+        False ->
+          case in_string {
+            True ->
+              case g {
+                "\\" -> find_matching_close(rest, depth, True, True, idx + 1)
+                "\"" -> find_matching_close(rest, depth, False, False, idx + 1)
+                _ -> find_matching_close(rest, depth, True, False, idx + 1)
+              }
+            False ->
+              case g {
+                "\"" -> find_matching_close(rest, depth, True, False, idx + 1)
+                "{" ->
+                  find_matching_close(rest, depth + 1, False, False, idx + 1)
+                "}" ->
+                  case depth - 1 {
+                    0 -> Ok(idx)
+                    new_depth ->
+                      find_matching_close(
+                        rest,
+                        new_depth,
+                        False,
+                        False,
+                        idx + 1,
+                      )
+                  }
+                _ -> find_matching_close(rest, depth, False, False, idx + 1)
+              }
+          }
+      }
+    }
   }
 }

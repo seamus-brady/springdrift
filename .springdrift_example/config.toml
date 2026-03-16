@@ -194,8 +194,8 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 # Weight for keyword overlap (default: 1)
 # keyword_weight = 1
 
-# Minimum overlap score to assign entry to existing thread (default: 4)
-# threshold = 4
+# Minimum overlap score to assign entry to existing thread (default: 3)
+# threshold = 3
 
 # ── CBR scoring ──────────────────────────────────────────────────────────────
 # Case-Based Reasoning retrieval scoring weights. Symbolic weights must sum to 1.0.
@@ -234,6 +234,9 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 
 # Days after which low-confidence CBR cases are pruned (default: 60)
 # cbr_pruning_days = 60
+
+# Days after which single-cycle threads with no signal are pruned (default: 7)
+# thread_pruning_days = 7
 
 # ── Embedding ────────────────────────────────────────────────────────────────
 # Ollama embedding service configuration.

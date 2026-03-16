@@ -26,6 +26,7 @@ import gleam/string
 import identity
 import narrative/housekeeping
 import narrative/librarian
+import narrative/log as narrative_log
 import narrative/virtual_memory.{
   type CbrSlotEntry, type VirtualMemory, ScratchEntry,
 }
@@ -44,6 +45,7 @@ pub type HousekeepingConfig {
     pruning_confidence: Float,
     fact_confidence: Float,
     cbr_pruning_days: Int,
+    thread_pruning_days: Int,
   )
 }
 
@@ -55,6 +57,7 @@ pub fn default_housekeeping_config() -> HousekeepingConfig {
     pruning_confidence: 0.3,
     fact_confidence: 0.7,
     cbr_pruning_days: 60,
+    thread_pruning_days: 7,
   )
 }
 
@@ -667,11 +670,29 @@ fn do_housekeeping(state: CuratorState) -> Nil {
     }
   })
 
+  // 4. Thread pruning — remove single-cycle old threads with no signal
+  let thread_cutoff =
+    days_ago_date(state.housekeeping_config.thread_pruning_days)
+  let thread_index = librarian.load_thread_index(state.librarian)
+  let thread_prune_results =
+    housekeeping.find_prunable_threads(thread_index.threads, thread_cutoff)
+  let thread_prune_count = list.length(thread_prune_results)
+  case thread_prune_count > 0 {
+    True -> {
+      let cleaned_index =
+        housekeeping.apply_thread_pruning(thread_index, thread_prune_results)
+      narrative_log.save_thread_index(state.narrative_dir, cleaned_index)
+      librarian.notify_thread_index(state.librarian, cleaned_index)
+    }
+    False -> Nil
+  }
+
   let report =
     housekeeping.HousekeepingReport(
       cases_deduplicated: dedup_count,
       cases_pruned: prune_count,
       facts_resolved: conflict_count,
+      threads_pruned: thread_prune_count,
     )
   slog.info(
     "narrative/curator",

@@ -502,6 +502,10 @@ fn run(cfg: AppConfig) -> Nil {
         cfg.cbr_pruning_days,
         hk_default.cbr_pruning_days,
       ),
+      thread_pruning_days: option.unwrap(
+        cfg.thread_pruning_days,
+        hk_default.thread_pruning_days,
+      ),
     )
 
   // Start Curator (stays alive for dynamic system prompt assembly)

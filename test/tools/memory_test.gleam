@@ -742,6 +742,10 @@ pub fn introspect_with_context_test() {
       dprime_modify_threshold: 0.3,
       dprime_reject_threshold: 0.7,
       current_cycle_id: Some("cycle-abc"),
+      thread_total: 100,
+      thread_single_cycle: 80,
+      thread_uuid_named: 70,
+      thread_multi_cycle: 20,
     ))
   let call = ToolCall(id: "i2", name: "introspect", input_json: "{}")
   let result =
@@ -779,6 +783,10 @@ pub fn introspect_no_agents_test() {
       dprime_modify_threshold: 0.0,
       dprime_reject_threshold: 0.0,
       current_cycle_id: None,
+      thread_total: 0,
+      thread_single_cycle: 0,
+      thread_uuid_named: 0,
+      thread_multi_cycle: 0,
     ))
   let call = ToolCall(id: "i3", name: "introspect", input_json: "{}")
   let result =

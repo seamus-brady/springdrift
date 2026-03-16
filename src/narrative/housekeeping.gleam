@@ -1,6 +1,6 @@
-//// Housekeeping — periodic maintenance for CBR cases and facts.
+//// Housekeeping — periodic maintenance for CBR cases, facts, and threads.
 ////
-//// Pure functions that identify cases for deduplication, pruning, and
+//// Pure functions that identify items for deduplication, pruning, and
 //// conflict resolution. The Curator calls these and then applies the
 //// results via the Librarian.
 ////
@@ -8,6 +8,7 @@
 ////   1. CBR deduplication: cosine similarity > 0.92 → merge (supersede older)
 ////   2. CBR pruning: failure + confidence < 0.3 + age > 60 days + no pitfalls → remove
 ////   3. Fact conflict resolution: same key, different values → supersede lower confidence
+////   4. Thread pruning: single-cycle threads older than cutoff → remove from index
 
 import cbr/types as cbr_types
 import facts/types as facts_types
@@ -16,6 +17,7 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/order
 import gleam/string
+import narrative/types as narrative_types
 
 // ---------------------------------------------------------------------------
 // CBR deduplication — cosine similarity > threshold
@@ -210,6 +212,58 @@ fn do_find_conflicts(
 }
 
 // ---------------------------------------------------------------------------
+// Thread pruning — single-cycle old threads
+// ---------------------------------------------------------------------------
+
+/// A thread pruning decision: the thread should be removed from the index.
+pub type ThreadPruneResult {
+  ThreadPruneResult(thread_id: String, thread_name: String, reason: String)
+}
+
+/// Find threads eligible for pruning:
+/// - cycle_count == 1 (never revisited)
+/// - last_cycle_at older than cutoff_date
+/// - empty keywords, domains, and topics (no useful signal)
+///   OR thread_name starts with "Thread " (UUID-pattern fallback name)
+pub fn find_prunable_threads(
+  threads: List(narrative_types.ThreadState),
+  cutoff_date: String,
+) -> List(ThreadPruneResult) {
+  list.filter_map(threads, fn(ts) {
+    let is_single = ts.cycle_count <= 1
+    let is_old =
+      string.compare(extract_date(ts.last_cycle_at), cutoff_date) == order.Lt
+    let is_uuid_name = string.starts_with(ts.thread_name, "Thread ")
+    let is_empty_signal =
+      list.is_empty(ts.keywords)
+      && list.is_empty(ts.domains)
+      && list.is_empty(ts.topics)
+    case is_single && is_old && { is_uuid_name || is_empty_signal } {
+      True ->
+        Ok(ThreadPruneResult(
+          thread_id: ts.thread_id,
+          thread_name: ts.thread_name,
+          reason: "single-cycle, old, no signal",
+        ))
+      False -> Error(Nil)
+    }
+  })
+}
+
+/// Apply thread pruning results to a thread index, returning the cleaned index.
+pub fn apply_thread_pruning(
+  index: narrative_types.ThreadIndex,
+  results: List(ThreadPruneResult),
+) -> narrative_types.ThreadIndex {
+  let prune_ids = list.map(results, fn(r) { r.thread_id })
+  narrative_types.ThreadIndex(
+    threads: list.filter(index.threads, fn(ts) {
+      !list.contains(prune_ids, ts.thread_id)
+    }),
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Housekeeping report
 // ---------------------------------------------------------------------------
 
@@ -219,12 +273,18 @@ pub type HousekeepingReport {
     cases_deduplicated: Int,
     cases_pruned: Int,
     facts_resolved: Int,
+    threads_pruned: Int,
   )
 }
 
 /// Create an empty report (nothing done).
 pub fn empty_report() -> HousekeepingReport {
-  HousekeepingReport(cases_deduplicated: 0, cases_pruned: 0, facts_resolved: 0)
+  HousekeepingReport(
+    cases_deduplicated: 0,
+    cases_pruned: 0,
+    facts_resolved: 0,
+    threads_pruned: 0,
+  )
 }
 
 /// Format a report for logging.
@@ -235,7 +295,9 @@ pub fn format_report(report: HousekeepingReport) -> String {
   <> string.inspect(report.cases_pruned)
   <> " cases pruned, "
   <> string.inspect(report.facts_resolved)
-  <> " fact conflicts resolved"
+  <> " fact conflicts resolved, "
+  <> string.inspect(report.threads_pruned)
+  <> " threads pruned"
 }
 
 // ---------------------------------------------------------------------------

@@ -114,6 +114,7 @@ pub type AppConfig {
     pruning_confidence: Option(Float),
     fact_confidence: Option(Float),
     cbr_pruning_days: Option(Int),
+    thread_pruning_days: Option(Int),
     // ── Embedding ──
     embedding_model: Option(String),
     embedding_base_url: Option(String),
@@ -234,6 +235,7 @@ pub fn default() -> AppConfig {
     pruning_confidence: None,
     fact_confidence: None,
     cbr_pruning_days: None,
+    thread_pruning_days: None,
     embedding_model: None,
     embedding_base_url: None,
     embedding_dimensions: None,
@@ -497,6 +499,10 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     cbr_pruning_days: option.or(
       override_cfg.cbr_pruning_days,
       base.cbr_pruning_days,
+    ),
+    thread_pruning_days: option.or(
+      override_cfg.thread_pruning_days,
+      base.thread_pruning_days,
     ),
     // Embedding
     embedding_model: option.or(
@@ -1028,6 +1034,9 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     ]),
     fact_confidence: get_toml_float(table, ["housekeeping", "fact_confidence"]),
     cbr_pruning_days: get_toml_int(table, ["housekeeping", "cbr_pruning_days"]),
+    thread_pruning_days: get_toml_int(table, [
+      "housekeeping", "thread_pruning_days",
+    ]),
     // ── [embedding] ──
     embedding_model: get_toml_str(table, ["embedding", "model"]),
     embedding_base_url: get_toml_str(table, ["embedding", "base_url"]),

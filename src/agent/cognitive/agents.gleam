@@ -23,6 +23,7 @@ import llm/response
 import llm/types as llm_types
 import narrative/curator
 import narrative/librarian
+import narrative/log as narrative_log
 import paths
 import slog
 import tools/memory
@@ -122,6 +123,18 @@ fn handle_memory_tools(
           }
           memory.AgentStatusEntry(name: e.name, status: status_str)
         })
+      // Compute thread health stats for introspect
+      let thread_index = case state.memory.librarian {
+        Some(l) -> librarian.load_thread_index(l)
+        None -> narrative_log.load_thread_index(state.memory.narrative_dir)
+      }
+      let thread_total = list.length(thread_index.threads)
+      let thread_single_cycle =
+        list.count(thread_index.threads, fn(ts) { ts.cycle_count <= 1 })
+      let thread_uuid_named =
+        list.count(thread_index.threads, fn(ts) {
+          string.starts_with(ts.thread_name, "Thread ")
+        })
       let introspect_ctx =
         Some(memory.IntrospectContext(
           agent_uuid: state.identity.agent_uuid,
@@ -138,6 +151,10 @@ fn handle_memory_tools(
             None -> 0.0
           },
           current_cycle_id: state.cycle_id,
+          thread_total:,
+          thread_single_cycle:,
+          thread_uuid_named:,
+          thread_multi_cycle: thread_total - thread_single_cycle,
         ))
       let result =
         memory.execute(

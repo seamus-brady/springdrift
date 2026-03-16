@@ -2152,6 +2152,20 @@ fn compute_day_stats(state: LibrarianState, date: String) -> dag_types.DayStats 
   // All gate decisions
   let gate_decisions = list.flat_map(all, fn(n) { n.dprime_gates })
 
+  // Agent-level failure breakdown
+  let agent_failures =
+    list.filter_map(all, fn(n) {
+      case n.node_type, n.outcome {
+        dag_types.AgentCycle, dag_types.NodeFailure(reason:) ->
+          Ok(dag_types.AgentFailureRecord(
+            agent_model: n.model,
+            reason:,
+            cycle_id: n.cycle_id,
+          ))
+        _, _ -> Error(Nil)
+      }
+    })
+
   dag_types.DayStats(
     date:,
     total_cycles: list.length(all),
@@ -2164,6 +2178,7 @@ fn compute_day_stats(state: LibrarianState, date: String) -> dag_types.DayStats 
     tool_failure_rate:,
     models_used:,
     gate_decisions:,
+    agent_failures:,
   )
 }
 

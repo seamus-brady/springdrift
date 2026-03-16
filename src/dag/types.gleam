@@ -94,7 +94,12 @@ pub type DayStats {
     tool_failure_rate: Float,
     models_used: List(String),
     gate_decisions: List(GateSummary),
+    agent_failures: List(AgentFailureRecord),
   )
+}
+
+pub type AgentFailureRecord {
+  AgentFailureRecord(agent_model: String, reason: String, cycle_id: String)
 }
 
 // ---------------------------------------------------------------------------

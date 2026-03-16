@@ -238,11 +238,12 @@ pub fn format_report_test() {
       cases_deduplicated: 2,
       cases_pruned: 1,
       facts_resolved: 3,
+      threads_pruned: 0,
     )
   let text = housekeeping.format_report(report)
   should.be_true(
     text
-    == "Housekeeping: 2 cases deduplicated, 1 cases pruned, 3 fact conflicts resolved",
+    == "Housekeeping: 2 cases deduplicated, 1 cases pruned, 3 fact conflicts resolved, 0 threads pruned",
   )
 }
 

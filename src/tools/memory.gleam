@@ -310,6 +310,10 @@ pub type IntrospectContext {
     dprime_modify_threshold: Float,
     dprime_reject_threshold: Float,
     current_cycle_id: Option(String),
+    thread_total: Int,
+    thread_single_cycle: Int,
+    thread_uuid_named: Int,
+    thread_multi_cycle: Int,
   )
 }
 
@@ -491,12 +495,56 @@ fn run_recall_threads(
         content: "No active threads in narrative memory.",
       )
     threads -> {
-      let formatted =
-        "Active threads ("
-        <> int.to_string(list.length(threads))
-        <> "):\n\n"
-        <> string.join(list.map(threads, format_thread_state), "\n\n")
-      ToolSuccess(tool_use_id: call.id, content: formatted)
+      let total = list.length(threads)
+
+      // Health metrics
+      let single_cycle = list.count(threads, fn(ts) { ts.cycle_count <= 1 })
+      let uuid_named =
+        list.count(threads, fn(ts) {
+          string.starts_with(ts.thread_name, "Thread ")
+        })
+      let named = total - uuid_named
+      let multi_cycle = total - single_cycle
+
+      // Size buckets
+      let size_2_to_5 =
+        list.count(threads, fn(ts) {
+          ts.cycle_count >= 2 && ts.cycle_count <= 5
+        })
+      let size_6_plus = list.count(threads, fn(ts) { ts.cycle_count >= 6 })
+
+      // Top threads by cycle count (up to 15)
+      let sorted =
+        list.sort(threads, fn(a, b) {
+          int.compare(b.cycle_count, a.cycle_count)
+        })
+      let top = list.take(sorted, 15)
+      let top_formatted =
+        string.join(list.map(top, format_thread_state), "\n\n")
+
+      let summary =
+        "## Thread summary\n\n"
+        <> "Total threads: "
+        <> int.to_string(total)
+        <> "\n"
+        <> "  Named: "
+        <> int.to_string(named)
+        <> " | UUID-pattern: "
+        <> int.to_string(uuid_named)
+        <> "\n"
+        <> "  Single-cycle: "
+        <> int.to_string(single_cycle)
+        <> " | Multi-cycle: "
+        <> int.to_string(multi_cycle)
+        <> "\n"
+        <> "  2-5 cycles: "
+        <> int.to_string(size_2_to_5)
+        <> " | 6+ cycles: "
+        <> int.to_string(size_6_plus)
+        <> "\n\n"
+        <> "## Top threads by activity\n\n"
+        <> top_formatted
+      ToolSuccess(tool_use_id: call.id, content: summary)
     }
   }
 }
@@ -990,6 +1038,25 @@ fn format_day_stats(stats: dag_types.DayStats) -> String {
           )
           <> "\n"
       }
+      <> case stats.agent_failures {
+        [] -> ""
+        failures ->
+          "Agent failures ("
+          <> int.to_string(list.length(failures))
+          <> "):\n"
+          <> string.join(
+            list.map(failures, fn(f: dag_types.AgentFailureRecord) {
+              "  - "
+              <> f.agent_model
+              <> " ["
+              <> string.slice(f.cycle_id, 0, 8)
+              <> "]: "
+              <> f.reason
+            }),
+            "\n",
+          )
+          <> "\n"
+      }
   }
 }
 
@@ -1419,6 +1486,20 @@ fn run_introspect(call: ToolCall, ctx: Option(IntrospectContext)) -> ToolResult 
         False -> "## D' Safety\n- enabled: false"
       }
       let sections = [dprime_section, ..sections]
+
+      // Thread health
+      let thread_section =
+        "## Thread Health\n- total: "
+        <> int.to_string(c.thread_total)
+        <> "\n- named: "
+        <> int.to_string(c.thread_total - c.thread_uuid_named)
+        <> " | uuid-pattern: "
+        <> int.to_string(c.thread_uuid_named)
+        <> "\n- single-cycle: "
+        <> int.to_string(c.thread_single_cycle)
+        <> " | multi-cycle: "
+        <> int.to_string(c.thread_multi_cycle)
+      let sections = [thread_section, ..sections]
 
       ToolSuccess(
         tool_use_id: call.id,

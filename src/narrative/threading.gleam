@@ -39,7 +39,7 @@ pub fn default_config() -> ThreadingConfig {
     domain_weight: 2,
     keyword_weight: 1,
     topic_weight: 3,
-    threshold: 4,
+    threshold: 3,
   )
 }
 
@@ -245,10 +245,19 @@ fn derive_thread_name(entry: NarrativeEntry) -> String {
   let domain = entry.intent.domain
   let locations = entry.entities.locations
   case domain, locations {
-    "", [] -> "Thread " <> string.slice(entry.cycle_id, 0, 8)
-    d, [] -> d
     "", [loc, ..] -> loc
+    "", [] ->
+      case entry.topics {
+        [topic, ..] -> topic
+        [] ->
+          case entry.keywords {
+            [k1, k2, ..] -> k1 <> ", " <> k2
+            [k1] -> k1
+            [] -> "Thread " <> string.slice(entry.cycle_id, 0, 8)
+          }
+      }
     d, [loc, ..] -> d <> " — " <> loc
+    d, [] -> d
   }
 }
 
