@@ -97,6 +97,7 @@ pub type AppConfig {
     threading_location_weight: Option(Int),
     threading_domain_weight: Option(Int),
     threading_keyword_weight: Option(Int),
+    threading_topic_weight: Option(Int),
     threading_threshold: Option(Int),
     // ── CBR scoring ──
     cbr_cosine_weight: Option(Float),
@@ -214,6 +215,7 @@ pub fn default() -> AppConfig {
     threading_location_weight: None,
     threading_domain_weight: None,
     threading_keyword_weight: None,
+    threading_topic_weight: None,
     threading_threshold: None,
     cbr_cosine_weight: None,
     cbr_symbolic_weight: None,
@@ -430,6 +432,10 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     threading_keyword_weight: option.or(
       override_cfg.threading_keyword_weight,
       base.threading_keyword_weight,
+    ),
+    threading_topic_weight: option.or(
+      override_cfg.threading_topic_weight,
+      base.threading_topic_weight,
     ),
     threading_threshold: option.or(
       override_cfg.threading_threshold,
@@ -976,6 +982,9 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     ]),
     threading_keyword_weight: get_toml_int(table, [
       "scoring", "threading", "keyword_weight",
+    ]),
+    threading_topic_weight: get_toml_int(table, [
+      "scoring", "threading", "topic_weight",
     ]),
     threading_threshold: get_toml_int(table, [
       "scoring", "threading", "threshold",

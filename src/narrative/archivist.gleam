@@ -113,6 +113,63 @@ pub fn generate(
   }
 }
 
+/// Enrich a NarrativeEntry with LLM-generated topic phrases.
+/// Falls back to the existing entry unchanged on any failure.
+fn enrich_topics(
+  entry: NarrativeEntry,
+  ctx: ArchivistContext,
+  provider: Provider,
+  model: String,
+) -> NarrativeEntry {
+  case generate_topics(ctx, provider, model) {
+    [] -> entry
+    topics -> NarrativeEntry(..entry, topics:)
+  }
+}
+
+/// Generate 3-5 topic phrases from cycle context via a cheap LLM call.
+/// Returns empty list on failure (silent — never affects the user).
+fn generate_topics(
+  ctx: ArchivistContext,
+  provider: Provider,
+  model: String,
+) -> List(String) {
+  let prompt =
+    "USER INPUT:\n"
+    <> string.slice(ctx.user_input, 0, 500)
+    <> "\n\nRESPONSE SUMMARY:\n"
+    <> string.slice(ctx.final_response, 0, 500)
+  let req =
+    request.new(model, 256)
+    |> request.with_system(
+      "Extract 3-5 topic phrases from this conversation cycle. Each topic should be 2-5 words describing a specific subject discussed (e.g. \"Brave Search API errors\", \"web UI sidebar layout\", \"cycle log persistence\"). Return ONLY a JSON array of strings, no other text.",
+    )
+    |> request.with_user_message(prompt)
+
+  case provider.chat(req) {
+    Ok(resp) -> {
+      let text = response.text(resp)
+      let cleaned =
+        text
+        |> string.trim
+        |> strip_markdown_fences
+      case json.parse(cleaned, decode.list(decode.string)) {
+        Ok(topics) -> list.take(topics, 7)
+        Error(_) -> {
+          slog.debug(
+            "narrative/archivist",
+            "generate_topics",
+            "Topic parse failed: " <> string.slice(text, 0, 100),
+            Some(ctx.cycle_id),
+          )
+          []
+        }
+      }
+    }
+    Error(_) -> []
+  }
+}
+
 /// Spawn the Archivist asynchronously. Does not block the caller.
 /// If a Librarian is available, it is notified after the entry is written.
 /// After the NarrativeEntry, a second LLM call generates a CbrCase.
@@ -133,8 +190,15 @@ pub fn spawn(
     process.spawn_unlinked(fn() {
       case generate(ctx, provider, model, max_tokens, verbose) {
         Some(entry) -> {
+          // Generate topic phrases via a cheap LLM call
+          let with_topics = enrich_topics(entry, ctx, provider, model)
           let threaded =
-            threading.assign_thread(entry, narrative_dir, lib, threading_config)
+            threading.assign_thread(
+              with_topics,
+              narrative_dir,
+              lib,
+              threading_config,
+            )
           narrative_log.append(narrative_dir, threaded)
           // Notify the Librarian to index the new entry
           case lib {
@@ -438,6 +502,7 @@ fn lenient_entry_decoder() -> decode.Decoder(NarrativeEntry) {
     delegation_chain:,
     decisions:,
     keywords:,
+    topics: [],
     entities:,
     sources:,
     thread: None,
@@ -1074,6 +1139,7 @@ fn fallback_entry(ctx: ArchivistContext) -> NarrativeEntry {
     }),
     decisions: [],
     keywords: extract_simple_keywords(ctx.user_input),
+    topics: [],
     entities: Entities(
       locations: [],
       organisations: [],

@@ -24,6 +24,7 @@ fn make_entry(
     delegation_chain: [],
     decisions: [],
     keywords:,
+    topics: [],
     entities: Entities(
       locations:,
       organisations: [],
@@ -63,6 +64,7 @@ fn make_thread_state(
     locations:,
     domains:,
     keywords:,
+    topics: [],
     last_data_points: [],
   )
 }

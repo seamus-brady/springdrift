@@ -573,6 +573,10 @@ fn run(cfg: AppConfig) -> Nil {
         cfg.threading_keyword_weight,
         default_threading.keyword_weight,
       ),
+      topic_weight: option.unwrap(
+        cfg.threading_topic_weight,
+        default_threading.topic_weight,
+      ),
       threshold: option.unwrap(
         cfg.threading_threshold,
         default_threading.threshold,

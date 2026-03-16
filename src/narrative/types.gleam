@@ -22,6 +22,7 @@ pub type NarrativeEntry {
     delegation_chain: List(DelegationStep),
     decisions: List(Decision),
     keywords: List(String),
+    topics: List(String),
     entities: Entities,
     sources: List(Source),
     thread: Option(Thread),
@@ -211,6 +212,7 @@ pub type ThreadState {
     locations: List(String),
     domains: List(String),
     keywords: List(String),
+    topics: List(String),
     last_data_points: List(DataPoint),
   )
 }

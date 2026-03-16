@@ -27,6 +27,7 @@ pub type ThreadingConfig {
     location_weight: Int,
     domain_weight: Int,
     keyword_weight: Int,
+    topic_weight: Int,
     threshold: Int,
   )
 }
@@ -37,6 +38,7 @@ pub fn default_config() -> ThreadingConfig {
     location_weight: 3,
     domain_weight: 2,
     keyword_weight: 1,
+    topic_weight: 3,
     threshold: 4,
   )
 }
@@ -127,6 +129,7 @@ pub fn do_assign(
             d -> [d]
           },
           keywords: entry.keywords,
+          topics: entry.topics,
           last_data_points: entry.entities.data_points,
         )
       let updated_index = ThreadIndex(threads: [new_ts, ..index.threads])
@@ -159,7 +162,9 @@ pub fn score_overlap_with_config(
   }
   let keyword_score =
     count_intersections(entry.keywords, ts.keywords) * cfg.keyword_weight
-  location_score + domain_score + keyword_score
+  let topic_score =
+    count_topic_overlaps(entry.topics, ts.topics) * cfg.topic_weight
+  location_score + domain_score + keyword_score + topic_score
 }
 
 // ---------------------------------------------------------------------------
@@ -169,6 +174,30 @@ pub fn score_overlap_with_config(
 fn count_intersections(a: List(String), b: List(String)) -> Int {
   let lower_b = list.map(b, string.lowercase)
   list.count(a, fn(item) { list.contains(lower_b, string.lowercase(item)) })
+}
+
+/// Count topic overlaps using substring matching.
+/// A topic pair matches if either contains the other, or they share 2+ words.
+fn count_topic_overlaps(a: List(String), b: List(String)) -> Int {
+  list.count(a, fn(topic_a) {
+    let lower_a = string.lowercase(topic_a)
+    list.any(b, fn(topic_b) {
+      let lower_b = string.lowercase(topic_b)
+      // Substring containment (either direction)
+      string.contains(lower_a, lower_b)
+      || string.contains(lower_b, lower_a)
+      // Or share 2+ significant words
+      || shared_word_count(lower_a, lower_b) >= 2
+    })
+  })
+}
+
+fn shared_word_count(a: String, b: String) -> Int {
+  let words_a =
+    string.split(a, " ") |> list.filter(fn(w) { string.length(w) > 2 })
+  let words_b =
+    string.split(b, " ") |> list.filter(fn(w) { string.length(w) > 2 })
+  list.count(words_a, fn(w) { list.contains(words_b, w) })
 }
 
 fn build_continuity_note(entry: NarrativeEntry, ts: ThreadState) -> String {
@@ -234,8 +263,8 @@ fn update_thread_state(ts: ThreadState, entry: NarrativeEntry) -> ThreadState {
       "" -> ts.domains
       d -> merge_unique(ts.domains, [d])
     },
-    keywords: merge_unique(ts.keywords, entry.keywords)
-      |> list.take(20),
+    keywords: merge_recent(ts.keywords, entry.keywords, 20),
+    topics: merge_recent(ts.topics, entry.topics, 15),
     last_data_points: case entry.entities.data_points {
       [] -> ts.last_data_points
       dps -> dps
@@ -251,6 +280,25 @@ fn merge_unique(existing: List(String), new: List(String)) -> List(String) {
       False -> list.append(acc, [item])
     }
   })
+}
+
+/// Merge keywords, keeping recent ones when the cap is exceeded.
+/// New keywords go to the front; oldest keywords are dropped first.
+fn merge_recent(
+  existing: List(String),
+  new: List(String),
+  cap: Int,
+) -> List(String) {
+  // Deduplicate: new keywords that aren't already present
+  let fresh =
+    list.filter(new, fn(item) {
+      let lower_item = string.lowercase(item)
+      !list.any(existing, fn(e) { string.lowercase(e) == lower_item })
+    })
+  // Prepend fresh keywords so they're at the front (most recent)
+  let combined = list.append(fresh, existing)
+  // Cap by dropping from the tail (oldest)
+  list.take(combined, cap)
 }
 
 fn replace_thread(index: ThreadIndex, updated: ThreadState) -> ThreadIndex {

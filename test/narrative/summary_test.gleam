@@ -24,6 +24,7 @@ fn make_entry(cycle_id: String, summary_text: String) -> NarrativeEntry {
     delegation_chain: [],
     decisions: [],
     keywords: ["test", "weather"],
+    topics: [],
     entities: Entities(
       locations: [],
       organisations: [],

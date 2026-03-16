@@ -272,6 +272,7 @@ fn build_summary_entry(
     delegation_chain: [],
     decisions: [],
     keywords:,
+    topics: [],
     entities: Entities(
       locations: [],
       organisations: [],

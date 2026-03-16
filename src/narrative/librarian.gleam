@@ -1625,11 +1625,14 @@ fn do_search(state: LibrarianState, keyword: String) -> List(NarrativeEntry) {
   let lower = string.lowercase(keyword)
   let by_kw = ets_lookup_bag(state.by_keyword, lower)
   let all = ets_all_values(state.entries)
-  let by_summary =
+  let by_text =
     list.filter(all, fn(entry) {
       string.contains(string.lowercase(entry.summary), lower)
+      || list.any(entry.topics, fn(t) {
+        string.contains(string.lowercase(t), lower)
+      })
     })
-  merge_unique_entries(by_kw, by_summary)
+  merge_unique_entries(by_kw, by_text)
 }
 
 // ---------------------------------------------------------------------------
@@ -1825,6 +1828,15 @@ fn index_entry(state: LibrarianState, entry: NarrativeEntry) -> Nil {
   // Keyword index (lowercased)
   list.each(entry.keywords, fn(kw) {
     ets_insert(state.by_keyword, string.lowercase(kw), entry)
+  })
+
+  // Topic index — full phrases + individual significant words
+  list.each(entry.topics, fn(topic) {
+    let lower_topic = string.lowercase(topic)
+    ets_insert(state.by_keyword, lower_topic, entry)
+    string.split(lower_topic, " ")
+    |> list.filter(fn(w) { string.length(w) > 2 })
+    |> list.each(fn(word) { ets_insert(state.by_keyword, word, entry) })
   })
 
   // Recency index

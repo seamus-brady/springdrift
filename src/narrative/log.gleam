@@ -109,7 +109,7 @@ pub fn load_thread(dir: String, thread_id: String) -> List(NarrativeEntry) {
   })
 }
 
-/// Search entries by keyword (case-insensitive match against summary + keywords).
+/// Search entries by keyword (case-insensitive match against summary, keywords, and topics).
 pub fn search(dir: String, keyword: String) -> List(NarrativeEntry) {
   let lower_keyword = string.lowercase(keyword)
   let all = load_all(dir)
@@ -120,7 +120,11 @@ pub fn search(dir: String, keyword: String) -> List(NarrativeEntry) {
       list.any(entry.keywords, fn(k) {
         string.contains(string.lowercase(k), lower_keyword)
       })
-    in_summary || in_keywords
+    let in_topics =
+      list.any(entry.topics, fn(t) {
+        string.contains(string.lowercase(t), lower_keyword)
+      })
+    in_summary || in_keywords || in_topics
   })
 }
 
@@ -221,6 +225,7 @@ pub fn encode_entry(entry: NarrativeEntry) -> json.Json {
     #("delegation_chain", json.array(entry.delegation_chain, encode_delegation)),
     #("decisions", json.array(entry.decisions, encode_decision)),
     #("keywords", json.array(entry.keywords, json.string)),
+    #("topics", json.array(entry.topics, json.string)),
     #("entities", encode_entities(entry.entities)),
     #("sources", json.array(entry.sources, encode_source)),
     #("thread", case entry.thread {
@@ -406,6 +411,7 @@ fn encode_thread_state(ts: ThreadState) -> json.Json {
     #("locations", json.array(ts.locations, json.string)),
     #("domains", json.array(ts.domains, json.string)),
     #("keywords", json.array(ts.keywords, json.string)),
+    #("topics", json.array(ts.topics, json.string)),
     #("last_data_points", json.array(ts.last_data_points, encode_data_point)),
   ])
 }
@@ -442,6 +448,7 @@ pub fn entry_decoder() -> decode.Decoder(NarrativeEntry) {
     [],
     decode.list(decode.string),
   )
+  use topics <- decode.optional_field("topics", [], decode.list(decode.string))
   use entities <- decode.optional_field(
     "entities",
     empty_entities(),
@@ -475,6 +482,7 @@ pub fn entry_decoder() -> decode.Decoder(NarrativeEntry) {
     delegation_chain:,
     decisions:,
     keywords:,
+    topics:,
     entities:,
     sources:,
     thread:,
@@ -763,6 +771,7 @@ fn thread_state_decoder() -> decode.Decoder(ThreadState) {
     [],
     decode.list(decode.string),
   )
+  use topics <- decode.optional_field("topics", [], decode.list(decode.string))
   use last_data_points <- decode.optional_field(
     "last_data_points",
     [],
@@ -778,6 +787,7 @@ fn thread_state_decoder() -> decode.Decoder(ThreadState) {
     locations:,
     domains:,
     keywords:,
+    topics:,
     last_data_points:,
   ))
 }

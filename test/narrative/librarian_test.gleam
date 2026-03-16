@@ -52,6 +52,7 @@ fn make_entry(cycle_id: String, summary: String) -> NarrativeEntry {
     delegation_chain: [],
     decisions: [],
     keywords: ["test", "memory"],
+    topics: [],
     entities: Entities(
       locations: ["Dublin"],
       organisations: [],
@@ -378,6 +379,7 @@ pub fn librarian_thread_index_test() {
       locations: [],
       domains: [],
       keywords: [],
+      topics: [],
       last_data_points: [],
     )
   librarian.notify_thread_index(lib, ThreadIndex(threads: [ts]))
@@ -451,6 +453,7 @@ pub fn librarian_thread_heads_test() {
       locations: [],
       domains: [],
       keywords: [],
+      topics: [],
       last_data_points: [],
     )
   librarian.notify_thread_index(lib, ThreadIndex(threads: [ts]))

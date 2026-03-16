@@ -20,6 +20,7 @@ fn make_entry(cycle_id: String, parent: option.Option(String)) -> NarrativeEntry
     delegation_chain: [],
     decisions: [],
     keywords: [],
+    topics: [],
     entities: Entities(
       locations: [],
       organisations: [],

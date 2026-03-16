@@ -510,6 +510,10 @@ fn format_thread_state(ts: narrative_types.ThreadState) -> String {
     [] -> ""
     l -> "  Locations: " <> string.join(l, ", ") <> "\n"
   }
+  let topics = case ts.topics {
+    [] -> ""
+    t -> "  Topics: " <> string.join(list.take(t, 10), ", ") <> "\n"
+  }
   let keywords = case ts.keywords {
     [] -> ""
     k -> "  Keywords: " <> string.join(list.take(k, 10), ", ") <> "\n"
@@ -538,6 +542,7 @@ fn format_thread_state(ts: narrative_types.ThreadState) -> String {
   <> "\n"
   <> domains
   <> locations
+  <> topics
   <> keywords
   <> data_points
 }
@@ -575,6 +580,10 @@ fn format_entry(entry: narrative_types.NarrativeEntry) -> String {
     Some(t) -> "  Thread: " <> t.thread_name <> "\n"
     None -> ""
   }
+  let topics = case entry.topics {
+    [] -> ""
+    t -> "  Topics: " <> string.join(t, ", ") <> "\n"
+  }
   let keywords = case entry.keywords {
     [] -> ""
     k -> "  Keywords: " <> string.join(k, ", ") <> "\n"
@@ -603,6 +612,7 @@ fn format_entry(entry: narrative_types.NarrativeEntry) -> String {
   <> entry.summary
   <> "\n"
   <> thread_info
+  <> topics
   <> keywords
   <> entities
   <> delegation
