@@ -4,13 +4,18 @@ import dprime/types as dprime_types
 import embedding/types as embedding_types
 import gleam/erlang/process.{type Subject}
 import gleam/option.{type Option, None}
+import gleam/string
 import llm/provider.{type Provider}
 import llm/retry
 import llm/types as llm_types
 import narrative/curator.{type CuratorMessage}
 import narrative/librarian.{type LibrarianMessage}
 import narrative/threading
+import simplifile
 import tools/memory
+
+@external(erlang, "springdrift_ffi", "generate_uuid")
+fn generate_uuid() -> String
 
 /// Configuration record for starting the cognitive loop.
 /// Replaces the 19-parameter `cognitive.start()` signature.
@@ -49,10 +54,17 @@ pub type CognitiveConfig {
 }
 
 /// Create a CognitiveConfig with sensible defaults for testing.
+/// Uses isolated temp directories so tests never pollute the live memory store.
 pub fn default_test_config(
   provider: Provider,
   notify: Subject(Notification),
 ) -> CognitiveConfig {
+  let id = string.slice(generate_uuid(), 0, 8)
+  let base = "/tmp/springdrift_test/" <> id
+  let narrative_dir = base <> "/narrative"
+  let cbr_dir = base <> "/cbr"
+  let _ = simplifile.create_directory_all(narrative_dir)
+  let _ = simplifile.create_directory_all(cbr_dir)
   CognitiveConfig(
     provider:,
     system: "You are a test assistant.",
@@ -67,8 +79,8 @@ pub fn default_test_config(
     reasoning_model: "mock-reasoning",
     dprime_state: None,
     output_dprime_state: None,
-    narrative_dir: ".springdrift/memory/narrative",
-    cbr_dir: ".springdrift/memory/cbr",
+    narrative_dir:,
+    cbr_dir:,
     archivist_model: "mock-model",
     archivist_max_tokens: 4096,
     librarian: None,

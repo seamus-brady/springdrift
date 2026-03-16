@@ -789,11 +789,24 @@ fn build_preamble_slots(state: CuratorState) -> List(identity.SlotValue) {
     })
     |> string.join("\n")
 
-  // Query last narrative entry for session summary
-  let last_session_summary = case librarian.get_recent(state.librarian, 1) {
-    [entry] -> entry.summary
+  // Query recent narrative entries for context continuity
+  let recent_entries = librarian.get_recent(state.librarian, 5)
+  let last_session_summary = case recent_entries {
+    [entry, ..] -> entry.summary
     _ -> ""
   }
+  let recent_narrative_text =
+    recent_entries
+    |> list.reverse
+    |> list.map(fn(e) {
+      let time = string.slice(e.timestamp, 11, 5)
+      let thread_info = case e.thread {
+        Some(t) -> " [" <> t.thread_name <> "]"
+        None -> ""
+      }
+      "- " <> time <> thread_info <> ": " <> string.slice(e.summary, 0, 200)
+    })
+    |> string.join("\n")
 
   // Build slot values
   [
@@ -826,6 +839,7 @@ fn build_preamble_slots(state: CuratorState) -> List(identity.SlotValue) {
         h -> h
       },
     ),
+    identity.SlotValue(key: "recent_narrative", value: recent_narrative_text),
     identity.SlotValue(key: "open_commitments", value: ""),
     identity.SlotValue(key: "memory_health", value: "Nominal"),
     identity.SlotValue(key: "active_profile", value: case state.active_profile {
