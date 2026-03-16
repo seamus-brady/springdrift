@@ -619,6 +619,7 @@ fn run(cfg: AppConfig) -> Nil {
         recall_max_entries:,
         cbr_max_results:,
       ),
+      input_queue_cap: option.unwrap(cfg.input_queue_cap, 10),
     ))
   {
     Ok(subj) -> subj
@@ -685,11 +686,14 @@ fn run(cfg: AppConfig) -> Nil {
                     _ -> {
                       let checkpoint_path =
                         ".springdrift/scheduler-checkpoint.json"
+                      let stuck_timeout_ms =
+                        option.unwrap(cfg.scheduler_stuck_timeout_ms, 600_000)
                       case
                         scheduler_runner.start(
                           tasks,
                           cognitive_subj,
                           checkpoint_path,
+                          stuck_timeout_ms,
                         )
                       {
                         Ok(_) ->

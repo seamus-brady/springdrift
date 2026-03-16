@@ -1,7 +1,7 @@
 import agent/registry.{type Registry}
 import agent/types.{
   type AgentCompletionRecord, type CognitiveMessage, type CognitiveStatus,
-  type Notification, type PendingTask, type SupervisorMessage,
+  type Notification, type PendingTask, type QueuedInput, type SupervisorMessage,
 }
 import dag/types as dag_types
 import dprime/types as dprime_types
@@ -97,6 +97,9 @@ pub type CognitiveState {
     dprime_state: Option(dprime_types.DprimeState),
     output_dprime_state: Option(dprime_types.DprimeState),
     dprime_decisions: List(dag_types.DprimeDecisionRecord),
+    // --- Input queue ---
+    input_queue: List(QueuedInput),
+    input_queue_cap: Int,
     // --- Identity and profile (read-only after init) ---
     identity: IdentityContext,
     // --- Runtime config (read-only after init) ---

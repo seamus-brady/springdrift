@@ -37,6 +37,8 @@ pub type ServerMessage {
   ToolNotification(name: String)
   SaveNotification(message: String)
   SafetyNotification(decision: String, score: Float, explanation: String)
+  QueueNotification(position: Int, queue_size: Int)
+  QueueFullNotification(queue_cap: Int)
   LogData(entries: List(slog.LogEntry))
   NarrativeData(entries_json: String)
 }
@@ -136,6 +138,23 @@ pub fn encode_server_message(msg: ServerMessage) -> String {
         #("decision", json.string(decision)),
         #("score", json.float(score)),
         #("explanation", json.string(explanation)),
+      ])
+      |> json.to_string
+
+    QueueNotification(position:, queue_size:) ->
+      json.object([
+        #("type", json.string("notification")),
+        #("kind", json.string("input_queued")),
+        #("position", json.int(position)),
+        #("queue_size", json.int(queue_size)),
+      ])
+      |> json.to_string
+
+    QueueFullNotification(queue_cap:) ->
+      json.object([
+        #("type", json.string("notification")),
+        #("kind", json.string("queue_full")),
+        #("queue_cap", json.int(queue_cap)),
       ])
       |> json.to_string
 

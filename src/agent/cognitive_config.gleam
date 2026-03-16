@@ -44,6 +44,7 @@ pub type CognitiveConfig {
     classify_timeout_ms: Int,
     threading_config: threading.ThreadingConfig,
     memory_limits: memory.MemoryLimits,
+    input_queue_cap: Int,
   )
 }
 
@@ -81,5 +82,6 @@ pub fn default_test_config(
     classify_timeout_ms: 10_000,
     threading_config: threading.default_config(),
     memory_limits: memory.default_limits(),
+    input_queue_cap: 10,
   )
 }

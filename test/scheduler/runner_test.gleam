@@ -76,7 +76,7 @@ pub fn start_returns_subject_test() {
   let cognitive = auto_reply_cognitive()
   let tasks = [make_task("job-a", 600_000)]
   let assert Ok(sched) =
-    runner.start(tasks, cognitive, "/tmp/springdrift-test-no-cp.json")
+    runner.start(tasks, cognitive, "/tmp/springdrift-test-no-cp.json", 600_000)
 
   let status_subj = process.new_subject()
   process.send(sched, GetStatus(reply_to: status_subj))
@@ -88,7 +88,7 @@ pub fn start_with_multiple_tasks_test() {
   let cognitive = auto_reply_cognitive()
   let tasks = [make_task("alpha", 600_000), make_task("beta", 600_000)]
   let assert Ok(sched) =
-    runner.start(tasks, cognitive, "/tmp/springdrift-test-no-cp2.json")
+    runner.start(tasks, cognitive, "/tmp/springdrift-test-no-cp2.json", 600_000)
 
   let status_subj = process.new_subject()
   process.send(sched, GetStatus(reply_to: status_subj))
@@ -104,7 +104,7 @@ pub fn stop_all_terminates_test() {
   let cognitive = auto_reply_cognitive()
   let tasks = [make_task("stopping", 600_000)]
   let assert Ok(sched) =
-    runner.start(tasks, cognitive, "/tmp/springdrift-test-no-cp3.json")
+    runner.start(tasks, cognitive, "/tmp/springdrift-test-no-cp3.json", 600_000)
 
   process.send(sched, StopAll)
   process.sleep(100)
@@ -119,7 +119,12 @@ pub fn auto_execution_completes_job_test() {
   // initial_delay returns 0, so tick fires at 1ms
   let tasks = [make_task("auto-run", 600_000)]
   let assert Ok(sched) =
-    runner.start(tasks, cognitive, "/tmp/springdrift-test-no-cp-auto.json")
+    runner.start(
+      tasks,
+      cognitive,
+      "/tmp/springdrift-test-no-cp-auto.json",
+      600_000,
+    )
 
   // Wait for the full flow: tick → spawn_job → UserInput → reply → JobComplete
   process.sleep(2000)
@@ -143,7 +148,7 @@ pub fn unknown_job_complete_ignored_test() {
   let cognitive = auto_reply_cognitive()
   let tasks = [make_task("real-job", 600_000)]
   let assert Ok(sched) =
-    runner.start(tasks, cognitive, "/tmp/springdrift-test-no-cp7.json")
+    runner.start(tasks, cognitive, "/tmp/springdrift-test-no-cp7.json", 600_000)
 
   process.send(sched, JobComplete(name: "ghost-job", result: "boo"))
   process.sleep(100)
@@ -158,7 +163,7 @@ pub fn unknown_job_failed_ignored_test() {
   let cognitive = auto_reply_cognitive()
   let tasks = [make_task("real-job2", 600_000)]
   let assert Ok(sched) =
-    runner.start(tasks, cognitive, "/tmp/springdrift-test-no-cp8.json")
+    runner.start(tasks, cognitive, "/tmp/springdrift-test-no-cp8.json", 600_000)
 
   process.send(sched, JobFailed(name: "ghost-job", reason: "phantom"))
   process.sleep(100)
@@ -176,7 +181,7 @@ pub fn unknown_job_failed_ignored_test() {
 pub fn start_with_no_tasks_test() {
   let cognitive = auto_reply_cognitive()
   let assert Ok(sched) =
-    runner.start([], cognitive, "/tmp/springdrift-test-no-cp10.json")
+    runner.start([], cognitive, "/tmp/springdrift-test-no-cp10.json", 600_000)
 
   let status_subj = process.new_subject()
   process.send(sched, GetStatus(reply_to: status_subj))
@@ -192,7 +197,12 @@ pub fn job_transitions_through_running_test() {
   let cognitive = auto_reply_cognitive()
   let tasks = [make_task("transitions", 600_000)]
   let assert Ok(sched) =
-    runner.start(tasks, cognitive, "/tmp/springdrift-test-no-cp-trans.json")
+    runner.start(
+      tasks,
+      cognitive,
+      "/tmp/springdrift-test-no-cp-trans.json",
+      600_000,
+    )
 
   // Query very quickly — tick has fired (1ms) so status should be Running or later
   process.sleep(50)
@@ -220,7 +230,12 @@ pub fn multiple_tasks_all_complete_test() {
     make_task("task-2", 600_000),
   ]
   let assert Ok(sched) =
-    runner.start(tasks, cognitive, "/tmp/springdrift-test-no-cp-multi.json")
+    runner.start(
+      tasks,
+      cognitive,
+      "/tmp/springdrift-test-no-cp-multi.json",
+      600_000,
+    )
 
   // Wait for both to complete
   process.sleep(2000)

@@ -10,15 +10,16 @@ import agent/cognitive_state.{
 }
 import agent/types.{
   type CognitiveMessage, type CognitiveReply, AgentComplete, AgentEvent,
-  Classifying, CognitiveReply, Idle, PendingThink, RestoreMessages, SaveResult,
-  SetModel, ThinkComplete, ThinkError, ThinkWorkerDown, Thinking, UserAnswer,
-  UserInput,
+  Classifying, CognitiveReply, Idle, InputQueueFull, InputQueued, PendingThink,
+  QueuedInput, RestoreMessages, SaveResult, SetModel, ThinkComplete, ThinkError,
+  ThinkWorkerDown, Thinking, UserAnswer, UserInput,
 }
 import agent/worker
 import cycle_log
 import dag/types as dag_types
 import gleam/dict
 import gleam/erlang/process.{type Subject}
+import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
@@ -86,6 +87,8 @@ pub fn start(
         ),
         agent_completions: [],
         last_user_input: "",
+        input_queue: [],
+        input_queue_cap: cfg.input_queue_cap,
         supervisor: None,
         identity: IdentityContext(
           agent_uuid: cfg.agent_uuid,
@@ -165,7 +168,7 @@ fn handle_message(
     },
     state.cycle_id,
   )
-  case msg {
+  let next = case msg {
     UserInput(text, reply_to) -> handle_user_input(state, text, reply_to)
     UserAnswer(answer) -> cognitive_agents.handle_user_answer(state, answer)
     ThinkComplete(task_id, resp) -> handle_think_complete(state, task_id, resp)
@@ -233,6 +236,28 @@ fn handle_message(
         reply_to,
       )
   }
+  maybe_drain_queue(next)
+}
+
+fn maybe_drain_queue(state: CognitiveState) -> CognitiveState {
+  case state.status, state.input_queue {
+    Idle, [QueuedInput(text:, reply_to:), ..rest] -> {
+      slog.info(
+        "cognitive",
+        "maybe_drain_queue",
+        "Draining queued input (remaining: "
+          <> int.to_string(list.length(rest))
+          <> ")",
+        state.cycle_id,
+      )
+      handle_user_input(
+        CognitiveState(..state, input_queue: rest),
+        text,
+        reply_to,
+      )
+    }
+    _, _ -> state
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -297,21 +322,54 @@ fn handle_user_input(
       CognitiveState(..state, status: Classifying(cycle_id:))
     }
     _ -> {
-      slog.warn(
-        "cognitive",
-        "handle_user_input",
-        "Input dropped: loop busy (status not Idle)",
-        state.cycle_id,
-      )
-      process.send(
-        reply_to,
-        CognitiveReply(
-          response: "[System: still processing previous request, please wait.]",
-          model: state.model,
-          usage: None,
-        ),
-      )
-      state
+      let queue_len = list.length(state.input_queue)
+      case queue_len >= state.input_queue_cap {
+        True -> {
+          slog.warn(
+            "cognitive",
+            "handle_user_input",
+            "Input queue full (cap="
+              <> int.to_string(state.input_queue_cap)
+              <> "), rejecting input",
+            state.cycle_id,
+          )
+          process.send(
+            state.notify,
+            InputQueueFull(queue_cap: state.input_queue_cap),
+          )
+          process.send(
+            reply_to,
+            CognitiveReply(
+              response: "[System: input queue full ("
+                <> int.to_string(state.input_queue_cap)
+                <> " pending), please wait.]",
+              model: state.model,
+              usage: None,
+            ),
+          )
+          state
+        }
+        False -> {
+          let position = queue_len + 1
+          let new_queue =
+            list.append(state.input_queue, [QueuedInput(text:, reply_to:)])
+          slog.info(
+            "cognitive",
+            "handle_user_input",
+            "Input queued at position "
+              <> int.to_string(position)
+              <> " (queue size: "
+              <> int.to_string(position)
+              <> ")",
+            state.cycle_id,
+          )
+          process.send(
+            state.notify,
+            InputQueued(position:, queue_size: position),
+          )
+          CognitiveState(..state, input_queue: new_queue)
+        }
+      }
     }
   }
 }

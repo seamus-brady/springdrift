@@ -355,4 +355,14 @@ pub type Notification {
   SafetyGateNotice(decision: String, score: Float, explanation: String)
   ProfileNotification(name: String)
   AgentLifecycleNotice(event_type: String, agent_name: String)
+  InputQueued(position: Int, queue_size: Int)
+  InputQueueFull(queue_cap: Int)
+}
+
+// ---------------------------------------------------------------------------
+// Queued input — buffered when the cognitive loop is busy
+// ---------------------------------------------------------------------------
+
+pub type QueuedInput {
+  QueuedInput(text: String, reply_to: Subject(CognitiveReply))
 }

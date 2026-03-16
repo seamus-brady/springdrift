@@ -279,6 +279,24 @@ fn handle_notification(
       let label = agent_name <> " " <> event_type
       continue_loop(TuiState(..state, spinner_label: label))
     }
+    agent_types.InputQueued(position:, queue_size: _) ->
+      continue_loop(
+        TuiState(
+          ..state,
+          notice: style.dim(
+            "  Queued (position " <> int.to_string(position) <> ")",
+          ),
+        ),
+      )
+    agent_types.InputQueueFull(queue_cap:) ->
+      continue_loop(
+        TuiState(
+          ..state,
+          notice: style.yellow(
+            "  Input queue full (" <> int.to_string(queue_cap) <> " pending)",
+          ),
+        ),
+      )
   }
 }
 

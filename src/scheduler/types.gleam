@@ -45,4 +45,6 @@ pub type SchedulerMessage {
   StopAll
   /// Get current job statuses
   GetStatus(reply_to: Subject(List(ScheduledJob)))
+  /// Stuck job timeout check
+  StuckJobCheck(name: String)
 }

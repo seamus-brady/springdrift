@@ -117,6 +117,9 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 # Housekeeping interval in ticks — ticks before running housekeeping (default: 60)
 # housekeeping_interval_ticks = 60
 
+# Scheduler stuck-job timeout — mark job as failed if still running (default: 600000 = 10 min)
+# scheduler_stuck_ms = 600000
+
 # ── Retry ────────────────────────────────────────────────────────────────────
 # LLM call retry configuration with exponential backoff.
 
@@ -174,6 +177,9 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 
 # Brave Search cache TTL in milliseconds (default: 300000 = 5 min)
 # brave_cache_ttl_ms = 300000
+
+# Max queued inputs when cognitive loop is busy (default: 10)
+# input_queue_cap = 10
 
 # ── Thread scoring ───────────────────────────────────────────────────────────
 # Overlap scoring weights for automatic thread assignment.

@@ -15,7 +15,8 @@ import scheduler/delivery
 import scheduler/persist
 import scheduler/types.{
   type ScheduledJob, type SchedulerMessage, Completed, Failed, GetStatus,
-  JobComplete, JobFailed, Pending, Running, ScheduledJob, StopAll, Tick,
+  JobComplete, JobFailed, Pending, Running, ScheduledJob, StopAll, StuckJobCheck,
+  Tick,
 }
 import slog
 
@@ -32,6 +33,7 @@ pub fn start(
   tasks: List(profile_types.ScheduleTaskConfig),
   cognitive: Subject(agent_types.CognitiveMessage),
   checkpoint_path: String,
+  stuck_timeout_ms: Int,
 ) -> Result(Subject(SchedulerMessage), Nil) {
   let setup = process.new_subject()
   process.spawn_unlinked(fn() {
@@ -109,7 +111,7 @@ pub fn start(
     )
 
     // Enter event loop
-    scheduler_loop(self, jobs, cognitive, checkpoint_path)
+    scheduler_loop(self, jobs, cognitive, checkpoint_path, stuck_timeout_ms)
   })
 
   case process.receive(setup, 5000) {
@@ -131,12 +133,16 @@ fn scheduler_loop(
   jobs: Dict(String, ScheduledJob),
   cognitive: Subject(agent_types.CognitiveMessage),
   checkpoint_path: String,
+  stuck_timeout_ms: Int,
 ) -> Nil {
   let selector =
     process.new_selector()
     |> process.select(self)
 
   let msg = process.selector_receive_forever(selector)
+  let loop = fn(j) {
+    scheduler_loop(self, j, cognitive, checkpoint_path, stuck_timeout_ms)
+  }
   case msg {
     StopAll -> {
       slog.info("scheduler", "loop", "Scheduler stopped", None)
@@ -146,34 +152,89 @@ fn scheduler_loop(
     GetStatus(reply_to:) -> {
       let status_list = dict.values(jobs)
       process.send(reply_to, status_list)
-      scheduler_loop(self, jobs, cognitive, checkpoint_path)
+      loop(jobs)
     }
 
     Tick(name:) -> {
       case dict.get(jobs, name) {
-        Error(_) -> scheduler_loop(self, jobs, cognitive, checkpoint_path)
-        Ok(job) -> {
-          slog.info(
-            "scheduler",
-            "loop",
-            "Tick: running job '" <> name <> "'",
-            None,
-          )
-          // Mark as running
-          let updated_job = ScheduledJob(..job, status: Running)
-          let updated_jobs = dict.insert(jobs, name, updated_job)
+        Error(_) -> loop(jobs)
+        Ok(job) ->
+          case job.status {
+            Running -> {
+              slog.warn(
+                "scheduler",
+                "loop",
+                "Tick: job '" <> name <> "' still running, skipping overlap",
+                None,
+              )
+              // Reschedule tick for next interval
+              schedule_tick(self, name, job.interval_ms)
+              loop(jobs)
+            }
+            _ -> {
+              slog.info(
+                "scheduler",
+                "loop",
+                "Tick: running job '" <> name <> "'",
+                None,
+              )
+              // Mark as running
+              let updated_job = ScheduledJob(..job, status: Running)
+              let updated_jobs = dict.insert(jobs, name, updated_job)
 
-          // Spawn async query to cognitive loop
-          spawn_job(self, cognitive, job)
+              // Spawn async query to cognitive loop
+              spawn_job(self, cognitive, job)
 
-          scheduler_loop(self, updated_jobs, cognitive, checkpoint_path)
-        }
+              // Schedule stuck-job timeout check
+              process.send_after(self, stuck_timeout_ms, StuckJobCheck(name:))
+
+              loop(updated_jobs)
+            }
+          }
+      }
+    }
+
+    StuckJobCheck(name:) -> {
+      case dict.get(jobs, name) {
+        Error(_) -> loop(jobs)
+        Ok(job) ->
+          case job.status {
+            Running -> {
+              slog.log_error(
+                "scheduler",
+                "loop",
+                "Stuck job timeout: '"
+                  <> name
+                  <> "' still running after "
+                  <> int_to_string(stuck_timeout_ms)
+                  <> "ms",
+                None,
+              )
+              let updated_job =
+                ScheduledJob(
+                  ..job,
+                  status: Failed(reason: "Stuck job timeout"),
+                  error_count: job.error_count + 1,
+                )
+              let updated_jobs = dict.insert(jobs, name, updated_job)
+
+              // Schedule next tick
+              schedule_tick(self, name, job.interval_ms)
+
+              // Save checkpoint
+              let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
+
+              loop(updated_jobs)
+            }
+            // Already completed or failed — ignore
+            _ -> loop(jobs)
+          }
       }
     }
 
     JobComplete(name:, result:) -> {
       case dict.get(jobs, name) {
-        Error(_) -> scheduler_loop(self, jobs, cognitive, checkpoint_path)
+        Error(_) -> loop(jobs)
         Ok(job) -> {
           let now = monotonic_now_ms()
 
@@ -236,14 +297,14 @@ fn scheduler_loop(
           // Save checkpoint after completion
           let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
 
-          scheduler_loop(self, updated_jobs, cognitive, checkpoint_path)
+          loop(updated_jobs)
         }
       }
     }
 
     JobFailed(name:, reason:) -> {
       case dict.get(jobs, name) {
-        Error(_) -> scheduler_loop(self, jobs, cognitive, checkpoint_path)
+        Error(_) -> loop(jobs)
         Ok(job) -> {
           slog.warn(
             "scheduler",
@@ -265,7 +326,7 @@ fn scheduler_loop(
           // Save checkpoint after failure
           let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
 
-          scheduler_loop(self, updated_jobs, cognitive, checkpoint_path)
+          loop(updated_jobs)
         }
       }
     }

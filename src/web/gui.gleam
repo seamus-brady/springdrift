@@ -440,6 +440,10 @@ fn notification_to_server_message(
     agent_types.ProfileNotification(_) -> protocol.ToolNotification(name: "")
     agent_types.AgentLifecycleNotice(event_type:, agent_name:) ->
       protocol.ToolNotification(name: agent_name <> " " <> event_type)
+    agent_types.InputQueued(position:, queue_size:) ->
+      protocol.QueueNotification(position:, queue_size:)
+    agent_types.InputQueueFull(queue_cap:) ->
+      protocol.QueueFullNotification(queue_cap:)
   }
 }
 

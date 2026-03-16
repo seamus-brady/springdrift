@@ -145,6 +145,10 @@ pub type AppConfig {
     brave_rate_limit_rps: Option(Int),
     brave_answers_rate_limit_rps: Option(Int),
     brave_cache_ttl_ms: Option(Int),
+    // ── Input queue ──
+    input_queue_cap: Option(Int),
+    // ── Scheduler stuck timeout ──
+    scheduler_stuck_timeout_ms: Option(Int),
   )
 }
 
@@ -256,6 +260,8 @@ pub fn default() -> AppConfig {
     brave_rate_limit_rps: None,
     brave_answers_rate_limit_rps: None,
     brave_cache_ttl_ms: None,
+    input_queue_cap: None,
+    scheduler_stuck_timeout_ms: None,
   )
 }
 
@@ -590,6 +596,14 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     brave_cache_ttl_ms: option.or(
       override_cfg.brave_cache_ttl_ms,
       base.brave_cache_ttl_ms,
+    ),
+    input_queue_cap: option.or(
+      override_cfg.input_queue_cap,
+      base.input_queue_cap,
+    ),
+    scheduler_stuck_timeout_ms: option.or(
+      override_cfg.scheduler_stuck_timeout_ms,
+      base.scheduler_stuck_timeout_ms,
     ),
   )
 }
@@ -1063,6 +1077,12 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
       "limits", "brave_answers_rate_limit_rps",
     ]),
     brave_cache_ttl_ms: get_toml_int(table, ["limits", "brave_cache_ttl_ms"]),
+    // ── [limits] input queue ──
+    input_queue_cap: get_toml_int(table, ["limits", "input_queue_cap"]),
+    // ── [timeouts] scheduler stuck ──
+    scheduler_stuck_timeout_ms: get_toml_int(table, [
+      "timeouts", "scheduler_stuck_ms",
+    ]),
   )
 }
 
@@ -1163,6 +1183,11 @@ fn validate_config_values(cfg: AppConfig) -> Nil {
   validate_positive("classify_timeout_ms", cfg.classify_timeout_ms)
   validate_positive("retry.max_retries", cfg.retry_max_retries)
   validate_positive("web.port", cfg.web_port)
+  validate_positive("input_queue_cap", cfg.input_queue_cap)
+  validate_positive(
+    "scheduler_stuck_timeout_ms",
+    cfg.scheduler_stuck_timeout_ms,
+  )
   case cfg.provider {
     Some(p) ->
       case
