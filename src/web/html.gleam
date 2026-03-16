@@ -62,8 +62,8 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
   var thinkingOverlay = document.getElementById('thinking-overlay');
   var ws = null;
   var thinkingEl = null;
-  var questionEl = null;
   var isThinking = false;
+  var waitingForAnswer = false;
   var reconnectDelay = 1000;
   var chatHistory = [];
 
@@ -100,7 +100,7 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
     switch (data.type) {
       case 'assistant_message':
         removeThinking();
-        removeQuestion();
+        waitingForAnswer = false;
         addAssistantMessage(data.text, data.model, data.usage);
         break;
       case 'thinking':
@@ -108,7 +108,9 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
         break;
       case 'question':
         removeThinking();
-        showQuestion(data.text, data.source);
+        var srcLabel = data.source === 'cognitive' ? '' : data.source.replace('agent:', '') + ' asks: ';
+        addAssistantMessage(srcLabel + data.text, null, null);
+        waitingForAnswer = true;
         break;
       case 'notification':
         if (data.kind === 'tool_calling') {
@@ -201,33 +203,6 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
     setThinkingLock(false);
   }
 
-  function showQuestion(text, source) {
-    removeQuestion();
-    questionEl = document.createElement('div');
-    questionEl.className = 'question-prompt';
-    var srcLabel = source === 'cognitive' ? 'Cognitive' : source.replace('agent:', '');
-    questionEl.innerHTML =
-      '<div class=\"q-source\">' + escapeHtml(srcLabel) + ' asks:</div>' +
-      '<div class=\"q-text\">' + escapeHtml(text) + '</div>' +
-      '<input type=\"text\" placeholder=\"Type your answer...\" autofocus>';
-    var qInput = questionEl.querySelector('input');
-    qInput.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter' && qInput.value.trim()) {
-        var answer = qInput.value.trim();
-        ws.send(JSON.stringify({ type: 'user_answer', text: answer }));
-        addUserMessage(answer);
-        removeQuestion();
-        input.focus();
-      }
-    });
-    msgs.appendChild(questionEl);
-    scrollBottom();
-    qInput.focus();
-  }
-
-  function removeQuestion() {
-    if (questionEl) { questionEl.remove(); questionEl = null; }
-  }
 
   function scrollBottom() {
     msgs.scrollTop = msgs.scrollHeight;
@@ -242,7 +217,12 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
   function sendMessage() {
     var text = input.value.trim();
     if (!text || !ws || ws.readyState !== WebSocket.OPEN || isThinking) return;
-    ws.send(JSON.stringify({ type: 'user_message', text: text }));
+    if (waitingForAnswer) {
+      ws.send(JSON.stringify({ type: 'user_answer', text: text }));
+      waitingForAnswer = false;
+    } else {
+      ws.send(JSON.stringify({ type: 'user_message', text: text }));
+    }
     addUserMessage(text);
     input.value = '';
     input.style.height = 'auto';
@@ -733,40 +713,6 @@ fn shared_css() -> String {
     0%, 80%, 100% { opacity: 0.2; }
     40% { opacity: 1; }
   }
-  .question-prompt {
-    background: var(--accent-light);
-    border: 1px solid var(--accent);
-    border-radius: var(--radius);
-    padding: 16px 18px;
-    align-self: flex-start;
-    max-width: 80%;
-  }
-  .question-prompt .q-source {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--accent);
-    margin-bottom: 6px;
-  }
-  .question-prompt .q-text {
-    font-size: 17px;
-    margin-bottom: 12px;
-  }
-  .question-prompt input {
-    width: 100%;
-    padding: 10px 14px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    color: var(--text);
-    font-size: 16px;
-    font-family: inherit;
-    outline: none;
-    transition: border-color 0.15s;
-  }
-  .question-prompt input:focus {
-    border-color: var(--accent);
-  }
-
   /* ── Input area ──────────────────────────────────── */
   #input-area {
     padding: 0 0 28px;
