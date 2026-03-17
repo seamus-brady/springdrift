@@ -101,6 +101,7 @@ pub fn start(
           classify_timeout_ms: cfg.classify_timeout_ms,
           threading_config: cfg.threading_config,
           memory_limits: cfg.memory_limits,
+          how_to_content: cfg.how_to_content,
         ),
       )
     process.send(setup, self)

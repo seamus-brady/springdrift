@@ -56,6 +56,7 @@ pub type RuntimeConfig {
     classify_timeout_ms: Int,
     threading_config: threading.ThreadingConfig,
     memory_limits: memory.MemoryLimits,
+    how_to_content: Option(String),
   )
 }
 

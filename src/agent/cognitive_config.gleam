@@ -48,6 +48,7 @@ pub type CognitiveConfig {
     threading_config: threading.ThreadingConfig,
     memory_limits: memory.MemoryLimits,
     input_queue_cap: Int,
+    how_to_content: Option(String),
   )
 }
 
@@ -92,5 +93,6 @@ pub fn default_test_config(
     threading_config: threading.default_config(),
     memory_limits: memory.default_limits(),
     input_queue_cap: 10,
+    how_to_content: None,
   )
 }

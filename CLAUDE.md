@@ -49,7 +49,8 @@ src/
 │   ├── planner.gleam          Planning agent (no tools, max_turns=3)
 │   ├── researcher.gleam       Research agent (web+artifacts+builtin, max_turns=8)
 │   ├── coder.gleam            Coding agent (builtin, max_turns=10)
-│   └── writer.gleam           Writer agent (builtin, max_turns=6)
+│   ├── writer.gleam           Writer agent (builtin, max_turns=6)
+│   └── observer.gleam         Observer agent (diagnostic memory tools, max_turns=6)
 │
 ├── dprime/                    D' discrepancy-gated safety system
 │   ├── types.gleam            Feature, Forecast, GateDecision, GateResult, DprimeConfig/State
@@ -99,6 +100,7 @@ src/
 │
 ├── tools/builtin.gleam        Built-in tools: calculator, get_current_datetime,
 │                              request_human_input, read_skill
+├── tools/how_to_content.gleam Default HOW_TO content (builtin fallback)
 ├── tools/web.gleam            Web tools: fetch_url, web_search
 ├── tools/artifacts.gleam      Artifact tools: store_result, retrieve_result (researcher agent)
 ├── tui.gleam                  Alternate-screen TUI; Chat + Log + Narrative tabs
@@ -283,6 +285,7 @@ At startup, the Librarian replays artifact metadata from disk (configurable via
 | `list_recent_cycles` | DAG | Discover cycle IDs for a date (feed into `inspect_cycle`) |
 | `query_tool_activity` | DAG | Per-tool usage stats for a date |
 | `introspect` | All | Perceive system state: identity, agent roster, D' config, cycle ID |
+| `how_to` | HOW_TO.md | Operator guide: tool selection heuristics, degradation paths |
 
 **Curator** (`narrative/curator.gleam`) assembles the system prompt from memory.
 On each `BuildSystemPrompt` message it loads identity files (persona + preamble
@@ -324,6 +327,7 @@ exposes this (and other system state) to the LLM.
 | Researcher | web + artifacts + builtin | 8 | 30 | Permanent | Gather information via search and extraction |
 | Coder | builtin | 10 | unlimited | Permanent | Write and modify code, fix errors |
 | Writer | builtin | 6 | unlimited | Permanent | Draft and edit text |
+| Observer | diagnostic memory (10 tools) | 6 | 20 | Transient | Examine past activity, explain failures, identify patterns |
 
 **Structured output** — when an agent completes, the framework populates
 `AgentSuccess.structured_result` with typed `AgentFindings` based on the agent name
@@ -554,6 +558,27 @@ CLI flags override config files. `--skills-dir` is repeatable and appends to the
 `SKILL.md` must open with `---`-fenced YAML frontmatter containing at least `name:`
 and `description:`. Everything after the closing `---` is the Markdown instruction
 body loaded by `read_skill`.
+
+## Documentation maintenance
+
+The following files form the project's documentation set and must be kept up to date
+after any development work that changes behaviour, adds features, or modifies the
+tool/agent surface:
+
+| File | Purpose |
+|---|---|
+| `CLAUDE.md` | Claude Code guide — architecture, patterns, config fields, key source files |
+| `.springdrift/HOW_TO.md` | Operator guide — tool selection heuristics, agent usage, degradation paths |
+| `.springdrift_example/HOW_TO.md` | Template copy of HOW_TO.md shipped with the project |
+| `.springdrift_example/README.md` | Setup instructions and directory layout for new users |
+
+After completing a task, check whether any of these files need updating. Common triggers:
+
+- **New or renamed tool** → update HOW_TO.md (both copies) and CLAUDE.md tool tables
+- **New or removed agent** → update HOW_TO.md Agents section and CLAUDE.md agent tables
+- **New config field** → update CLAUDE.md Config fields table and both config.toml files
+- **Changed directory layout** → update `.springdrift_example/README.md` and CLAUDE.md Key source files
+- **New environment variable** → update HOW_TO.md Degradation Paths and CLAUDE.md
 
 ## Shell Commands
 Do not warn about consecutive quote characters in shell commands.

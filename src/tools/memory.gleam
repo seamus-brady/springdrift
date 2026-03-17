@@ -58,6 +58,23 @@ pub fn all() -> List(Tool) {
     query_tool_activity_tool(),
     introspect_tool(),
     list_recent_cycles_tool(),
+    how_to_tool(),
+  ]
+}
+
+/// Tools for the Observer agent — diagnostic + read-only memory tools.
+pub fn observer_tools() -> List(Tool) {
+  [
+    reflect_tool(),
+    inspect_cycle_tool(),
+    list_recent_cycles_tool(),
+    query_tool_activity_tool(),
+    memory_trace_tool(),
+    recall_recent_tool(),
+    recall_search_tool(),
+    recall_threads_tool(),
+    recall_cases_tool(),
+    introspect_tool(),
   ]
 }
 
@@ -265,6 +282,22 @@ fn list_recent_cycles_tool() -> Tool {
   |> tool.build()
 }
 
+fn how_to_tool() -> Tool {
+  tool.new("how_to")
+  |> tool.with_description(
+    "Get guidance on using this system's tools effectively. Returns decision "
+    <> "heuristics, tool combinations, and degradation paths. Call when unsure "
+    <> "which tool to use for a task type. Optionally provide a topic.",
+  )
+  |> tool.add_string_param(
+    "topic",
+    "Optional: task type ('research', 'memory', 'code', 'agents') or a specific "
+      <> "tool name. Omit for the full guide.",
+    False,
+  )
+  |> tool.build()
+}
+
 // ---------------------------------------------------------------------------
 // Executor
 // ---------------------------------------------------------------------------
@@ -285,6 +318,7 @@ pub fn is_memory_tool(name: String) -> Bool {
   || name == "query_tool_activity"
   || name == "introspect"
   || name == "list_recent_cycles"
+  || name == "how_to"
 }
 
 /// Context for facts-based memory tools.
@@ -335,6 +369,27 @@ pub fn execute(
   introspect_ctx: Option(IntrospectContext),
   limits: MemoryLimits,
 ) -> ToolResult {
+  execute_with_how_to(
+    call,
+    narrative_dir,
+    lib,
+    facts_ctx,
+    introspect_ctx,
+    limits,
+    None,
+  )
+}
+
+/// Execute a memory tool call with optional how_to content.
+pub fn execute_with_how_to(
+  call: ToolCall,
+  narrative_dir: String,
+  lib: Option(Subject(LibrarianMessage)),
+  facts_ctx: Option(FactsContext),
+  introspect_ctx: Option(IntrospectContext),
+  limits: MemoryLimits,
+  how_to_content: Option(String),
+) -> ToolResult {
   slog.debug("memory", "execute", "tool=" <> call.name, None)
   case call.name {
     "recall_recent" ->
@@ -353,6 +408,7 @@ pub fn execute(
     "query_tool_activity" -> run_query_tool_activity(call, lib)
     "introspect" -> run_introspect(call, introspect_ctx)
     "list_recent_cycles" -> run_list_recent_cycles(call, lib)
+    "how_to" -> run_how_to(call, how_to_content)
     _ -> ToolFailure(tool_use_id: call.id, error: "Unknown tool: " <> call.name)
   }
 }
@@ -1624,5 +1680,51 @@ fn run_query_tool_activity(
         }
       }
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// how_to — operator guidance
+// ---------------------------------------------------------------------------
+
+fn run_how_to(call: ToolCall, content: Option(String)) -> ToolResult {
+  case content {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "HOW_TO content not loaded — no HOW_TO.md file found.",
+      )
+    Some(guide) -> {
+      let decoder = {
+        use topic <- decode.optional_field(
+          "topic",
+          None,
+          decode.string |> decode.map(Some),
+        )
+        decode.success(topic)
+      }
+      let result = case json.parse(call.input_json, decoder) {
+        Error(_) -> guide
+        Ok(None) -> guide
+        Ok(Some(topic)) -> filter_by_topic(guide, topic)
+      }
+      ToolSuccess(tool_use_id: call.id, content: result)
+    }
+  }
+}
+
+fn filter_by_topic(content: String, topic: String) -> String {
+  let lower = string.lowercase(topic)
+  let sections = string.split(content, "\n## ")
+  case sections {
+    [intro, ..rest] -> {
+      let matching =
+        list.filter(rest, fn(s) { string.contains(string.lowercase(s), lower) })
+      case matching {
+        [] -> content
+        _ -> intro <> "\n\n## " <> string.join(matching, "\n\n## ")
+      }
+    }
+    [] -> content
   }
 }

@@ -157,13 +157,14 @@ fn handle_memory_tools(
           thread_multi_cycle: thread_total - thread_single_cycle,
         ))
       let result =
-        memory.execute(
+        memory.execute_with_how_to(
           call,
           state.memory.narrative_dir,
           state.memory.librarian,
           facts_ctx,
           introspect_ctx,
           state.config.memory_limits,
+          state.config.how_to_content,
         )
       case result {
         llm_types.ToolSuccess(tool_use_id: id, content: c) ->

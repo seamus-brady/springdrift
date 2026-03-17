@@ -153,6 +153,24 @@ pub fn default_skills_dirs() -> List(String) {
 }
 
 // ---------------------------------------------------------------------------
+// HOW_TO
+// ---------------------------------------------------------------------------
+
+/// HOW_TO filename — operator guide for tool selection and usage patterns.
+pub const how_to_filename = "HOW_TO.md"
+
+/// Search paths for HOW_TO.md (local project first, then user-level).
+pub fn how_to_paths() -> List(String) {
+  case get_env("HOME") {
+    Ok(home) -> [
+      project_dir <> "/" <> how_to_filename,
+      home <> "/.config/springdrift/" <> how_to_filename,
+    ]
+    Error(_) -> [project_dir <> "/" <> how_to_filename]
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Profiles
 // ---------------------------------------------------------------------------
 

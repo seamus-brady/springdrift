@@ -13,6 +13,7 @@ Then edit `.springdrift/config.toml` with your provider and API key.
 ```
 .springdrift/
 ├── config.toml          Project-level config (overrides ~/.config/springdrift/config.toml)
+├── HOW_TO.md            Operator guide — tool selection heuristics and usage patterns
 ├── identity/            Agent identity files (persona + session preamble template)
 │   ├── persona.md       First-person character text (supports {{agent_name}} slot)
 │   └── session_preamble.md  Dynamic session context with {{slot}} and [OMIT IF] rules
@@ -49,9 +50,20 @@ Identity files are searched in order: `.springdrift/identity/` (local override) 
 `~/.config/springdrift/identity/` (user default). If neither exists, the agent falls
 back to the configured system prompt.
 
+## HOW_TO.md
+
+`HOW_TO.md` is the operator guide — it contains tool selection heuristics, agent usage
+patterns, and degradation paths. The cognitive loop serves this content via the `how_to`
+tool so the LLM can orient itself when unsure which tool to use for a task.
+
+The file is loaded at startup from `.springdrift/HOW_TO.md` (local override) or
+`~/.config/springdrift/HOW_TO.md` (user default). If neither exists, a built-in
+default is used. Edit this file to customise guidance for your specific deployment.
+
 ## Included examples
 
 - **`identity/`** — default persona and session preamble template.
+- **`HOW_TO.md`** — operator guide with tool selection heuristics and degradation paths.
 - **`profiles/market-monitor/`** — example profile that tracks commercial property
   prices in Dublin and Cork with daily scheduled jobs and report delivery.
 - **`dprime.example.json`** — example D' safety gate configuration with seven

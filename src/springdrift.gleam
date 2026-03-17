@@ -5,6 +5,7 @@ import agent/supervisor
 import agent/types as agent_types
 import agent_identity
 import agents/coder
+import agents/observer
 import agents/planner
 import agents/researcher
 import config.{type AppConfig}
@@ -16,6 +17,7 @@ import gleam/int
 import gleam/io
 import gleam/list
 import gleam/option
+import gleam/result
 import gleam/string
 import llm/adapters/anthropic as anthropic_adapter
 import llm/adapters/local as local_adapter
@@ -39,6 +41,7 @@ import storage
 import tools/brave as tools_brave
 import tools/builtin as tools_builtin
 import tools/cache
+import tools/how_to_content
 import tools/jina as tools_jina
 import tools/memory as tools_memory
 import tools/rate_limiter
@@ -515,6 +518,17 @@ fn run(cfg: AppConfig) -> Nil {
   let recall_max_entries = option.unwrap(cfg.recall_max_entries, 50)
   let cbr_max_results = option.unwrap(cfg.cbr_max_results, 20)
 
+  // Load HOW_TO content (file on disk, or built-in default)
+  let how_to_content =
+    paths.how_to_paths()
+    |> list.find_map(fn(path) {
+      case simplifile.read(path) {
+        Ok(c) -> Ok(c)
+        Error(_) -> Error(Nil)
+      }
+    })
+    |> result.unwrap(how_to_content.builtin())
+
   let cognitive_subj = case
     cognitive.start(CognitiveConfig(
       provider: p,
@@ -548,6 +562,7 @@ fn run(cfg: AppConfig) -> Nil {
         cbr_max_results:,
       ),
       input_queue_cap: option.unwrap(cfg.input_queue_cap, 10),
+      how_to_content: option.Some(how_to_content),
     ))
   {
     Ok(subj) -> subj
@@ -811,6 +826,17 @@ fn default_agent_specs(
       brave_cache_ttl_ms,
     )
   let c_spec = coder.spec(provider, task_model, sandbox_timeout)
+  let recall_max_entries = option.unwrap(cfg.recall_max_entries, 50)
+  let cbr_max_results = option.unwrap(cfg.cbr_max_results, 20)
+  let o_spec =
+    observer.spec(
+      provider,
+      task_model,
+      option.unwrap(cfg.narrative_dir, paths.narrative_dir()),
+      librarian_subj,
+      tools_memory.MemoryLimits(recall_max_entries:, cbr_max_results:),
+      option.None,
+    )
   [
     agent_types.AgentSpec(
       ..p_spec,
@@ -846,6 +872,7 @@ fn default_agent_specs(
       ),
       inter_turn_delay_ms: delay,
     ),
+    o_spec,
   ]
 }
 

@@ -22,7 +22,7 @@ pub fn main() -> Nil {
 
 pub fn memory_tools_defined_test() {
   let tools = memory.all()
-  tools |> list.length |> should.equal(14)
+  tools |> list.length |> should.equal(15)
 }
 
 pub fn recall_recent_tool_exists_test() {
@@ -658,4 +658,127 @@ pub fn list_recent_cycles_no_librarian_test() {
       should.be_true(string.contains(e, "not available"))
     _ -> should.fail()
   }
+}
+
+// ---------------------------------------------------------------------------
+// how_to tool
+// ---------------------------------------------------------------------------
+
+pub fn is_memory_tool_how_to_test() {
+  memory.is_memory_tool("how_to") |> should.be_true
+}
+
+pub fn how_to_tool_exists_test() {
+  let tools = memory.all()
+  let names = list.map(tools, fn(t) { t.name })
+  list.contains(names, "how_to") |> should.be_true
+}
+
+pub fn how_to_no_content_returns_error_test() {
+  let call = ToolCall(id: "ht1", name: "how_to", input_json: "{}")
+  let result = memory.execute(call, "/tmp", None, None, None, test_limits)
+  case result {
+    ToolFailure(error: e, ..) ->
+      should.be_true(string.contains(e, "not loaded"))
+    _ -> should.fail()
+  }
+}
+
+pub fn how_to_returns_full_guide_test() {
+  let guide = "# Guide\n\n## Research\nUse tools.\n\n## Memory\nUse recall."
+  let call = ToolCall(id: "ht2", name: "how_to", input_json: "{}")
+  let result =
+    memory.execute_with_how_to(
+      call,
+      "/tmp",
+      None,
+      None,
+      None,
+      test_limits,
+      Some(guide),
+    )
+  case result {
+    ToolSuccess(content: c, ..) -> c |> should.equal(guide)
+    _ -> should.fail()
+  }
+}
+
+pub fn how_to_filters_by_topic_test() {
+  let guide =
+    "# Guide\n\n## Research\nUse search tools.\n\n## Memory\nUse recall."
+  let call =
+    ToolCall(id: "ht3", name: "how_to", input_json: "{\"topic\": \"research\"}")
+  let result =
+    memory.execute_with_how_to(
+      call,
+      "/tmp",
+      None,
+      None,
+      None,
+      test_limits,
+      Some(guide),
+    )
+  case result {
+    ToolSuccess(content: c, ..) -> {
+      should.be_true(string.contains(c, "Research"))
+      should.be_true(string.contains(c, "search tools"))
+      // Should not contain the Memory section
+      should.be_false(string.contains(c, "## Memory"))
+    }
+    _ -> should.fail()
+  }
+}
+
+pub fn how_to_unknown_topic_returns_full_guide_test() {
+  let guide = "# Guide\n\n## Research\nUse search.\n\n## Memory\nUse recall."
+  let call =
+    ToolCall(id: "ht4", name: "how_to", input_json: "{\"topic\": \"quantum\"}")
+  let result =
+    memory.execute_with_how_to(
+      call,
+      "/tmp",
+      None,
+      None,
+      None,
+      test_limits,
+      Some(guide),
+    )
+  case result {
+    ToolSuccess(content: c, ..) -> c |> should.equal(guide)
+    _ -> should.fail()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// observer_tools
+// ---------------------------------------------------------------------------
+
+pub fn observer_tools_count_test() {
+  let tools = memory.observer_tools()
+  tools |> list.length |> should.equal(10)
+}
+
+pub fn observer_tools_has_reflect_test() {
+  let names = list.map(memory.observer_tools(), fn(t) { t.name })
+  list.contains(names, "reflect") |> should.be_true
+}
+
+pub fn observer_tools_has_inspect_cycle_test() {
+  let names = list.map(memory.observer_tools(), fn(t) { t.name })
+  list.contains(names, "inspect_cycle") |> should.be_true
+}
+
+pub fn observer_tools_has_recall_recent_test() {
+  let names = list.map(memory.observer_tools(), fn(t) { t.name })
+  list.contains(names, "recall_recent") |> should.be_true
+}
+
+pub fn observer_tools_has_introspect_test() {
+  let names = list.map(memory.observer_tools(), fn(t) { t.name })
+  list.contains(names, "introspect") |> should.be_true
+}
+
+pub fn observer_tools_no_how_to_test() {
+  let names = list.map(memory.observer_tools(), fn(t) { t.name })
+  list.contains(names, "how_to") |> should.be_false
 }
