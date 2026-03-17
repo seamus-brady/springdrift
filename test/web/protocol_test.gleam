@@ -203,6 +203,42 @@ pub fn encode_log_data_empty_test() {
 }
 
 // ---------------------------------------------------------------------------
+// decode_client_message — Scheduler messages
+// ---------------------------------------------------------------------------
+
+pub fn decode_request_scheduler_data_test() {
+  let json = "{\"type\": \"request_scheduler_data\"}"
+  let result = protocol.decode_client_message(json)
+  result |> should.be_ok
+  let assert Ok(protocol.RequestSchedulerData) = result
+}
+
+pub fn decode_request_scheduler_cycles_test() {
+  let json = "{\"type\": \"request_scheduler_cycles\"}"
+  let result = protocol.decode_client_message(json)
+  result |> should.be_ok
+  let assert Ok(protocol.RequestSchedulerCycles) = result
+}
+
+// ---------------------------------------------------------------------------
+// encode_server_message — Scheduler messages
+// ---------------------------------------------------------------------------
+
+pub fn encode_scheduler_data_test() {
+  let msg = protocol.SchedulerData(jobs_json: "[{\"name\":\"test\"}]")
+  let json_str = protocol.encode_server_message(msg)
+  json_str |> should_contain("\"type\":\"scheduler_data\"")
+  json_str |> should_contain("\"jobs\":[{\"name\":\"test\"}]")
+}
+
+pub fn encode_scheduler_cycles_data_test() {
+  let msg = protocol.SchedulerCyclesData(cycles_json: "[]")
+  let json_str = protocol.encode_server_message(msg)
+  json_str |> should_contain("\"type\":\"scheduler_cycles_data\"")
+  json_str |> should_contain("\"cycles\":[]")
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

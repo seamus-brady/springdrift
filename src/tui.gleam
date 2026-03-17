@@ -301,6 +301,29 @@ fn handle_notification(
       continue_loop(
         TuiState(..state, notice: style.yellow("  Reminder: " <> title)),
       )
+    agent_types.SchedulerJobStarted(name:, kind:) ->
+      continue_loop(
+        TuiState(
+          ..state,
+          spinner_label: "scheduler:" <> name <> " (" <> kind <> ")",
+        ),
+      )
+    agent_types.SchedulerJobCompleted(name:, result_preview: _) ->
+      continue_loop(
+        TuiState(
+          ..state,
+          notice: style.dim("  Scheduler job '" <> name <> "' completed"),
+        ),
+      )
+    agent_types.SchedulerJobFailed(name:, reason:) ->
+      continue_loop(
+        TuiState(
+          ..state,
+          notice: style.yellow(
+            "  Scheduler job '" <> name <> "' failed: " <> reason,
+          ),
+        ),
+      )
   }
 }
 

@@ -25,6 +25,7 @@ pub fn proceed_with_model(
   text: String,
   cycle_id: String,
   reply_to: Subject(CognitiveReply),
+  node_type: dag_types.CycleNodeType,
 ) -> CognitiveState {
   slog.info(
     "cognitive",
@@ -61,7 +62,7 @@ pub fn proceed_with_model(
         librarian.IndexNode(node: dag_types.CycleNode(
           cycle_id: cycle_id,
           parent_id: None,
-          node_type: dag_types.CognitiveCycle,
+          node_type: node_type,
           timestamp: get_datetime(),
           outcome: dag_types.NodePending,
           model:,
@@ -101,6 +102,7 @@ pub fn proceed_with_model(
         reply_to:,
         output_gate_count: 0,
         empty_retried: False,
+        node_type:,
       ),
     ),
   )
@@ -129,7 +131,7 @@ pub fn handle_think_error(
   cycle_log.log_llm_error(cycle_id, error)
   case dict.get(state.pending, task_id) {
     Error(_) -> state
-    Ok(PendingThink(model: failed_model, reply_to: rt, ..)) -> {
+    Ok(PendingThink(model: failed_model, reply_to: rt, node_type:, ..)) -> {
       // If the error is retryable and we have a different model to try, fall back
       case retryable && failed_model != state.task_model {
         True -> {
@@ -164,6 +166,7 @@ pub fn handle_think_error(
                 reply_to: rt,
                 output_gate_count: 0,
                 empty_retried: False,
+                node_type:,
               ),
             ),
           )

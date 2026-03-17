@@ -1,3 +1,4 @@
+import dag/types as dag_types
 import dprime/types as dprime_types
 import gleam/erlang/process.{type Subject}
 import gleam/option.{type Option}
@@ -8,6 +9,7 @@ import llm/types.{
   type ToolResult, type Usage,
 }
 import query_complexity.{type QueryComplexity}
+import scheduler/types as scheduler_types
 
 // ---------------------------------------------------------------------------
 // Agent spec → Tool conversion
@@ -263,6 +265,16 @@ pub type CognitiveMessage {
   )
   LoadProfile(name: String, reply_to: Subject(CognitiveReply))
   SetSupervisor(supervisor: Subject(SupervisorMessage))
+  SchedulerInput(
+    job_name: String,
+    query: String,
+    kind: scheduler_types.JobKind,
+    for_: scheduler_types.ForTarget,
+    title: String,
+    body: String,
+    tags: List(String),
+    reply_to: Subject(CognitiveReply),
+  )
   OutputGateComplete(
     cycle_id: String,
     result: dprime_types.GateResult,
@@ -330,6 +342,7 @@ pub type PendingTask {
     reply_to: Subject(CognitiveReply),
     output_gate_count: Int,
     empty_retried: Bool,
+    node_type: dag_types.CycleNodeType,
   )
   PendingAgent(
     task_id: String,
@@ -358,6 +371,9 @@ pub type Notification {
   InputQueued(position: Int, queue_size: Int)
   InputQueueFull(queue_cap: Int)
   SchedulerReminder(name: String, title: String, body: String)
+  SchedulerJobStarted(name: String, kind: String)
+  SchedulerJobCompleted(name: String, result_preview: String)
+  SchedulerJobFailed(name: String, reason: String)
 }
 
 // ---------------------------------------------------------------------------
@@ -366,4 +382,14 @@ pub type Notification {
 
 pub type QueuedInput {
   QueuedInput(text: String, reply_to: Subject(CognitiveReply))
+  QueuedSchedulerInput(
+    job_name: String,
+    query: String,
+    kind: scheduler_types.JobKind,
+    for_: scheduler_types.ForTarget,
+    title: String,
+    body: String,
+    tags: List(String),
+    reply_to: Subject(CognitiveReply),
+  )
 }

@@ -667,14 +667,20 @@ fn run(cfg: AppConfig) -> Nil {
 
   // Always start the scheduler runner
   let stuck_timeout_ms = option.unwrap(cfg.scheduler_stuck_timeout_ms, 600_000)
+  let max_cycles_per_hour =
+    option.unwrap(cfg.max_autonomous_cycles_per_hour, 20)
+  let token_budget_per_hour =
+    option.unwrap(cfg.autonomous_token_budget_per_hour, 500_000)
   let runner_result =
     scheduler_runner.start(
       profile_schedule_tasks,
       cognitive_subj,
       paths.scheduler_checkpoint(),
       stuck_timeout_ms,
+      max_cycles_per_hour,
+      token_budget_per_hour,
     )
-  case runner_result {
+  let scheduler_subj = case runner_result {
     Ok(runner_subj) -> {
       case profile_schedule_tasks {
         [] -> io.println("Scheduler: started (no profile tasks)")
@@ -698,8 +704,18 @@ fn run(cfg: AppConfig) -> Nil {
           io.println("  Agent  : scheduler failed (" <> msg <> ")")
         Error(_) -> io.println("  Agent  : scheduler failed (timeout)")
       }
+      option.Some(runner_subj)
     }
-    Error(_) -> io.println("Scheduler: failed to start")
+    Error(_) -> {
+      io.println("Scheduler: failed to start")
+      option.None
+    }
+  }
+
+  // Wire scheduler to curator for open_commitments slot
+  case scheduler_subj {
+    option.Some(sched) -> curator.set_scheduler(curator_subj, sched)
+    option.None -> Nil
   }
 
   // Start GUI
@@ -723,6 +739,7 @@ fn run(cfg: AppConfig) -> Nil {
         agent_name,
         agent_version,
         ws_max_bytes,
+        scheduler_subj,
       )
     }
     _ ->

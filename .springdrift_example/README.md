@@ -26,7 +26,8 @@ Then edit `.springdrift/config.toml` with your provider and API key.
 │   ├── cbr/             Case-Based Reasoning cases (auto-generated)
 │   └── facts/           Key-value fact store (auto-generated)
 ├── skills/              Local SKILL.md definitions
-└── profiles/            Agent profile directories
+├── profiles/            Agent profile directories
+└── scheduler-checkpoint.json  Scheduler state persistence (auto-generated)
 ```
 
 Add `.springdrift/` to your `.gitignore` — it contains runtime state, logs, and
@@ -59,6 +60,25 @@ tool so the LLM can orient itself when unsure which tool to use for a task.
 The file is loaded at startup from `.springdrift/HOW_TO.md` (local override) or
 `~/.config/springdrift/HOW_TO.md` (user default). If neither exists, a built-in
 default is used. Edit this file to customise guidance for your specific deployment.
+
+## Scheduler configuration
+
+The `[scheduler]` section in `config.toml` controls resource limits for autonomous
+scheduler execution:
+
+```toml
+[scheduler]
+# Max autonomous cycles the scheduler may fire per hour (default: 20, 0 = unlimited)
+# max_autonomous_cycles_per_hour = 20
+
+# Max total tokens (input + output) per hour (default: 500000, 0 = unlimited)
+# autonomous_token_budget_per_hour = 500000
+```
+
+Scheduler state is persisted to `scheduler-checkpoint.json` (auto-generated) and
+reconciled with the current profile's `schedule.toml` on startup. The checkpoint
+records job status, last-run times, and next-run times so jobs resume correctly
+after restarts.
 
 ## Included examples
 

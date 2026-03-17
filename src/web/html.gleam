@@ -280,6 +280,8 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
 <div id=\"tab-bar\">
   <button class=\"tab-btn active\" data-tab=\"narrative\">Narrative</button>
   <button class=\"tab-btn\" data-tab=\"log\">Log</button>
+  <button class=\"tab-btn\" data-tab=\"scheduler\">Scheduler</button>
+  <button class=\"tab-btn\" data-tab=\"cycles\">Cycles</button>
 </div>
 <div id=\"content-area\">
   <div id=\"narrative-tab\" class=\"tab-content active\">
@@ -289,6 +291,22 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
   <div id=\"log-tab\" class=\"tab-content\">
     <button class=\"refresh-btn\" id=\"log-refresh\">Refresh</button>
     <div id=\"log-container\">Loading...</div>
+  </div>
+  <div id=\"scheduler-tab\" class=\"tab-content\">
+    <button class=\"refresh-btn\" id=\"scheduler-refresh\">Refresh</button>
+    <div id=\"scheduler-container\">
+      <table class=\"admin-table\"><thead><tr>
+        <th>Name</th><th>Kind</th><th>Status</th><th>Target</th><th>Due/Interval</th><th>Runs</th><th>Errors</th><th>Last Result</th>
+      </tr></thead><tbody id=\"scheduler-body\"></tbody></table>
+    </div>
+  </div>
+  <div id=\"cycles-tab\" class=\"tab-content\">
+    <button class=\"refresh-btn\" id=\"cycles-refresh\">Refresh</button>
+    <div id=\"cycles-container\">
+      <table class=\"admin-table\"><thead><tr>
+        <th>Cycle ID</th><th>Time</th><th>Outcome</th><th>Model</th><th>Tools</th><th>Tokens</th><th>Duration</th>
+      </tr></thead><tbody id=\"cycles-body\"></tbody></table>
+    </div>
   </div>
 </div>
 </div>
@@ -313,11 +331,15 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
       document.getElementById(tab + '-tab').classList.add('active');
       if (tab === 'log') requestLogData();
       else if (tab === 'narrative') requestNarrativeData();
+      else if (tab === 'scheduler') requestSchedulerData();
+      else if (tab === 'cycles') requestSchedulerCycles();
     });
   });
 
   document.getElementById('log-refresh').addEventListener('click', requestLogData);
   document.getElementById('narrative-refresh').addEventListener('click', requestNarrativeData);
+  document.getElementById('scheduler-refresh').addEventListener('click', requestSchedulerData);
+  document.getElementById('cycles-refresh').addEventListener('click', requestSchedulerCycles);
 
   function requestLogData() {
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -329,6 +351,39 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'request_narrative_data' }));
     }
+  }
+
+  function requestSchedulerData() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'request_scheduler_data' }));
+    }
+  }
+
+  function requestSchedulerCycles() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'request_scheduler_cycles' }));
+    }
+  }
+
+  function renderSchedulerJobs(jobs) {
+    var body = document.getElementById('scheduler-body');
+    if (!jobs || jobs.length === 0) { body.innerHTML = '<tr><td colspan=\"8\" style=\"text-align:center;opacity:.5\">No scheduled jobs</td></tr>'; return; }
+    body.innerHTML = jobs.map(function(j) {
+      var due = j.due_at ? j.due_at : (j.interval_ms > 0 ? (j.interval_ms/1000)+'s' : '-');
+      var lr = j.last_result ? j.last_result.substring(0,80) : '-';
+      return '<tr><td>'+j.name+'</td><td>'+j.kind+'</td><td>'+j.status+'</td><td>'+(j['for']||'-')+'</td><td>'+due+'</td><td>'+j.run_count+'</td><td>'+j.error_count+'</td><td style=\"max-width:200px;overflow:hidden;text-overflow:ellipsis\">'+lr+'</td></tr>';
+    }).join('');
+  }
+
+  function renderSchedulerCycles(cycles) {
+    var body = document.getElementById('cycles-body');
+    if (!cycles || cycles.length === 0) { body.innerHTML = '<tr><td colspan=\"7\" style=\"text-align:center;opacity:.5\">No scheduler cycles today</td></tr>'; return; }
+    body.innerHTML = cycles.map(function(c) {
+      var badge = c.outcome === 'success' ? '\\u2705' : c.outcome === 'pending' ? '\\u23f3' : '\\u274c';
+      var tokens = c.tokens_in + c.tokens_out;
+      var dur = c.duration_ms > 0 ? (c.duration_ms/1000).toFixed(1)+'s' : '-';
+      return '<tr><td>'+c.cycle_id.substring(0,8)+'</td><td>'+c.timestamp+'</td><td>'+badge+' '+c.outcome+'</td><td>'+c.model+'</td><td>'+c.tool_call_count+'</td><td>'+tokens+'</td><td>'+dur+'</td></tr>';
+    }).join('');
   }
 
   function renderNarrativeEntries(entries) {
@@ -407,6 +462,12 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
         break;
       case 'narrative_data':
         renderNarrativeEntries(data.entries);
+        break;
+      case 'scheduler_data':
+        renderSchedulerJobs(data.jobs);
+        break;
+      case 'scheduler_cycles_data':
+        renderSchedulerCycles(data.cycles);
         break;
     }
   }
@@ -901,6 +962,10 @@ fn shared_css() -> String {
     -ms-overflow-style: none;
   }
   #log-container::-webkit-scrollbar { display: none; }
+  .admin-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .admin-table th, .admin-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; }
+  .admin-table th { background: var(--header-bg); font-weight: 600; position: sticky; top: 0; }
+  .admin-table tr:hover td { background: var(--accent-light); }
   .log-entry {
     padding: 3px 0;
     display: flex;

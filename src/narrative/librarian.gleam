@@ -421,6 +421,13 @@ pub type LibrarianMessage {
     reply_to: Subject(Result(artifacts_types.ArtifactMeta, Nil)),
   )
 
+  // --- Scheduler cycle queries ---
+  /// Get DAG nodes with node_type == SchedulerCycle for a date.
+  QuerySchedulerCycles(
+    date: String,
+    reply_to: Subject(List(dag_types.CycleNode)),
+  )
+
   /// Shutdown
   Shutdown
 }
@@ -1729,6 +1736,15 @@ fn loop(state: LibrarianState) -> Nil {
         QueryToolActivity(date:, reply_to:) -> {
           let records = compute_tool_activity(state, date)
           process.send(reply_to, records)
+          loop(state)
+        }
+
+        // --- Scheduler cycle queries ---
+        QuerySchedulerCycles(date:, reply_to:) -> {
+          let all = do_query_dag_day(state, date)
+          let scheduler_only =
+            list.filter(all, fn(n) { n.node_type == dag_types.SchedulerCycle })
+          process.send(reply_to, scheduler_only)
           loop(state)
         }
 

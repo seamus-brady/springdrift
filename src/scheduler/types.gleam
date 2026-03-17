@@ -1,7 +1,9 @@
 //// Scheduler types — scheduled task state and messages.
 
 import gleam/erlang/process.{type Subject}
-import gleam/option.{type Option}
+import gleam/json
+import gleam/option.{type Option, None, Some}
+import gleam/string
 import profile/types as profile_types
 
 // ---------------------------------------------------------------------------
@@ -120,8 +122,8 @@ pub type JobQuery {
 pub type SchedulerMessage {
   /// Timer fired for a specific job
   Tick(name: String)
-  /// Job completed with result text
-  JobComplete(name: String, result: String)
+  /// Job completed with result text and token usage
+  JobComplete(name: String, result: String, tokens_used: Int)
   /// Job failed
   JobFailed(name: String, reason: String)
   /// Stop all scheduled jobs
@@ -144,4 +146,57 @@ pub type SchedulerMessage {
   GetJobs(query: JobQuery, reply_to: Subject(List(ScheduledJob)))
   /// Mark a job completed (for Todos and Reminders).
   CompleteJob(name: String, reply_to: Subject(Result(Nil, String)))
+}
+
+// ---------------------------------------------------------------------------
+// JSON encoding — scheduler job state for web admin
+// ---------------------------------------------------------------------------
+
+pub fn encode_job(job: ScheduledJob) -> json.Json {
+  json.object([
+    #("name", json.string(job.name)),
+    #("title", json.string(job.title)),
+    #("kind", json.string(encode_job_kind(job.kind))),
+    #("status", json.string(encode_job_status(job.status))),
+    #("for", json.string(encode_for_target(job.for_))),
+    #("interval_ms", json.int(job.interval_ms)),
+    #("due_at", case job.due_at {
+      Some(d) -> json.string(d)
+      None -> json.null()
+    }),
+    #("run_count", json.int(job.run_count)),
+    #("error_count", json.int(job.error_count)),
+    #("fired_count", json.int(job.fired_count)),
+    #("tags", json.array(job.tags, json.string)),
+    #("last_result", case job.last_result {
+      Some(r) -> json.string(string.slice(r, 0, 200))
+      None -> json.null()
+    }),
+  ])
+}
+
+pub fn encode_job_kind(kind: JobKind) -> String {
+  case kind {
+    RecurringTask -> "recurring_task"
+    Reminder -> "reminder"
+    Todo -> "todo"
+    Appointment -> "appointment"
+  }
+}
+
+pub fn encode_for_target(target: ForTarget) -> String {
+  case target {
+    ForAgent -> "agent"
+    ForUser -> "user"
+  }
+}
+
+pub fn encode_job_status(status: JobStatus) -> String {
+  case status {
+    Pending -> "pending"
+    Running -> "running"
+    Completed -> "completed"
+    Cancelled -> "cancelled"
+    Failed(reason:) -> "failed: " <> reason
+  }
 }

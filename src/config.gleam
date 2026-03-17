@@ -142,6 +142,9 @@ pub type AppConfig {
     scheduler_stuck_timeout_ms: Option(Int),
     // ── Scheduler tool timeout ──
     scheduler_tool_timeout_ms: Option(Int),
+    // ── Scheduler resource limits ──
+    max_autonomous_cycles_per_hour: Option(Int),
+    autonomous_token_budget_per_hour: Option(Int),
   )
 }
 
@@ -248,6 +251,8 @@ pub fn default() -> AppConfig {
     input_queue_cap: None,
     scheduler_stuck_timeout_ms: None,
     scheduler_tool_timeout_ms: None,
+    max_autonomous_cycles_per_hour: None,
+    autonomous_token_budget_per_hour: None,
   )
 }
 
@@ -555,6 +560,14 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     scheduler_tool_timeout_ms: option.or(
       override_cfg.scheduler_tool_timeout_ms,
       base.scheduler_tool_timeout_ms,
+    ),
+    max_autonomous_cycles_per_hour: option.or(
+      override_cfg.max_autonomous_cycles_per_hour,
+      base.max_autonomous_cycles_per_hour,
+    ),
+    autonomous_token_budget_per_hour: option.or(
+      override_cfg.autonomous_token_budget_per_hour,
+      base.autonomous_token_budget_per_hour,
     ),
   )
 }
@@ -1020,6 +1033,12 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     scheduler_tool_timeout_ms: get_toml_int(table, [
       "timeouts", "scheduler_tool_ms",
     ]),
+    max_autonomous_cycles_per_hour: get_toml_int(table, [
+      "scheduler", "max_autonomous_cycles_per_hour",
+    ]),
+    autonomous_token_budget_per_hour: get_toml_int(table, [
+      "scheduler", "autonomous_token_budget_per_hour",
+    ]),
   )
 }
 
@@ -1052,7 +1071,7 @@ const known_keys = [
   "write_anywhere", "skills_dirs", "gui", "dprime_enabled", "dprime_config",
   "narrative", "profile", "profiles_dirs", "agent", "log_retention_days",
   "log_max_file_bytes", "timeouts", "retry", "limits", "scoring", "housekeeping",
-  "cbr", "agents", "web", "services",
+  "cbr", "agents", "web", "services", "scheduler",
 ]
 
 const known_narrative_keys = [
@@ -1124,6 +1143,14 @@ fn validate_config_values(cfg: AppConfig) -> Nil {
   validate_positive(
     "scheduler_stuck_timeout_ms",
     cfg.scheduler_stuck_timeout_ms,
+  )
+  validate_positive(
+    "scheduler.max_autonomous_cycles_per_hour",
+    cfg.max_autonomous_cycles_per_hour,
+  )
+  validate_positive(
+    "scheduler.autonomous_token_budget_per_hour",
+    cfg.autonomous_token_budget_per_hour,
   )
   case cfg.provider {
     Some(p) ->

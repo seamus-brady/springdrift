@@ -123,6 +123,15 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 # Scheduler tool timeout — how long scheduler agent tools wait for runner reply (default: 5000 = 5s)
 # scheduler_tool_ms = 5000
 
+# ── Scheduler ────────────────────────────────────────────────────────────────
+# Resource limits for autonomous scheduler execution.
+[scheduler]
+# Max autonomous cycles the scheduler may fire per hour (default: 20, 0 = unlimited)
+# max_autonomous_cycles_per_hour = 20
+
+# Max total tokens (input + output) the scheduler may consume per hour (default: 500000, 0 = unlimited)
+# autonomous_token_budget_per_hour = 500000
+
 # ── Retry ────────────────────────────────────────────────────────────────────
 # LLM call retry configuration with exponential backoff.
 

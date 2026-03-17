@@ -2,6 +2,7 @@
 
 import agent/types as agent_types
 import cycle_log
+import dag/types as dag_types
 import gleam/bytes_tree
 import gleam/erlang/process.{type Selector, type Subject}
 import gleam/http/request.{type Request}
@@ -15,6 +16,7 @@ import llm/types.{type Message, Assistant, TextContent, User}
 import mist.{type Connection, type ResponseData}
 import narrative/librarian.{type LibrarianMessage}
 import narrative/log as narrative_log
+import scheduler/types as scheduler_types
 import slog
 import web/auth
 import web/html
@@ -55,6 +57,7 @@ type WsState {
     relay: Subject(RelayMsg),
     narrative_dir: String,
     librarian: Option(Subject(LibrarianMessage)),
+    scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
     ws_max_bytes: Int,
   )
 }
@@ -94,6 +97,7 @@ pub fn start(
   agent_name: String,
   agent_version: String,
   ws_max_bytes: Int,
+  scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
 ) -> Nil {
   let auth_token = get_auth_token()
   let relay: Subject(RelayMsg) = process.new_subject()
@@ -116,6 +120,7 @@ pub fn start(
         agent_name,
         agent_version,
         ws_max_bytes,
+        scheduler,
       )
     }
     |> mist.new
@@ -142,6 +147,7 @@ fn handle_request(
   agent_name: String,
   agent_version: String,
   ws_max_bytes: Int,
+  scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
 ) -> Response(ResponseData) {
   case auth.check_auth(req, auth_token) {
     False ->
@@ -191,6 +197,7 @@ fn handle_request(
                 narrative_dir,
                 lib,
                 ws_max_bytes,
+                scheduler,
               )
             },
             on_close: fn(state) {
@@ -218,6 +225,7 @@ fn ws_on_init(
   narrative_dir: String,
   lib: Option(Subject(LibrarianMessage)),
   ws_max_bytes: Int,
+  scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
 ) -> #(WsState, option.Option(Selector(WsMsg))) {
   // Create per-connection subjects (owned by this WebSocket handler process)
   let reply_subject: Subject(agent_types.CognitiveReply) = process.new_subject()
@@ -240,6 +248,7 @@ fn ws_on_init(
       relay:,
       narrative_dir:,
       librarian: lib,
+      scheduler:,
       ws_max_bytes:,
     )
 
@@ -325,6 +334,68 @@ fn ws_handler(
                     entries_json:,
                   )),
                 )
+              mist.continue(state)
+            }
+            Ok(protocol.RequestSchedulerData) -> {
+              case state.scheduler {
+                Some(sched) -> {
+                  let status_subj = process.new_subject()
+                  process.send(
+                    sched,
+                    scheduler_types.GetStatus(reply_to: status_subj),
+                  )
+                  case process.receive(status_subj, 2000) {
+                    Ok(jobs) -> {
+                      let jobs_json =
+                        json.to_string(json.array(
+                          jobs,
+                          scheduler_types.encode_job,
+                        ))
+                      let _ =
+                        mist.send_text_frame(
+                          conn,
+                          protocol.encode_server_message(protocol.SchedulerData(
+                            jobs_json:,
+                          )),
+                        )
+                      Nil
+                    }
+                    Error(_) -> Nil
+                  }
+                }
+                None -> Nil
+              }
+              mist.continue(state)
+            }
+            Ok(protocol.RequestSchedulerCycles) -> {
+              case state.librarian {
+                Some(lib) -> {
+                  let reply_subj = process.new_subject()
+                  process.send(
+                    lib,
+                    librarian.QuerySchedulerCycles(
+                      date: get_today_date(),
+                      reply_to: reply_subj,
+                    ),
+                  )
+                  case process.receive(reply_subj, 2000) {
+                    Ok(cycles) -> {
+                      let cycles_json =
+                        json.to_string(json.array(cycles, encode_cycle_node))
+                      let _ =
+                        mist.send_text_frame(
+                          conn,
+                          protocol.encode_server_message(
+                            protocol.SchedulerCyclesData(cycles_json:),
+                          ),
+                        )
+                      Nil
+                    }
+                    Error(_) -> Nil
+                  }
+                }
+                None -> Nil
+              }
               mist.continue(state)
             }
             Ok(protocol.RequestRewind(index:)) -> {
@@ -446,7 +517,49 @@ fn notification_to_server_message(
       protocol.QueueFullNotification(queue_cap:)
     agent_types.SchedulerReminder(name: _, title:, body: _) ->
       protocol.ToolNotification(name: "reminder: " <> title)
+    agent_types.SchedulerJobStarted(name:, kind:) ->
+      protocol.ToolNotification(
+        name: "scheduler:" <> name <> " (" <> kind <> ")",
+      )
+    agent_types.SchedulerJobCompleted(name:, result_preview: _) ->
+      protocol.ToolNotification(name: "scheduler:" <> name <> " done")
+    agent_types.SchedulerJobFailed(name:, reason:) ->
+      protocol.ToolNotification(
+        name: "scheduler:" <> name <> " failed: " <> reason,
+      )
   }
+}
+
+@external(erlang, "springdrift_ffi", "get_today_date")
+fn get_today_date() -> String
+
+fn encode_cycle_node(node: dag_types.CycleNode) -> json.Json {
+  json.object([
+    #("cycle_id", json.string(node.cycle_id)),
+    #("timestamp", json.string(node.timestamp)),
+    #(
+      "node_type",
+      json.string(case node.node_type {
+        dag_types.CognitiveCycle -> "cognitive"
+        dag_types.AgentCycle -> "agent"
+        dag_types.SchedulerCycle -> "scheduler"
+      }),
+    ),
+    #(
+      "outcome",
+      json.string(case node.outcome {
+        dag_types.NodeSuccess -> "success"
+        dag_types.NodePartial -> "partial"
+        dag_types.NodeFailure(reason:) -> "failure: " <> reason
+        dag_types.NodePending -> "pending"
+      }),
+    ),
+    #("model", json.string(node.model)),
+    #("tool_call_count", json.int(list.length(node.tool_calls))),
+    #("tokens_in", json.int(node.tokens_in)),
+    #("tokens_out", json.int(node.tokens_out)),
+    #("duration_ms", json.int(node.duration_ms)),
+  ])
 }
 
 fn extract_text(msg: Message) -> String {

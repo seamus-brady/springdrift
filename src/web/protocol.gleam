@@ -28,6 +28,8 @@ pub type ClientMessage {
   RequestLogData
   RequestRewind(index: Int)
   RequestNarrativeData
+  RequestSchedulerData
+  RequestSchedulerCycles
 }
 
 pub type ServerMessage {
@@ -41,6 +43,8 @@ pub type ServerMessage {
   QueueFullNotification(queue_cap: Int)
   LogData(entries: List(slog.LogEntry))
   NarrativeData(entries_json: String)
+  SchedulerData(jobs_json: String)
+  SchedulerCyclesData(cycles_json: String)
 }
 
 pub type CycleDataJson {
@@ -79,6 +83,8 @@ pub fn decode_client_message(json_string: String) -> Result(ClientMessage, Nil) 
         decode.success(RequestRewind(index:))
       }
       "request_narrative_data" -> decode.success(RequestNarrativeData)
+      "request_scheduler_data" -> decode.success(RequestSchedulerData)
+      "request_scheduler_cycles" -> decode.success(RequestSchedulerCycles)
       _ -> decode.failure(UserMessage(""), "Unknown client message type")
     }
   }
@@ -182,6 +188,12 @@ pub fn encode_server_message(msg: ServerMessage) -> String {
 
     NarrativeData(entries_json:) ->
       "{\"type\":\"narrative_data\",\"entries\":" <> entries_json <> "}"
+
+    SchedulerData(jobs_json:) ->
+      "{\"type\":\"scheduler_data\",\"jobs\":" <> jobs_json <> "}"
+
+    SchedulerCyclesData(cycles_json:) ->
+      "{\"type\":\"scheduler_cycles_data\",\"cycles\":" <> cycles_json <> "}"
   }
 }
 

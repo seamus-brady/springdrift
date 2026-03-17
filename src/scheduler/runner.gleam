@@ -34,6 +34,8 @@ pub fn start(
   cognitive: Subject(agent_types.CognitiveMessage),
   checkpoint_path: String,
   stuck_timeout_ms: Int,
+  max_cycles_per_hour: Int,
+  token_budget_per_hour: Int,
 ) -> Result(Subject(SchedulerMessage), Nil) {
   let setup = process.new_subject()
   process.spawn_unlinked(fn() {
@@ -123,7 +125,17 @@ pub fn start(
     )
 
     // Enter event loop
-    scheduler_loop(self, jobs, cognitive, checkpoint_path, stuck_timeout_ms)
+    scheduler_loop(
+      self,
+      jobs,
+      cognitive,
+      checkpoint_path,
+      stuck_timeout_ms,
+      max_cycles_per_hour,
+      token_budget_per_hour,
+      [],
+      [],
+    )
   })
 
   case process.receive(setup, 5000) {
@@ -146,6 +158,10 @@ fn scheduler_loop(
   cognitive: Subject(agent_types.CognitiveMessage),
   checkpoint_path: String,
   stuck_timeout_ms: Int,
+  max_cycles_per_hour: Int,
+  token_budget_per_hour: Int,
+  cycle_timestamps: List(Int),
+  token_usage: List(#(Int, Int)),
 ) -> Nil {
   let selector =
     process.new_selector()
@@ -153,7 +169,30 @@ fn scheduler_loop(
 
   let msg = process.selector_receive_forever(selector)
   let loop = fn(j) {
-    scheduler_loop(self, j, cognitive, checkpoint_path, stuck_timeout_ms)
+    scheduler_loop(
+      self,
+      j,
+      cognitive,
+      checkpoint_path,
+      stuck_timeout_ms,
+      max_cycles_per_hour,
+      token_budget_per_hour,
+      cycle_timestamps,
+      token_usage,
+    )
+  }
+  let loop_with_tracking = fn(j, cts, tu) {
+    scheduler_loop(
+      self,
+      j,
+      cognitive,
+      checkpoint_path,
+      stuck_timeout_ms,
+      max_cycles_per_hour,
+      token_budget_per_hour,
+      cts,
+      tu,
+    )
   }
   case msg {
     StopAll -> {
@@ -185,23 +224,72 @@ fn scheduler_loop(
             }
             Cancelled | Completed -> loop(jobs)
             _ -> {
-              slog.info(
-                "scheduler",
-                "loop",
-                "Tick: running job '" <> name <> "'",
-                None,
-              )
-              // Mark as running
-              let updated_job = ScheduledJob(..job, status: Running)
-              let updated_jobs = dict.insert(jobs, name, updated_job)
+              // Rate limit check
+              let now = monotonic_now_ms()
+              let hour_ago = now - 3_600_000
+              let recent_cycles =
+                list.filter(cycle_timestamps, fn(ts) { ts > hour_ago })
+              let recent_tokens =
+                list.filter(token_usage, fn(tu) { tu.0 > hour_ago })
+              let total_tokens =
+                list.fold(recent_tokens, 0, fn(acc, tu) { acc + tu.1 })
+              let cycles_at_limit =
+                max_cycles_per_hour > 0
+                && list.length(recent_cycles) >= max_cycles_per_hour
+              let tokens_at_limit =
+                token_budget_per_hour > 0
+                && total_tokens >= token_budget_per_hour
+              case cycles_at_limit || tokens_at_limit {
+                True -> {
+                  let reason = case cycles_at_limit, tokens_at_limit {
+                    True, True -> "cycle + token budget"
+                    True, False -> "cycle limit"
+                    False, True -> "token budget"
+                    False, False -> "rate limit"
+                  }
+                  slog.warn(
+                    "scheduler",
+                    "loop",
+                    "Rate limit ("
+                      <> reason
+                      <> "): skipping job '"
+                      <> name
+                      <> "', rescheduling",
+                    None,
+                  )
+                  schedule_tick(self, name, job.interval_ms)
+                  loop(jobs)
+                }
+                False -> {
+                  slog.info(
+                    "scheduler",
+                    "loop",
+                    "Tick: running job '" <> name <> "'",
+                    None,
+                  )
+                  // Mark as running
+                  let updated_job = ScheduledJob(..job, status: Running)
+                  let updated_jobs = dict.insert(jobs, name, updated_job)
 
-              // Spawn async query to cognitive loop
-              spawn_job(self, cognitive, job)
+                  // Spawn async query to cognitive loop
+                  spawn_job(self, cognitive, job)
 
-              // Schedule stuck-job timeout check
-              process.send_after(self, stuck_timeout_ms, StuckJobCheck(name:))
+                  // Schedule stuck-job timeout check
+                  process.send_after(
+                    self,
+                    stuck_timeout_ms,
+                    StuckJobCheck(name:),
+                  )
 
-              loop(updated_jobs)
+                  // Track this cycle for rate limiting
+                  let new_timestamps = [now, ..recent_cycles]
+                  loop_with_tracking(
+                    updated_jobs,
+                    new_timestamps,
+                    recent_tokens,
+                  )
+                }
+              }
             }
           }
       }
@@ -245,7 +333,7 @@ fn scheduler_loop(
       }
     }
 
-    JobComplete(name:, result:) -> {
+    JobComplete(name:, result:, tokens_used:) -> {
       case dict.get(jobs, name) {
         Error(_) -> loop(jobs)
         Ok(job) -> {
@@ -310,7 +398,15 @@ fn scheduler_loop(
           // Save checkpoint after completion
           let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
 
-          loop(updated_jobs)
+          // Track token usage for rate limiting
+          let hour_ago = now - 3_600_000
+          let recent_tokens =
+            list.filter(token_usage, fn(tu) { tu.0 > hour_ago })
+          let new_tokens = case tokens_used > 0 {
+            True -> [#(now, tokens_used), ..recent_tokens]
+            False -> recent_tokens
+          }
+          loop_with_tracking(updated_jobs, cycle_timestamps, new_tokens)
         }
       }
     }
@@ -509,16 +605,32 @@ fn spawn_job(
   job: ScheduledJob,
 ) -> Nil {
   let name = job.name
-  let query = job.query
   process.spawn_unlinked(fn() {
     let reply_subj: Subject(agent_types.CognitiveReply) = process.new_subject()
     process.send(
       cognitive,
-      agent_types.UserInput(text: query, reply_to: reply_subj),
+      agent_types.SchedulerInput(
+        job_name: name,
+        query: job.query,
+        kind: job.kind,
+        for_: job.for_,
+        title: job.title,
+        body: job.body,
+        tags: job.tags,
+        reply_to: reply_subj,
+      ),
     )
     case process.receive(reply_subj, 300_000) {
-      Ok(reply) ->
-        process.send(scheduler, JobComplete(name:, result: reply.response))
+      Ok(reply) -> {
+        let tokens = case reply.usage {
+          Some(usage) -> usage.input_tokens + usage.output_tokens
+          None -> 0
+        }
+        process.send(
+          scheduler,
+          JobComplete(name:, result: reply.response, tokens_used: tokens),
+        )
+      }
       Error(_) ->
         process.send(scheduler, JobFailed(name:, reason: "Timeout (5 minutes)"))
     }

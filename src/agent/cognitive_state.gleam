@@ -95,6 +95,7 @@ pub type CognitiveState {
     // --- Cycle telemetry ---
     cycle_tool_calls: List(dag_types.ToolSummary),
     cycle_started_ms: Int,
+    cycle_node_type: dag_types.CycleNodeType,
     // --- D' safety ---
     dprime_state: Option(dprime_types.DprimeState),
     output_dprime_state: Option(dprime_types.DprimeState),

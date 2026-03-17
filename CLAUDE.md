@@ -38,7 +38,7 @@ src/
 ├── skills.gleam               Skill discovery, frontmatter parsing, XML-escaped injection
 │
 ├── agent/                     Agent substrate
-│   ├── types.gleam            CognitiveMessage, Notification, PendingTask, CognitiveReply
+│   ├── types.gleam            CognitiveMessage (incl. SchedulerInput), Notification, PendingTask, CognitiveReply
 │   ├── cognitive.gleam        Cognitive loop — orchestrates agents, model switching, fallback
 │   ├── framework.gleam        Gen-server wrapper for agent specs → running agent processes
 │   ├── supervisor.gleam       Restart strategies (Permanent/Transient/Temporary)
@@ -92,9 +92,9 @@ src/
 │   └── types.gleam            Profile, ProfileModels, AgentDef, DeliveryConfig, ScheduleTaskConfig
 ├── profile.gleam              Profile discovery, parsing, validation, schedule loading
 │
-├── scheduler/                 BEAM-native task scheduler
-│   ├── types.gleam            ScheduledJob, JobStatus, SchedulerMessage
-│   ├── runner.gleam           OTP scheduler process with send_after tick loop
+├── scheduler/                 BEAM-native task scheduler with autonomous cycles
+│   ├── types.gleam            ScheduledJob, JobStatus, SchedulerMessage, JSON encoders
+│   ├── runner.gleam           OTP scheduler process with send_after tick loop + rate limiting
 │   ├── delivery.gleam         Report delivery (file, webhook via gleam_httpc)
 │   └── persist.gleam          Atomic checkpoint persistence with reconciliation
 │
@@ -105,9 +105,9 @@ src/
 ├── tools/artifacts.gleam      Artifact tools: store_result, retrieve_result (researcher agent)
 ├── tui.gleam                  Alternate-screen TUI; Chat + Log + Narrative tabs
 │
-├── web/                       Web chat GUI
+├── web/                       Web chat GUI + admin dashboard
 │   ├── gui.gleam              Mist HTTP + WebSocket server with bearer token auth
-│   ├── html.gleam             Embedded HTML/CSS/JS chat page
+│   ├── html.gleam             Embedded HTML/CSS/JS chat + admin page (4 tabs)
 │   └── protocol.gleam         WebSocket JSON codec (ClientMessage/ServerMessage)
 │
 └── llm/
@@ -232,6 +232,8 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `narrative_summary_schedule` | — | `"weekly"` | Summary schedule: `"weekly"` or `"monthly"` |
 | `profiles_dirs` | `--profiles-dir` (repeatable) | `[~/.config/springdrift/profiles, .springdrift/profiles]` | Profile directories |
 | `default_profile` | `--profile` | None | Profile to load at startup |
+| `max_autonomous_cycles_per_hour` | — | 20 | Max scheduler-triggered cycles per hour (0 = unlimited) |
+| `autonomous_token_budget_per_hour` | — | 500000 | Max tokens (input+output) scheduler may consume per hour (0 = unlimited) |
 
 ## Memory architecture
 
@@ -261,7 +263,8 @@ tools go through it when available, falling back to direct JSONL reads when it's
 `None`. It owns ETS tables for narrative entries, threads, facts, CBR cases, artifacts,
 and DAG nodes. Messages: `QueryDayRoots`, `QueryDayStats`, `QueryNodeWithDescendants`,
 `QueryThreadCount`, `QueryPersistentFactCount`, `QueryCaseCount`, `IndexArtifact`,
-`QueryArtifactsByCycle`, `QueryArtifactById`, `RetrieveArtifactContent`, etc.
+`QueryArtifactsByCycle`, `QueryArtifactById`, `RetrieveArtifactContent`,
+`QuerySchedulerCycles`, etc.
 At startup, the Librarian replays artifact metadata from disk (configurable via
 `librarian_max_days`, default 30).
 
@@ -306,8 +309,9 @@ cognitive loop delegates work to.
 **Supervisor** (`agent/supervisor.gleam`) manages agent lifecycle with three restart
 strategies: `Permanent` (always restart), `Transient` (restart on abnormal exit), and
 `Temporary` (never restart). Lifecycle events (`AgentStarted`, `AgentCrashed`,
-`AgentRestarted`, `AgentStopped`) are forwarded through the cognitive loop to the
-notification channel for TUI/web GUI display.
+`AgentRestarted`, `AgentStopped`) and scheduler events (`SchedulerJobStarted`,
+`SchedulerJobCompleted`, `SchedulerJobFailed`) are forwarded through the cognitive loop
+to the notification channel for TUI/web GUI display.
 
 **Framework** (`agent/framework.gleam`) wraps each `AgentSpec` into a running OTP
 process with a react loop. Each agent has its own message history, tool set, and
@@ -348,8 +352,12 @@ accessor in a `case` arm extracts from the same root dynamic value.
 functions. Build requests by piping: `request.new(model, max_tokens) |> request.with_system(...) |> ...`.
 
 **Actor messages as the API surface** — public API of the cognitive loop is the
-`CognitiveMessage` type. Add new capabilities by adding variants, not by exposing
-internal functions.
+`CognitiveMessage` type (`UserInput`, `SchedulerInput`, `SetModel`, `RestoreMessages`,
+etc.). Add new capabilities by adding variants, not by exposing internal functions.
+`QueuedInput` has corresponding `QueuedUserInput` and `QueuedSchedulerInput` variants.
+`PendingThink` carries a `node_type: CycleNodeType` field so the cognitive loop can
+tag DAG nodes with the correct type (`UserCycle` vs `SchedulerCycle`).
+`CognitiveState` tracks `cycle_node_type: CycleNodeType` for the current cycle.
 
 **Cycle logging** — every LLM call must thread a `cycle_id: String` and log events
 via `cycle_log.*`. Do not add LLM calls that bypass this logging. `llm_request` /
@@ -438,7 +446,10 @@ FACTS EXIST). `assemble_system_prompt` combines persona + rendered preamble in c
 counts, renders preamble slots (including `agent_name`, `agent_version`, and constitution
 stats like `today_cycles` and `today_success_rate`), and assembles the final system prompt.
 The Archivist pushes `UpdateConstitution` after each cycle; `handle_agent_event` pushes
-`UpdateAgentHealth` on crash/restart/stop events. Falls back to a provided fallback prompt
+`UpdateAgentHealth` on crash/restart/stop events. `SetScheduler` message wires the
+scheduler subject into the Curator so it can query pending/running jobs via
+`build_open_commitments` and populate the `{{open_commitments}}` preamble slot with
+upcoming schedule items (sensorium integration). Falls back to a provided fallback prompt
 when no identity files exist.
 
 **Profiles** — startup-only agent team configurations loaded from TOML directories.
@@ -458,6 +469,23 @@ handles report delivery (file with timestamps, webhook/websocket stubs).
 `scheduler/persist.gleam` provides atomic checkpoint persistence (tmp + rename) with
 `reconcile` to align checkpoint state with current config.
 
+Scheduler-triggered cycles use the `SchedulerInput` cognitive message variant (not
+`UserInput`), which skips query complexity classification, always uses `task_model`,
+and prepends `<scheduler_context>` XML to the prompt with job metadata. DAG nodes for
+these cycles are tagged with `SchedulerCycle` node type (vs `UserCycle` for interactive
+input). The scheduler reports `JobComplete` with `tokens_used` to enable token budget
+tracking.
+
+**Scheduler resource limits** — autonomous execution is rate-limited by two configurable
+guards: `max_autonomous_cycles_per_hour` (default 20) and
+`autonomous_token_budget_per_hour` (default 500000). The runner tracks cycle counts and
+token consumption per rolling hour window. When either limit is hit, jobs are skipped
+until the window rolls over. Set either to 0 for unlimited.
+
+**Scheduler notifications** — `SchedulerJobStarted`, `SchedulerJobCompleted`, and
+`SchedulerJobFailed` notification variants are emitted by the scheduler and displayed
+in both TUI (spinner label and notice) and web GUI (mapped to `ToolNotification`).
+
 **Config validation** — `parse_config_toml` validates unknown TOML keys and warns via
 `slog`. Numeric values are range-checked (must be positive). Provider and GUI mode
 values are validated against known options. Parse failures are logged instead of silent.
@@ -475,7 +503,11 @@ legacy plain-array format. Corruption is detected and logged.
 
 **Web GUI auth** — when `SPRINGDRIFT_WEB_TOKEN` is set, all HTTP and WebSocket requests
 require authentication via `Authorization: Bearer <token>` header or `?token=` query
-parameter. No auth required when the env var is unset.
+parameter. No auth required when the env var is unset. The web admin page has four tabs:
+Narrative, Log, Scheduler (job list with status and next-run times), and Cycles
+(scheduler-triggered cycle history with token usage and agent output). WebSocket messages
+`RequestSchedulerData`/`SchedulerData` and `RequestSchedulerCycles`/`SchedulerCyclesData`
+power the admin tabs. The scheduler subject is threaded through `web/gui.gleam`.
 
 **Web research tools** — `tools/web.gleam` provides two tools. `web_search`
 (DuckDuckGo, no key) and `fetch_url` (raw HTTP GET, no key). The researcher agent
@@ -503,6 +535,7 @@ The config is organized into these TOML sections:
 | `[scoring.cbr]` | CBR retrieval: cosine/symbolic weights, min score, decay |
 | `[housekeeping]` | Dedup similarity, pruning confidence, fact threshold |
 | `[embedding]` | Ollama: model, base_url, dimensions |
+| `[scheduler]` | Autonomous cycle resource limits (cycles/hour, token budget/hour) |
 | `[agents.planner]` | Planner agent: max_tokens, max_turns, max_errors |
 | `[agents.researcher]` | Researcher agent: max_tokens, max_turns, max_errors, max_context |
 | `[agents.coder]` | Coder agent: max_tokens, max_turns, max_errors |

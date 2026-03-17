@@ -53,6 +53,54 @@ tools: `reflect`, `inspect_cycle`, `list_recent_cycles`, `query_tool_activity`.
 - **agent_coder** — code writing, debugging, refactoring (builtin tools, max 10 turns)
 - **agent_writer** — long-form writing and structured reports (builtin tools, max 6 turns)
 
+## Scheduler
+
+The scheduler runs recurring tasks autonomously. Jobs fire on their configured
+schedule and run through the cognitive loop as `SchedulerInput` messages (not
+interactive `UserInput`), using `task_model` without complexity classification.
+
+### Scheduler agent tools
+
+- **schedule_reminder** — one-shot or recurring reminder
+- **add_todo** — task with optional due date
+- **add_appointment** — calendar-style event with start time
+- **complete_item** / **cancel_item** — mark a job done or cancelled
+- **update_item** — modify an existing job's schedule or description
+- **list_schedule** — view all scheduled jobs with status
+
+### Job kinds
+
+- `Reminder` — fires a notification at the scheduled time
+- `Todo` — task item, optionally recurring
+- `Appointment` — time-bound event
+- `ScheduledQuery` — profile-defined research query with delivery config
+
+### ForAgent vs ForUser
+
+Each job has a `for_target` field:
+- **ForAgent** — the agent processes the result autonomously (e.g. scheduled research)
+- **ForUser** — the result is delivered to the user (e.g. reminders, reports)
+
+### Resource limits
+
+Autonomous scheduler cycles are rate-limited to prevent runaway token spend:
+
+- `max_autonomous_cycles_per_hour` (default: 20) — max scheduler-triggered cognitive
+  cycles per rolling hour. Set to 0 for unlimited.
+- `autonomous_token_budget_per_hour` (default: 500000) — max total tokens (input +
+  output) the scheduler may consume per rolling hour. Set to 0 for unlimited.
+
+Configure in `[scheduler]` section of `config.toml`.
+
+### Web admin tabs
+
+When using `gui = "web"`, the admin page has four tabs:
+
+- **Narrative** — recent narrative entries
+- **Log** — system log stream
+- **Scheduler** — job list with status, kind, next-run time, and for-target
+- **Cycles** — scheduler-triggered cycle history with token usage and agent output
+
 ## Degradation Paths
 
 When a required API key is missing, fall back gracefully:

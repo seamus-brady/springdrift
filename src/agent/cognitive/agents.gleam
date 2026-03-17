@@ -31,6 +31,17 @@ import tools/memory
 @external(erlang, "springdrift_ffi", "get_datetime")
 fn get_datetime() -> String
 
+/// Extract node_type from the PendingThink for a task_id, defaulting to CognitiveCycle.
+fn pending_node_type(
+  state: CognitiveState,
+  task_id: String,
+) -> dag_types.CycleNodeType {
+  case dict.get(state.pending, task_id) {
+    Ok(PendingThink(node_type:, ..)) -> node_type
+    _ -> dag_types.CognitiveCycle
+  }
+}
+
 pub fn dispatch_tool_calls(
   state: CognitiveState,
   task_id: String,
@@ -250,6 +261,7 @@ fn handle_memory_tools(
             reply_to:,
             output_gate_count: 0,
             empty_retried: False,
+            node_type: pending_node_type(state, task_id),
           ),
         ),
       )
@@ -310,6 +322,7 @@ fn handle_memory_tools(
                 reply_to:,
                 output_gate_count: 0,
                 empty_retried: False,
+                node_type: pending_node_type(state, task_id),
               ),
             ),
           )
@@ -819,6 +832,7 @@ pub fn handle_agent_complete(
                 reply_to:,
                 output_gate_count: 0,
                 empty_retried: False,
+                node_type: state.cycle_node_type,
               ),
             ),
           )
@@ -896,6 +910,7 @@ pub fn handle_user_answer(
             reply_to:,
             output_gate_count: 0,
             empty_retried: False,
+            node_type: state.cycle_node_type,
           ),
         ),
       )
