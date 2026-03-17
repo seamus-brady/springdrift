@@ -92,6 +92,9 @@ pub type CognitiveState {
     agent_completions: List(AgentCompletionRecord),
     last_user_input: String,
     supervisor: Option(Subject(SupervisorMessage)),
+    // --- Cycle telemetry ---
+    cycle_tool_calls: List(dag_types.ToolSummary),
+    cycle_started_ms: Int,
     // --- D' safety ---
     dprime_state: Option(dprime_types.DprimeState),
     output_dprime_state: Option(dprime_types.DprimeState),

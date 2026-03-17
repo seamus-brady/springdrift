@@ -102,9 +102,12 @@ fn handle_memory_tools(
   remaining_calls: List(llm_types.ToolCall),
   reply_to: Subject(CognitiveReply),
 ) -> CognitiveState {
-  // Execute memory tools synchronously
+  let cycle_id = option.unwrap(state.cycle_id, task_id)
+  // Execute memory tools synchronously, logging each call/result
   let memory_results =
     list.map(memory_calls, fn(call) {
+      // Log tool call to cycle log
+      cycle_log.log_tool_call(cycle_id, call)
       let facts_ctx = case state.cycle_id {
         Some(cid) ->
           Some(memory.FactsContext(
@@ -166,6 +169,8 @@ fn handle_memory_tools(
           state.config.memory_limits,
           state.config.how_to_content,
         )
+      // Log tool result to cycle log
+      cycle_log.log_tool_result(cycle_id, result)
       case result {
         llm_types.ToolSuccess(tool_use_id: id, content: c) ->
           llm_types.ToolResultContent(
@@ -181,6 +186,25 @@ fn handle_memory_tools(
           )
       }
     })
+
+  // Accumulate ToolSummaries for DAG telemetry
+  let new_summaries =
+    list.map(memory_calls, fn(call) {
+      let success =
+        list.any(memory_results, fn(r) {
+          case r {
+            llm_types.ToolResultContent(tool_use_id: tuid, is_error: err, ..) ->
+              tuid == call.id && !err
+            _ -> False
+          }
+        })
+      dag_types.ToolSummary(name: call.name, success:, error: None)
+    })
+  let state =
+    CognitiveState(
+      ..state,
+      cycle_tool_calls: list.append(state.cycle_tool_calls, new_summaries),
+    )
 
   // If there are also agent calls, dispatch those with memory results as initial_results
   case remaining_calls {
@@ -493,9 +517,17 @@ fn do_dispatch_agents(
           },
         )
 
+      // Log agent dispatch calls and accumulate ToolSummaries
+      let agent_summaries =
+        list.map(agent_calls, fn(call) {
+          cycle_log.log_tool_call(cycle_id, call)
+          dag_types.ToolSummary(name: call.name, success: True, error: None)
+        })
+
       CognitiveState(
         ..state,
         messages:,
+        cycle_tool_calls: list.append(state.cycle_tool_calls, agent_summaries),
         status: WaitingForAgents(
           pending_ids:,
           accumulated_results: initial_results,

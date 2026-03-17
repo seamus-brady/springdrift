@@ -35,6 +35,9 @@ import tools/memory
 @external(erlang, "springdrift_ffi", "rescue")
 fn rescue(body: fn() -> a) -> Result(a, String)
 
+@external(erlang, "springdrift_ffi", "monotonic_now_ms")
+fn monotonic_now_ms() -> Int
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -77,6 +80,8 @@ pub fn start(
         save_pending: None,
         dprime_state: cfg.dprime_state,
         output_dprime_state: cfg.output_dprime_state,
+        cycle_tool_calls: [],
+        cycle_started_ms: 0,
         dprime_decisions: [],
         memory: MemoryContext(
           narrative_dir: cfg.narrative_dir,
@@ -291,6 +296,8 @@ fn handle_user_input(
           ..state,
           last_user_input: text,
           agent_completions: [],
+          cycle_tool_calls: [],
+          cycle_started_ms: monotonic_now_ms(),
           dprime_decisions: [],
         )
 
@@ -560,6 +567,10 @@ fn handle_think_complete(
                 }
                 None -> {
                   // Update DAG node with final outcome
+                  let duration_ms = case state.cycle_started_ms {
+                    0 -> 0
+                    started -> monotonic_now_ms() - started
+                  }
                   case state.memory.librarian {
                     Some(lib) ->
                       process.send(
@@ -572,7 +583,7 @@ fn handle_think_complete(
                           outcome: dag_types.NodeSuccess,
                           model: reply_model,
                           complexity: "",
-                          tool_calls: [],
+                          tool_calls: state.cycle_tool_calls,
                           dprime_gates: list.map(state.dprime_decisions, fn(d) {
                             dag_types.GateSummary(
                               gate: d.gate,
@@ -582,7 +593,7 @@ fn handle_think_complete(
                           }),
                           tokens_in: resp.usage.input_tokens,
                           tokens_out: resp.usage.output_tokens,
-                          duration_ms: 0,
+                          duration_ms:,
                           agent_output: None,
                         )),
                       )
