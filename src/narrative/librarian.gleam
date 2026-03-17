@@ -34,6 +34,7 @@ import facts/log as facts_log
 import facts/types as facts_types
 import gleam/dict
 import gleam/erlang/process.{type Pid, type Subject}
+import gleam/float
 import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
@@ -52,11 +53,21 @@ import slog
 
 /// Configuration for paperwings-based CBR retrieval.
 pub type CbrConfig {
-  CbrConfig(vsa_dimensions: Int, mailbox_warn_threshold: Int)
+  CbrConfig(
+    vsa_dimensions: Int,
+    mailbox_warn_threshold: Int,
+    rrf_k: Int,
+    min_score: Float,
+  )
 }
 
 pub fn default_cbr_config() -> CbrConfig {
-  CbrConfig(vsa_dimensions: 1000, mailbox_warn_threshold: 50)
+  CbrConfig(
+    vsa_dimensions: 1000,
+    mailbox_warn_threshold: 50,
+    rrf_k: 60,
+    min_score: 0.0,
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -289,6 +300,28 @@ pub type LibrarianMessage {
   /// Get all CBR cases.
   QueryAllCases(reply_to: Subject(List(cbr_types.CbrCase)))
 
+  // --- CBR mutation (Phase 3) ---
+  /// Update a case's fields (correct misclassified data).
+  UpdateCase(
+    case_id: String,
+    updated_case: cbr_types.CbrCase,
+    reply_to: Subject(Result(Nil, String)),
+  )
+  /// Append an annotation to a case's pitfalls.
+  AnnotateCase(
+    case_id: String,
+    annotation: String,
+    reply_to: Subject(Result(Nil, String)),
+  )
+  /// Suppress a case — mark as suppressed, remove from retrieval.
+  SuppressCase(case_id: String, reply_to: Subject(Result(Nil, String)))
+  /// Boost/adjust a case's confidence score.
+  BoostCase(
+    case_id: String,
+    new_confidence: Float,
+    reply_to: Subject(Result(Nil, String)),
+  )
+
   // --- Facts ingestion ---
   /// Index a new fact (after it's been written to JSONL).
   IndexFact(fact: facts_types.MemoryFact)
@@ -408,9 +441,10 @@ type LibrarianState {
     by_keyword: NarrativeTable,
     by_recency: NarrativeTable,
     thread_index: ThreadIndex,
-    // CBR — metadata ETS + paperwings CaseBase
+    // CBR — metadata ETS + paperwings CaseBase + config
     cbr_cases: CbrTable,
     case_base: bridge.CaseBase,
+    cbr_config: CbrConfig,
     // Facts
     facts_dir: String,
     facts_by_key: FactTable,
@@ -515,6 +549,7 @@ fn start_with_pid(
           thread_index: ThreadIndex(threads: []),
           cbr_cases: cbr_cases_table,
           case_base:,
+          cbr_config:,
           facts_dir:,
           facts_by_key: facts_key_table,
           facts_by_cycle: facts_cycle_table,
@@ -926,6 +961,65 @@ pub fn load_all_cases(
       )
       []
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Synchronous mutation helpers — CBR
+// ---------------------------------------------------------------------------
+
+/// Update a case's fields. Blocks until reply.
+pub fn update_case(
+  librarian: Subject(LibrarianMessage),
+  case_id: String,
+  updated_case: cbr_types.CbrCase,
+) -> Result(Nil, String) {
+  let reply_to = process.new_subject()
+  process.send(librarian, UpdateCase(case_id:, updated_case:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(result) -> result
+    Error(_) -> Error("Timeout waiting for update_case reply")
+  }
+}
+
+/// Append an annotation to a case's pitfalls. Blocks until reply.
+pub fn annotate_case(
+  librarian: Subject(LibrarianMessage),
+  case_id: String,
+  annotation: String,
+) -> Result(Nil, String) {
+  let reply_to = process.new_subject()
+  process.send(librarian, AnnotateCase(case_id:, annotation:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(result) -> result
+    Error(_) -> Error("Timeout waiting for annotate_case reply")
+  }
+}
+
+/// Suppress a case — remove from retrieval. Blocks until reply.
+pub fn suppress_case(
+  librarian: Subject(LibrarianMessage),
+  case_id: String,
+) -> Result(Nil, String) {
+  let reply_to = process.new_subject()
+  process.send(librarian, SuppressCase(case_id:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(result) -> result
+    Error(_) -> Error("Timeout waiting for suppress_case reply")
+  }
+}
+
+/// Boost/adjust a case's confidence. Blocks until reply.
+pub fn boost_case(
+  librarian: Subject(LibrarianMessage),
+  case_id: String,
+  new_confidence: Float,
+) -> Result(Nil, String) {
+  let reply_to = process.new_subject()
+  process.send(librarian, BoostCase(case_id:, new_confidence:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(result) -> result
+    Error(_) -> Error("Timeout waiting for boost_case reply")
   }
 }
 
@@ -1343,7 +1437,14 @@ fn loop(state: LibrarianState) -> Nil {
 
         RetrieveCases(query:, reply_to:) -> {
           let metadata = build_cbr_metadata(state)
-          let results = bridge.retrieve_cases(state.case_base, query, metadata)
+          let results =
+            bridge.retrieve_cases(
+              state.case_base,
+              query,
+              metadata,
+              state.cbr_config.rrf_k,
+              state.cbr_config.min_score,
+            )
           process.send(reply_to, results)
           loop(state)
         }
@@ -1358,6 +1459,103 @@ fn loop(state: LibrarianState) -> Nil {
           let all = cbr_all_values(state.cbr_cases)
           process.send(reply_to, all)
           loop(state)
+        }
+
+        // --- CBR mutation messages ---
+        UpdateCase(case_id:, updated_case:, reply_to:) -> {
+          case cbr_lookup(state.cbr_cases, case_id) {
+            Error(_) -> {
+              process.send(reply_to, Error("Case not found: " <> case_id))
+              loop(state)
+            }
+            Ok(_) -> {
+              // Update metadata ETS
+              cbr_insert(state.cbr_cases, case_id, updated_case)
+              // Re-encode in CaseBase (remove old, retain new)
+              let case_base = bridge.remove_case(state.case_base, case_id)
+              let case_base = bridge.retain_case(case_base, updated_case)
+              // Persist update to disk
+              cbr_log.append(state.cbr_dir, updated_case)
+              process.send(reply_to, Ok(Nil))
+              loop(LibrarianState(..state, case_base:))
+            }
+          }
+        }
+
+        AnnotateCase(case_id:, annotation:, reply_to:) -> {
+          case cbr_lookup(state.cbr_cases, case_id) {
+            Error(_) -> {
+              process.send(reply_to, Error("Case not found: " <> case_id))
+              loop(state)
+            }
+            Ok(existing) -> {
+              let updated =
+                cbr_types.CbrCase(
+                  ..existing,
+                  outcome: cbr_types.CbrOutcome(
+                    ..existing.outcome,
+                    pitfalls: list.append(existing.outcome.pitfalls, [
+                      annotation,
+                    ]),
+                  ),
+                )
+              cbr_insert(state.cbr_cases, case_id, updated)
+              cbr_log.append(state.cbr_dir, updated)
+              process.send(reply_to, Ok(Nil))
+              loop(state)
+            }
+          }
+        }
+
+        SuppressCase(case_id:, reply_to:) -> {
+          case cbr_lookup(state.cbr_cases, case_id) {
+            Error(_) -> {
+              process.send(reply_to, Error("Case not found: " <> case_id))
+              loop(state)
+            }
+            Ok(existing) -> {
+              // Mark as suppressed in metadata
+              let suppressed =
+                cbr_types.CbrCase(
+                  ..existing,
+                  outcome: cbr_types.CbrOutcome(
+                    ..existing.outcome,
+                    status: "suppressed",
+                  ),
+                )
+              cbr_insert(state.cbr_cases, case_id, suppressed)
+              // Remove from CaseBase (no longer retrievable via VSA/index)
+              let case_base = bridge.remove_case(state.case_base, case_id)
+              cbr_log.append(state.cbr_dir, suppressed)
+              process.send(reply_to, Ok(Nil))
+              loop(LibrarianState(..state, case_base:))
+            }
+          }
+        }
+
+        BoostCase(case_id:, new_confidence:, reply_to:) -> {
+          case cbr_lookup(state.cbr_cases, case_id) {
+            Error(_) -> {
+              process.send(reply_to, Error("Case not found: " <> case_id))
+              loop(state)
+            }
+            Ok(existing) -> {
+              // Clamp confidence to [0.0, 1.0]
+              let clamped = float.min(1.0, float.max(0.0, new_confidence))
+              let updated =
+                cbr_types.CbrCase(
+                  ..existing,
+                  outcome: cbr_types.CbrOutcome(
+                    ..existing.outcome,
+                    confidence: clamped,
+                  ),
+                )
+              cbr_insert(state.cbr_cases, case_id, updated)
+              cbr_log.append(state.cbr_dir, updated)
+              process.send(reply_to, Ok(Nil))
+              loop(state)
+            }
+          }
         }
 
         // --- Facts messages ---
@@ -1614,7 +1812,13 @@ fn build_cbr_metadata(
   state: LibrarianState,
 ) -> dict.Dict(String, cbr_types.CbrCase) {
   let all_cases = cbr_all_values(state.cbr_cases)
-  list.fold(all_cases, dict.new(), fn(d, c) { dict.insert(d, c.case_id, c) })
+  // Exclude suppressed cases from retrieval metadata
+  list.fold(all_cases, dict.new(), fn(d, c) {
+    case c.outcome.status {
+      "suppressed" -> d
+      _ -> dict.insert(d, c.case_id, c)
+    }
+  })
 }
 
 /// Generate a list [from..to] inclusive.

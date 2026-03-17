@@ -101,6 +101,8 @@ pub type AppConfig {
     threading_threshold: Option(Int),
     // ── CBR (paperwings) ──
     vsa_dimensions: Option(Int),
+    cbr_rrf_k: Option(Int),
+    cbr_min_score: Option(Float),
     // ── Housekeeping ──
     dedup_similarity: Option(Float),
     pruning_confidence: Option(Float),
@@ -211,6 +213,8 @@ pub fn default() -> AppConfig {
     threading_topic_weight: None,
     threading_threshold: None,
     vsa_dimensions: None,
+    cbr_rrf_k: None,
+    cbr_min_score: None,
     dedup_similarity: None,
     pruning_confidence: None,
     fact_confidence: None,
@@ -428,6 +432,8 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     ),
     // CBR (paperwings)
     vsa_dimensions: option.or(override_cfg.vsa_dimensions, base.vsa_dimensions),
+    cbr_rrf_k: option.or(override_cfg.cbr_rrf_k, base.cbr_rrf_k),
+    cbr_min_score: option.or(override_cfg.cbr_min_score, base.cbr_min_score),
     // Housekeeping
     dedup_similarity: option.or(
       override_cfg.dedup_similarity,
@@ -941,6 +947,8 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     ]),
     // ── [cbr] ──
     vsa_dimensions: get_toml_int(table, ["cbr", "vsa_dimensions"]),
+    cbr_rrf_k: get_toml_int(table, ["cbr", "rrf_k"]),
+    cbr_min_score: get_toml_float(table, ["cbr", "min_score"]),
     // ── [housekeeping] ──
     dedup_similarity: get_toml_float(table, ["housekeeping", "dedup_similarity"]),
     pruning_confidence: get_toml_float(table, [

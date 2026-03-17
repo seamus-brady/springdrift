@@ -75,6 +75,7 @@ pub type CbrQuery {
     keywords: List(String),
     entities: List(String),
     max_results: Int,
+    query_complexity: Option(String),
   )
 }
 

@@ -7,7 +7,7 @@
 //// Three retrieval signals, fused with RRF:
 ////   1. VSA structural distance — role-filler bound vectors bundled per case
 ////   2. Inverted index — token overlap (keywords, entities, tools, agents)
-////   3. Semantic embedding — optional, via EmbedFn closure (ortex/ONNX)
+////   3. Recency — newer cases ranked higher
 
 import cbr/types.{type CbrCase, type CbrQuery, type ScoredCase, ScoredCase}
 import gleam/dict.{type Dict}
@@ -44,17 +44,13 @@ pub type CaseBase {
   )
 }
 
-/// Optional semantic embedding function (ortex/ONNX).
-/// Takes text, returns float vector. None = VSA + index only.
-pub type EmbedFn =
-  fn(String) -> Result(List(Float), String)
-
 // ---------------------------------------------------------------------------
 // Role names — stable feature identifiers
+// Issue 3: "approach" removed — approach tokens go to inverted index only
 // ---------------------------------------------------------------------------
 
 const role_names = [
-  "intent", "domain", "status", "approach", "keyword", "entity", "tool", "agent",
+  "intent", "domain", "status", "keyword", "entity", "tool", "agent",
 ]
 
 // ---------------------------------------------------------------------------
@@ -154,12 +150,17 @@ pub fn rebuild_index(base: CaseBase, cases: List(CbrCase)) -> CaseBase {
 
 // ---------------------------------------------------------------------------
 // Retain — encode a new case into the CaseBase
+// Issue 4: Reorder — ensure_fillers before encode_case, then update index
 // ---------------------------------------------------------------------------
 
 /// Encode a CbrCase into the CaseBase's three stores (VSA, index).
 /// Returns the updated CaseBase.
 pub fn retain_case(base: CaseBase, cbr_case: CbrCase) -> CaseBase {
-  // Step 1: Encode features as VSA vector
+  // Step 1: Ensure filler vectors exist for new values (before encoding)
+  let fillers = ensure_fillers(base.fillers, cbr_case)
+  let base = CaseBase(..base, fillers:)
+
+  // Step 2: Encode features as VSA vector (now all fillers are available)
   let case_vec_result = encode_case(base, cbr_case)
 
   let base = case case_vec_result {
@@ -180,7 +181,7 @@ pub fn retain_case(base: CaseBase, cbr_case: CbrCase) -> CaseBase {
     }
   }
 
-  // Step 2: Update inverted index
+  // Step 3: Update inverted index
   let tokens = case_tokens(cbr_case)
   let index =
     list.fold(tokens, base.index, fn(idx, tok) {
@@ -188,22 +189,22 @@ pub fn retain_case(base: CaseBase, cbr_case: CbrCase) -> CaseBase {
       dict.insert(idx, tok, [cbr_case.case_id, ..existing])
     })
 
-  // Step 3: Ensure filler vectors exist for new values
-  let fillers = ensure_fillers(base.fillers, cbr_case)
-
-  CaseBase(..base, index:, fillers:)
+  CaseBase(..base, index:)
 }
 
 // ---------------------------------------------------------------------------
 // Retrieve — find similar cases
+// Issue 10: rrf_k + min_score params; Issue 6: recency signal; Issue 2: min_score filter
 // ---------------------------------------------------------------------------
 
-/// Retrieve cases matching a query, scored by RRF fusion of VSA distance
-/// and inverted index overlap. Returns ScoredCase list (descending score).
+/// Retrieve cases matching a query, scored by RRF fusion of VSA distance,
+/// inverted index overlap, and recency. Returns ScoredCase list (descending score).
 pub fn retrieve_cases(
   base: CaseBase,
   query: CbrQuery,
   metadata: Dict(String, CbrCase),
+  rrf_k: Int,
+  min_score: Float,
 ) -> List(ScoredCase) {
   let max_results = query.max_results
 
@@ -213,11 +214,16 @@ pub fn retrieve_cases(
   // Signal 2: Inverted index token overlap
   let index_ranked = index_rank(base, query)
 
-  // Fuse with Reciprocal Rank Fusion (k=60)
-  let fused = reciprocal_rank_fusion([vsa_ranked, index_ranked], 60)
+  // Signal 3: Recency (newer cases ranked higher)
+  let recency_ranked = recency_rank(metadata)
 
-  // Map case_ids back to full CbrCase via metadata lookup
+  // Fuse with Reciprocal Rank Fusion
+  let fused =
+    reciprocal_rank_fusion([vsa_ranked, index_ranked, recency_ranked], rrf_k)
+
+  // Issue 2: Filter by min_score before taking max_results
   fused
+  |> list.filter(fn(scored_id) { scored_id.1 >=. min_score })
   |> list.take(max_results)
   |> list.filter_map(fn(scored_id) {
     case dict.get(metadata, scored_id.0) {
@@ -229,16 +235,16 @@ pub fn retrieve_cases(
 
 // ---------------------------------------------------------------------------
 // VSA encoding
+// Issue 3: "approach" removed from VSA bindings (tokenised in inverted index only)
 // ---------------------------------------------------------------------------
 
 /// Encode a CbrCase as a bundled VSA vector of role⊗filler bindings.
 fn encode_case(base: CaseBase, c: CbrCase) -> Result(Vector, MemoryError) {
-  // Build feature bindings
+  // Build feature bindings (approach excluded — goes to inverted index only)
   let features = [
     #("intent", c.problem.intent),
     #("domain", c.problem.domain),
     #("status", c.outcome.status),
-    #("approach", string.slice(c.solution.approach, 0, 50)),
   ]
 
   // Single-value features: bind role ⊗ filler
@@ -338,12 +344,12 @@ fn get_or_create_binding(
 }
 
 /// Ensure filler vectors exist for all values in a case.
+/// Issue 3: "approach" removed from fillers (no longer a VSA role)
 fn ensure_fillers(fillers: VectorSpace, c: CbrCase) -> VectorSpace {
   let pairs = [
     #("intent", [c.problem.intent]),
     #("domain", [c.problem.domain]),
     #("status", [c.outcome.status]),
-    #("approach", [string.slice(c.solution.approach, 0, 50)]),
     #("keyword", c.problem.keywords),
     #("entity", c.problem.entities),
     #("tool", c.solution.tools_used),
@@ -431,6 +437,7 @@ fn vsa_rank(base: CaseBase, query: CbrQuery) -> List(#(String, Int)) {
 
 // ---------------------------------------------------------------------------
 // Inverted index ranking
+// Issue 3: approach tokens added; Issue 8: query_complexity tokens added
 // ---------------------------------------------------------------------------
 
 /// Extract tokens for the inverted index from a CbrCase.
@@ -447,6 +454,20 @@ fn case_tokens(c: CbrCase) -> List(String) {
     "" -> []
     d -> [string.lowercase(d)]
   }
+  // Issue 3: Tokenise approach into individual words for the inverted index
+  let approach_tokens = case c.solution.approach {
+    "" -> []
+    a ->
+      a
+      |> string.lowercase
+      |> string.split(" ")
+      |> list.filter(fn(w) { string.length(w) > 2 })
+  }
+  // Issue 8: Include query_complexity as a token
+  let complexity_tokens = case c.problem.query_complexity {
+    "" -> []
+    qc -> [string.lowercase(qc)]
+  }
   list.flatten([
     kw_tokens,
     entity_tokens,
@@ -454,12 +475,23 @@ fn case_tokens(c: CbrCase) -> List(String) {
     agent_tokens,
     intent_tokens,
     domain_tokens,
+    approach_tokens,
+    complexity_tokens,
   ])
   |> list.unique
 }
 
 /// Rank cases by token overlap with query.
+/// Issue 8: query_complexity included in query tokens
 fn index_rank(base: CaseBase, query: CbrQuery) -> List(#(String, Int)) {
+  let complexity_tokens = case query.query_complexity {
+    Some(qc) ->
+      case qc {
+        "" -> []
+        _ -> [string.lowercase(qc)]
+      }
+    None -> []
+  }
   let query_tokens =
     list.flatten([
       list.map(query.keywords, string.lowercase),
@@ -472,6 +504,7 @@ fn index_rank(base: CaseBase, query: CbrQuery) -> List(#(String, Int)) {
         "" -> []
         d -> [string.lowercase(d)]
       },
+      complexity_tokens,
     ])
     |> list.unique
 
@@ -494,6 +527,22 @@ fn index_rank(base: CaseBase, query: CbrQuery) -> List(#(String, Int)) {
     |> list.sort(fn(a, b) { int.compare(b.1, a.1) })
 
   // Return ranked (position 1 = best)
+  list.index_map(sorted, fn(entry, idx) { #(entry.0, idx + 1) })
+}
+
+// ---------------------------------------------------------------------------
+// Recency ranking (Issue 6)
+// ---------------------------------------------------------------------------
+
+/// Rank cases by timestamp (newer = higher rank). Cases with empty timestamps
+/// are ranked last.
+fn recency_rank(metadata: Dict(String, CbrCase)) -> List(#(String, Int)) {
+  let entries = dict.to_list(metadata)
+  let sorted =
+    list.sort(entries, fn(a, b) {
+      // Sort by timestamp descending (newest first)
+      string.compare({ b.1 }.timestamp, { a.1 }.timestamp)
+    })
   list.index_map(sorted, fn(entry, idx) { #(entry.0, idx + 1) })
 }
 
@@ -543,6 +592,7 @@ pub fn destroy(base: CaseBase) -> Nil {
 }
 
 /// Remove a case from the CaseBase (for pruning/dedup).
+/// Issue 5: Filter out empty posting lists after removal
 pub fn remove_case(base: CaseBase, case_id: String) -> CaseBase {
   // Remove from case vectors
   let cases = case vector_space.delete_vector(base.cases, case_id) {
@@ -550,11 +600,12 @@ pub fn remove_case(base: CaseBase, case_id: String) -> CaseBase {
     Error(_) -> base.cases
   }
 
-  // Remove from inverted index
+  // Remove from inverted index, filtering out empty posting lists
   let index =
     dict.map_values(base.index, fn(_tok, ids) {
       list.filter(ids, fn(id) { id != case_id })
     })
+    |> dict.filter(fn(_tok, ids) { !list.is_empty(ids) })
 
   CaseBase(..base, cases:, index:)
 }

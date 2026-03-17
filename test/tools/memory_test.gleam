@@ -22,7 +22,7 @@ pub fn main() -> Nil {
 
 pub fn memory_tools_defined_test() {
   let tools = memory.all()
-  tools |> list.length |> should.equal(15)
+  tools |> list.length |> should.equal(19)
 }
 
 pub fn recall_recent_tool_exists_test() {
@@ -781,4 +781,112 @@ pub fn observer_tools_has_introspect_test() {
 pub fn observer_tools_no_how_to_test() {
   let names = list.map(memory.observer_tools(), fn(t) { t.name })
   list.contains(names, "how_to") |> should.be_false
+}
+
+// ---------------------------------------------------------------------------
+// CBR mutation tools — existence + is_memory_tool
+// ---------------------------------------------------------------------------
+
+pub fn correct_case_tool_exists_test() {
+  let tools = memory.all()
+  let names = list.map(tools, fn(t) { t.name })
+  list.contains(names, "correct_case") |> should.be_true
+}
+
+pub fn annotate_case_tool_exists_test() {
+  let tools = memory.all()
+  let names = list.map(tools, fn(t) { t.name })
+  list.contains(names, "annotate_case") |> should.be_true
+}
+
+pub fn suppress_case_tool_exists_test() {
+  let tools = memory.all()
+  let names = list.map(tools, fn(t) { t.name })
+  list.contains(names, "suppress_case") |> should.be_true
+}
+
+pub fn boost_case_tool_exists_test() {
+  let tools = memory.all()
+  let names = list.map(tools, fn(t) { t.name })
+  list.contains(names, "boost_case") |> should.be_true
+}
+
+pub fn is_memory_tool_correct_case_test() {
+  memory.is_memory_tool("correct_case") |> should.be_true
+}
+
+pub fn is_memory_tool_annotate_case_test() {
+  memory.is_memory_tool("annotate_case") |> should.be_true
+}
+
+pub fn is_memory_tool_suppress_case_test() {
+  memory.is_memory_tool("suppress_case") |> should.be_true
+}
+
+pub fn is_memory_tool_boost_case_test() {
+  memory.is_memory_tool("boost_case") |> should.be_true
+}
+
+// ---------------------------------------------------------------------------
+// CBR mutation tools — no librarian returns error
+// ---------------------------------------------------------------------------
+
+pub fn correct_case_no_librarian_test() {
+  let call =
+    ToolCall(
+      id: "cc1",
+      name: "correct_case",
+      input_json: "{\"case_id\":\"c1\",\"status\":\"failure\"}",
+    )
+  let result = memory.execute(call, "/tmp", None, None, None, test_limits)
+  case result {
+    ToolFailure(error: e, ..) ->
+      should.be_true(string.contains(e, "not available"))
+    _ -> should.fail()
+  }
+}
+
+pub fn suppress_case_no_librarian_test() {
+  let call =
+    ToolCall(
+      id: "sc1",
+      name: "suppress_case",
+      input_json: "{\"case_id\":\"c1\"}",
+    )
+  let result = memory.execute(call, "/tmp", None, None, None, test_limits)
+  case result {
+    ToolFailure(error: e, ..) ->
+      should.be_true(string.contains(e, "not available"))
+    _ -> should.fail()
+  }
+}
+
+pub fn boost_case_no_librarian_test() {
+  let call =
+    ToolCall(
+      id: "bc1",
+      name: "boost_case",
+      input_json: "{\"case_id\":\"c1\",\"confidence\":0.9}",
+    )
+  let result = memory.execute(call, "/tmp", None, None, None, test_limits)
+  case result {
+    ToolFailure(error: e, ..) ->
+      should.be_true(string.contains(e, "not available"))
+    _ -> should.fail()
+  }
+}
+
+pub fn annotate_case_no_librarian_test() {
+  let call =
+    ToolCall(
+      id: "ac1",
+      name: "annotate_case",
+      input_json: "{\"case_id\":\"c1\",\"annotation\":\"note\"}",
+    )
+  let result = memory.execute(call, "/tmp", None, None, None, test_limits)
+  case result {
+    ToolFailure(error: e, ..) ->
+      should.be_true(string.contains(e, "not available"))
+    _ -> should.fail()
+  }
 }

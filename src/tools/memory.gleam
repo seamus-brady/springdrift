@@ -14,6 +14,7 @@ import facts/types as facts_types
 import gleam/dynamic/decode
 import gleam/erlang/process.{type Subject}
 import gleam/float
+
 import gleam/int
 import gleam/json
 import gleam/list
@@ -59,6 +60,10 @@ pub fn all() -> List(Tool) {
     introspect_tool(),
     list_recent_cycles_tool(),
     how_to_tool(),
+    correct_case_tool(),
+    annotate_case_tool(),
+    suppress_case_tool(),
+    boost_case_tool(),
   ]
 }
 
@@ -319,6 +324,10 @@ pub fn is_memory_tool(name: String) -> Bool {
   || name == "introspect"
   || name == "list_recent_cycles"
   || name == "how_to"
+  || name == "correct_case"
+  || name == "annotate_case"
+  || name == "suppress_case"
+  || name == "boost_case"
 }
 
 /// Context for facts-based memory tools.
@@ -409,6 +418,10 @@ pub fn execute_with_how_to(
     "introspect" -> run_introspect(call, introspect_ctx)
     "list_recent_cycles" -> run_list_recent_cycles(call, lib)
     "how_to" -> run_how_to(call, how_to_content)
+    "correct_case" -> run_correct_case(call, lib)
+    "annotate_case" -> run_annotate_case(call, lib)
+    "suppress_case" -> run_suppress_case(call, lib)
+    "boost_case" -> run_boost_case(call, lib)
     _ -> ToolFailure(tool_use_id: call.id, error: "Unknown tool: " <> call.name)
   }
 }
@@ -1314,6 +1327,7 @@ fn run_recall_cases(
               keywords:,
               entities: [],
               max_results: clamped,
+              query_complexity: None,
             )
           let results = librarian.retrieve_cases(l, query)
           case results {
@@ -1709,6 +1723,272 @@ fn run_how_to(call: ToolCall, content: Option(String)) -> ToolResult {
         Ok(Some(topic)) -> filter_by_topic(guide, topic)
       }
       ToolSuccess(tool_use_id: call.id, content: result)
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// CBR mutation tools (Phase 3)
+// ---------------------------------------------------------------------------
+
+fn correct_case_tool() -> Tool {
+  tool.new("correct_case")
+  |> tool.with_description(
+    "Correct a misclassified CBR case. Update status, confidence, or assessment. "
+    <> "Provide the case_id and any fields to change.",
+  )
+  |> tool.add_string_param("case_id", "The case ID to correct", True)
+  |> tool.add_string_param(
+    "status",
+    "New outcome status (e.g. 'success', 'failure', 'partial')",
+    False,
+  )
+  |> tool.add_number_param(
+    "confidence",
+    "New confidence score (0.0 to 1.0)",
+    False,
+  )
+  |> tool.add_string_param("assessment", "New outcome assessment", False)
+  |> tool.build()
+}
+
+fn annotate_case_tool() -> Tool {
+  tool.new("annotate_case")
+  |> tool.with_description(
+    "Add an annotation (pitfall or note) to an existing CBR case. "
+    <> "The annotation is appended to the case's pitfalls list.",
+  )
+  |> tool.add_string_param("case_id", "The case ID to annotate", True)
+  |> tool.add_string_param("annotation", "The annotation to add", True)
+  |> tool.build()
+}
+
+fn suppress_case_tool() -> Tool {
+  tool.new("suppress_case")
+  |> tool.with_description(
+    "Suppress a CBR case — removes it from retrieval results. "
+    <> "Use this for cases that are incorrect, misleading, or no longer relevant. "
+    <> "The case is preserved on disk but marked as suppressed.",
+  )
+  |> tool.add_string_param("case_id", "The case ID to suppress", True)
+  |> tool.add_string_param("reason", "Optional reason for suppression", False)
+  |> tool.build()
+}
+
+fn boost_case_tool() -> Tool {
+  tool.new("boost_case")
+  |> tool.with_description(
+    "Adjust a CBR case's confidence score. Higher confidence makes the case "
+    <> "more prominent in retrieval. Value is clamped to [0.0, 1.0].",
+  )
+  |> tool.add_string_param("case_id", "The case ID to boost", True)
+  |> tool.add_number_param(
+    "confidence",
+    "New confidence score (0.0 to 1.0)",
+    True,
+  )
+  |> tool.build()
+}
+
+fn run_correct_case(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+) -> ToolResult {
+  case lib {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "correct_case not available: Librarian not initialised",
+      )
+    Some(l) -> {
+      let decoder = {
+        use case_id <- decode.field("case_id", decode.string)
+        use status <- decode.optional_field("status", "", decode.string)
+        use confidence <- decode.optional_field(
+          "confidence",
+          -1.0,
+          decode.float,
+        )
+        use assessment <- decode.optional_field("assessment", "", decode.string)
+        decode.success(#(case_id, status, confidence, assessment))
+      }
+      case json.parse(call.input_json, decoder) {
+        Error(_) ->
+          ToolFailure(
+            tool_use_id: call.id,
+            error: "Invalid correct_case input: case_id required",
+          )
+        Ok(#(case_id, status, confidence, assessment)) -> {
+          // Look up the existing case first
+          let reply_to = process.new_subject()
+          process.send(l, librarian.QueryCaseById(case_id:, reply_to:))
+          case process.receive(reply_to, 5000) {
+            Error(_) ->
+              ToolFailure(
+                tool_use_id: call.id,
+                error: "Timeout looking up case " <> case_id,
+              )
+            Ok(Error(_)) ->
+              ToolFailure(
+                tool_use_id: call.id,
+                error: "Case not found: " <> case_id,
+              )
+            Ok(Ok(existing)) -> {
+              let new_status = case status {
+                "" -> existing.outcome.status
+                s -> s
+              }
+              let new_confidence = case confidence <. 0.0 {
+                True -> existing.outcome.confidence
+                False -> float.min(1.0, float.max(0.0, confidence))
+              }
+              let new_assessment = case assessment {
+                "" -> existing.outcome.assessment
+                a -> a
+              }
+              let updated =
+                cbr_types.CbrCase(
+                  ..existing,
+                  outcome: cbr_types.CbrOutcome(
+                    ..existing.outcome,
+                    status: new_status,
+                    confidence: new_confidence,
+                    assessment: new_assessment,
+                  ),
+                )
+              case librarian.update_case(l, case_id, updated) {
+                Ok(_) ->
+                  ToolSuccess(
+                    tool_use_id: call.id,
+                    content: "Case " <> case_id <> " corrected.",
+                  )
+                Error(e) ->
+                  ToolFailure(
+                    tool_use_id: call.id,
+                    error: "Update failed: " <> e,
+                  )
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+fn run_annotate_case(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+) -> ToolResult {
+  case lib {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "annotate_case not available: Librarian not initialised",
+      )
+    Some(l) -> {
+      let decoder = {
+        use case_id <- decode.field("case_id", decode.string)
+        use annotation <- decode.field("annotation", decode.string)
+        decode.success(#(case_id, annotation))
+      }
+      case json.parse(call.input_json, decoder) {
+        Error(_) ->
+          ToolFailure(
+            tool_use_id: call.id,
+            error: "Invalid annotate_case input: case_id and annotation required",
+          )
+        Ok(#(case_id, annotation)) ->
+          case librarian.annotate_case(l, case_id, annotation) {
+            Ok(_) ->
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: "Annotation added to case " <> case_id <> ".",
+              )
+            Error(e) ->
+              ToolFailure(tool_use_id: call.id, error: "Annotate failed: " <> e)
+          }
+      }
+    }
+  }
+}
+
+fn run_suppress_case(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+) -> ToolResult {
+  case lib {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "suppress_case not available: Librarian not initialised",
+      )
+    Some(l) -> {
+      let decoder = {
+        use case_id <- decode.field("case_id", decode.string)
+        use reason <- decode.optional_field("reason", "", decode.string)
+        decode.success(#(case_id, reason))
+      }
+      case json.parse(call.input_json, decoder) {
+        Error(_) ->
+          ToolFailure(
+            tool_use_id: call.id,
+            error: "Invalid suppress_case input: case_id required",
+          )
+        Ok(#(case_id, _reason)) ->
+          case librarian.suppress_case(l, case_id) {
+            Ok(_) ->
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: "Case "
+                  <> case_id
+                  <> " suppressed — removed from retrieval.",
+              )
+            Error(e) ->
+              ToolFailure(tool_use_id: call.id, error: "Suppress failed: " <> e)
+          }
+      }
+    }
+  }
+}
+
+fn run_boost_case(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+) -> ToolResult {
+  case lib {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "boost_case not available: Librarian not initialised",
+      )
+    Some(l) -> {
+      let decoder = {
+        use case_id <- decode.field("case_id", decode.string)
+        use confidence <- decode.field("confidence", decode.float)
+        decode.success(#(case_id, confidence))
+      }
+      case json.parse(call.input_json, decoder) {
+        Error(_) ->
+          ToolFailure(
+            tool_use_id: call.id,
+            error: "Invalid boost_case input: case_id and confidence required",
+          )
+        Ok(#(case_id, confidence)) ->
+          case librarian.boost_case(l, case_id, confidence) {
+            Ok(_) ->
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: "Case "
+                  <> case_id
+                  <> " confidence updated to "
+                  <> float.to_string(float.min(1.0, float.max(0.0, confidence)))
+                  <> ".",
+              )
+            Error(e) ->
+              ToolFailure(tool_use_id: call.id, error: "Boost failed: " <> e)
+          }
+      }
     }
   }
 }

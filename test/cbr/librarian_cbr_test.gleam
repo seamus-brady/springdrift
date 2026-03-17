@@ -142,6 +142,7 @@ pub fn librarian_retrieve_by_intent_test() {
       keywords: ["market"],
       entities: ["Dublin"],
       max_results: 10,
+      query_complexity: None,
     )
   let results = librarian.retrieve_cases(lib, query)
 
@@ -187,6 +188,7 @@ pub fn librarian_retrieve_by_keywords_test() {
       keywords: ["market", "rental"],
       entities: [],
       max_results: 10,
+      query_complexity: None,
     )
   let results = librarian.retrieve_cases(lib, query)
   should.be_true(list.length(results) >= 2)
@@ -227,6 +229,7 @@ pub fn librarian_retrieve_max_results_test() {
       keywords: ["market"],
       entities: [],
       max_results: 2,
+      query_complexity: None,
     )
   let results = librarian.retrieve_cases(lib, query)
   list.length(results) |> should.equal(2)
@@ -260,6 +263,7 @@ pub fn librarian_retrieve_no_match_test() {
       keywords: ["rust", "compiler"],
       entities: ["Mozilla"],
       max_results: 10,
+      query_complexity: None,
     )
   let results = librarian.retrieve_cases(lib, query)
 
@@ -331,6 +335,7 @@ pub fn librarian_domain_scoring_test() {
       keywords: ["market"],
       entities: [],
       max_results: 10,
+      query_complexity: None,
     )
   let results = librarian.retrieve_cases(lib, query)
   should.be_true(list.length(results) >= 2)
@@ -369,11 +374,171 @@ pub fn librarian_entity_scoring_test() {
       keywords: ["market"],
       entities: ["Dublin"],
       max_results: 10,
+      query_complexity: None,
     )
   let results = librarian.retrieve_cases(lib, query)
   should.be_true(list.length(results) >= 2)
   let assert [top, ..] = results
   top.cbr_case.case_id |> should.equal("case-e1")
+
+  process.send(lib, librarian.Shutdown)
+}
+
+// ---------------------------------------------------------------------------
+// CBR mutation tests
+// ---------------------------------------------------------------------------
+
+pub fn librarian_suppress_case_test() {
+  let dir = test_dir("suppress")
+  let cbr_dir = dir <> "/cbr"
+  let _ = simplifile.create_directory_all(cbr_dir)
+  let lib =
+    librarian.start(
+      dir,
+      cbr_dir,
+      dir <> "/facts",
+      dir <> "/artifacts",
+      0,
+      librarian.default_cbr_config(),
+    )
+
+  let c1 = make_case("case-s1", "research", "property", ["market"], ["Dublin"])
+  let c2 = make_case("case-s2", "research", "property", ["rental"], ["Cork"])
+  librarian.notify_new_case(lib, c1)
+  librarian.notify_new_case(lib, c2)
+  process.sleep(50)
+
+  // Suppress c1
+  let result = librarian.suppress_case(lib, "case-s1")
+  result |> should.be_ok
+
+  // Retrieve — suppressed case should not appear
+  let query =
+    CbrQuery(
+      intent: "research",
+      domain: "property",
+      keywords: ["market"],
+      entities: [],
+      max_results: 10,
+      query_complexity: None,
+    )
+  let results = librarian.retrieve_cases(lib, query)
+  let case_ids = list.map(results, fn(r) { r.cbr_case.case_id })
+  list.contains(case_ids, "case-s1") |> should.be_false
+
+  process.send(lib, librarian.Shutdown)
+}
+
+pub fn librarian_annotate_case_test() {
+  let dir = test_dir("annotate")
+  let cbr_dir = dir <> "/cbr"
+  let _ = simplifile.create_directory_all(cbr_dir)
+  let lib =
+    librarian.start(
+      dir,
+      cbr_dir,
+      dir <> "/facts",
+      dir <> "/artifacts",
+      0,
+      librarian.default_cbr_config(),
+    )
+
+  let c1 = make_case("case-a1", "research", "property", ["market"], [])
+  librarian.notify_new_case(lib, c1)
+  process.sleep(50)
+
+  // Annotate
+  let result = librarian.annotate_case(lib, "case-a1", "rate limits hit")
+  result |> should.be_ok
+
+  // Look up — should have the pitfall
+  let reply_to = process.new_subject()
+  process.send(lib, librarian.QueryCaseById(case_id: "case-a1", reply_to:))
+  let assert Ok(Ok(updated)) = process.receive(reply_to, 5000)
+  list.contains(updated.outcome.pitfalls, "rate limits hit") |> should.be_true
+
+  process.send(lib, librarian.Shutdown)
+}
+
+pub fn librarian_boost_case_test() {
+  let dir = test_dir("boost")
+  let cbr_dir = dir <> "/cbr"
+  let _ = simplifile.create_directory_all(cbr_dir)
+  let lib =
+    librarian.start(
+      dir,
+      cbr_dir,
+      dir <> "/facts",
+      dir <> "/artifacts",
+      0,
+      librarian.default_cbr_config(),
+    )
+
+  let c1 = make_case("case-b1", "research", "property", ["market"], [])
+  librarian.notify_new_case(lib, c1)
+  process.sleep(50)
+
+  // Boost confidence
+  let result = librarian.boost_case(lib, "case-b1", 0.95)
+  result |> should.be_ok
+
+  // Look up — confidence should be updated
+  let reply_to = process.new_subject()
+  process.send(lib, librarian.QueryCaseById(case_id: "case-b1", reply_to:))
+  let assert Ok(Ok(updated)) = process.receive(reply_to, 5000)
+  should.be_true(updated.outcome.confidence >. 0.9)
+
+  process.send(lib, librarian.Shutdown)
+}
+
+pub fn librarian_boost_clamps_confidence_test() {
+  let dir = test_dir("boost_clamp")
+  let cbr_dir = dir <> "/cbr"
+  let _ = simplifile.create_directory_all(cbr_dir)
+  let lib =
+    librarian.start(
+      dir,
+      cbr_dir,
+      dir <> "/facts",
+      dir <> "/artifacts",
+      0,
+      librarian.default_cbr_config(),
+    )
+
+  let c1 = make_case("case-bc1", "research", "property", ["market"], [])
+  librarian.notify_new_case(lib, c1)
+  process.sleep(50)
+
+  // Boost with value > 1.0 — should clamp
+  let result = librarian.boost_case(lib, "case-bc1", 5.0)
+  result |> should.be_ok
+
+  let reply_to = process.new_subject()
+  process.send(lib, librarian.QueryCaseById(case_id: "case-bc1", reply_to:))
+  let assert Ok(Ok(updated)) = process.receive(reply_to, 5000)
+  // Clamped to 1.0
+  should.be_true(updated.outcome.confidence <=. 1.0)
+
+  process.send(lib, librarian.Shutdown)
+}
+
+pub fn librarian_suppress_nonexistent_test() {
+  let dir = test_dir("suppress_missing")
+  let cbr_dir = dir <> "/cbr"
+  let _ = simplifile.create_directory_all(cbr_dir)
+  let lib =
+    librarian.start(
+      dir,
+      cbr_dir,
+      dir <> "/facts",
+      dir <> "/artifacts",
+      0,
+      librarian.default_cbr_config(),
+    )
+
+  // Suppress nonexistent case
+  let result = librarian.suppress_case(lib, "nonexistent")
+  result |> should.be_error
 
   process.send(lib, librarian.Shutdown)
 }

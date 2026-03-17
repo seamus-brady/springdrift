@@ -204,6 +204,12 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 # VSA vector dimension for CBR case encoding (default: 1000)
 # vsa_dimensions = 1000
 
+# Reciprocal Rank Fusion k parameter — higher values smooth ranking differences (default: 60)
+# rrf_k = 60
+
+# Minimum RRF score to include a case in results — 0.0 returns all (default: 0.0)
+# min_score = 0.0
+
 # ── Housekeeping ─────────────────────────────────────────────────────────────
 # Maintenance thresholds for CBR dedup, pruning, and fact management.
 
