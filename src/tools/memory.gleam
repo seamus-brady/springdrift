@@ -277,11 +277,17 @@ fn list_recent_cycles_tool() -> Tool {
   |> tool.with_description(
     "List recent cycle IDs for a given date. Returns cycle IDs that can be passed "
     <> "to inspect_cycle for detailed analysis. Use this to discover which cycles "
-    <> "happened without needing to know IDs in advance.",
+    <> "happened without needing to know IDs in advance. By default shows only root "
+    <> "cognitive cycles; set include_agents=true to see agent sub-cycles too.",
   )
   |> tool.add_string_param(
     "date",
     "Date to query in YYYY-MM-DD format (default: today)",
+    False,
+  )
+  |> tool.add_boolean_param(
+    "include_agents",
+    "Include agent sub-cycles (default: false). When true, shows all cycles with [root]/[agent] labels.",
     False,
   )
   |> tool.build()
@@ -1063,7 +1069,11 @@ fn format_day_stats(stats: dag_types.DayStats) -> String {
       <> "\n\n"
       <> "Total cycles: "
       <> int.to_string(total)
-      <> "\n"
+      <> " (root: "
+      <> int.to_string(stats.root_cycles)
+      <> ", agent: "
+      <> int.to_string(stats.agent_cycles)
+      <> ")\n"
       <> "  Success: "
       <> int.to_string(stats.success_count)
       <> " | Partial: "
@@ -1581,19 +1591,33 @@ fn run_list_recent_cycles(
     Some(l) -> {
       let decoder = {
         use date <- decode.optional_field("date", get_date(), decode.string)
-        decode.success(date)
+        use include_agents <- decode.optional_field(
+          "include_agents",
+          False,
+          decode.bool,
+        )
+        decode.success(#(date, include_agents))
       }
-      let date = case json.parse(call.input_json, decoder) {
-        Ok(d) -> d
-        Error(_) -> get_date()
+      let #(date, include_agents) = case json.parse(call.input_json, decoder) {
+        Ok(pair) -> pair
+        Error(_) -> #(get_date(), False)
       }
       let subj = process.new_subject()
-      process.send(l, librarian.QueryDayRoots(date:, reply_to: subj))
+      process.send(l, librarian.QueryDayAll(date:, reply_to: subj))
       case process.receive(subj, 5000) {
         Error(_) ->
-          ToolFailure(tool_use_id: call.id, error: "Timeout querying day roots")
-        Ok(roots) ->
-          case roots {
+          ToolFailure(tool_use_id: call.id, error: "Timeout querying cycles")
+        Ok(all_nodes) -> {
+          let total = list.length(all_nodes)
+          let roots =
+            list.filter(all_nodes, fn(n) { option.is_none(n.parent_id) })
+          let root_count = list.length(roots)
+          let agent_count = total - root_count
+          let nodes = case include_agents {
+            True -> all_nodes
+            False -> roots
+          }
+          case nodes {
             [] ->
               ToolSuccess(
                 tool_use_id: call.id,
@@ -1601,17 +1625,28 @@ fn run_list_recent_cycles(
               )
             _ -> {
               let lines =
-                list.map(roots, fn(node: dag_types.CycleNode) {
+                list.map(nodes, fn(node: dag_types.CycleNode) {
                   let outcome_str = case node.outcome {
                     dag_types.NodeSuccess -> "success"
                     dag_types.NodePartial -> "partial"
                     dag_types.NodeFailure(reason:) -> "failure: " <> reason
                     dag_types.NodePending -> "pending"
                   }
-                  node.cycle_id
+                  let type_label = case node.parent_id {
+                    None -> "[root]"
+                    Some(pid) -> "[agent of " <> string.slice(pid, 0, 8) <> "]"
+                  }
+                  let indent = case node.parent_id {
+                    None -> ""
+                    Some(_) -> "  "
+                  }
+                  indent
+                  <> node.cycle_id
                   <> " ["
                   <> node.timestamp
                   <> "] "
+                  <> type_label
+                  <> " "
                   <> outcome_str
                   <> " [tokens: "
                   <> int.to_string(node.tokens_in)
@@ -1619,17 +1654,33 @@ fn run_list_recent_cycles(
                   <> int.to_string(node.tokens_out)
                   <> "]"
                 })
-              ToolSuccess(
-                tool_use_id: call.id,
-                content: "Cycles for "
+              let header = case include_agents {
+                False ->
+                  "Root cycles for "
                   <> date
                   <> " ("
-                  <> int.to_string(list.length(roots))
-                  <> "):\n"
-                  <> string.join(lines, "\n"),
+                  <> int.to_string(root_count)
+                  <> " of "
+                  <> int.to_string(total)
+                  <> " total — pass include_agents=true to see all):"
+                True ->
+                  "All cycles for "
+                  <> date
+                  <> " ("
+                  <> int.to_string(total)
+                  <> " total, "
+                  <> int.to_string(root_count)
+                  <> " root + "
+                  <> int.to_string(agent_count)
+                  <> " agent):"
+              }
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: header <> "\n" <> string.join(lines, "\n"),
               )
             }
           }
+        }
       }
     }
   }

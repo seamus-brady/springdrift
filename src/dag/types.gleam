@@ -85,6 +85,8 @@ pub type DayStats {
   DayStats(
     date: String,
     total_cycles: Int,
+    root_cycles: Int,
+    agent_cycles: Int,
     success_count: Int,
     partial_count: Int,
     failure_count: Int,

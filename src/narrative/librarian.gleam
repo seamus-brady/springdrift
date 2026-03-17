@@ -2149,9 +2149,15 @@ fn compute_day_stats(state: LibrarianState, date: String) -> dag_types.DayStats 
       }
     })
 
+  let total = list.length(all)
+  let root_cycles = list.count(all, fn(n) { option.is_none(n.parent_id) })
+  let agent_cycles = total - root_cycles
+
   dag_types.DayStats(
     date:,
-    total_cycles: list.length(all),
+    total_cycles: total,
+    root_cycles:,
+    agent_cycles:,
     success_count:,
     partial_count:,
     failure_count:,
