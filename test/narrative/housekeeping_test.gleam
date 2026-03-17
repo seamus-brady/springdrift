@@ -1,6 +1,5 @@
 import cbr/types as cbr_types
 import facts/types as facts_types
-import gleam/float
 import gleam/list
 import gleam/option.{None}
 import gleeunit/should

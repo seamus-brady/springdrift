@@ -400,7 +400,7 @@ fn run(cfg: AppConfig) -> Nil {
   }
 
   // Initialise paperwings RNG (required before any VSA vector operations)
-  init_paperwings_rng()
+  let _ = init_paperwings_rng()
   io.println(
     "CBR: paperwings VSA (dimensions="
     <> int.to_string(option.unwrap(cfg.vsa_dimensions, 1000))
