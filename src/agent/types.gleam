@@ -357,6 +357,7 @@ pub type Notification {
   AgentLifecycleNotice(event_type: String, agent_name: String)
   InputQueued(position: Int, queue_size: Int)
   InputQueueFull(queue_cap: Int)
+  SchedulerReminder(name: String, title: String, body: String)
 }
 
 // ---------------------------------------------------------------------------

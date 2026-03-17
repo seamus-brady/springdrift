@@ -14,9 +14,9 @@ import profile/types as profile_types
 import scheduler/delivery
 import scheduler/persist
 import scheduler/types.{
-  type ScheduledJob, type SchedulerMessage, Completed, Failed, GetStatus,
-  JobComplete, JobFailed, Pending, Running, ScheduledJob, StopAll, StuckJobCheck,
-  Tick,
+  type ScheduledJob, type SchedulerMessage, Cancelled, Completed, Failed,
+  ForAgent, GetStatus, JobComplete, JobFailed, Pending, ProfileJob,
+  RecurringTask, Running, ScheduledJob, StopAll, StuckJobCheck, Tick,
 }
 import slog
 
@@ -76,6 +76,18 @@ pub fn start(
               last_result: None,
               run_count: 0,
               error_count: 0,
+              job_source: ProfileJob,
+              kind: RecurringTask,
+              due_at: None,
+              for_: ForAgent,
+              title: task.name,
+              body: "",
+              duration_minutes: 0,
+              tags: [],
+              created_at: get_datetime(),
+              fired_count: 0,
+              recurrence_end_at: None,
+              max_occurrences: None,
             )
         }
         dict.insert(acc, task.name, job)
@@ -171,6 +183,7 @@ fn scheduler_loop(
               schedule_tick(self, name, job.interval_ms)
               loop(jobs)
             }
+            Cancelled | Completed -> loop(jobs)
             _ -> {
               slog.info(
                 "scheduler",
@@ -330,8 +343,165 @@ fn scheduler_loop(
         }
       }
     }
+
+    types.AddJob(job:, reply_to:) -> {
+      case dict.get(jobs, job.name) {
+        Ok(_) -> {
+          process.send(reply_to, Error("Job already exists: " <> job.name))
+          loop(jobs)
+        }
+        Error(_) -> {
+          let updated_jobs = dict.insert(jobs, job.name, job)
+          // Arm timer for due_at items
+          case job.kind {
+            RecurringTask ->
+              case job.interval_ms > 0 {
+                True -> schedule_tick(self, job.name, job.interval_ms)
+                False -> Nil
+              }
+            types.Reminder | types.Appointment ->
+              case job.due_at {
+                Some(due) -> {
+                  let delay = ms_until_datetime(due)
+                  schedule_tick(self, job.name, case delay < 1 {
+                    True -> 1
+                    False -> delay
+                  })
+                }
+                None -> Nil
+              }
+            types.Todo -> Nil
+          }
+          let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
+          process.send(reply_to, Ok(job.name))
+          slog.info("scheduler", "loop", "Added job '" <> job.name <> "'", None)
+          loop(updated_jobs)
+        }
+      }
+    }
+
+    types.RemoveJob(name:, reply_to:) -> {
+      case dict.get(jobs, name) {
+        Error(_) -> {
+          process.send(reply_to, Error("Job not found: " <> name))
+          loop(jobs)
+        }
+        Ok(job) -> {
+          let cancelled_job = ScheduledJob(..job, status: Cancelled)
+          let updated_jobs = dict.insert(jobs, name, cancelled_job)
+          let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
+          process.send(reply_to, Ok(Nil))
+          slog.info("scheduler", "loop", "Removed job '" <> name <> "'", None)
+          loop(updated_jobs)
+        }
+      }
+    }
+
+    types.UpdateJob(name:, updates:, reply_to:) -> {
+      case dict.get(jobs, name) {
+        Error(_) -> {
+          process.send(reply_to, Error("Job not found: " <> name))
+          loop(jobs)
+        }
+        Ok(job) -> {
+          let updated_job =
+            ScheduledJob(
+              ..job,
+              title: option.unwrap(updates.title, job.title),
+              body: option.unwrap(updates.body, job.body),
+              due_at: case updates.due_at {
+                Some(d) -> Some(d)
+                None -> job.due_at
+              },
+              tags: option.unwrap(updates.tags, job.tags),
+            )
+          // Re-arm timer if due_at changed
+          case updates.due_at {
+            Some(new_due) ->
+              case updated_job.kind {
+                types.Reminder | types.Appointment -> {
+                  let delay = ms_until_datetime(new_due)
+                  schedule_tick(self, name, case delay < 1 {
+                    True -> 1
+                    False -> delay
+                  })
+                }
+                _ -> Nil
+              }
+            None -> Nil
+          }
+          let updated_jobs = dict.insert(jobs, name, updated_job)
+          let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
+          process.send(reply_to, Ok(Nil))
+          loop(updated_jobs)
+        }
+      }
+    }
+
+    types.GetJobs(query:, reply_to:) -> {
+      let all_jobs = dict.values(jobs)
+      let filtered =
+        all_jobs
+        |> list.filter(fn(j) {
+          let kind_ok = case query.kinds {
+            [] -> True
+            ks -> list.contains(ks, j.kind)
+          }
+          let status_ok = case query.statuses {
+            [] -> True
+            ss -> list.any(ss, fn(s) { status_eq(s, j.status) })
+          }
+          let for_ok = case query.for_ {
+            None -> True
+            Some(f) -> j.for_ == f
+          }
+          let overdue_ok = case query.overdue_only {
+            False -> True
+            True ->
+              case j.due_at {
+                Some(due) -> ms_until_datetime(due) < 0
+                None -> False
+              }
+          }
+          kind_ok && status_ok && for_ok && overdue_ok
+        })
+        |> list.take(query.max_results)
+      process.send(reply_to, filtered)
+      loop(jobs)
+    }
+
+    types.CompleteJob(name:, reply_to:) -> {
+      case dict.get(jobs, name) {
+        Error(_) -> {
+          process.send(reply_to, Error("Job not found: " <> name))
+          loop(jobs)
+        }
+        Ok(job) -> {
+          let completed_job = ScheduledJob(..job, status: Completed)
+          let updated_jobs = dict.insert(jobs, name, completed_job)
+          let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
+          process.send(reply_to, Ok(Nil))
+          slog.info("scheduler", "loop", "Completed job '" <> name <> "'", None)
+          loop(updated_jobs)
+        }
+      }
+    }
   }
 }
+
+fn status_eq(a: types.JobStatus, b: types.JobStatus) -> Bool {
+  case a, b {
+    Pending, Pending -> True
+    Running, Running -> True
+    Completed, Completed -> True
+    Cancelled, Cancelled -> True
+    Failed(_), Failed(_) -> True
+    _, _ -> False
+  }
+}
+
+@external(erlang, "springdrift_ffi", "ms_until_datetime")
+fn ms_until_datetime(iso: String) -> Int
 
 fn spawn_job(
   scheduler: Subject(SchedulerMessage),

@@ -12,7 +12,8 @@
          uri_encode/1, extract_ddg_results/1,
          http_get/1, http_get_with_headers/2,
          ensure_utf8/1, days_between/2,
-         mailbox_size/0, add_days/2]).
+         mailbox_size/0, add_days/2,
+         ms_until_datetime/1, advance_datetime_ms/2]).
 
 %% Read one line from stdin.
 %% Returns {ok, Binary} (including trailing newline) or {error, nil} on EOF.
@@ -483,4 +484,37 @@ add_days(DateBin, Days) ->
     Greg = calendar:date_to_gregorian_days({Y, M, D}),
     {NY, NM, ND} = calendar:gregorian_days_to_date(Greg + Days),
     iolist_to_binary(io_lib:format("~4..0B-~2..0B-~2..0B", [NY, NM, ND])).
+
+%% Milliseconds from now until an ISO 8601 local-time datetime string.
+%% Returns negative if the datetime is in the past.
+ms_until_datetime(IsoStr) when is_binary(IsoStr) ->
+    {Y, Mo, D, H, Mi, S} = parse_datetime_bin(IsoStr),
+    Target = calendar:datetime_to_gregorian_seconds({{Y,Mo,D},{H,Mi,S}}),
+    Now = calendar:datetime_to_gregorian_seconds(calendar:local_time()),
+    (Target - Now) * 1000.
+
+%% Add N milliseconds to an ISO 8601 local-time datetime string.
+%% Returns a new ISO 8601 datetime string.
+advance_datetime_ms(IsoStr, Ms) when is_binary(IsoStr), is_integer(Ms) ->
+    {Y, Mo, D, H, Mi, S} = parse_datetime_bin(IsoStr),
+    Base = calendar:datetime_to_gregorian_seconds({{Y,Mo,D},{H,Mi,S}}),
+    {{NY,NMo,ND},{NH,NMi,NS}} =
+        calendar:gregorian_seconds_to_datetime(Base + (Ms div 1000)),
+    Pad = fun(N, W) -> string:right(integer_to_list(N), W, $0) end,
+    iolist_to_binary([Pad(NY,4),$-,Pad(NMo,2),$-,Pad(ND,2),$T,
+                      Pad(NH,2),$:,Pad(NMi,2),$:,Pad(NS,2)]).
+
+%% Parse an ISO 8601 datetime binary like "2026-03-17T14:30:00" into a 6-tuple.
+parse_datetime_bin(Bin) ->
+    BinStr = binary_to_list(Bin),
+    case string:split(BinStr, "T") of
+        [DatePart, TimePart] ->
+            [Y, Mo, D] = [list_to_integer(X) || X <- string:split(DatePart, "-", all)],
+            [H, Mi, S] = [list_to_integer(X) || X <- string:split(TimePart, ":", all)],
+            {Y, Mo, D, H, Mi, S};
+        _ ->
+            %% Fallback: treat as date only (midnight)
+            {Y, Mo, D} = parse_date_bin(Bin),
+            {Y, Mo, D, 0, 0, 0}
+    end.
 

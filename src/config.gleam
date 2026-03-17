@@ -140,6 +140,8 @@ pub type AppConfig {
     input_queue_cap: Option(Int),
     // ── Scheduler stuck timeout ──
     scheduler_stuck_timeout_ms: Option(Int),
+    // ── Scheduler tool timeout ──
+    scheduler_tool_timeout_ms: Option(Int),
   )
 }
 
@@ -245,6 +247,7 @@ pub fn default() -> AppConfig {
     brave_cache_ttl_ms: None,
     input_queue_cap: None,
     scheduler_stuck_timeout_ms: None,
+    scheduler_tool_timeout_ms: None,
   )
 }
 
@@ -548,6 +551,10 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     scheduler_stuck_timeout_ms: option.or(
       override_cfg.scheduler_stuck_timeout_ms,
       base.scheduler_stuck_timeout_ms,
+    ),
+    scheduler_tool_timeout_ms: option.or(
+      override_cfg.scheduler_tool_timeout_ms,
+      base.scheduler_tool_timeout_ms,
     ),
   )
 }
@@ -1009,6 +1016,9 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     // ── [timeouts] scheduler stuck ──
     scheduler_stuck_timeout_ms: get_toml_int(table, [
       "timeouts", "scheduler_stuck_ms",
+    ]),
+    scheduler_tool_timeout_ms: get_toml_int(table, [
+      "timeouts", "scheduler_tool_ms",
     ]),
   )
 }

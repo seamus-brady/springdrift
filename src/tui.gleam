@@ -297,6 +297,10 @@ fn handle_notification(
           ),
         ),
       )
+    agent_types.SchedulerReminder(name: _, title:, body: _) ->
+      continue_loop(
+        TuiState(..state, notice: style.yellow("  Reminder: " <> title)),
+      )
   }
 }
 

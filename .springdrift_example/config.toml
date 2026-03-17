@@ -120,6 +120,9 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 # Scheduler stuck-job timeout — mark job as failed if still running (default: 600000 = 10 min)
 # scheduler_stuck_ms = 600000
 
+# Scheduler tool timeout — how long scheduler agent tools wait for runner reply (default: 5000 = 5s)
+# scheduler_tool_ms = 5000
+
 # ── Retry ────────────────────────────────────────────────────────────────────
 # LLM call retry configuration with exponential backoff.
 
@@ -251,6 +254,11 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 [agents.writer]
 # max_tokens = 4096
 # max_turns = 5
+# max_errors = 2
+
+[agents.scheduler]
+# max_tokens = 1024
+# max_turns = 4
 # max_errors = 2
 
 # ── Web GUI ──────────────────────────────────────────────────────────────────

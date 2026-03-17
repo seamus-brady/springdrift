@@ -11,8 +11,9 @@ import gleam/option.{None, Some}
 import gleam/string
 import profile/types as profile_types
 import scheduler/types.{
-  type JobStatus, type ScheduledJob, Completed, Failed, Pending, Running,
-  ScheduledJob,
+  type JobStatus, type ScheduledJob, AgentJob, Appointment, Cancelled, Completed,
+  Failed, ForAgent, ForUser, Pending, ProfileJob, RecurringTask, Reminder,
+  Running, ScheduledJob, Todo,
 }
 import simplifile
 import slog
@@ -109,7 +110,7 @@ fn encode_checkpoint(jobs: List(ScheduledJob)) -> String {
   )
 }
 
-fn encode_job(job: ScheduledJob) -> json.Json {
+pub fn encode_job(job: ScheduledJob) -> json.Json {
   json.object([
     #("name", json.string(job.name)),
     #("query", json.string(job.query)),
@@ -125,15 +126,60 @@ fn encode_job(job: ScheduledJob) -> json.Json {
     }),
     #("run_count", json.int(job.run_count)),
     #("error_count", json.int(job.error_count)),
+    #("job_source", json.string(job_source_to_string(job.job_source))),
+    #("kind", json.string(kind_to_string(job.kind))),
+    #("due_at", case job.due_at {
+      Some(d) -> json.string(d)
+      None -> json.null()
+    }),
+    #("for_", json.string(for_target_to_string(job.for_))),
+    #("title", json.string(job.title)),
+    #("body", json.string(job.body)),
+    #("duration_minutes", json.int(job.duration_minutes)),
+    #("tags", json.array(job.tags, json.string)),
+    #("created_at", json.string(job.created_at)),
+    #("fired_count", json.int(job.fired_count)),
+    #("recurrence_end_at", case job.recurrence_end_at {
+      Some(d) -> json.string(d)
+      None -> json.null()
+    }),
+    #("max_occurrences", case job.max_occurrences {
+      Some(n) -> json.int(n)
+      None -> json.null()
+    }),
   ])
 }
 
-fn status_to_string(status: JobStatus) -> String {
+pub fn status_to_string(status: JobStatus) -> String {
   case status {
     Pending -> "pending"
     Running -> "running"
     Completed -> "completed"
+    Cancelled -> "cancelled"
     Failed(reason:) -> "failed:" <> reason
+  }
+}
+
+fn job_source_to_string(source: types.JobSource) -> String {
+  case source {
+    ProfileJob -> "profile"
+    AgentJob -> "agent"
+  }
+}
+
+pub fn kind_to_string(kind: types.JobKind) -> String {
+  case kind {
+    RecurringTask -> "recurring_task"
+    Reminder -> "reminder"
+    Todo -> "todo"
+    Appointment -> "appointment"
+  }
+}
+
+fn for_target_to_string(target: types.ForTarget) -> String {
+  case target {
+    ForAgent -> "agent"
+    ForUser -> "user"
   }
 }
 
@@ -147,7 +193,7 @@ fn checkpoint_decoder() -> decode.Decoder(Checkpoint) {
   decode.success(Checkpoint(jobs:, saved_at:))
 }
 
-fn job_decoder() -> decode.Decoder(ScheduledJob) {
+pub fn job_decoder() -> decode.Decoder(ScheduledJob) {
   use name <- decode.field("name", decode.string)
   use query <- decode.optional_field("query", "", decode.string)
   use interval_ms <- decode.optional_field(
@@ -168,7 +214,46 @@ fn job_decoder() -> decode.Decoder(ScheduledJob) {
   )
   use run_count <- decode.optional_field("run_count", 0, decode.int)
   use error_count <- decode.optional_field("error_count", 0, decode.int)
+  use job_source_str <- decode.optional_field(
+    "job_source",
+    "profile",
+    decode.string,
+  )
+  use kind_str <- decode.optional_field("kind", "recurring_task", decode.string)
+  use due_at <- decode.optional_field(
+    "due_at",
+    None,
+    decode.optional(decode.string),
+  )
+  use for_str <- decode.optional_field("for_", "agent", decode.string)
+  use title <- decode.optional_field("title", "", decode.string)
+  use body <- decode.optional_field("body", "", decode.string)
+  use duration_minutes <- decode.optional_field(
+    "duration_minutes",
+    0,
+    decode.int,
+  )
+  use tags <- decode.optional_field("tags", [], decode.list(decode.string))
+  use created_at <- decode.optional_field("created_at", "", decode.string)
+  use fired_count <- decode.optional_field("fired_count", 0, decode.int)
+  use recurrence_end_at <- decode.optional_field(
+    "recurrence_end_at",
+    None,
+    decode.optional(decode.string),
+  )
+  use max_occurrences <- decode.optional_field(
+    "max_occurrences",
+    None,
+    decode.optional(decode.int),
+  )
   let status = parse_status(status_str)
+  let job_source = parse_job_source(job_source_str)
+  let kind = parse_kind(kind_str)
+  let for_ = parse_for_target(for_str)
+  let effective_title = case title {
+    "" -> name
+    t -> t
+  }
   decode.success(ScheduledJob(
     name:,
     query:,
@@ -180,6 +265,18 @@ fn job_decoder() -> decode.Decoder(ScheduledJob) {
     last_result:,
     run_count:,
     error_count:,
+    job_source:,
+    kind:,
+    due_at:,
+    for_:,
+    title: effective_title,
+    body:,
+    duration_minutes:,
+    tags:,
+    created_at:,
+    fired_count:,
+    recurrence_end_at:,
+    max_occurrences:,
   ))
 }
 
@@ -188,11 +285,35 @@ fn parse_status(s: String) -> JobStatus {
     "pending" -> Pending
     "running" -> Pending
     "completed" -> Completed
+    "cancelled" -> Cancelled
     _ ->
       case has_prefix(s, "failed:") {
         True -> Failed(reason: drop_prefix(s, "failed:"))
         False -> Pending
       }
+  }
+}
+
+fn parse_job_source(s: String) -> types.JobSource {
+  case s {
+    "agent" -> AgentJob
+    _ -> ProfileJob
+  }
+}
+
+pub fn parse_kind(s: String) -> types.JobKind {
+  case s {
+    "reminder" -> Reminder
+    "todo" -> Todo
+    "appointment" -> Appointment
+    _ -> RecurringTask
+  }
+}
+
+pub fn parse_for_target(s: String) -> types.ForTarget {
+  case s {
+    "user" -> ForUser
+    _ -> ForAgent
   }
 }
 

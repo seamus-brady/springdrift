@@ -100,6 +100,16 @@ pub fn artifacts_dir() -> String {
   project_dir <> "/memory/artifacts"
 }
 
+/// Schedule directory: .springdrift/memory/schedule/
+pub fn schedule_dir() -> String {
+  project_dir <> "/memory/schedule"
+}
+
+/// Legacy scheduler checkpoint (one-time migration source only).
+pub fn scheduler_checkpoint() -> String {
+  project_dir <> "/scheduler-checkpoint.json"
+}
+
 // ---------------------------------------------------------------------------
 // Identity
 // ---------------------------------------------------------------------------

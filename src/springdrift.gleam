@@ -8,6 +8,7 @@ import agents/coder
 import agents/observer
 import agents/planner
 import agents/researcher
+import agents/scheduler as scheduler_agent
 import config.{type AppConfig}
 import dot_env
 import dprime/config as dprime_config_mod
@@ -33,6 +34,7 @@ import narrative/threading as narrative_threading
 import paths
 import profile
 import profile/types as profile_types
+import scheduler/log as schedule_log
 import scheduler/runner as scheduler_runner
 import simplifile
 import skills
@@ -374,8 +376,32 @@ fn run(cfg: AppConfig) -> Nil {
     )
   }
 
-  // Build agent tools for the cognitive loop
-  let agent_tools = list.map(agent_specs, cognitive.agent_to_tool)
+  // Build agent tools for the cognitive loop (includes scheduler)
+  let scheduler_tool =
+    agent_types.agent_to_tool(agent_types.AgentSpec(
+      name: "scheduler",
+      human_name: "Scheduler",
+      description: "Manage reminders, todos, and appointments. "
+        <> "Set one-shot or recurring reminders that fire at a specific time — "
+        <> "as input to the cognitive loop (for agent self-reminders) or as "
+        <> "user notifications. Maintain a todo list. Schedule appointments. "
+        <> "List, cancel, complete, or reschedule existing items.",
+      system_prompt: "",
+      provider: p,
+      model: task_model,
+      max_tokens: 1024,
+      max_turns: 4,
+      max_consecutive_errors: 2,
+      max_context_messages: option.None,
+      tools: [],
+      restart: agent_types.Permanent,
+      tool_executor: fn(_call) {
+        llm_types.ToolFailure(tool_use_id: "", error: "stub")
+      },
+      inter_turn_delay_ms: 0,
+    ))
+  let agent_tools =
+    list.append(list.map(agent_specs, cognitive.agent_to_tool), [scheduler_tool])
 
   // Create notification channel
   let notify: process.Subject(agent_types.Notification) = process.new_subject()
@@ -617,47 +643,63 @@ fn run(cfg: AppConfig) -> Nil {
     _ -> io.println("Profiles : " <> string.join(available_profiles, ", "))
   }
 
-  // Start scheduler if profile has a schedule
-  case cfg.default_profile {
+  // Migrate old scheduler checkpoint to JSONL (no-op if already done)
+  let schedule_dir = paths.schedule_dir()
+  schedule_log.migrate_checkpoint(schedule_dir, paths.scheduler_checkpoint())
+
+  // Load profile schedule tasks if applicable
+  let profile_schedule_tasks = case cfg.default_profile {
     option.Some(profile_name) ->
       case profile.load(profile_name, profile_dirs) {
         Ok(loaded_profile) ->
           case loaded_profile.schedule_path {
             option.Some(schedule_path) ->
               case profile.parse_schedule(schedule_path) {
-                Ok(tasks) ->
-                  case tasks {
-                    [] -> Nil
-                    _ -> {
-                      let checkpoint_path =
-                        ".springdrift/scheduler-checkpoint.json"
-                      let stuck_timeout_ms =
-                        option.unwrap(cfg.scheduler_stuck_timeout_ms, 600_000)
-                      case
-                        scheduler_runner.start(
-                          tasks,
-                          cognitive_subj,
-                          checkpoint_path,
-                          stuck_timeout_ms,
-                        )
-                      {
-                        Ok(_) ->
-                          io.println(
-                            "Scheduler: "
-                            <> int.to_string(list.length(tasks))
-                            <> " task(s) scheduled",
-                          )
-                        Error(_) -> io.println("Scheduler: failed to start")
-                      }
-                    }
-                  }
-                Error(_) -> Nil
+                Ok(tasks) -> tasks
+                Error(_) -> []
               }
-            option.None -> Nil
+            option.None -> []
           }
-        Error(_) -> Nil
+        Error(_) -> []
       }
-    option.None -> Nil
+    option.None -> []
+  }
+
+  // Always start the scheduler runner
+  let stuck_timeout_ms = option.unwrap(cfg.scheduler_stuck_timeout_ms, 600_000)
+  let runner_result =
+    scheduler_runner.start(
+      profile_schedule_tasks,
+      cognitive_subj,
+      paths.scheduler_checkpoint(),
+      stuck_timeout_ms,
+    )
+  case runner_result {
+    Ok(runner_subj) -> {
+      case profile_schedule_tasks {
+        [] -> io.println("Scheduler: started (no profile tasks)")
+        tasks ->
+          io.println(
+            "Scheduler: "
+            <> int.to_string(list.length(tasks))
+            <> " task(s) scheduled",
+          )
+      }
+      // Register scheduler agent with the supervisor
+      let sched_spec = scheduler_agent.spec(p, task_model, runner_subj)
+      let reply_subj = process.new_subject()
+      process.send(
+        sup,
+        agent_types.StartChild(spec: sched_spec, reply_to: reply_subj),
+      )
+      case process.receive(reply_subj, 5000) {
+        Ok(Ok(_)) -> io.println("  Agent  : scheduler started")
+        Ok(Error(msg)) ->
+          io.println("  Agent  : scheduler failed (" <> msg <> ")")
+        Error(_) -> io.println("  Agent  : scheduler failed (timeout)")
+      }
+    }
+    Error(_) -> io.println("Scheduler: failed to start")
   }
 
   // Start GUI

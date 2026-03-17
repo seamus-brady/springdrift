@@ -444,6 +444,8 @@ fn notification_to_server_message(
       protocol.QueueNotification(position:, queue_size:)
     agent_types.InputQueueFull(queue_cap:) ->
       protocol.QueueFullNotification(queue_cap:)
+    agent_types.SchedulerReminder(name: _, title:, body: _) ->
+      protocol.ToolNotification(name: "reminder: " <> title)
   }
 }
 
