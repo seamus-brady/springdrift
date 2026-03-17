@@ -18,7 +18,6 @@ pub type CbrCase {
     problem: CbrProblem,
     solution: CbrSolution,
     outcome: CbrOutcome,
-    embedding: List(Float),
     source_narrative_id: String,
     profile: Option(String),
   )
@@ -75,7 +74,6 @@ pub type CbrQuery {
     domain: String,
     keywords: List(String),
     entities: List(String),
-    embedding: Option(List(Float)),
     max_results: Int,
   )
 }

@@ -10,7 +10,7 @@
          resolve_symlinks/1,
          file_size/1, days_ago_date/1,
          uri_encode/1, extract_ddg_results/1,
-         http_get/1, http_get_with_headers/2, cosine_similarity/2,
+         http_get/1, http_get_with_headers/2,
          ensure_utf8/1, days_between/2,
          mailbox_size/0, add_days/2]).
 
@@ -420,22 +420,6 @@ http_get_with_headers(Url, Headers) ->
             {ok, {StatusCode, Body}};
         {error, Reason} ->
             {error, list_to_binary(io_lib:format("~p", [Reason]))}
-    end.
-
-%% Cosine similarity between two float lists.
-%% Returns a float between -1.0 and 1.0.
-%% Returns 0.0 if either list is empty or they differ in length.
-cosine_similarity(A, B) when is_list(A), is_list(B) ->
-    case length(A) =:= length(B) andalso length(A) > 0 of
-        false -> 0.0;
-        true ->
-            Dot = lists:sum([X*Y || {X,Y} <- lists:zip(A, B)]),
-            NormA = math:sqrt(lists:sum([X*X || X <- A])),
-            NormB = math:sqrt(lists:sum([X*X || X <- B])),
-            case NormA * NormB of
-                +0.0 -> +0.0;
-                Denom -> Dot / Denom
-            end
     end.
 
 %% Clean DuckDuckGo redirect URLs to extract the actual URL.

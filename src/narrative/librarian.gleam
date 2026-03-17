@@ -14,11 +14,9 @@
 ////   - by_keyword (bag)        — keyword (lowercased) → NarrativeEntry
 ////   - by_recency (ordered)    — timestamp → NarrativeEntry
 ////
-//// CBR ETS tables:
-////   - cbr_cases (set)         — case_id → CbrCase
-////   - cbr_by_intent (bag)     — intent → CbrCase
-////   - cbr_by_keyword (bag)    — keyword (lowercased) → CbrCase
-////   - cbr_by_domain (bag)     — domain → CbrCase
+//// CBR:
+////   - cbr_cases (set)         — case_id → CbrCase (metadata)
+////   - paperwings CaseBase     — VSA vectors + inverted index (retrieval)
 ////
 //// Facts ETS tables:
 ////   - facts_by_key (set)      — key → MemoryFact (current value)
@@ -27,16 +25,15 @@
 import agent/types as agent_types
 import artifacts/log as artifacts_log
 import artifacts/types as artifacts_types
+import cbr/bridge
 import cbr/log as cbr_log
 import cbr/types as cbr_types
 import cycle_log
 import dag/types as dag_types
-import embedding/client as embedding_client
 import facts/log as facts_log
 import facts/types as facts_types
 import gleam/dict
 import gleam/erlang/process.{type Pid, type Subject}
-import gleam/float
 import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
@@ -50,37 +47,16 @@ import simplifile
 import slog
 
 // ---------------------------------------------------------------------------
-// CBR Scoring Configuration
+// CBR Configuration
 // ---------------------------------------------------------------------------
 
-pub type CbrScoringConfig {
-  CbrScoringConfig(
-    cosine_weight: Float,
-    symbolic_weight: Float,
-    intent_weight: Float,
-    keyword_weight: Float,
-    entity_weight: Float,
-    domain_weight: Float,
-    recency_weight: Float,
-    min_score: Float,
-    recency_decay_days: Int,
-    mailbox_warn_threshold: Int,
-  )
+/// Configuration for paperwings-based CBR retrieval.
+pub type CbrConfig {
+  CbrConfig(vsa_dimensions: Int, mailbox_warn_threshold: Int)
 }
 
-pub fn default_scoring_config() -> CbrScoringConfig {
-  CbrScoringConfig(
-    cosine_weight: 0.4,
-    symbolic_weight: 0.6,
-    intent_weight: 0.35,
-    keyword_weight: 0.25,
-    entity_weight: 0.2,
-    domain_weight: 0.15,
-    recency_weight: 0.05,
-    min_score: 0.1,
-    recency_decay_days: 30,
-    mailbox_warn_threshold: 50,
-  )
+pub fn default_cbr_config() -> CbrConfig {
+  CbrConfig(vsa_dimensions: 1000, mailbox_warn_threshold: 50)
 }
 
 // ---------------------------------------------------------------------------
@@ -173,9 +149,6 @@ fn cbr_insert(table: CbrTable, key: String, value: cbr_types.CbrCase) -> Nil
 
 @external(erlang, "store_ffi", "lookup")
 fn cbr_lookup(table: CbrTable, key: String) -> Result(cbr_types.CbrCase, Nil)
-
-@external(erlang, "store_ffi", "lookup_bag")
-fn cbr_lookup_bag(table: CbrTable, key: String) -> List(cbr_types.CbrCase)
 
 @external(erlang, "store_ffi", "all_values")
 fn cbr_all_values(table: CbrTable) -> List(cbr_types.CbrCase)
@@ -435,11 +408,9 @@ type LibrarianState {
     by_keyword: NarrativeTable,
     by_recency: NarrativeTable,
     thread_index: ThreadIndex,
-    // CBR ETS tables
+    // CBR — metadata ETS + paperwings CaseBase
     cbr_cases: CbrTable,
-    cbr_by_intent: CbrTable,
-    cbr_by_keyword: CbrTable,
-    cbr_by_domain: CbrTable,
+    case_base: bridge.CaseBase,
     // Facts
     facts_dir: String,
     facts_by_key: FactTable,
@@ -454,8 +425,6 @@ type LibrarianState {
     artifacts_dir: String,
     artifacts: ArtifactTable,
     artifacts_by_cycle: ArtifactTable,
-    // CBR scoring configuration
-    scoring_config: CbrScoringConfig,
   )
 }
 
@@ -472,7 +441,7 @@ pub fn start(
   facts_dir: String,
   artifacts_dir: String,
   max_files: Int,
-  scoring_config: CbrScoringConfig,
+  cbr_config: CbrConfig,
 ) -> Subject(LibrarianMessage) {
   let #(subj, _pid) =
     start_with_pid(
@@ -481,7 +450,7 @@ pub fn start(
       facts_dir,
       artifacts_dir,
       max_files,
-      scoring_config,
+      cbr_config,
     )
   subj
 }
@@ -494,7 +463,7 @@ fn start_with_pid(
   facts_dir: String,
   artifacts_dir: String,
   max_files: Int,
-  scoring_config: CbrScoringConfig,
+  cbr_config: CbrConfig,
 ) -> #(Subject(LibrarianMessage), Pid) {
   let setup: Subject(Subject(LibrarianMessage)) = process.new_subject()
   let pid =
@@ -510,11 +479,11 @@ fn start_with_pid(
       let by_recency_table =
         new_narrative_table("narrative_by_recency", "ordered_set")
 
-      // Create CBR ETS tables
+      // Create CBR metadata ETS table + paperwings CaseBase
       let cbr_cases_table = new_cbr_table("cbr_cases", "set")
-      let cbr_intent_table = new_cbr_table("cbr_by_intent", "bag")
-      let cbr_keyword_table = new_cbr_table("cbr_by_keyword", "bag")
-      let cbr_domain_table = new_cbr_table("cbr_by_domain", "bag")
+      let case_base =
+        bridge.load(cbr_dir, cbr_config.vsa_dimensions)
+        |> bridge.ensure_roles
 
       // Create Facts ETS tables
       let facts_key_table = new_fact_table("facts_by_key", "set")
@@ -545,9 +514,7 @@ fn start_with_pid(
           by_recency: by_recency_table,
           thread_index: ThreadIndex(threads: []),
           cbr_cases: cbr_cases_table,
-          cbr_by_intent: cbr_intent_table,
-          cbr_by_keyword: cbr_keyword_table,
-          cbr_by_domain: cbr_domain_table,
+          case_base:,
           facts_dir:,
           facts_by_key: facts_key_table,
           facts_by_cycle: facts_cycle_table,
@@ -558,7 +525,6 @@ fn start_with_pid(
           artifacts_dir:,
           artifacts: artifacts_table,
           artifacts_by_cycle: artifacts_cycle_table,
-          scoring_config:,
         )
 
       // Replay narrative JSONL files
@@ -568,8 +534,8 @@ fn start_with_pid(
       let thread_index = narrative_log.load_thread_index(narrative_dir)
       let state = LibrarianState(..state, thread_index:)
 
-      // Replay CBR JSONL files
-      replay_cbr_from_disk(state, max_files)
+      // Replay CBR JSONL files (into metadata ETS + CaseBase)
+      let state = replay_cbr_from_disk(state, max_files)
 
       // Replay facts from disk
       replay_facts_from_disk(state)
@@ -625,7 +591,7 @@ pub fn start_supervised(
   artifacts_dir: String,
   max_files: Int,
   max_restarts: Int,
-  scoring_config: CbrScoringConfig,
+  cbr_config: CbrConfig,
 ) -> Result(Subject(LibrarianMessage), Nil) {
   // The proxy subject must be created inside the spawned process (owner rule),
   // then sent back to the caller via a setup channel.
@@ -642,7 +608,7 @@ pub fn start_supervised(
       max_restarts,
       0,
       proxy_subj,
-      scoring_config,
+      cbr_config,
     )
   })
   case process.receive(setup, 30_000) {
@@ -674,7 +640,7 @@ fn librarian_supervisor_loop(
   max_restarts: Int,
   restart_count: Int,
   proxy: Subject(LibrarianMessage),
-  scoring_config: CbrScoringConfig,
+  cbr_config: CbrConfig,
 ) -> Nil {
   // Start a fresh librarian, getting both Subject and Pid
   let #(librarian, pid) =
@@ -684,7 +650,7 @@ fn librarian_supervisor_loop(
       facts_dir,
       artifacts_dir,
       max_files,
-      scoring_config,
+      cbr_config,
     )
 
   // Set up OTP monitor — fires immediately when the process exits
@@ -708,7 +674,7 @@ fn librarian_supervisor_loop(
     max_restarts,
     restart_count,
     proxy,
-    scoring_config,
+    cbr_config,
   )
 }
 
@@ -723,7 +689,7 @@ fn forward_loop(
   max_restarts: Int,
   restart_count: Int,
   proxy: Subject(LibrarianMessage),
-  scoring_config: CbrScoringConfig,
+  cbr_config: CbrConfig,
 ) -> Nil {
   case process.selector_receive_forever(sel) {
     ForwardMsg(msg) -> {
@@ -739,7 +705,7 @@ fn forward_loop(
         max_restarts,
         restart_count,
         proxy,
-        scoring_config,
+        cbr_config,
       )
     }
     LibrarianDown -> {
@@ -762,7 +728,7 @@ fn forward_loop(
             max_restarts,
             restart_count + 1,
             proxy,
-            scoring_config,
+            cbr_config,
           )
         }
         False -> {
@@ -1250,7 +1216,7 @@ pub fn lookup_artifact(
 fn loop(state: LibrarianState) -> Nil {
   // Periodic mailbox backpressure check
   let mbox_size = get_mailbox_size()
-  let threshold = state.scoring_config.mailbox_warn_threshold
+  let threshold = 50
   case mbox_size > threshold {
     True ->
       slog.warn(
@@ -1279,11 +1245,10 @@ fn loop(state: LibrarianState) -> Nil {
           ets_delete_table(state.by_date)
           ets_delete_table(state.by_keyword)
           ets_delete_table(state.by_recency)
-          // Delete CBR tables
+          // Save + destroy CBR CaseBase, delete metadata table
+          let _ = bridge.save(state.case_base)
+          bridge.destroy(state.case_base)
           cbr_delete_table(state.cbr_cases)
-          cbr_delete_table(state.cbr_by_intent)
-          cbr_delete_table(state.cbr_by_keyword)
-          cbr_delete_table(state.cbr_by_domain)
           // Delete Facts tables
           fact_delete_table(state.facts_by_key)
           fact_delete_table(state.facts_by_cycle)
@@ -1369,12 +1334,16 @@ fn loop(state: LibrarianState) -> Nil {
 
         // --- CBR messages ---
         IndexCase(cbr_case:) -> {
-          index_case(state, cbr_case)
-          loop(state)
+          // Index in metadata ETS
+          cbr_insert(state.cbr_cases, cbr_case.case_id, cbr_case)
+          // Encode into paperwings CaseBase
+          let case_base = bridge.retain_case(state.case_base, cbr_case)
+          loop(LibrarianState(..state, case_base:))
         }
 
         RetrieveCases(query:, reply_to:) -> {
-          let results = do_retrieve_cases(state, query)
+          let metadata = build_cbr_metadata(state)
+          let results = bridge.retrieve_cases(state.case_base, query, metadata)
           process.send(reply_to, results)
           loop(state)
         }
@@ -1423,8 +1392,9 @@ fn loop(state: LibrarianState) -> Nil {
 
         // --- Housekeeping messages ---
         RemoveCase(case_id:) -> {
-          remove_case_from_indices(state, case_id)
-          loop(state)
+          cbr_delete_key(state.cbr_cases, case_id)
+          let case_base = bridge.remove_case(state.case_base, case_id)
+          loop(LibrarianState(..state, case_base:))
         }
 
         SupersedeFact(fact:) -> {
@@ -1636,164 +1606,15 @@ fn do_search(state: LibrarianState, keyword: String) -> List(NarrativeEntry) {
 }
 
 // ---------------------------------------------------------------------------
-// CBR query implementation — two-stage symbolic retrieval
+// CBR query helpers — paperwings bridge delegates retrieval
 // ---------------------------------------------------------------------------
 
-fn do_retrieve_cases(
+/// Build a metadata dict from the cbr_cases ETS table for bridge lookups.
+fn build_cbr_metadata(
   state: LibrarianState,
-  query: cbr_types.CbrQuery,
-) -> List(cbr_types.ScoredCase) {
-  // Stage 1: ETS pre-filter — intent match ∪ keyword overlap
-  let by_intent = cbr_lookup_bag(state.cbr_by_intent, query.intent)
-  let by_keywords =
-    list.flat_map(query.keywords, fn(kw) {
-      cbr_lookup_bag(state.cbr_by_keyword, string.lowercase(kw))
-    })
-  let candidates = merge_unique_cases(by_intent, by_keywords)
-
-  // Filter out stale bag entries — only keep cases still in the primary table
-  let candidates =
-    list.filter(candidates, fn(c) {
-      case cbr_lookup(state.cbr_cases, c.case_id) {
-        Ok(_) -> True
-        Error(_) -> False
-      }
-    })
-
-  // If no candidates from indices, fall back to all cases
-  let candidates = case candidates {
-    [] -> cbr_all_values(state.cbr_cases)
-    _ -> candidates
-  }
-
-  // Stage 2: Score each candidate (hybrid when embeddings available)
-  let cfg = state.scoring_config
-  let scored =
-    list.map(candidates, fn(c) {
-      let score = score_case(c, query, cfg)
-      cbr_types.ScoredCase(score:, cbr_case: c)
-    })
-
-  // Filter by minimum score and sort descending
-  scored
-  |> list.filter(fn(sc) { sc.score >. cfg.min_score })
-  |> list.sort(fn(a, b) {
-    case a.score >. b.score {
-      True -> order.Lt
-      False ->
-        case a.score <. b.score {
-          True -> order.Gt
-          False -> order.Eq
-        }
-    }
-  })
-  |> list.take(query.max_results)
-}
-
-/// Hybrid scoring: when both query and case have embeddings, blend
-/// cosine similarity with symbolic. Otherwise pure symbolic.
-fn score_case(
-  c: cbr_types.CbrCase,
-  query: cbr_types.CbrQuery,
-  cfg: CbrScoringConfig,
-) -> Float {
-  let symbolic = score_case_symbolic(c, query, cfg)
-  case query.embedding, c.embedding {
-    Some(q_emb), [_, ..] -> {
-      let cosine = embedding_client.cosine_similarity(q_emb, c.embedding)
-      // Clamp cosine to [0, 1] for scoring
-      let clamped = float.max(0.0, float.min(1.0, cosine))
-      { symbolic *. cfg.symbolic_weight } +. { clamped *. cfg.cosine_weight }
-    }
-    _, _ -> symbolic
-  }
-}
-
-/// Symbolic scoring fallback (no embeddings).
-/// Weights are drawn from CbrScoringConfig.
-fn score_case_symbolic(
-  c: cbr_types.CbrCase,
-  query: cbr_types.CbrQuery,
-  cfg: CbrScoringConfig,
-) -> Float {
-  let intent_score = case c.problem.intent == query.intent {
-    True -> 1.0
-    False -> 0.0
-  }
-
-  let keyword_score =
-    jaccard(
-      list.map(c.problem.keywords, string.lowercase),
-      list.map(query.keywords, string.lowercase),
-    )
-
-  let entity_score =
-    jaccard(
-      list.map(c.problem.entities, string.lowercase),
-      list.map(query.entities, string.lowercase),
-    )
-
-  let domain_score = case
-    string.lowercase(c.problem.domain) == string.lowercase(query.domain)
-  {
-    True -> 1.0
-    False -> 0.0
-  }
-
-  // Recency score: compare case timestamp against current date.
-  // Recent cases (today) score 1.0, decaying to 0.0 over recency_decay_days.
-  let recency_score = compute_recency(c.timestamp, cfg)
-
-  { intent_score *. cfg.intent_weight }
-  +. { keyword_score *. cfg.keyword_weight }
-  +. { entity_score *. cfg.entity_weight }
-  +. { domain_score *. cfg.domain_weight }
-  +. { recency_score *. cfg.recency_weight }
-}
-
-/// Jaccard similarity: |A ∩ B| / |A ∪ B|
-fn jaccard(a: List(String), b: List(String)) -> Float {
-  case a, b {
-    [], _ -> 0.0
-    _, [] -> 0.0
-    _, _ -> {
-      let intersection =
-        list.filter(a, fn(x) { list.contains(b, x) })
-        |> list.length()
-      let union_size = list.length(a) + list.length(b) - intersection
-      case union_size {
-        0 -> 0.0
-        n -> int.to_float(intersection) /. int.to_float(n)
-      }
-    }
-  }
-}
-
-/// Compute recency score from a timestamp string (ISO 8601 or YYYY-MM-DD prefix).
-/// Returns 1.0 for today, decaying linearly to 0.0 over recency_decay_days.
-fn compute_recency(timestamp: String, cfg: CbrScoringConfig) -> Float {
-  let case_date = string.slice(timestamp, 0, 10)
-  let today = get_date()
-  case case_date == today {
-    True -> 1.0
-    False -> {
-      // Compare date strings lexicographically as a rough age approximation.
-      // Dates older than recency_decay_days get 0.0; we approximate by checking
-      // a few reference dates via the FFI.
-      let age_days = estimate_age_days(case_date, today)
-      let decay_days = int.to_float(cfg.recency_decay_days)
-      let decay = 1.0 -. { int.to_float(age_days) /. decay_days }
-      case decay <. 0.0 {
-        True -> 0.0
-        False -> decay
-      }
-    }
-  }
-}
-
-/// Exact age in days between two YYYY-MM-DD date strings using Erlang calendar.
-fn estimate_age_days(case_date: String, today: String) -> Int {
-  days_between(case_date, today)
+) -> dict.Dict(String, cbr_types.CbrCase) {
+  let all_cases = cbr_all_values(state.cbr_cases)
+  list.fold(all_cases, dict.new(), fn(d, c) { dict.insert(d, c.case_id, c) })
 }
 
 /// Generate a list [from..to] inclusive.
@@ -1803,9 +1624,6 @@ fn generate_offsets(from: Int, to: Int) -> List(Int) {
     False -> [from, ..generate_offsets(from + 1, to)]
   }
 }
-
-@external(erlang, "springdrift_ffi", "get_date")
-fn get_date() -> String
 
 // ---------------------------------------------------------------------------
 // Narrative indexing
@@ -1841,47 +1659,6 @@ fn index_entry(state: LibrarianState, entry: NarrativeEntry) -> Nil {
 
   // Recency index
   ets_insert(state.by_recency, entry.timestamp, entry)
-}
-
-// ---------------------------------------------------------------------------
-// CBR indexing
-// ---------------------------------------------------------------------------
-
-fn index_case(state: LibrarianState, c: cbr_types.CbrCase) -> Nil {
-  // Primary: case_id → case
-  cbr_insert(state.cbr_cases, c.case_id, c)
-
-  // Intent index
-  case c.problem.intent {
-    "" -> Nil
-    intent -> cbr_insert(state.cbr_by_intent, intent, c)
-  }
-
-  // Domain index
-  case c.problem.domain {
-    "" -> Nil
-    domain -> cbr_insert(state.cbr_by_domain, domain, c)
-  }
-
-  // Keyword index (lowercased)
-  list.each(c.problem.keywords, fn(kw) {
-    cbr_insert(state.cbr_by_keyword, string.lowercase(kw), c)
-  })
-}
-
-fn remove_case_from_indices(state: LibrarianState, case_id: String) -> Nil {
-  // Remove from primary set
-  cbr_delete_key(state.cbr_cases, case_id)
-  // Note: bag tables don't support targeted removal by value in our FFI,
-  // but since we check case_id during retrieval/scoring, stale bag entries
-  // will be filtered out naturally when the primary lookup fails.
-  // A full re-index could be done periodically if needed.
-  slog.debug(
-    "narrative/librarian",
-    "remove_case",
-    "Removed case " <> case_id <> " from primary index",
-    None,
-  )
 }
 
 // ---------------------------------------------------------------------------
@@ -1962,9 +1739,9 @@ fn replay_narrative_from_disk(
   }
 }
 
-fn replay_cbr_from_disk(state: LibrarianState, max_files: Int) -> Nil {
+fn replay_cbr_from_disk(state: LibrarianState, max_files: Int) -> LibrarianState {
   case simplifile.read_directory(state.cbr_dir) {
-    Error(_) -> Nil
+    Error(_) -> state
     Ok(files) -> {
       let jsonl_files =
         files
@@ -1973,11 +1750,23 @@ fn replay_cbr_from_disk(state: LibrarianState, max_files: Int) -> Nil {
 
       let limited = limit_files(jsonl_files, max_files)
 
-      list.each(limited, fn(f) {
-        let date = string.drop_end(f, 6)
-        let cases = cbr_log.load_date(state.cbr_dir, date)
-        list.each(cases, fn(c) { index_case(state, c) })
-      })
+      let all_cases =
+        list.flat_map(limited, fn(f) {
+          let date = string.drop_end(f, 6)
+          cbr_log.load_date(state.cbr_dir, date)
+        })
+
+      // Index metadata in ETS
+      list.each(all_cases, fn(c) { cbr_insert(state.cbr_cases, c.case_id, c) })
+
+      // Encode all cases into the CaseBase + rebuild inverted index
+      let case_base =
+        list.fold(all_cases, state.case_base, fn(base, c) {
+          bridge.retain_case(base, c)
+        })
+      let case_base = bridge.rebuild_index(case_base, all_cases)
+
+      LibrarianState(..state, case_base:)
     }
   }
 }
@@ -2042,16 +1831,6 @@ fn merge_unique_entries(
   let id_set =
     list.fold(a, dict.new(), fn(d, e) { dict.insert(d, e.cycle_id, Nil) })
   let unique_b = list.filter(b, fn(e) { !dict.has_key(id_set, e.cycle_id) })
-  list.append(a, unique_b)
-}
-
-fn merge_unique_cases(
-  a: List(cbr_types.CbrCase),
-  b: List(cbr_types.CbrCase),
-) -> List(cbr_types.CbrCase) {
-  let id_set =
-    list.fold(a, dict.new(), fn(d, c) { dict.insert(d, c.case_id, Nil) })
-  let unique_b = list.filter(b, fn(c) { !dict.has_key(id_set, c.case_id) })
   list.append(a, unique_b)
 }
 

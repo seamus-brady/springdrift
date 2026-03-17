@@ -623,6 +623,7 @@ fn do_housekeeping(state: CuratorState) -> Nil {
     housekeeping.find_duplicate_cases(
       all_cases,
       state.housekeeping_config.dedup_similarity,
+      None,
     )
   let dedup_count = list.length(dedup_results)
   list.each(dedup_results, fn(d: housekeeping.DedupResult) {

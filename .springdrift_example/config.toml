@@ -197,27 +197,12 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 # Minimum overlap score to assign entry to existing thread (default: 3)
 # threshold = 3
 
-# ── CBR scoring ──────────────────────────────────────────────────────────────
-# Case-Based Reasoning retrieval scoring weights. Symbolic weights must sum to 1.0.
+# ── CBR (paperwings) ─────────────────────────────────────────────────────────
+# Case-Based Reasoning retrieval via paperwings VSA + inverted index + RRF.
 
-[scoring.cbr]
-# Weight for embedding cosine similarity vs symbolic scoring (default: 0.4 / 0.6)
-# When embeddings are unavailable, pure symbolic scoring is used.
-# cosine_weight = 0.4
-# symbolic_weight = 0.6
-
-# Symbolic component weights (must sum to 1.0)
-# intent_weight = 0.35     # Intent/goal match
-# keyword_weight = 0.25    # Keyword Jaccard overlap
-# entity_weight = 0.20     # Entity Jaccard overlap
-# domain_weight = 0.15     # Domain match
-# recency_weight = 0.05    # Recency decay bonus
-
-# Minimum score for CBR result inclusion (default: 0.1)
-# min_score = 0.1
-
-# Days over which recency score decays to zero (default: 30)
-# recency_decay_days = 30
+[cbr]
+# VSA vector dimension for CBR case encoding (default: 1000)
+# vsa_dimensions = 1000
 
 # ── Housekeeping ─────────────────────────────────────────────────────────────
 # Maintenance thresholds for CBR dedup, pruning, and fact management.
@@ -237,19 +222,6 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 
 # Days after which single-cycle threads with no signal are pruned (default: 7)
 # thread_pruning_days = 7
-
-# ── Embedding ────────────────────────────────────────────────────────────────
-# Ollama embedding service configuration.
-
-[embedding]
-# Embedding model name (default: "nomic-embed-text")
-# model = "nomic-embed-text"
-
-# Ollama base URL (default: "http://localhost:11434")
-# base_url = "http://localhost:11434"
-
-# Expected embedding dimensions (default: 768)
-# dimensions = 768
 
 # ── Agent specifications ─────────────────────────────────────────────────────
 # Per-agent configuration. Profiles override these when active.

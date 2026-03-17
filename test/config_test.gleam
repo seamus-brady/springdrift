@@ -35,7 +35,7 @@ pub fn default_has_all_none_test() {
   cfg.llm_request_timeout_ms |> should.equal(None)
   cfg.retry_max_retries |> should.equal(None)
   cfg.max_artifact_chars |> should.equal(None)
-  cfg.embedding_model |> should.equal(None)
+  cfg.vsa_dimensions |> should.equal(None)
   cfg.web_port |> should.equal(None)
   cfg.planner_max_turns |> should.equal(None)
 }
@@ -641,16 +641,12 @@ mailbox_warn_threshold = 100"
   cfg.mailbox_warn_threshold |> should.equal(Some(100))
 }
 
-pub fn parse_config_toml_embedding_test() {
+pub fn parse_config_toml_cbr_test() {
   let toml =
-    "[embedding]
-model = \"all-minilm\"
-base_url = \"http://myhost:11434\"
-dimensions = 384"
+    "[cbr]
+vsa_dimensions = 2000"
   let assert Ok(cfg) = config.parse_config_toml(toml)
-  cfg.embedding_model |> should.equal(Some("all-minilm"))
-  cfg.embedding_base_url |> should.equal(Some("http://myhost:11434"))
-  cfg.embedding_dimensions |> should.equal(Some(384))
+  cfg.vsa_dimensions |> should.equal(Some(2000))
 }
 
 pub fn parse_config_toml_agents_test() {
@@ -696,16 +692,12 @@ threshold = 6"
   cfg.threading_threshold |> should.equal(Some(6))
 }
 
-pub fn parse_config_toml_scoring_cbr_test() {
+pub fn parse_config_toml_cbr_vsa_test() {
   let toml =
-    "[scoring.cbr]
-cosine_weight = 0.5
-symbolic_weight = 0.5
-min_score = 0.2"
+    "[cbr]
+vsa_dimensions = 500"
   let assert Ok(cfg) = config.parse_config_toml(toml)
-  cfg.cbr_cosine_weight |> should.equal(Some(0.5))
-  cfg.cbr_symbolic_weight |> should.equal(Some(0.5))
-  cfg.cbr_min_score |> should.equal(Some(0.2))
+  cfg.vsa_dimensions |> should.equal(Some(500))
 }
 
 pub fn parse_config_toml_housekeeping_test() {

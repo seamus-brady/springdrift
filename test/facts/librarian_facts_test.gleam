@@ -56,7 +56,7 @@ fn start_lib(suffix: String) {
       facts_dir,
       dir <> "/artifacts",
       0,
-      librarian.default_scoring_config(),
+      librarian.default_cbr_config(),
     )
   #(lib, dir, facts_dir)
 }
@@ -193,7 +193,7 @@ pub fn librarian_replay_facts_from_disk_test() {
       facts_dir,
       dir <> "/artifacts",
       0,
-      librarian.default_scoring_config(),
+      librarian.default_cbr_config(),
     )
   let facts = librarian.get_all_facts(lib)
   list.length(facts) |> should.equal(2)

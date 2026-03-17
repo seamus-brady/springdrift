@@ -109,7 +109,6 @@ pub fn encode_case(c: CbrCase) -> json.Json {
     #("problem", encode_problem(c.problem)),
     #("solution", encode_solution(c.solution)),
     #("outcome", encode_outcome(c.outcome)),
-    #("embedding", json.array(c.embedding, json.float)),
     #("source_narrative_id", json.string(c.source_narrative_id)),
     #("profile", case c.profile {
       option.Some(p) -> json.string(p)
@@ -161,11 +160,6 @@ pub fn case_decoder() -> decode.Decoder(CbrCase) {
   use problem <- decode.field("problem", problem_decoder())
   use solution <- decode.field("solution", solution_decoder())
   use outcome <- decode.field("outcome", outcome_decoder())
-  use embedding <- decode.field(
-    "embedding",
-    decode.optional(decode.list(decode.float))
-      |> decode.map(option.unwrap(_, [])),
-  )
   use source_narrative_id <- decode.field(
     "source_narrative_id",
     decode.optional(decode.string) |> decode.map(option.unwrap(_, "")),
@@ -178,7 +172,6 @@ pub fn case_decoder() -> decode.Decoder(CbrCase) {
     problem:,
     solution:,
     outcome:,
-    embedding:,
     source_narrative_id:,
     profile:,
   ))

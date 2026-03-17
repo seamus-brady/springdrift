@@ -39,7 +39,7 @@ fn start_lib(suffix: String) {
       facts_dir,
       dir <> "/artifacts",
       0,
-      librarian.default_scoring_config(),
+      librarian.default_cbr_config(),
     )
   lib
 }

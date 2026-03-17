@@ -10,11 +10,12 @@
 ////   3. Fact conflict resolution: same key, different values → supersede lower confidence
 ////   4. Thread pruning: single-cycle threads older than cutoff → remove from index
 
+import cbr/bridge
 import cbr/types as cbr_types
 import facts/types as facts_types
 import gleam/float
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{type Option, None, Some}
 import gleam/order
 import gleam/string
 import narrative/types as narrative_types
@@ -28,26 +29,33 @@ pub type DedupResult {
   DedupResult(keep_id: String, supersede_id: String, similarity: Float)
 }
 
-/// Find pairs of CBR cases with cosine similarity > threshold on their
-/// embeddings. Returns a list of DedupResult where the older (by timestamp)
-/// case should be superseded.
+/// Find pairs of CBR cases with VSA distance < threshold (smaller = more similar).
+/// When a CaseBase is provided, uses VSA structural distance.
+/// Returns a list of DedupResult where the older (by timestamp) case should be superseded.
 pub fn find_duplicate_cases(
   cases: List(cbr_types.CbrCase),
   threshold: Float,
+  case_base: Option(bridge.CaseBase),
 ) -> List(DedupResult) {
-  do_find_duplicates(cases, threshold, [])
+  do_find_duplicates(cases, threshold, case_base, [])
 }
 
 fn do_find_duplicates(
   cases: List(cbr_types.CbrCase),
   threshold: Float,
+  case_base: Option(bridge.CaseBase),
   acc: List(DedupResult),
 ) -> List(DedupResult) {
   case cases {
     [] -> acc
     [first, ..rest] -> {
-      let new_results = compare_against_rest(first, rest, threshold)
-      do_find_duplicates(rest, threshold, list.append(acc, new_results))
+      let new_results = compare_against_rest(first, rest, threshold, case_base)
+      do_find_duplicates(
+        rest,
+        threshold,
+        case_base,
+        list.append(acc, new_results),
+      )
     }
   }
 }
@@ -56,68 +64,41 @@ fn compare_against_rest(
   case_a: cbr_types.CbrCase,
   others: List(cbr_types.CbrCase),
   threshold: Float,
+  case_base: Option(bridge.CaseBase),
 ) -> List(DedupResult) {
   list.filter_map(others, fn(case_b) {
-    case case_a.embedding, case_b.embedding {
-      [], _ -> Error(Nil)
-      _, [] -> Error(Nil)
-      emb_a, emb_b -> {
-        let sim = cosine_similarity(emb_a, emb_b)
-        case sim >. threshold {
-          True -> {
-            // Keep the newer one (later timestamp), supersede the older
-            let #(keep, supersede) = case
-              string.compare(case_a.timestamp, case_b.timestamp)
-            {
-              order.Lt -> #(case_b.case_id, case_a.case_id)
-              _ -> #(case_a.case_id, case_b.case_id)
+    case case_base {
+      None -> Error(Nil)
+      Some(base) -> {
+        case bridge.case_distance(base, case_a.case_id, case_b.case_id) {
+          Error(_) -> Error(Nil)
+          Ok(dist) -> {
+            // VSA distance: 0.0 = identical, 0.5 = random. Threshold is
+            // similarity (0.92) so convert: distance < (1 - threshold).
+            let dist_threshold = 1.0 -. threshold
+            case dist <. dist_threshold {
+              True -> {
+                let sim = 1.0 -. dist
+                let #(keep, supersede) = case
+                  string.compare(case_a.timestamp, case_b.timestamp)
+                {
+                  order.Lt -> #(case_b.case_id, case_a.case_id)
+                  _ -> #(case_a.case_id, case_b.case_id)
+                }
+                Ok(DedupResult(
+                  keep_id: keep,
+                  supersede_id: supersede,
+                  similarity: sim,
+                ))
+              }
+              False -> Error(Nil)
             }
-            Ok(DedupResult(
-              keep_id: keep,
-              supersede_id: supersede,
-              similarity: sim,
-            ))
           }
-          False -> Error(Nil)
         }
       }
     }
   })
 }
-
-/// Cosine similarity between two float vectors.
-pub fn cosine_similarity(a: List(Float), b: List(Float)) -> Float {
-  let #(dot, mag_a, mag_b) = dot_and_magnitudes(a, b, 0.0, 0.0, 0.0)
-  let denominator = float_sqrt(mag_a) *. float_sqrt(mag_b)
-  case denominator >. 0.0 {
-    True -> dot /. denominator
-    False -> 0.0
-  }
-}
-
-fn dot_and_magnitudes(
-  a: List(Float),
-  b: List(Float),
-  dot: Float,
-  mag_a: Float,
-  mag_b: Float,
-) -> #(Float, Float, Float) {
-  case a, b {
-    [], _ -> #(dot, mag_a, mag_b)
-    _, [] -> #(dot, mag_a, mag_b)
-    [x, ..rest_a], [y, ..rest_b] ->
-      dot_and_magnitudes(
-        rest_a,
-        rest_b,
-        dot +. { x *. y },
-        mag_a +. { x *. x },
-        mag_b +. { y *. y },
-      )
-  }
-}
-
-@external(erlang, "math", "sqrt")
-fn float_sqrt(x: Float) -> Float
 
 // ---------------------------------------------------------------------------
 // CBR pruning — old failures without pitfalls

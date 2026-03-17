@@ -99,26 +99,14 @@ pub type AppConfig {
     threading_keyword_weight: Option(Int),
     threading_topic_weight: Option(Int),
     threading_threshold: Option(Int),
-    // ── CBR scoring ──
-    cbr_cosine_weight: Option(Float),
-    cbr_symbolic_weight: Option(Float),
-    cbr_intent_weight: Option(Float),
-    cbr_keyword_weight: Option(Float),
-    cbr_entity_weight: Option(Float),
-    cbr_domain_weight: Option(Float),
-    cbr_recency_weight: Option(Float),
-    cbr_min_score: Option(Float),
-    cbr_recency_decay_days: Option(Int),
+    // ── CBR (paperwings) ──
+    vsa_dimensions: Option(Int),
     // ── Housekeeping ──
     dedup_similarity: Option(Float),
     pruning_confidence: Option(Float),
     fact_confidence: Option(Float),
     cbr_pruning_days: Option(Int),
     thread_pruning_days: Option(Int),
-    // ── Embedding ──
-    embedding_model: Option(String),
-    embedding_base_url: Option(String),
-    embedding_dimensions: Option(Int),
     // ── Agent specs ──
     planner_max_tokens: Option(Int),
     planner_max_turns: Option(Int),
@@ -222,23 +210,12 @@ pub fn default() -> AppConfig {
     threading_keyword_weight: None,
     threading_topic_weight: None,
     threading_threshold: None,
-    cbr_cosine_weight: None,
-    cbr_symbolic_weight: None,
-    cbr_intent_weight: None,
-    cbr_keyword_weight: None,
-    cbr_entity_weight: None,
-    cbr_domain_weight: None,
-    cbr_recency_weight: None,
-    cbr_min_score: None,
-    cbr_recency_decay_days: None,
+    vsa_dimensions: None,
     dedup_similarity: None,
     pruning_confidence: None,
     fact_confidence: None,
     cbr_pruning_days: None,
     thread_pruning_days: None,
-    embedding_model: None,
-    embedding_base_url: None,
-    embedding_dimensions: None,
     planner_max_tokens: None,
     planner_max_turns: None,
     planner_max_errors: None,
@@ -449,40 +426,8 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       override_cfg.threading_threshold,
       base.threading_threshold,
     ),
-    // CBR scoring
-    cbr_cosine_weight: option.or(
-      override_cfg.cbr_cosine_weight,
-      base.cbr_cosine_weight,
-    ),
-    cbr_symbolic_weight: option.or(
-      override_cfg.cbr_symbolic_weight,
-      base.cbr_symbolic_weight,
-    ),
-    cbr_intent_weight: option.or(
-      override_cfg.cbr_intent_weight,
-      base.cbr_intent_weight,
-    ),
-    cbr_keyword_weight: option.or(
-      override_cfg.cbr_keyword_weight,
-      base.cbr_keyword_weight,
-    ),
-    cbr_entity_weight: option.or(
-      override_cfg.cbr_entity_weight,
-      base.cbr_entity_weight,
-    ),
-    cbr_domain_weight: option.or(
-      override_cfg.cbr_domain_weight,
-      base.cbr_domain_weight,
-    ),
-    cbr_recency_weight: option.or(
-      override_cfg.cbr_recency_weight,
-      base.cbr_recency_weight,
-    ),
-    cbr_min_score: option.or(override_cfg.cbr_min_score, base.cbr_min_score),
-    cbr_recency_decay_days: option.or(
-      override_cfg.cbr_recency_decay_days,
-      base.cbr_recency_decay_days,
-    ),
+    // CBR (paperwings)
+    vsa_dimensions: option.or(override_cfg.vsa_dimensions, base.vsa_dimensions),
     // Housekeeping
     dedup_similarity: option.or(
       override_cfg.dedup_similarity,
@@ -503,19 +448,6 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     thread_pruning_days: option.or(
       override_cfg.thread_pruning_days,
       base.thread_pruning_days,
-    ),
-    // Embedding
-    embedding_model: option.or(
-      override_cfg.embedding_model,
-      base.embedding_model,
-    ),
-    embedding_base_url: option.or(
-      override_cfg.embedding_base_url,
-      base.embedding_base_url,
-    ),
-    embedding_dimensions: option.or(
-      override_cfg.embedding_dimensions,
-      base.embedding_dimensions,
     ),
     // Agent specs
     planner_max_tokens: option.or(
@@ -744,11 +676,9 @@ pub fn to_string(cfg: AppConfig) -> String {
     option.map(cfg.mailbox_warn_threshold, fn(v) {
       "mailbox_warn_threshold: " <> int.to_string(v)
     }),
-    // Embedding
-    option.map(cfg.embedding_model, fn(v) { "embedding.model: " <> v }),
-    option.map(cfg.embedding_base_url, fn(v) { "embedding.base_url: " <> v }),
-    option.map(cfg.embedding_dimensions, fn(v) {
-      "embedding.dimensions: " <> int.to_string(v)
+    // CBR
+    option.map(cfg.vsa_dimensions, fn(v) {
+      "cbr.vsa_dimensions: " <> int.to_string(v)
     }),
     // Web
     option.map(cfg.web_port, fn(v) { "web.port: " <> int.to_string(v) }),
@@ -1009,24 +939,8 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     threading_threshold: get_toml_int(table, [
       "scoring", "threading", "threshold",
     ]),
-    // ── [scoring.cbr] ──
-    cbr_cosine_weight: get_toml_float(table, ["scoring", "cbr", "cosine_weight"]),
-    cbr_symbolic_weight: get_toml_float(table, [
-      "scoring", "cbr", "symbolic_weight",
-    ]),
-    cbr_intent_weight: get_toml_float(table, ["scoring", "cbr", "intent_weight"]),
-    cbr_keyword_weight: get_toml_float(table, [
-      "scoring", "cbr", "keyword_weight",
-    ]),
-    cbr_entity_weight: get_toml_float(table, ["scoring", "cbr", "entity_weight"]),
-    cbr_domain_weight: get_toml_float(table, ["scoring", "cbr", "domain_weight"]),
-    cbr_recency_weight: get_toml_float(table, [
-      "scoring", "cbr", "recency_weight",
-    ]),
-    cbr_min_score: get_toml_float(table, ["scoring", "cbr", "min_score"]),
-    cbr_recency_decay_days: get_toml_int(table, [
-      "scoring", "cbr", "recency_decay_days",
-    ]),
+    // ── [cbr] ──
+    vsa_dimensions: get_toml_int(table, ["cbr", "vsa_dimensions"]),
     // ── [housekeeping] ──
     dedup_similarity: get_toml_float(table, ["housekeeping", "dedup_similarity"]),
     pruning_confidence: get_toml_float(table, [
@@ -1037,10 +951,6 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     thread_pruning_days: get_toml_int(table, [
       "housekeeping", "thread_pruning_days",
     ]),
-    // ── [embedding] ──
-    embedding_model: get_toml_str(table, ["embedding", "model"]),
-    embedding_base_url: get_toml_str(table, ["embedding", "base_url"]),
-    embedding_dimensions: get_toml_int(table, ["embedding", "dimensions"]),
     // ── [agents.*] ──
     planner_max_tokens: get_toml_int(table, ["agents", "planner", "max_tokens"]),
     planner_max_turns: get_toml_int(table, ["agents", "planner", "max_turns"]),
@@ -1124,7 +1034,7 @@ const known_keys = [
   "write_anywhere", "skills_dirs", "gui", "dprime_enabled", "dprime_config",
   "narrative", "profile", "profiles_dirs", "agent", "log_retention_days",
   "log_max_file_bytes", "timeouts", "retry", "limits", "scoring", "housekeeping",
-  "embedding", "agents", "web", "services",
+  "cbr", "agents", "web", "services",
 ]
 
 const known_narrative_keys = [

@@ -7,8 +7,6 @@
 import agent/types as agent_types
 import cbr/log as cbr_log
 import cbr/types as cbr_types
-import embedding/client as embedding_client
-import embedding/types as embedding_types
 import gleam/dynamic/decode
 import gleam/erlang/process.{type Subject}
 import gleam/int
@@ -183,7 +181,6 @@ pub fn spawn(
   cbr_dir: String,
   verbose: Bool,
   lib: Option(Subject(LibrarianMessage)),
-  embed_config: embedding_types.EmbeddingConfig,
   cur: Option(Subject(CuratorMessage)),
   threading_config: threading.ThreadingConfig,
 ) -> Nil {
@@ -236,11 +233,10 @@ pub fn spawn(
           // Step 2: Generate CBR case from the narrative entry
           case generate_cbr_case(ctx, threaded, provider, model) {
             Some(cbr_case) -> {
-              // Embed the case before persisting
-              let embedded = embed_cbr_case(cbr_case, embed_config)
-              cbr_log.append(cbr_dir, embedded)
+              // Persist to JSONL and notify Librarian (which encodes into CaseBase)
+              cbr_log.append(cbr_dir, cbr_case)
               case lib {
-                Some(l) -> librarian.notify_new_case(l, embedded)
+                Some(l) -> librarian.notify_new_case(l, cbr_case)
                 None -> Nil
               }
             }
@@ -825,49 +821,6 @@ fn generate_cbr_case(
   }
 }
 
-/// Generate an embedding for a CBR case and attach it.
-/// Falls back to empty embedding on any error (best-effort).
-fn embed_cbr_case(
-  cbr_case: cbr_types.CbrCase,
-  config: embedding_types.EmbeddingConfig,
-) -> cbr_types.CbrCase {
-  // Build a text representation for embedding from the case's key fields
-  let text =
-    cbr_case.problem.intent
-    <> " "
-    <> cbr_case.problem.domain
-    <> " "
-    <> string.join(cbr_case.problem.keywords, " ")
-    <> " "
-    <> cbr_case.problem.user_input
-    <> " "
-    <> cbr_case.solution.approach
-  case embedding_client.embed(config, text) {
-    Ok(result) -> {
-      slog.info(
-        "narrative/archivist",
-        "embed_cbr",
-        "Embedded CBR case "
-          <> cbr_case.case_id
-          <> " ("
-          <> int.to_string(list.length(result.embedding))
-          <> " dims)",
-        Some(cbr_case.case_id),
-      )
-      cbr_types.CbrCase(..cbr_case, embedding: result.embedding)
-    }
-    Error(_) -> {
-      slog.warn(
-        "narrative/archivist",
-        "embed_cbr",
-        "Embedding failed for CBR case " <> cbr_case.case_id <> ", using empty",
-        Some(cbr_case.case_id),
-      )
-      cbr_case
-    }
-  }
-}
-
 fn cbr_system_prompt() -> String {
   "You are the Archivist extracting a Case-Based Reasoning record from a completed cognitive cycle. Your goal is to produce a structured problem/solution/outcome record optimised for future retrieval.
 
@@ -984,7 +937,6 @@ fn parse_cbr_case(
           case_id: ctx.cycle_id,
           timestamp: entry.timestamp,
           schema_version: 1,
-          embedding: [],
           source_narrative_id: ctx.cycle_id,
           profile: option.None,
         ),
@@ -1033,7 +985,6 @@ fn lenient_cbr_decoder() -> decode.Decoder(cbr_types.CbrCase) {
     problem:,
     solution:,
     outcome:,
-    embedding: [],
     source_narrative_id: "",
     profile: option.None,
   ))

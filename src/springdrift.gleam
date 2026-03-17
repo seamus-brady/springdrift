@@ -10,8 +10,6 @@ import agents/researcher
 import config.{type AppConfig}
 import dot_env
 import dprime/config as dprime_config_mod
-import embedding/health as embedding_health
-import embedding/types as embedding_types
 import facts/log as facts_log
 import gleam/erlang/process
 import gleam/int
@@ -54,6 +52,11 @@ fn do_halt(code: Int) -> Nil
 
 @external(erlang, "springdrift_ffi", "get_date")
 fn get_date_ffi() -> String
+
+/// Seed Nx RNG for paperwings vector generation. No-op if already seeded.
+fn init_paperwings_rng() -> Nil {
+  Nil
+}
 
 fn default_skill_dirs() -> List(String) {
   paths.default_skills_dirs()
@@ -255,47 +258,11 @@ fn run(cfg: AppConfig) -> Nil {
   // Migrate legacy facts.jsonl to daily rotation (no-op if already done)
   facts_log.migrate_legacy(paths.facts_dir())
 
-  // Build CBR scoring config
-  let default_sc = librarian.default_scoring_config()
-  let scoring_config =
-    librarian.CbrScoringConfig(
-      cosine_weight: option.unwrap(
-        cfg.cbr_cosine_weight,
-        default_sc.cosine_weight,
-      ),
-      symbolic_weight: option.unwrap(
-        cfg.cbr_symbolic_weight,
-        default_sc.symbolic_weight,
-      ),
-      intent_weight: option.unwrap(
-        cfg.cbr_intent_weight,
-        default_sc.intent_weight,
-      ),
-      keyword_weight: option.unwrap(
-        cfg.cbr_keyword_weight,
-        default_sc.keyword_weight,
-      ),
-      entity_weight: option.unwrap(
-        cfg.cbr_entity_weight,
-        default_sc.entity_weight,
-      ),
-      domain_weight: option.unwrap(
-        cfg.cbr_domain_weight,
-        default_sc.domain_weight,
-      ),
-      recency_weight: option.unwrap(
-        cfg.cbr_recency_weight,
-        default_sc.recency_weight,
-      ),
-      min_score: option.unwrap(cfg.cbr_min_score, default_sc.min_score),
-      recency_decay_days: option.unwrap(
-        cfg.cbr_recency_decay_days,
-        default_sc.recency_decay_days,
-      ),
-      mailbox_warn_threshold: option.unwrap(
-        cfg.mailbox_warn_threshold,
-        default_sc.mailbox_warn_threshold,
-      ),
+  // Build CBR config for paperwings
+  let cbr_config =
+    librarian.CbrConfig(
+      vsa_dimensions: option.unwrap(cfg.vsa_dimensions, 1000),
+      mailbox_warn_threshold: option.unwrap(cfg.mailbox_warn_threshold, 50),
     )
 
   // Start the Librarian (supervised — auto-restarts on crash)
@@ -308,7 +275,7 @@ fn run(cfg: AppConfig) -> Nil {
       paths.artifacts_dir(),
       librarian_max_days,
       5,
-      scoring_config,
+      cbr_config,
     )
   {
     Ok(subj) -> subj
@@ -427,55 +394,13 @@ fn run(cfg: AppConfig) -> Nil {
     }
   }
 
-  // Ollama embedding service — obligatory health check at startup
-  let default_embed = embedding_types.default_config()
-  let embedding_config =
-    embedding_types.EmbeddingConfig(
-      model: option.unwrap(cfg.embedding_model, default_embed.model),
-      base_url: option.unwrap(cfg.embedding_base_url, default_embed.base_url),
-      dimensions: option.unwrap(
-        cfg.embedding_dimensions,
-        default_embed.dimensions,
-      ),
-      fallback: default_embed.fallback,
-    )
-  case embedding_health.check(embedding_config) {
-    embedding_types.Healthy(model: m, dimensions: d) ->
-      io.println(
-        "Embeddings: " <> m <> " (" <> int.to_string(d) <> " dims) — OK",
-      )
-    embedding_types.Unhealthy(error: e) -> {
-      io.println("FATAL: Ollama embedding service is required but unavailable.")
-      case e {
-        embedding_types.NotReachable(reason:) ->
-          io.println(
-            "  Ollama not reachable: " <> reason <> "\n  Fix: ollama serve",
-          )
-        embedding_types.ModelNotFound(model:) ->
-          io.println(
-            "  Model '" <> model <> "' not found.\n  Fix: ollama pull " <> model,
-          )
-        embedding_types.DimensionMismatch(expected:, got:) ->
-          io.println(
-            "  Dimension mismatch: expected "
-            <> int.to_string(expected)
-            <> ", got "
-            <> int.to_string(got)
-            <> "\n  Fix: ollama rm "
-            <> embedding_config.model
-            <> " && ollama pull "
-            <> embedding_config.model,
-          )
-        embedding_types.HttpError(status:, body:) ->
-          io.println("  HTTP error " <> int.to_string(status) <> ": " <> body)
-        embedding_types.NetworkError(reason:) ->
-          io.println("  Network error: " <> reason)
-        embedding_types.DecodeError(reason:) ->
-          io.println("  Decode error: " <> reason)
-      }
-      do_halt(1)
-    }
-  }
+  // Initialise paperwings RNG (required before any VSA vector operations)
+  init_paperwings_rng()
+  io.println(
+    "CBR: paperwings VSA (dimensions="
+    <> int.to_string(option.unwrap(cfg.vsa_dimensions, 1000))
+    <> ") — OK",
+  )
 
   // Build housekeeping config
   let hk_default = curator.default_housekeeping_config()
@@ -613,7 +538,6 @@ fn run(cfg: AppConfig) -> Nil {
       profile_dirs:,
       write_anywhere:,
       curator: option.Some(curator_subj),
-      embedding_config:,
       agent_uuid: stable_identity.agent_uuid,
       session_since:,
       retry_config:,

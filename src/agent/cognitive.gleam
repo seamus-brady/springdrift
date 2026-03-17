@@ -83,7 +83,6 @@ pub fn start(
           cbr_dir: cfg.cbr_dir,
           librarian: cfg.librarian,
           curator: cfg.curator,
-          embedding_config: cfg.embedding_config,
         ),
         agent_completions: [],
         last_user_input: "",

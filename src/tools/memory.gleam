@@ -9,8 +9,6 @@
 
 import cbr/types as cbr_types
 import dag/types as dag_types
-import embedding/client as embedding_client
-import embedding/types as embedding_types
 import facts/log as facts_log
 import facts/types as facts_types
 import gleam/dynamic/decode
@@ -334,7 +332,6 @@ pub fn execute(
   narrative_dir: String,
   lib: Option(Subject(LibrarianMessage)),
   facts_ctx: Option(FactsContext),
-  embed_config: embedding_types.EmbeddingConfig,
   introspect_ctx: Option(IntrospectContext),
   limits: MemoryLimits,
 ) -> ToolResult {
@@ -352,8 +349,7 @@ pub fn execute(
     "memory_trace_fact" -> run_memory_trace(call, facts_ctx)
     "reflect" -> run_reflect(call, lib)
     "inspect_cycle" -> run_inspect_cycle(call, lib)
-    "recall_cases" ->
-      run_recall_cases(call, lib, embed_config, limits.cbr_max_results)
+    "recall_cases" -> run_recall_cases(call, lib, limits.cbr_max_results)
     "query_tool_activity" -> run_query_tool_activity(call, lib)
     "introspect" -> run_introspect(call, introspect_ctx)
     "list_recent_cycles" -> run_list_recent_cycles(call, lib)
@@ -1226,7 +1222,6 @@ fn format_subtree(tree: dag_types.DagSubtree, depth: Int) -> String {
 fn run_recall_cases(
   call: ToolCall,
   lib: Option(Subject(LibrarianMessage)),
-  embed_config: embedding_types.EmbeddingConfig,
   cbr_max: Int,
 ) -> ToolResult {
   case lib {
@@ -1256,22 +1251,12 @@ fn run_recall_cases(
               |> list.filter(fn(k) { k != "" })
           }
           let clamped = int.min(cbr_max, int.max(1, max_results))
-          // Embed the query text for semantic retrieval
-          let query_text =
-            intent <> " " <> domain <> " " <> string.join(keywords, " ")
-          let query_embedding = case
-            embedding_client.embed(embed_config, query_text)
-          {
-            Ok(result) -> Some(result.embedding)
-            Error(_) -> None
-          }
           let query =
             cbr_types.CbrQuery(
               intent:,
               domain:,
               keywords:,
               entities: [],
-              embedding: query_embedding,
               max_results: clamped,
             )
           let results = librarian.retrieve_cases(l, query)

@@ -105,7 +105,7 @@ pub fn librarian_starts_with_empty_dir_test() {
       dir <> "/facts",
       dir <> "/artifacts",
       0,
-      librarian.default_scoring_config(),
+      librarian.default_cbr_config(),
     )
   let entries = librarian.load_all(lib)
   entries |> should.equal([])
@@ -128,7 +128,7 @@ pub fn librarian_replays_from_jsonl_test() {
       dir <> "/facts",
       dir <> "/artifacts",
       0,
-      librarian.default_scoring_config(),
+      librarian.default_cbr_config(),
     )
   let entries = librarian.load_all(lib)
   list.length(entries) |> should.equal(2)
@@ -144,7 +144,7 @@ pub fn librarian_index_entry_test() {
       dir <> "/facts",
       dir <> "/artifacts",
       0,
-      librarian.default_scoring_config(),
+      librarian.default_cbr_config(),
     )
 
   // Notify Librarian of a new entry
@@ -170,7 +170,7 @@ pub fn librarian_search_by_keyword_test() {
       dir <> "/facts",
       dir <> "/artifacts",
       0,
-      librarian.default_scoring_config(),
+      librarian.default_cbr_config(),
     )
 
   let entry1 =
@@ -211,7 +211,7 @@ pub fn librarian_search_case_insensitive_test() {
       dir <> "/facts",
       dir <> "/artifacts",
       0,
-      librarian.default_scoring_config(),
+      librarian.default_cbr_config(),
     )
 
   let entry =
@@ -240,7 +240,7 @@ pub fn librarian_thread_query_test() {
       dir <> "/facts",
       dir <> "/artifacts",
       0,
-      librarian.default_scoring_config(),
+      librarian.default_cbr_config(),
     )
 
   let entry1 = make_threaded_entry("cycle-t1", "thread-A", "Property Research")
@@ -273,7 +273,7 @@ pub fn librarian_date_range_query_test() {
       dir <> "/facts",
       dir <> "/artifacts",
       0,
-      librarian.default_scoring_config(),
+      librarian.default_cbr_config(),
     )
 
   let entry1 =
@@ -318,7 +318,7 @@ pub fn librarian_recent_entries_test() {
       dir <> "/facts",
       dir <> "/artifacts",
       0,
-      librarian.default_scoring_config(),
+      librarian.default_cbr_config(),
     )
 
   let entry1 =
@@ -360,7 +360,7 @@ pub fn librarian_thread_index_test() {
       dir <> "/facts",
       dir <> "/artifacts",
       0,
-      librarian.default_scoring_config(),
+      librarian.default_cbr_config(),
     )
 
   // Initially empty
@@ -409,7 +409,7 @@ pub fn librarian_max_files_limit_test() {
       dir <> "/facts",
       dir <> "/artifacts",
       1,
-      librarian.default_scoring_config(),
+      librarian.default_cbr_config(),
     )
   let entries = librarian.load_all(lib)
   list.length(entries) |> should.equal(1)
@@ -428,7 +428,7 @@ pub fn librarian_thread_heads_test() {
       dir <> "/facts",
       dir <> "/artifacts",
       0,
-      librarian.default_scoring_config(),
+      librarian.default_cbr_config(),
     )
 
   let entry1 = make_threaded_entry("cycle-h1", "thread-X", "Thread X")
@@ -476,7 +476,7 @@ pub fn librarian_no_results_for_unknown_keyword_test() {
       dir <> "/facts",
       dir <> "/artifacts",
       0,
-      librarian.default_scoring_config(),
+      librarian.default_cbr_config(),
     )
   let results = librarian.search(lib, "nonexistent_topic_xyz")
   results |> should.equal([])

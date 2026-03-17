@@ -162,7 +162,6 @@ fn handle_memory_tools(
           state.memory.narrative_dir,
           state.memory.librarian,
           facts_ctx,
-          state.memory.embedding_config,
           introspect_ctx,
           state.config.memory_limits,
         )

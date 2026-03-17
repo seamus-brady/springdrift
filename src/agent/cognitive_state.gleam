@@ -5,7 +5,6 @@ import agent/types.{
 }
 import dag/types as dag_types
 import dprime/types as dprime_types
-import embedding/types as embedding_types
 import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Subject}
 import gleam/option.{type Option}
@@ -36,7 +35,6 @@ pub type MemoryContext {
     cbr_dir: String,
     librarian: Option(Subject(LibrarianMessage)),
     curator: Option(Subject(CuratorMessage)),
-    embedding_config: embedding_types.EmbeddingConfig,
   )
 }
 

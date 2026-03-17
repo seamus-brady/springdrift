@@ -7,43 +7,13 @@ import gleeunit/should
 import narrative/housekeeping
 
 // ---------------------------------------------------------------------------
-// Cosine similarity
-// ---------------------------------------------------------------------------
-
-pub fn cosine_similarity_identical_vectors_test() {
-  let a = [1.0, 0.0, 0.0]
-  let b = [1.0, 0.0, 0.0]
-  let sim = housekeeping.cosine_similarity(a, b)
-  should.be_true(sim >. 0.99)
-}
-
-pub fn cosine_similarity_orthogonal_vectors_test() {
-  let a = [1.0, 0.0, 0.0]
-  let b = [0.0, 1.0, 0.0]
-  let sim = housekeeping.cosine_similarity(a, b)
-  should.be_true(float.absolute_value(sim) <. 0.01)
-}
-
-pub fn cosine_similarity_similar_vectors_test() {
-  let a = [1.0, 1.0, 0.0]
-  let b = [1.0, 1.0, 0.1]
-  let sim = housekeeping.cosine_similarity(a, b)
-  should.be_true(sim >. 0.95)
-}
-
-pub fn cosine_similarity_empty_vectors_test() {
-  let sim = housekeeping.cosine_similarity([], [1.0, 2.0])
-  should.be_true(float.absolute_value(sim) <. 0.01)
-}
-
-// ---------------------------------------------------------------------------
-// CBR deduplication
+// CBR deduplication (via paperwings VSA distance)
 // ---------------------------------------------------------------------------
 
 fn make_case(
   id: String,
   timestamp: String,
-  embedding: List(Float),
+  _embedding: List(Float),
   status: String,
   confidence: Float,
   pitfalls: List(String),
@@ -72,43 +42,23 @@ fn make_case(
       assessment: "test",
       pitfalls: pitfalls,
     ),
-    embedding: embedding,
     source_narrative_id: "n-" <> id,
     profile: None,
   )
 }
 
-pub fn dedup_finds_similar_cases_test() {
+pub fn dedup_no_casebase_returns_empty_test() {
+  // Without a CaseBase, dedup has no VSA vectors to compare → always empty
   let case_a =
     make_case("a", "2026-03-01T10:00:00Z", [1.0, 0.0, 0.0], "success", 0.9, [])
   let case_b =
     make_case("b", "2026-03-02T10:00:00Z", [1.0, 0.0, 0.0], "success", 0.9, [])
-  let results = housekeeping.find_duplicate_cases([case_a, case_b], 0.92)
-  list.length(results) |> should.equal(1)
-  let assert [r] = results
-  // b is newer, so it should be kept
-  r.keep_id |> should.equal("b")
-  r.supersede_id |> should.equal("a")
-}
-
-pub fn dedup_ignores_dissimilar_cases_test() {
-  let case_a =
-    make_case("a", "2026-03-01T10:00:00Z", [1.0, 0.0, 0.0], "success", 0.9, [])
-  let case_b =
-    make_case("b", "2026-03-02T10:00:00Z", [0.0, 1.0, 0.0], "success", 0.9, [])
-  let results = housekeeping.find_duplicate_cases([case_a, case_b], 0.92)
-  results |> should.equal([])
-}
-
-pub fn dedup_handles_empty_embeddings_test() {
-  let case_a = make_case("a", "2026-03-01T10:00:00Z", [], "success", 0.9, [])
-  let case_b = make_case("b", "2026-03-02T10:00:00Z", [], "success", 0.9, [])
-  let results = housekeeping.find_duplicate_cases([case_a, case_b], 0.92)
+  let results = housekeeping.find_duplicate_cases([case_a, case_b], 0.92, None)
   results |> should.equal([])
 }
 
 pub fn dedup_empty_list_test() {
-  let results = housekeeping.find_duplicate_cases([], 0.92)
+  let results = housekeeping.find_duplicate_cases([], 0.92, None)
   results |> should.equal([])
 }
 
