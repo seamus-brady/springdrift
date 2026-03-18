@@ -142,3 +142,15 @@ count_names(Names) ->
 ensure_bin(V) when is_binary(V) -> V;
 ensure_bin(V) when is_list(V) -> unicode:characters_to_binary(V);
 ensure_bin(V) -> iolist_to_binary(io_lib:format("~p", [V])).
+
+%% Suppress xmerl's noisy error_logger output during tests.
+%% Returns the previous log level so it can be restored.
+suppress_xmerl_logging() ->
+    #{level := PrevLevel} = logger:get_primary_config(),
+    logger:set_primary_config(level, none),
+    PrevLevel.
+
+%% Restore the log level after suppression.
+restore_xmerl_logging(PrevLevel) ->
+    logger:set_primary_config(level, PrevLevel),
+    nil.
