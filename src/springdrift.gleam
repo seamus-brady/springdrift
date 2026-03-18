@@ -258,7 +258,7 @@ fn run(cfg: AppConfig) -> Nil {
   // Narrative config (always enabled)
   let narrative_dir = option.unwrap(cfg.narrative_dir, paths.narrative_dir())
   let archivist_model = option.unwrap(cfg.archivist_model, task_model)
-  let archivist_max_tokens = option.unwrap(cfg.archivist_max_tokens, 4096)
+  let archivist_max_tokens = option.unwrap(cfg.archivist_max_tokens, 8192)
 
   // Migrate legacy facts.jsonl to daily rotation (no-op if already done)
   facts_log.migrate_legacy(paths.facts_dir())

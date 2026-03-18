@@ -36,6 +36,11 @@ src/
 ├── context.gleam              Context window trim helper (sliding window)
 ├── query_complexity.gleam     LLM-based + heuristic query classifier (Simple | Complex)
 ├── skills.gleam               Skill discovery, frontmatter parsing, XML-escaped injection
+├── xstructor.gleam            XStructor — XML-schema-validated structured LLM output
+├── xstructor_ffi.erl          Erlang FFI for xmerl: compile_schema, validate_xml, extract_elements
+│
+├── xstructor/                 XStructor schemas
+│   └── schemas.gleam          XSD schemas + XML examples for all structured LLM call sites
 │
 ├── agent/                     Agent substrate
 │   ├── types.gleam            CognitiveMessage (incl. SchedulerInput), Notification, PendingTask, CognitiveReply
@@ -160,6 +165,37 @@ This formats every `.gleam` file in `src/` and `test/` in place. The formatter i
 non-negotiable — unformatted code should not be committed. If you are unsure whether
 formatting is needed, run `gleam format` anyway; it is idempotent.
 
+### Build must be warning-free
+
+**All compiler warnings must be resolved before a task is complete.** Run:
+
+```sh
+gleam build
+```
+
+If `gleam build` produces any warnings (unused variables, unused imports, etc.),
+fix them. Warnings indicate code quality issues — unused `_` prefixing, removing
+dead imports, or deleting unreachable code are all acceptable fixes. Do not leave
+warnings for the next person to clean up.
+
+### Structured LLM output must use XStructor
+
+**When an LLM call needs structured output, use XStructor (XML + XSD validation).**
+Do not parse JSON from LLM responses. Do not write JSON repair heuristics.
+
+XStructor (`src/xstructor.gleam`) provides schema-validated XML generation with
+automatic retry. The workflow:
+1. Define an XSD schema and XML example in `src/xstructor/schemas.gleam`
+2. Compile the schema with `xstructor.compile_schema(schemas_dir, name, xsd_content)`
+3. Build a config with `XStructorConfig(schema, system_prompt, xml_example, max_retries, max_tokens)`
+4. Call `xstructor.generate(config, user_prompt, provider, model)` — handles LLM call,
+   response cleaning, validation, and retry on error
+5. Extract fields from `XStructorResult.elements` (a `Dict(String, String)` with dotted
+   paths like `root.child.value`; repeated elements use `.0`, `.1` indexing)
+
+Use `schemas.build_system_prompt(base_prompt, xsd, example)` to build the system prompt.
+Always provide a fallback path for when XStructor generation fails entirely.
+
 ### No magic numbers, no invisible settings, no hidden system vars
 
 **Every configurable value must be surfaced in `config.toml`.** This is non-negotiable.
@@ -234,6 +270,7 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `default_profile` | `--profile` | None | Profile to load at startup |
 | `max_autonomous_cycles_per_hour` | — | 20 | Max scheduler-triggered cycles per hour (0 = unlimited) |
 | `autonomous_token_budget_per_hour` | — | 500000 | Max tokens (input+output) scheduler may consume per hour (0 = unlimited) |
+| `xstructor_max_retries` | — | 3 | Max XStructor XML validation+retry attempts |
 
 ## Memory architecture
 
@@ -486,6 +523,18 @@ until the window rolls over. Set either to 0 for unlimited.
 `SchedulerJobFailed` notification variants are emitted by the scheduler and displayed
 in both TUI (spinner label and notice) and web GUI (mapped to `ToolNotification`).
 
+**XStructor** — XML-schema-validated structured LLM output (`xstructor.gleam` +
+`xstructor_ffi.erl`). Replaces JSON parsing + repair heuristics with XSD validation
+and retry. All 5 structured LLM call sites use XStructor: D' candidates
+(`deliberative.gleam`), D' forecasts (`scorer.gleam`), narrative summaries
+(`summary.gleam`), CBR cases (`archivist.gleam`), and narrative entries
+(`archivist.gleam`). XSD schemas live in `xstructor/schemas.gleam`. Compiled schemas
+are written to `.springdrift/schemas/`. The `generate` function handles the full
+LLM call → clean response → validate against schema → retry on error loop.
+`extract` returns a flat `Dict(String, String)` with dotted paths
+(`root.child.grandchild`). Repeated elements use indexed paths
+(`root.items.item.0`, `root.items.item.1`).
+
 **Config validation** — `parse_config_toml` validates unknown TOML keys and warns via
 `slog`. Numeric values are range-checked (must be positive). Provider and GUI mode
 values are validated against known options. Parse failures are logged instead of silent.
@@ -536,6 +585,7 @@ The config is organized into these TOML sections:
 | `[housekeeping]` | Dedup similarity, pruning confidence, fact threshold |
 | `[embedding]` | Ollama: model, base_url, dimensions |
 | `[scheduler]` | Autonomous cycle resource limits (cycles/hour, token budget/hour) |
+| `[xstructor]` | XStructor XML validation settings (max_retries) |
 | `[agents.planner]` | Planner agent: max_tokens, max_turns, max_errors |
 | `[agents.researcher]` | Researcher agent: max_tokens, max_turns, max_errors, max_context |
 | `[agents.coder]` | Coder agent: max_tokens, max_turns, max_errors |

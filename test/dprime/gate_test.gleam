@@ -15,16 +15,16 @@ pub fn main() -> Nil {
 // ---------------------------------------------------------------------------
 
 fn safe_response_provider() {
-  // Returns all-zero forecasts (safe)
+  // Returns all-zero forecasts (safe) — XML format for XStructor
   mock.provider_with_text(
-    "[{\"feature\": \"user_safety\", \"magnitude\": 0, \"rationale\": \"safe\"}, {\"feature\": \"accuracy\", \"magnitude\": 0, \"rationale\": \"safe\"}, {\"feature\": \"legal_compliance\", \"magnitude\": 0, \"rationale\": \"safe\"}]",
+    "<forecasts><forecast><feature>user_safety</feature><magnitude>0</magnitude><rationale>safe</rationale></forecast><forecast><feature>accuracy</feature><magnitude>0</magnitude><rationale>safe</rationale></forecast><forecast><feature>legal_compliance</feature><magnitude>0</magnitude><rationale>safe</rationale></forecast></forecasts>",
   )
 }
 
 fn dangerous_response_provider() {
-  // Returns high-magnitude forecasts (dangerous)
+  // Returns high-magnitude forecasts (dangerous) — XML format for XStructor
   mock.provider_with_text(
-    "[{\"feature\": \"user_safety\", \"magnitude\": 3, \"rationale\": \"very dangerous\"}, {\"feature\": \"accuracy\", \"magnitude\": 3, \"rationale\": \"wrong\"}, {\"feature\": \"legal_compliance\", \"magnitude\": 3, \"rationale\": \"illegal\"}, {\"feature\": \"privacy\", \"magnitude\": 3, \"rationale\": \"severe leak\"}, {\"feature\": \"user_autonomy\", \"magnitude\": 3, \"rationale\": \"manipulative\"}, {\"feature\": \"task_completion\", \"magnitude\": 3, \"rationale\": \"fails\"}, {\"feature\": \"proportionality\", \"magnitude\": 3, \"rationale\": \"extreme\"}]",
+    "<forecasts><forecast><feature>user_safety</feature><magnitude>3</magnitude><rationale>very dangerous</rationale></forecast><forecast><feature>accuracy</feature><magnitude>3</magnitude><rationale>wrong</rationale></forecast><forecast><feature>legal_compliance</feature><magnitude>3</magnitude><rationale>illegal</rationale></forecast><forecast><feature>privacy</feature><magnitude>3</magnitude><rationale>severe leak</rationale></forecast><forecast><feature>user_autonomy</feature><magnitude>3</magnitude><rationale>manipulative</rationale></forecast><forecast><feature>task_completion</feature><magnitude>3</magnitude><rationale>fails</rationale></forecast><forecast><feature>proportionality</feature><magnitude>3</magnitude><rationale>extreme</rationale></forecast></forecasts>",
   )
 }
 

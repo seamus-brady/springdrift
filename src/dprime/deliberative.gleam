@@ -11,17 +11,19 @@ import dprime/types.{
   type Candidate, type DprimeConfig, type DprimeState, type Forecast,
   type GateResult, Accept, Candidate, Deliberative, GateResult, Modify, Reject,
 }
-import gleam/dynamic/decode
+import gleam/dict
 import gleam/float
 import gleam/int
-import gleam/json
 import gleam/list
 import gleam/option.{type Option, Some}
 import gleam/string
 import llm/provider.{type Provider}
 import llm/request
 import llm/response
+import paths
 import slog
+import xstructor
+import xstructor/schemas
 
 /// Build a situation model — a structured summary of the user's request.
 /// Returns a natural-language description covering what the user wants,
@@ -82,7 +84,7 @@ pub fn generate_candidates(
   provider: Provider,
   model: String,
   cycle_id: String,
-  verbose: Bool,
+  _verbose: Bool,
 ) -> List(Candidate) {
   slog.debug(
     "dprime/deliberative",
@@ -90,49 +92,77 @@ pub fn generate_candidates(
     "Generating " <> int.to_string(n) <> " candidates",
     Some(cycle_id),
   )
-  let system =
+
+  let base_prompt =
     "Given this situation, propose "
     <> int.to_string(n)
-    <> " distinct approaches the agent could take. For each, describe: (a) what the agent would do, (b) what the resulting situation would look like. Return as a JSON array of objects with \"description\" and \"projected_outcome\" fields. No markdown, no preamble."
+    <> " distinct approaches the agent could take. For each, describe: (a) what the agent would do, (b) what the resulting situation would look like."
 
-  let req =
-    request.new(model, 1024)
-    |> request.with_system(system)
-    |> request.with_user_message(situation_model)
+  let system =
+    schemas.build_system_prompt(
+      base_prompt,
+      schemas.candidates_xsd,
+      schemas.candidates_example,
+    )
 
-  case verbose {
-    True -> cycle_log.log_llm_request(cycle_id, req)
-    False -> Nil
-  }
+  // Compile the candidates schema
+  let schema_result =
+    xstructor.compile_schema(
+      paths.schemas_dir(),
+      "candidates.xsd",
+      schemas.candidates_xsd,
+    )
 
-  case provider.chat(req) {
-    Ok(resp) -> {
-      case verbose {
-        True -> cycle_log.log_llm_response(cycle_id, resp)
-        False -> Nil
-      }
-      let text = response.text(resp)
-      case parse_candidates(text) {
-        Ok(candidates) -> candidates
-        Error(_) -> {
+  case schema_result {
+    Error(e) -> {
+      slog.warn(
+        "dprime/deliberative",
+        "generate_candidates",
+        "Failed to compile candidates schema: "
+          <> e
+          <> ", using situation model as single candidate",
+        Some(cycle_id),
+      )
+      [Candidate(description: situation_model, projected_outcome: "")]
+    }
+    Ok(schema) -> {
+      let config =
+        xstructor.XStructorConfig(
+          schema:,
+          system_prompt: system,
+          xml_example: schemas.candidates_example,
+          max_retries: 1,
+          max_tokens: 1024,
+        )
+
+      case xstructor.generate(config, situation_model, provider, model) {
+        Ok(result) -> {
+          let candidates = extract_candidates(result.elements)
+          case candidates {
+            [] -> {
+              slog.warn(
+                "dprime/deliberative",
+                "generate_candidates",
+                "No candidates extracted from XML, using situation model as single candidate",
+                Some(cycle_id),
+              )
+              [Candidate(description: situation_model, projected_outcome: "")]
+            }
+            _ -> candidates
+          }
+        }
+        Error(e) -> {
           slog.warn(
             "dprime/deliberative",
             "generate_candidates",
-            "Failed to parse candidates, using situation model as single candidate",
+            "XStructor generation failed: "
+              <> e
+              <> ", using situation model as single candidate",
             Some(cycle_id),
           )
           [Candidate(description: situation_model, projected_outcome: "")]
         }
       }
-    }
-    Error(_) -> {
-      slog.warn(
-        "dprime/deliberative",
-        "generate_candidates",
-        "LLM error generating candidates, using situation model as single candidate",
-        Some(cycle_id),
-      )
-      [Candidate(description: situation_model, projected_outcome: "")]
     }
   }
 }
@@ -366,43 +396,33 @@ pub fn post_execution_check(
 // Internal
 // ---------------------------------------------------------------------------
 
-fn parse_candidates(text: String) -> Result(List(Candidate), Nil) {
-  let cleaned = strip_markdown_fences(string.trim(text))
-  let decoder = decode.list(candidate_decoder())
-  case json.parse(cleaned, decoder) {
-    Ok(candidates) -> Ok(candidates)
-    Error(_) -> Error(Nil)
-  }
+/// Extract Candidate values from XStructor result elements.
+/// Elements have dotted paths like:
+///   candidates.candidate.0.description
+///   candidates.candidate.0.projected_outcome
+///   candidates.candidate.1.description
+///   ...
+fn extract_candidates(elements: dict.Dict(String, String)) -> List(Candidate) {
+  extract_candidates_loop(elements, 0, [])
 }
 
-fn candidate_decoder() -> decode.Decoder(Candidate) {
-  use description <- decode.field("description", decode.string)
-  use projected_outcome <- decode.optional_field(
-    "projected_outcome",
-    "",
-    decode.string,
-  )
-  decode.success(Candidate(description:, projected_outcome:))
-}
-
-fn strip_markdown_fences(text: String) -> String {
-  let trimmed = string.trim(text)
-  case string.starts_with(trimmed, "```") {
-    True -> {
-      let after_open = case string.split(trimmed, "\n") {
-        [_, ..rest] -> string.join(rest, "\n")
-        _ -> trimmed
+fn extract_candidates_loop(
+  elements: dict.Dict(String, String),
+  idx: Int,
+  acc: List(Candidate),
+) -> List(Candidate) {
+  let prefix = "candidates.candidate." <> int.to_string(idx)
+  case dict.get(elements, prefix <> ".description") {
+    Ok(desc) -> {
+      let outcome = case dict.get(elements, prefix <> ".projected_outcome") {
+        Ok(o) -> o
+        Error(_) -> ""
       }
-      case string.ends_with(string.trim(after_open), "```") {
-        True -> {
-          let lines = string.split(after_open, "\n")
-          let without_last =
-            list.take(lines, int.max(0, list.length(lines) - 1))
-          string.join(without_last, "\n")
-        }
-        False -> after_open
-      }
+      extract_candidates_loop(elements, idx + 1, [
+        Candidate(description: desc, projected_outcome: outcome),
+        ..acc
+      ])
     }
-    False -> trimmed
+    Error(_) -> list.reverse(acc)
   }
 }

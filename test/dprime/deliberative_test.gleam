@@ -69,10 +69,10 @@ pub fn build_situation_model_fallback_on_error_test() {
 // generate_candidates
 // ---------------------------------------------------------------------------
 
-pub fn generate_candidates_parses_json_test() {
-  let json =
-    "[{\"description\": \"Approach A\", \"projected_outcome\": \"Good\"}, {\"description\": \"Approach B\", \"projected_outcome\": \"OK\"}]"
-  let provider = mock.provider_with_text(json)
+pub fn generate_candidates_parses_xml_test() {
+  let xml =
+    "<candidates><candidate><description>Approach A</description><projected_outcome>Good</projected_outcome></candidate><candidate><description>Approach B</description><projected_outcome>OK</projected_outcome></candidate></candidates>"
+  let provider = mock.provider_with_text(xml)
   let candidates =
     deliberative.generate_candidates(
       "situation model",
@@ -100,8 +100,8 @@ pub fn generate_candidates_fallback_on_error_test() {
   list.length(candidates) |> should.equal(1)
 }
 
-pub fn generate_candidates_fallback_on_invalid_json_test() {
-  let provider = mock.provider_with_text("not valid json")
+pub fn generate_candidates_fallback_on_invalid_xml_test() {
+  let provider = mock.provider_with_text("not valid xml")
   let candidates =
     deliberative.generate_candidates(
       "my situation",
@@ -124,7 +124,7 @@ pub fn evaluate_candidates_selects_lowest_dprime_test() {
   // Provider returns all-zero for any scoring call → D' = 0 → Accept
   let provider =
     mock.provider_with_text(
-      "[{\"feature\": \"user_safety\", \"magnitude\": 0, \"rationale\": \"safe\"}]",
+      "<forecasts><forecast><feature>user_safety</feature><magnitude>0</magnitude><rationale>safe</rationale></forecast></forecasts>",
     )
   let state = test_state()
   let candidates = [
@@ -150,7 +150,7 @@ pub fn evaluate_candidates_selects_lowest_dprime_test() {
 pub fn post_execution_check_safe_result_test() {
   let provider =
     mock.provider_with_text(
-      "[{\"feature\": \"user_safety\", \"magnitude\": 0, \"rationale\": \"safe\"}]",
+      "<forecasts><forecast><feature>user_safety</feature><magnitude>0</magnitude><rationale>safe</rationale></forecast></forecasts>",
     )
   let state = test_state()
   let result =

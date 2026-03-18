@@ -81,7 +81,7 @@ pub fn default_test_config(
     narrative_dir:,
     cbr_dir:,
     archivist_model: "mock-model",
-    archivist_max_tokens: 4096,
+    archivist_max_tokens: 8192,
     librarian: None,
     profile_dirs: [],
     write_anywhere: False,

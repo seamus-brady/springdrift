@@ -105,6 +105,11 @@ pub fn schedule_dir() -> String {
   project_dir <> "/memory/schedule"
 }
 
+/// XStructor schema directory: .springdrift/schemas/
+pub fn schemas_dir() -> String {
+  project_dir <> "/schemas"
+}
+
 /// Legacy scheduler checkpoint (one-time migration source only).
 pub fn scheduler_checkpoint() -> String {
   project_dir <> "/scheduler-checkpoint.json"

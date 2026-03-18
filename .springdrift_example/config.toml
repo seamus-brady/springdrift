@@ -294,3 +294,10 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 
 # E2B sandbox API
 # e2b_base_url = "https://api.e2b.app"
+
+# ── XStructor ────────────────────────────────────────────────────────────────
+# XML-schema-validated structured LLM output.
+
+[xstructor]
+# Max validation+retry attempts for XStructor XML generation (default: 3)
+# max_retries = 3

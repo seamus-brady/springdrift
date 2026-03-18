@@ -145,6 +145,8 @@ pub type AppConfig {
     // ── Scheduler resource limits ──
     max_autonomous_cycles_per_hour: Option(Int),
     autonomous_token_budget_per_hour: Option(Int),
+    // ── XStructor ──
+    xstructor_max_retries: Option(Int),
   )
 }
 
@@ -253,6 +255,7 @@ pub fn default() -> AppConfig {
     scheduler_tool_timeout_ms: None,
     max_autonomous_cycles_per_hour: None,
     autonomous_token_budget_per_hour: None,
+    xstructor_max_retries: None,
   )
 }
 
@@ -568,6 +571,10 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     autonomous_token_budget_per_hour: option.or(
       override_cfg.autonomous_token_budget_per_hour,
       base.autonomous_token_budget_per_hour,
+    ),
+    xstructor_max_retries: option.or(
+      override_cfg.xstructor_max_retries,
+      base.xstructor_max_retries,
     ),
   )
 }
@@ -1039,6 +1046,8 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     autonomous_token_budget_per_hour: get_toml_int(table, [
       "scheduler", "autonomous_token_budget_per_hour",
     ]),
+    // ── [xstructor] ──
+    xstructor_max_retries: get_toml_int(table, ["xstructor", "max_retries"]),
   )
 }
 
@@ -1071,7 +1080,7 @@ const known_keys = [
   "write_anywhere", "skills_dirs", "gui", "dprime_enabled", "dprime_config",
   "narrative", "profile", "profiles_dirs", "agent", "log_retention_days",
   "log_max_file_bytes", "timeouts", "retry", "limits", "scoring", "housekeeping",
-  "cbr", "agents", "web", "services", "scheduler",
+  "cbr", "agents", "web", "services", "scheduler", "xstructor",
 ]
 
 const known_narrative_keys = [

@@ -18,3 +18,5 @@ Agents: {{profile_agents}} [OMIT IF EMPTY]
 
 Open commitments: {{open_commitments}} [OMIT IF EMPTY]
 Memory health: {{memory_health}} [OMIT IF EMPTY]
+
+At session start or after a gap in conversation, review recent memory context before responding. Use recall_recent if the injected memory summary above seems stale or insufficient.

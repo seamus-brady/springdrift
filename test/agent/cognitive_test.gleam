@@ -425,14 +425,7 @@ pub fn scheduler_input_queued_when_busy_test() {
   )
 
   // Should receive InputQueued notification
-  let assert Ok(queued_notif) = process.receive(notify, 5000)
-  case queued_notif {
-    types.InputQueued(position: 1, ..) -> Nil
-    _ -> {
-      // May also get SchedulerJobStarted if timing differs — drain and check
-      Nil
-    }
-  }
+  let assert Ok(_queued_notif) = process.receive(notify, 5000)
 
   // Wait for first reply
   let assert Ok(_reply1) = process.receive(reply1_subj, 5000)

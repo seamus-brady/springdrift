@@ -25,6 +25,7 @@ Then edit `.springdrift/config.toml` with your provider and API key.
 │   ├── narrative/       Prime Narrative memory (auto-generated)
 │   ├── cbr/             Case-Based Reasoning cases (auto-generated)
 │   └── facts/           Key-value fact store (auto-generated)
+├── schemas/             XStructor XSD schemas (auto-generated, compiled at runtime)
 ├── skills/              Local SKILL.md definitions
 ├── profiles/            Agent profile directories
 └── scheduler-checkpoint.json  Scheduler state persistence (auto-generated)
