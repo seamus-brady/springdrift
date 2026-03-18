@@ -311,16 +311,36 @@ fn scheduler_loop(
                   <> "ms",
                 None,
               )
+              let should_recur =
+                job.interval_ms > 0
+                && {
+                  case job.max_occurrences {
+                    Some(max) -> job.fired_count < max
+                    None -> True
+                  }
+                }
+                && {
+                  case job.recurrence_end_at {
+                    Some(end_at) -> ms_until_datetime(end_at) > 0
+                    None -> True
+                  }
+                }
               let updated_job =
                 ScheduledJob(
                   ..job,
-                  status: Failed(reason: "Stuck job timeout"),
+                  status: case should_recur {
+                    True -> Failed(reason: "Stuck job timeout")
+                    False -> Completed
+                  },
                   error_count: job.error_count + 1,
                 )
               let updated_jobs = dict.insert(jobs, name, updated_job)
 
-              // Schedule next tick
-              schedule_tick(self, name, job.interval_ms)
+              // Only schedule next tick if recurring
+              case should_recur {
+                True -> schedule_tick(self, name, job.interval_ms)
+                False -> Nil
+              }
 
               // Save checkpoint
               let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
@@ -382,18 +402,41 @@ fn scheduler_loop(
               )
           }
 
+          let new_fired = job.fired_count + 1
+          let should_recur =
+            job.interval_ms > 0
+            && {
+              case job.max_occurrences {
+                Some(max) -> new_fired < max
+                None -> True
+              }
+            }
+            && {
+              case job.recurrence_end_at {
+                Some(end_at) -> ms_until_datetime(end_at) > 0
+                None -> True
+              }
+            }
+
           let updated_job =
             ScheduledJob(
               ..job,
-              status: Completed,
+              status: case should_recur {
+                True -> Pending
+                False -> Completed
+              },
               last_run_ms: Some(now),
               last_result: Some(result),
               run_count: job.run_count + 1,
+              fired_count: new_fired,
             )
           let updated_jobs = dict.insert(jobs, name, updated_job)
 
-          // Schedule next tick
-          schedule_tick(self, name, job.interval_ms)
+          // Only schedule next tick if recurring
+          case should_recur {
+            True -> schedule_tick(self, name, job.interval_ms)
+            False -> Nil
+          }
 
           // Save checkpoint after completion
           let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
@@ -421,16 +464,36 @@ fn scheduler_loop(
             "Job '" <> name <> "' failed: " <> reason,
             None,
           )
+          let should_recur =
+            job.interval_ms > 0
+            && {
+              case job.max_occurrences {
+                Some(max) -> job.fired_count < max
+                None -> True
+              }
+            }
+            && {
+              case job.recurrence_end_at {
+                Some(end_at) -> ms_until_datetime(end_at) > 0
+                None -> True
+              }
+            }
           let updated_job =
             ScheduledJob(
               ..job,
-              status: Failed(reason:),
+              status: case should_recur {
+                True -> Failed(reason:)
+                False -> Completed
+              },
               error_count: job.error_count + 1,
             )
           let updated_jobs = dict.insert(jobs, name, updated_job)
 
-          // Schedule next tick (retry on next interval)
-          schedule_tick(self, name, job.interval_ms)
+          // Only schedule next tick if recurring
+          case should_recur {
+            True -> schedule_tick(self, name, job.interval_ms)
+            False -> Nil
+          }
 
           // Save checkpoint after failure
           let _ = persist.save(checkpoint_path, dict.values(updated_jobs))

@@ -30,6 +30,9 @@ fn get_datetime() -> String
 @external(erlang, "springdrift_ffi", "ms_until_datetime")
 fn ms_until_datetime(iso: String) -> Int
 
+@external(erlang, "springdrift_ffi", "advance_datetime_ms")
+fn advance_datetime_ms(iso: String, ms: Int) -> String
+
 const system_prompt = "You are the Scheduler — a time management agent for this system.
 
 You manage the schedule on behalf of the primary agent and the user.
@@ -58,6 +61,13 @@ complete, cancel, or update existing items.
 - Appointments fire a reminder at the start time and carry a duration.
 
 - Always return the item name/ID so the orchestrator can reference it later.
+
+- Prefer schedule_from_spec over schedule_reminder when you have explicit
+  parameters. schedule_from_spec takes structured params (no NL ambiguity)
+  and returns structured confirmation with fire time previews.
+
+- Use inspect_job to verify a job was created correctly or to debug
+  failures. It returns full job state including fired_count and status.
 
 ## After your task
 
@@ -113,6 +123,7 @@ fn scheduler_executor(
 
 fn scheduler_tools() -> List(Tool) {
   [
+    schedule_from_spec_tool(),
     schedule_reminder_tool(),
     add_todo_tool(),
     add_appointment_tool(),
@@ -120,6 +131,7 @@ fn scheduler_tools() -> List(Tool) {
     cancel_item_tool(),
     list_schedule_tool(),
     update_item_tool(),
+    inspect_job_tool(),
     datetime_tool(),
   ]
 }
@@ -127,6 +139,53 @@ fn scheduler_tools() -> List(Tool) {
 fn datetime_tool() -> Tool {
   tool.new("get_current_datetime")
   |> tool.with_description("Get the current date and time in ISO 8601 format.")
+  |> tool.build()
+}
+
+fn schedule_from_spec_tool() -> Tool {
+  tool.new("schedule_from_spec")
+  |> tool.with_description(
+    "Schedule a job from a structured spec. Preferred over schedule_reminder "
+    <> "for precise control — no NL interpretation, explicit parameters. "
+    <> "Returns structured confirmation with job ID and next fire times.",
+  )
+  |> tool.add_string_param(
+    "kind",
+    "\"reminder\" | \"todo\" | \"appointment\" | \"recurring\"",
+    True,
+  )
+  |> tool.add_string_param("title", "Short label", True)
+  |> tool.add_string_param("body", "Detail text or query to execute", True)
+  |> tool.add_string_param(
+    "due_at",
+    "First fire time, ISO 8601: YYYY-MM-DDTHH:MM:SS",
+    True,
+  )
+  |> tool.add_string_param(
+    "for_",
+    "\"agent\" (cognitive loop input) or \"user\" (notification)",
+    True,
+  )
+  |> tool.add_integer_param(
+    "interval_ms",
+    "Repeat interval in milliseconds. 0 = one-shot. 300000 = 5 min. 3600000 = 1 hour. 86400000 = daily.",
+    True,
+  )
+  |> tool.add_integer_param(
+    "max_occurrences",
+    "Total number of fires. 0 = unlimited. 4 = fire exactly 4 times then stop.",
+    True,
+  )
+  |> tool.add_string_param(
+    "tags",
+    "Comma-separated tags for filtering and grouping",
+    False,
+  )
+  |> tool.add_integer_param(
+    "duration_minutes",
+    "Duration in minutes (appointments only, 0 otherwise)",
+    False,
+  )
   |> tool.build()
 }
 
@@ -151,6 +210,11 @@ fn schedule_reminder_tool() -> Tool {
   |> tool.add_integer_param(
     "interval_ms",
     "Repeat every N ms after firing; 0 for one-shot",
+    False,
+  )
+  |> tool.add_integer_param(
+    "max_occurrences",
+    "Maximum number of times to fire (0 or omit for unlimited recurring)",
     False,
   )
   |> tool.add_string_param("tags", "Comma-separated tags", False)
@@ -251,6 +315,16 @@ fn update_item_tool() -> Tool {
   |> tool.build()
 }
 
+fn inspect_job_tool() -> Tool {
+  tool.new("inspect_job")
+  |> tool.with_description(
+    "Inspect a specific scheduled job. Returns full details including "
+    <> "status, recurrence info, fire count, and next fire time.",
+  )
+  |> tool.add_string_param("name", "Job ID to inspect", True)
+  |> tool.build()
+}
+
 // ---------------------------------------------------------------------------
 // Tool execution
 // ---------------------------------------------------------------------------
@@ -260,6 +334,7 @@ fn execute_scheduler_tool(
   runner: Subject(sched_types.SchedulerMessage),
 ) -> ToolResult {
   case call.name {
+    "schedule_from_spec" -> handle_schedule_from_spec(call, runner)
     "schedule_reminder" -> handle_schedule_reminder(call, runner)
     "add_todo" -> handle_add_todo(call, runner)
     "add_appointment" -> handle_add_appointment(call, runner)
@@ -267,6 +342,7 @@ fn execute_scheduler_tool(
     "cancel_item" -> handle_cancel_item(call, runner)
     "list_schedule" -> handle_list_schedule(call, runner)
     "update_item" -> handle_update_item(call, runner)
+    "inspect_job" -> handle_inspect_job(call, runner)
     _ -> ToolFailure(tool_use_id: call.id, error: "Unknown tool: " <> call.name)
   }
 }
@@ -278,10 +354,17 @@ fn handle_schedule_reminder(
   let title = get_str(call, "title", "Reminder")
   let body = get_str(call, "body", "")
   let due_at = get_str(call, "due_at", "")
-  let for_ = parse_for_target(get_str(call, "for_", "user"))
+  let for_str = get_str(call, "for_", "user")
+  let for_ = parse_for_target(for_str)
   let interval_ms = get_int(call, "interval_ms", 0)
+  let max_occurrences_val = get_int(call, "max_occurrences", 0)
   let tags = parse_tags(get_str(call, "tags", ""))
   let name = generate_name("remind", title)
+
+  let max_occ = case max_occurrences_val {
+    0 -> None
+    n -> Some(n)
+  }
 
   let job =
     make_job(
@@ -295,6 +378,7 @@ fn handle_schedule_reminder(
       body,
       0,
       tags,
+      max_occ,
     )
 
   let reply_subj = process.new_subject()
@@ -305,11 +389,124 @@ fn handle_schedule_reminder(
         tool_use_id: call.id,
         content: "Reminder '"
           <> title
-          <> "' scheduled for "
+          <> "' scheduled."
+          <> "\n  ID: "
+          <> id
+          <> "\n  Due: "
           <> due_at
-          <> ". ID: "
-          <> id,
+          <> "\n  Interval: "
+          <> case interval_ms {
+          0 -> "one-shot"
+          ms -> format_duration_ms(ms)
+        }
+          <> "\n  Max fires: "
+          <> case max_occurrences_val {
+          0 -> "unlimited"
+          n -> int.to_string(n)
+        }
+          <> "\n  For: "
+          <> for_str,
       )
+    Ok(Error(reason)) -> ToolFailure(tool_use_id: call.id, error: reason)
+    Error(_) ->
+      ToolFailure(tool_use_id: call.id, error: "Timeout waiting for scheduler")
+  }
+}
+
+fn handle_schedule_from_spec(
+  call: ToolCall,
+  runner: Subject(sched_types.SchedulerMessage),
+) -> ToolResult {
+  let kind_str = get_str(call, "kind", "reminder")
+  let title = get_str(call, "title", "")
+  let body = get_str(call, "body", "")
+  let due_at = get_str(call, "due_at", "")
+  let for_str = get_str(call, "for_", "agent")
+  let for_ = parse_for_target(for_str)
+  let interval_ms = get_int(call, "interval_ms", 0)
+  let max_occurrences_val = get_int(call, "max_occurrences", 0)
+  let tags = parse_tags(get_str(call, "tags", ""))
+  let duration_minutes = get_int(call, "duration_minutes", 0)
+
+  let kind = case kind_str {
+    "todo" -> sched_types.Todo
+    "appointment" -> sched_types.Appointment
+    "recurring" -> sched_types.RecurringTask
+    _ -> sched_types.Reminder
+  }
+
+  let prefix = case kind {
+    sched_types.Todo -> "todo"
+    sched_types.Appointment -> "appt"
+    sched_types.RecurringTask -> "task"
+    _ -> "remind"
+  }
+  let name = generate_name(prefix, title)
+
+  let max_occ = case max_occurrences_val {
+    0 -> None
+    n -> Some(n)
+  }
+
+  let job =
+    make_job(
+      name,
+      body,
+      interval_ms,
+      kind,
+      Some(due_at),
+      for_,
+      title,
+      body,
+      duration_minutes,
+      tags,
+      max_occ,
+    )
+
+  let reply_subj = process.new_subject()
+  process.send(runner, sched_types.AddJob(job:, reply_to: reply_subj))
+  case process.receive(reply_subj, 5000) {
+    Ok(Ok(id)) -> {
+      // Build structured confirmation
+      let interval_str = case interval_ms {
+        0 -> "one-shot"
+        ms -> format_duration_ms(ms)
+      }
+      let max_str = case max_occurrences_val {
+        0 -> "unlimited"
+        n -> int.to_string(n)
+      }
+      // Calculate next fire times for recurring jobs
+      let fires_preview = case interval_ms > 0 && max_occurrences_val > 0 {
+        True -> {
+          let fire_times =
+            build_fire_times(due_at, interval_ms, max_occurrences_val)
+          "\n  Next fires: " <> string.join(fire_times, ", ")
+        }
+        False -> ""
+      }
+      ToolSuccess(
+        tool_use_id: call.id,
+        content: "Job created from spec."
+          <> "\n  ID: "
+          <> id
+          <> "\n  Kind: "
+          <> kind_str
+          <> "\n  Title: "
+          <> title
+          <> "\n  Due: "
+          <> due_at
+          <> "\n  Interval: "
+          <> interval_str
+          <> "\n  Max fires: "
+          <> max_str
+          <> "\n  For: "
+          <> for_str
+          <> "\n  Tags: "
+          <> string.join(tags, ", ")
+          <> fires_preview,
+      )
+    }
     Ok(Error(reason)) -> ToolFailure(tool_use_id: call.id, error: reason)
     Error(_) ->
       ToolFailure(tool_use_id: call.id, error: "Timeout waiting for scheduler")
@@ -343,6 +540,7 @@ fn handle_add_todo(
       body,
       0,
       tags,
+      None,
     )
 
   let reply_subj = process.new_subject()
@@ -383,6 +581,7 @@ fn handle_add_appointment(
       body,
       duration_minutes,
       tags,
+      None,
     )
 
   let reply_subj = process.new_subject()
@@ -483,6 +682,93 @@ fn handle_list_schedule(
     Error(_) ->
       ToolFailure(tool_use_id: call.id, error: "Timeout waiting for scheduler")
   }
+}
+
+fn handle_inspect_job(
+  call: ToolCall,
+  runner: Subject(sched_types.SchedulerMessage),
+) -> ToolResult {
+  let name = get_str(call, "name", "")
+  let reply_subj = process.new_subject()
+  process.send(runner, sched_types.GetStatus(reply_to: reply_subj))
+  case process.receive(reply_subj, 5000) {
+    Ok(jobs) -> {
+      case list.find(jobs, fn(j) { j.name == name }) {
+        Ok(job) ->
+          ToolSuccess(tool_use_id: call.id, content: format_job_detail(job))
+        Error(_) ->
+          ToolFailure(tool_use_id: call.id, error: "Job not found: " <> name)
+      }
+    }
+    Error(_) ->
+      ToolFailure(tool_use_id: call.id, error: "Timeout waiting for scheduler")
+  }
+}
+
+fn format_job_detail(job: sched_types.ScheduledJob) -> String {
+  let kind_str = sched_types.encode_job_kind(job.kind)
+  let status_str = sched_types.encode_job_status(job.status)
+  let for_str = sched_types.encode_for_target(job.for_)
+  let due_str = case job.due_at {
+    Some(due) -> {
+      let ms = ms_until_datetime(due)
+      due
+      <> case ms < 0 {
+        True -> " (OVERDUE)"
+        False -> " (in " <> format_duration_ms(ms) <> ")"
+      }
+    }
+    None -> "none"
+  }
+  let interval_str = case job.interval_ms > 0 {
+    True -> format_duration_ms(job.interval_ms)
+    False -> "one-shot"
+  }
+  let fires_str = case job.max_occurrences {
+    Some(max) -> int.to_string(job.fired_count) <> "/" <> int.to_string(max)
+    None -> int.to_string(job.fired_count) <> " (unlimited)"
+  }
+  let end_str = case job.recurrence_end_at {
+    Some(end_at) -> end_at
+    None -> "none"
+  }
+  let tags_str = case job.tags {
+    [] -> "none"
+    ts -> string.join(ts, ", ")
+  }
+  let last_result_str = case job.last_result {
+    Some(r) -> string.slice(r, 0, 200)
+    None -> "none"
+  }
+
+  "Job: "
+  <> job.name
+  <> "\n  Title: "
+  <> job.title
+  <> "\n  Kind: "
+  <> kind_str
+  <> "\n  Status: "
+  <> status_str
+  <> "\n  For: "
+  <> for_str
+  <> "\n  Due: "
+  <> due_str
+  <> "\n  Interval: "
+  <> interval_str
+  <> "\n  Fired: "
+  <> fires_str
+  <> "\n  Run count: "
+  <> int.to_string(job.run_count)
+  <> "\n  Error count: "
+  <> int.to_string(job.error_count)
+  <> "\n  Recurrence end: "
+  <> end_str
+  <> "\n  Tags: "
+  <> tags_str
+  <> "\n  Created: "
+  <> job.created_at
+  <> "\n  Last result: "
+  <> last_result_str
 }
 
 fn handle_update_item(
@@ -614,6 +900,23 @@ fn format_items(jobs: List(sched_types.ScheduledJob)) -> String {
       sched_types.Failed(r) -> " [FAILED: " <> r <> "]"
       _ -> ""
     }
+    let recurrence_info = case j.interval_ms > 0 {
+      True -> {
+        let interval_str =
+          " — repeats every " <> format_duration_ms(j.interval_ms)
+        let fires_str = case j.max_occurrences {
+          Some(max) ->
+            " ("
+            <> int.to_string(j.fired_count)
+            <> "/"
+            <> int.to_string(max)
+            <> " fires)"
+          None -> " (" <> int.to_string(j.fired_count) <> " fires)"
+        }
+        interval_str <> fires_str
+      }
+      False -> ""
+    }
     "- ["
     <> j.name
     <> "] \""
@@ -622,6 +925,7 @@ fn format_items(jobs: List(sched_types.ScheduledJob)) -> String {
     <> time_info
     <> " "
     <> for_label
+    <> recurrence_info
     <> status_label
   })
   |> string.join("\n")
@@ -652,6 +956,7 @@ fn make_job(
   body: String,
   duration_minutes: Int,
   tags: List(String),
+  max_occurrences: Option(Int),
 ) -> sched_types.ScheduledJob {
   sched_types.ScheduledJob(
     name:,
@@ -678,7 +983,7 @@ fn make_job(
     created_at: get_datetime(),
     fired_count: 0,
     recurrence_end_at: None,
-    max_occurrences: None,
+    max_occurrences:,
   )
 }
 
@@ -732,4 +1037,29 @@ fn generate_name(prefix: String, title: String) -> String {
     |> string.slice(0, 30)
   let uuid_suffix = string.slice(generate_uuid(), 0, 6)
   prefix <> "-" <> slug <> "-" <> uuid_suffix
+}
+
+/// Build a preview of upcoming fire times for a recurring job.
+fn build_fire_times(
+  due_at: String,
+  interval_ms: Int,
+  max_occurrences: Int,
+) -> List(String) {
+  let count = int.min(max_occurrences, 8)
+  build_fire_times_loop(due_at, interval_ms, count, [])
+}
+
+fn build_fire_times_loop(
+  current: String,
+  interval_ms: Int,
+  remaining: Int,
+  acc: List(String),
+) -> List(String) {
+  case remaining <= 0 {
+    True -> list.reverse(acc)
+    False -> {
+      let next = advance_datetime_ms(current, interval_ms)
+      build_fire_times_loop(next, interval_ms, remaining - 1, [current, ..acc])
+    }
+  }
 }

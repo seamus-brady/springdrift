@@ -521,7 +521,11 @@ modification loop (max 2 iterations).
 `process.send_after` for recurring tick-based execution. `scheduler/delivery.gleam`
 handles report delivery (file with timestamps, webhook/websocket stubs).
 `scheduler/persist.gleam` provides atomic checkpoint persistence (tmp + rename) with
-`reconcile` to align checkpoint state with current config.
+`reconcile` to align checkpoint state with current config. Recurring jobs track
+`fired_count` and check `max_occurrences` / `recurrence_end_at` before rescheduling.
+The scheduler agent (`agents/scheduler.gleam`) has 10 tools including
+`schedule_from_spec` (structured params, preferred) and `inspect_job` (introspection).
+`schedule_from_spec` returns structured confirmation with fire time preview.
 
 Scheduler-triggered cycles use the `SchedulerInput` cognitive message variant (not
 `UserInput`), which skips query complexity classification, always uses `task_model`,

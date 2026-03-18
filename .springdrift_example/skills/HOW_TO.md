@@ -61,12 +61,16 @@ interactive `UserInput`), using `task_model` without complexity classification.
 
 ### Scheduler agent tools
 
-- **schedule_reminder** — one-shot or recurring reminder
+- **schedule_from_spec** — preferred: create a job from explicit structured parameters
+  (kind, title, body, due_at, for_, interval_ms, max_occurrences, tags). Returns
+  structured confirmation with fire time preview. No NL ambiguity.
+- **schedule_reminder** — create a reminder from individual params (NL-friendly)
 - **add_todo** — task with optional due date
 - **add_appointment** — calendar-style event with start time
+- **inspect_job** — view full job details (status, fired/max, interval, errors, tags)
 - **complete_item** / **cancel_item** — mark a job done or cancelled
 - **update_item** — modify an existing job's schedule or description
-- **list_schedule** — view all scheduled jobs with status
+- **list_schedule** — view all scheduled jobs with status and recurrence info
 
 ### Job kinds
 

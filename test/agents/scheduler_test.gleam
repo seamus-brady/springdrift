@@ -45,6 +45,9 @@ fn mock_runner_loop(subj: process.Subject(sched_types.SchedulerMessage)) -> Nil 
     sched_types.UpdateJob(name: _, updates: _, reply_to:) -> {
       process.send(reply_to, Ok(Nil))
     }
+    sched_types.GetStatus(reply_to:) -> {
+      process.send(reply_to, [])
+    }
     sched_types.StopAll -> Nil
     _ -> Nil
   }
@@ -68,8 +71,8 @@ pub fn spec_has_tools_test() {
   let runner = mock_runner()
   let provider = mock.provider_with_text("test")
   let s = scheduler_agent.spec(provider, "test-model", runner)
-  // Should have 8 tools
-  list.length(s.tools) |> should.equal(8)
+  // Should have 10 tools (including schedule_from_spec and inspect_job)
+  list.length(s.tools) |> should.equal(10)
   process.send(runner, sched_types.StopAll)
 }
 
