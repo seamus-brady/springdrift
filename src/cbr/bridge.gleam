@@ -238,7 +238,9 @@ pub fn retrieve_cases(
 // Issue 3: "approach" removed from VSA bindings (tokenised in inverted index only)
 // ---------------------------------------------------------------------------
 
-/// Encode a CbrCase as a bundled VSA vector of role⊗filler bindings.
+/// Encode a CbrCase as a bundled VSA vector.
+/// Precondition: all filler vectors for `c` must already exist in `base.fillers`.
+/// Call `ensure_fillers` before this function. `retain_case` guarantees this ordering.
 fn encode_case(base: CaseBase, c: CbrCase) -> Result(Vector, MemoryError) {
   // Build feature bindings (approach excluded — goes to inverted index only)
   let features = [

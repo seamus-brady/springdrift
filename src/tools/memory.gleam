@@ -1382,7 +1382,9 @@ fn format_scored_case(sc: cbr_types.ScoredCase) -> String {
     [] -> ""
     k -> "  Keywords: " <> string.join(k, ", ") <> "\n"
   }
-  "[score: "
+  "[case_id: "
+  <> c.case_id
+  <> "] [score: "
   <> float.to_string(sc.score)
   <> "] "
   <> c.problem.intent

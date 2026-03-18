@@ -437,9 +437,24 @@ pub fn build_system_prompt(
   xsd_schema: String,
   xml_example: String,
 ) -> String {
-  base_prompt
-  <> "\n\nRespond with ONLY valid XML matching this schema. No preamble, no markdown fences, no explanation.\n\nXML SCHEMA (XSD):\n"
-  <> xsd_schema
-  <> "\n\nEXAMPLE OUTPUT:\n"
-  <> xml_example
+  base_prompt <> "
+
+=== STRUCTURED OUTPUT TASK ===
+
+- You must provide structured output in XML format using the XML schema below.
+- You are also provided with an example of the expected output in XML.
+- You must escape any strings embedded in the XML output as follows:
+    ' is replaced with &apos;
+    \" is replaced with &quot;
+    & is replaced with &amp;
+    < is replaced with &lt;
+    > is replaced with &gt;
+- Your output must be valid XML.
+- Respond with ONLY the XML. No JSON, no markdown fences, no preamble, no explanation.
+
+XML SCHEMA (XSD):
+" <> xsd_schema <> "
+
+EXAMPLE OUTPUT:
+" <> xml_example
 }

@@ -53,21 +53,11 @@ import slog
 
 /// Configuration for paperwings-based CBR retrieval.
 pub type CbrConfig {
-  CbrConfig(
-    vsa_dimensions: Int,
-    mailbox_warn_threshold: Int,
-    rrf_k: Int,
-    min_score: Float,
-  )
+  CbrConfig(vsa_dimensions: Int, rrf_k: Int, min_score: Float)
 }
 
 pub fn default_cbr_config() -> CbrConfig {
-  CbrConfig(
-    vsa_dimensions: 1000,
-    mailbox_warn_threshold: 50,
-    rrf_k: 60,
-    min_score: 0.0,
-  )
+  CbrConfig(vsa_dimensions: 1000, rrf_k: 60, min_score: 0.0)
 }
 
 // ---------------------------------------------------------------------------
@@ -1507,6 +1497,7 @@ fn loop(state: LibrarianState) -> Nil {
                   ),
                 )
               cbr_insert(state.cbr_cases, case_id, updated)
+              // Pitfalls and confidence are not VSA features — no CaseBase re-encoding needed.
               cbr_log.append(state.cbr_dir, updated)
               process.send(reply_to, Ok(Nil))
               loop(state)
@@ -1558,6 +1549,7 @@ fn loop(state: LibrarianState) -> Nil {
                   ),
                 )
               cbr_insert(state.cbr_cases, case_id, updated)
+              // Pitfalls and confidence are not VSA features — no CaseBase re-encoding needed.
               cbr_log.append(state.cbr_dir, updated)
               process.send(reply_to, Ok(Nil))
               loop(state)

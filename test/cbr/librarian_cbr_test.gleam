@@ -248,7 +248,7 @@ pub fn librarian_retrieve_no_match_test() {
       dir <> "/facts",
       dir <> "/artifacts",
       0,
-      librarian.default_cbr_config(),
+      librarian.CbrConfig(..librarian.default_cbr_config(), min_score: 0.5),
     )
 
   let c = make_case("case-nm1", "research", "property", ["market"], ["Dublin"])
@@ -267,10 +267,9 @@ pub fn librarian_retrieve_no_match_test() {
     )
   let results = librarian.retrieve_cases(lib, query)
 
-  // With paperwings RRF, all indexed cases get some score (no min_score threshold).
-  // A completely mismatched query still finds results via the inverted index.
-  // The key invariant is that results are returned (even low-scored).
-  should.be_true(list.length(results) >= 0)
+  // With a min_score of 0.5, a completely mismatched query should return no results
+  // because the RRF scores for unrelated cases fall below the threshold.
+  list.length(results) |> should.equal(0)
 
   process.send(lib, librarian.Shutdown)
 }

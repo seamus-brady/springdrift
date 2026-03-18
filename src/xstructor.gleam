@@ -141,7 +141,18 @@ fn do_generate(
     Ok(resp) -> {
       let text = response.text(resp)
       let cleaned = clean_response(text)
-      case do_validate_xml(cleaned, config.schema) {
+      // Pre-check: detect non-XML responses (JSON, plain text) before
+      // passing to xmerl, which produces unhelpful crash messages.
+      let validation_result = case looks_like_xml(cleaned) {
+        False ->
+          Error(
+            "Response is not XML (starts with: "
+            <> string.slice(cleaned, 0, 50)
+            <> "...)",
+          )
+        True -> do_validate_xml(cleaned, config.schema)
+      }
+      case validation_result {
         Ok(_) -> {
           case extract(cleaned) {
             Ok(elements) ->
@@ -167,15 +178,23 @@ fn do_generate(
                   <> string.slice(validation_error, 0, 200),
                 None,
               )
-              // Build retry messages: append assistant response + user error feedback
+              // Build retry messages with explicit XML correction prompt
+              let error_hint = case looks_like_xml(cleaned) {
+                False ->
+                  "You responded with JSON or plain text instead of XML. "
+                True -> ""
+              }
               let retry_messages =
                 list.append(messages, [
                   Message(role: Assistant, content: [TextContent(text: text)]),
                   Message(role: User, content: [
                     TextContent(
-                      text: "Your XML was invalid. Validation error:\n"
+                      text: error_hint
+                      <> "Your response must be valid XML. Error:\n"
                       <> validation_error
-                      <> "\n\nPlease fix the XML and try again. Respond with ONLY the corrected XML, no explanation.",
+                      <> "\n\nRespond with ONLY valid XML matching the schema. Start with <"
+                      <> extract_root_element(config.xml_example)
+                      <> ">. No JSON, no markdown, no explanation.",
                     ),
                   ]),
                 ])
@@ -251,6 +270,32 @@ fn extract_list_loop(
   case dict.get(elements, key) {
     Ok(value) -> extract_list_loop(elements, prefix, idx + 1, [value, ..acc])
     Error(_) -> list.reverse(acc)
+  }
+}
+
+/// Check if text looks like it could be XML (starts with < after trimming).
+/// This catches the common case where the LLM returns JSON or plain text.
+fn looks_like_xml(text: String) -> Bool {
+  let trimmed = string.trim(text)
+  string.starts_with(trimmed, "<")
+}
+
+/// Extract the root element name from an XML example for use in retry prompts.
+fn extract_root_element(xml_example: String) -> String {
+  let trimmed = string.trim(xml_example)
+  case string.starts_with(trimmed, "<") {
+    True -> {
+      let after_lt = string.drop_start(trimmed, 1)
+      case string.split_once(after_lt, ">") {
+        Ok(#(tag, _)) ->
+          case string.split_once(tag, " ") {
+            Ok(#(name, _)) -> name
+            Error(_) -> tag
+          }
+        Error(_) -> "root"
+      }
+    }
+    False -> "root"
   }
 }
 

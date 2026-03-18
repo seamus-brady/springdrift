@@ -267,7 +267,6 @@ fn run(cfg: AppConfig) -> Nil {
   let cbr_config =
     librarian.CbrConfig(
       vsa_dimensions: option.unwrap(cfg.vsa_dimensions, 1000),
-      mailbox_warn_threshold: option.unwrap(cfg.mailbox_warn_threshold, 50),
       rrf_k: option.unwrap(cfg.cbr_rrf_k, 60),
       min_score: option.unwrap(cfg.cbr_min_score, 0.0),
     )

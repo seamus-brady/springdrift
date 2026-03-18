@@ -97,6 +97,7 @@ fn dedup_by_case_id(cases: List(CbrCase)) -> List(CbrCase) {
   cases
   |> list.fold(dict.new(), fn(acc, c) { dict.insert(acc, c.case_id, c) })
   |> dict.values
+  |> list.sort(fn(a, b) { string.compare(a.timestamp, b.timestamp) })
 }
 
 // ---------------------------------------------------------------------------
