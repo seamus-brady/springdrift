@@ -530,7 +530,7 @@ fn notification_to_server_message(
   }
 }
 
-@external(erlang, "springdrift_ffi", "get_today_date")
+@external(erlang, "springdrift_ffi", "get_date")
 fn get_today_date() -> String
 
 fn encode_cycle_node(node: dag_types.CycleNode) -> json.Json {
