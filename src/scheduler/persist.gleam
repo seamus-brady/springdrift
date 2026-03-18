@@ -9,6 +9,7 @@ import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
+import paths
 import profile/types as profile_types
 import scheduler/types.{
   type JobStatus, type ScheduledJob, AgentJob, Appointment, Cancelled, Completed,
@@ -330,7 +331,10 @@ fn int_to_string(n: Int) -> String {
 }
 
 fn default_delivery() -> profile_types.DeliveryConfig {
-  profile_types.FileDelivery(directory: "./reports", format: "markdown")
+  profile_types.FileDelivery(
+    directory: paths.scheduler_outputs_dir(),
+    format: "markdown",
+  )
 }
 
 @external(erlang, "springdrift_ffi", "get_datetime")

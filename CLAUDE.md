@@ -196,6 +196,23 @@ automatic retry. The workflow:
 Use `schemas.build_system_prompt(base_prompt, xsd, example)` to build the system prompt.
 Always provide a fallback path for when XStructor generation fails entirely.
 
+### All output goes into `.springdrift/`
+
+**All files the system generates — logs, reports, schemas, memory, scheduler
+output — must be written inside the `.springdrift/` directory.** Never write output
+to the project root or arbitrary directories.
+
+This is a hard rule. The `.springdrift/` directory is the single, predictable
+location for all runtime data. This makes backup simple: copy one directory and
+you have everything. Use `paths.gleam` to define any new output paths and always
+go through the centralised path functions.
+
+Current output directories:
+- `.springdrift/logs/` — system logs
+- `.springdrift/memory/` — narrative, CBR, facts, artifacts, cycle-log
+- `.springdrift/schemas/` — compiled XSD schemas
+- `.springdrift/scheduler/outputs/` — scheduler report delivery
+
 ### No magic numbers, no invisible settings, no hidden system vars
 
 **Every configurable value must be surfaced in `config.toml`.** This is non-negotiable.
@@ -651,8 +668,8 @@ tool/agent surface:
 | File | Purpose |
 |---|---|
 | `CLAUDE.md` | Claude Code guide — architecture, patterns, config fields, key source files |
-| `.springdrift/HOW_TO.md` | Operator guide — tool selection heuristics, agent usage, degradation paths |
-| `.springdrift_example/HOW_TO.md` | Template copy of HOW_TO.md shipped with the project |
+| `.springdrift/skills/HOW_TO.md` | Operator guide — tool selection heuristics, agent usage, degradation paths |
+| `.springdrift_example/skills/HOW_TO.md` | Template copy of HOW_TO.md shipped with the project |
 | `.springdrift_example/README.md` | Setup instructions and directory layout for new users |
 
 After completing a task, check whether any of these files need updating. Common triggers:

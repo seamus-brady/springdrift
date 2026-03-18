@@ -17,6 +17,7 @@ import llm/tool
 import llm/types.{
   type Tool, type ToolCall, type ToolResult, ToolFailure, ToolSuccess,
 }
+import paths
 import profile/types as profile_types
 import scheduler/types as sched_types
 
@@ -657,7 +658,7 @@ fn make_job(
     query:,
     interval_ms:,
     delivery: profile_types.FileDelivery(
-      directory: "./reports",
+      directory: paths.scheduler_outputs_dir(),
       format: "markdown",
     ),
     only_if_changed: False,

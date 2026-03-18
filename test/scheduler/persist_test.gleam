@@ -15,7 +15,7 @@ fn test_job(name: String) -> ScheduledJob {
     query: "test query for " <> name,
     interval_ms: 3_600_000,
     delivery: profile_types.FileDelivery(
-      directory: "./reports",
+      directory: ".springdrift/scheduler/outputs",
       format: "markdown",
     ),
     only_if_changed: False,

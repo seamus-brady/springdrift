@@ -1,7 +1,7 @@
 -module(xstructor_ffi).
 -include_lib("xmerl/include/xmerl.hrl").
 -export([compile_schema/1, validate_xml/2, extract_elements/1,
-         write_schema_file/2]).
+         write_schema_file/2, suppress_xmerl_logging/0, restore_xmerl_logging/1]).
 
 %% Write an XSD schema string to a file path. Creates parent dirs as needed.
 %% Returns {ok, nil} | {error, Reason}.
