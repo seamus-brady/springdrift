@@ -35,6 +35,7 @@ pub fn spec(provider: Provider, model: String) -> AgentSpec {
     restart: Permanent,
     tool_executor: writer_executor,
     inter_turn_delay_ms: 200,
+    redact_secrets: True,
   )
 }
 

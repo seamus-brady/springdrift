@@ -62,6 +62,7 @@ pub type AgentSpec {
     restart: RestartStrategy,
     tool_executor: fn(ToolCall) -> ToolResult,
     inter_turn_delay_ms: Int,
+    redact_secrets: Bool,
   )
 }
 
@@ -96,6 +97,10 @@ pub type AgentOutcome {
     instruction: String,
     tools_used: List(String),
     tool_call_details: List(ToolCallDetail),
+    /// Tool errors that occurred during the react loop. Non-empty means the
+    /// agent's LLM chose to continue despite failures — the orchestrator
+    /// should treat the result with suspicion.
+    tool_errors: List(String),
     input_tokens: Int,
     output_tokens: Int,
     duration_ms: Int,

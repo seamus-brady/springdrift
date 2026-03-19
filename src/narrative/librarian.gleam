@@ -224,6 +224,35 @@ fn dag_lookup(table: DagTable, key: String) -> Result(dag_types.CycleNode, Nil)
 @external(erlang, "store_ffi", "lookup_bag")
 fn dag_lookup_bag(table: DagTable, key: String) -> List(dag_types.CycleNode)
 
+// Narrative bag deletion (for trim operations)
+@external(erlang, "store_ffi", "delete_object")
+fn ets_delete_object(
+  table: NarrativeTable,
+  object: #(String, NarrativeEntry),
+) -> Nil
+
+// DAG key deletion
+@external(erlang, "store_ffi", "delete_key")
+fn dag_delete_key(table: DagTable, key: String) -> Nil
+
+// Artifact key deletion
+@external(erlang, "store_ffi", "delete_key")
+fn artifact_delete_key(table: ArtifactTable, key: String) -> Nil
+
+// Narrative key deletion
+@external(erlang, "store_ffi", "delete_key")
+fn narrative_delete_key(table: NarrativeTable, key: String) -> Nil
+
+// DAG all values
+@external(erlang, "store_ffi", "all_values")
+fn dag_all_values(table: DagTable) -> List(dag_types.CycleNode)
+
+// Artifact all values
+@external(erlang, "store_ffi", "all_values")
+fn artifact_all_values(
+  table: ArtifactTable,
+) -> List(artifacts_types.ArtifactMeta)
+
 // Artifact-typed operations
 @external(erlang, "store_ffi", "insert")
 fn artifact_insert(
@@ -425,6 +454,14 @@ pub type LibrarianMessage {
     date: String,
     reply_to: Subject(List(dag_types.CycleNode)),
   )
+
+  // --- Trim operations (Housekeeper) ---
+  /// Evict narrative entries older than cutoff_date from all narrative ETS tables.
+  TrimNarrativeWindow(cutoff_date: String, reply_to: Subject(Int))
+  /// Evict DAG nodes older than cutoff_date from all DAG ETS tables.
+  TrimDagWindow(cutoff_date: String, reply_to: Subject(Int))
+  /// Evict artifact metadata older than cutoff_date from artifact ETS tables.
+  TrimArtifactWindow(cutoff_date: String, reply_to: Subject(Int))
 
   /// Shutdown
   Shutdown
@@ -1218,6 +1255,45 @@ pub fn clear_cycle_scratchpad(
   process.send(librarian, ClearCycleScratchpad(cycle_id:))
 }
 
+/// Trim narrative entries older than cutoff_date. Blocks until reply.
+pub fn trim_narrative_window(
+  librarian: Subject(LibrarianMessage),
+  cutoff_date: String,
+) -> Int {
+  let reply_to = process.new_subject()
+  process.send(librarian, TrimNarrativeWindow(cutoff_date:, reply_to:))
+  case process.receive(reply_to, 30_000) {
+    Ok(count) -> count
+    Error(_) -> 0
+  }
+}
+
+/// Trim DAG nodes older than cutoff_date. Blocks until reply.
+pub fn trim_dag_window(
+  librarian: Subject(LibrarianMessage),
+  cutoff_date: String,
+) -> Int {
+  let reply_to = process.new_subject()
+  process.send(librarian, TrimDagWindow(cutoff_date:, reply_to:))
+  case process.receive(reply_to, 30_000) {
+    Ok(count) -> count
+    Error(_) -> 0
+  }
+}
+
+/// Trim artifact metadata older than cutoff_date. Blocks until reply.
+pub fn trim_artifact_window(
+  librarian: Subject(LibrarianMessage),
+  cutoff_date: String,
+) -> Int {
+  let reply_to = process.new_subject()
+  process.send(librarian, TrimArtifactWindow(cutoff_date:, reply_to:))
+  case process.receive(reply_to, 30_000) {
+    Ok(count) -> count
+    Error(_) -> 0
+  }
+}
+
 pub fn query_tool_activity(
   librarian: Subject(LibrarianMessage),
   date: String,
@@ -1772,6 +1848,25 @@ fn loop(state: LibrarianState) -> Nil {
           process.send(reply_to, result)
           loop(state)
         }
+
+        // --- Trim operations (Housekeeper) ---
+        TrimNarrativeWindow(cutoff_date:, reply_to:) -> {
+          let count = do_trim_narrative(state, cutoff_date)
+          process.send(reply_to, count)
+          loop(state)
+        }
+
+        TrimDagWindow(cutoff_date:, reply_to:) -> {
+          let count = do_trim_dag(state, cutoff_date)
+          process.send(reply_to, count)
+          loop(state)
+        }
+
+        TrimArtifactWindow(cutoff_date:, reply_to:) -> {
+          let count = do_trim_artifact(state, cutoff_date)
+          process.send(reply_to, count)
+          loop(state)
+        }
       }
   }
 }
@@ -2297,6 +2392,80 @@ fn cycle_data_to_node(c: cycle_log.CycleData) -> dag_types.CycleNode {
     duration_ms: 0,
     agent_output: None,
   )
+}
+
+// ---------------------------------------------------------------------------
+// Trim operations — evict old entries from ETS tables
+// ---------------------------------------------------------------------------
+
+fn do_trim_narrative(state: LibrarianState, cutoff_date: String) -> Int {
+  // Get all entries, filter to those older than cutoff
+  let all = ets_all_values(state.entries)
+  let old_entries =
+    list.filter(all, fn(entry) {
+      string.compare(extract_date(entry.timestamp), cutoff_date) == order.Lt
+    })
+  let count = list.length(old_entries)
+  // Remove from set tables (O(1) per key)
+  list.each(old_entries, fn(entry) {
+    narrative_delete_key(state.entries, entry.cycle_id)
+    narrative_delete_key(state.by_recency, entry.timestamp)
+  })
+  // Remove from bag tables (per-object deletion required)
+  list.each(old_entries, fn(entry) {
+    let date = extract_date(entry.timestamp)
+    ets_delete_object(state.by_date, #(date, entry))
+    case entry.thread {
+      option.Some(t) ->
+        ets_delete_object(state.by_thread, #(t.thread_id, entry))
+      option.None -> Nil
+    }
+    list.each(entry.keywords, fn(kw) {
+      ets_delete_object(state.by_keyword, #(string.lowercase(kw), entry))
+    })
+    list.each(entry.topics, fn(topic) {
+      let lower_topic = string.lowercase(topic)
+      ets_delete_object(state.by_keyword, #(lower_topic, entry))
+      string.split(lower_topic, " ")
+      |> list.filter(fn(w) { string.length(w) > 2 })
+      |> list.each(fn(word) {
+        ets_delete_object(state.by_keyword, #(word, entry))
+      })
+    })
+  })
+  count
+}
+
+fn do_trim_dag(state: LibrarianState, cutoff_date: String) -> Int {
+  let all = dag_all_values(state.dag_nodes)
+  let old_nodes =
+    list.filter(all, fn(node) {
+      string.compare(string.slice(node.timestamp, 0, 10), cutoff_date)
+      == order.Lt
+    })
+  let count = list.length(old_nodes)
+  list.each(old_nodes, fn(node) {
+    dag_delete_key(state.dag_nodes, node.cycle_id)
+    // dag_by_parent and dag_by_date are bags — stale entries remain but
+    // do_query_dag_day deduplicates via set lookup, so orphaned bag entries
+    // are harmless and will be cleaned on next restart (replay skips old files).
+  })
+  count
+}
+
+fn do_trim_artifact(state: LibrarianState, cutoff_date: String) -> Int {
+  let all = artifact_all_values(state.artifacts)
+  let old_metas =
+    list.filter(all, fn(meta) {
+      string.compare(string.slice(meta.stored_at, 0, 10), cutoff_date)
+      == order.Lt
+    })
+  let count = list.length(old_metas)
+  list.each(old_metas, fn(meta) {
+    artifact_delete_key(state.artifacts, meta.artifact_id)
+    // artifacts_by_cycle bag entries become orphaned but harmless
+  })
+  count
 }
 
 /// Pair tool_call names with tool_result successes positionally.

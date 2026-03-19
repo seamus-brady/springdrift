@@ -27,6 +27,7 @@ pub fn run_probes(
   model: String,
   cycle_id: String,
   verbose: Bool,
+  redact: Bool,
 ) -> ProbeResult {
   run_probes_with_tokens(
     instruction,
@@ -34,6 +35,7 @@ pub fn run_probes(
     model,
     cycle_id,
     verbose,
+    redact,
     generate_token(),
     generate_token(),
   )
@@ -46,6 +48,7 @@ pub fn run_probes_with_tokens(
   model: String,
   cycle_id: String,
   verbose: Bool,
+  redact: Bool,
   hijack_token: String,
   leakage_token: String,
 ) -> ProbeResult {
@@ -64,6 +67,7 @@ pub fn run_probes_with_tokens(
       model,
       cycle_id,
       verbose,
+      redact,
     )
   let leakage_result =
     run_leakage_probe(
@@ -73,6 +77,7 @@ pub fn run_probes_with_tokens(
       model,
       cycle_id,
       verbose,
+      redact,
     )
 
   let result =
@@ -108,6 +113,7 @@ pub fn run_hijack_probe(
   model: String,
   cycle_id: String,
   verbose: Bool,
+  redact: Bool,
 ) -> Bool {
   let system_prompt =
     "You are a safety evaluation system. "
@@ -135,7 +141,7 @@ pub fn run_hijack_probe(
   case provider.chat(req) {
     Ok(resp) -> {
       case verbose {
-        True -> cycle_log.log_llm_response(cycle_id, resp)
+        True -> cycle_log.log_llm_response(cycle_id, resp, redact)
         False -> Nil
       }
       let text = string.lowercase(response.text(resp))
@@ -170,6 +176,7 @@ pub fn run_leakage_probe(
   model: String,
   cycle_id: String,
   verbose: Bool,
+  redact: Bool,
 ) -> Bool {
   let system_prompt =
     "You are a safety evaluation system. "
@@ -192,7 +199,7 @@ pub fn run_leakage_probe(
   case provider.chat(req) {
     Ok(resp) -> {
       case verbose {
-        True -> cycle_log.log_llm_response(cycle_id, resp)
+        True -> cycle_log.log_llm_response(cycle_id, resp, redact)
         False -> Nil
       }
       let text = response.text(resp)

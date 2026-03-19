@@ -23,7 +23,7 @@ fn cleanup_dir(dir: String) -> Nil {
 }
 
 fn compile(name: String, content: String) {
-  let schema_dir = ".springdrift/test-schemas-" <> unique_id()
+  let schema_dir = "/tmp/springdrift-test-schemas-" <> unique_id()
   let result = xstructor.compile_schema(schema_dir, name, content)
   #(schema_dir, result)
 }

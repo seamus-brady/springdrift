@@ -119,5 +119,6 @@ pub fn maybe_spawn_archivist(
     state.memory.librarian,
     state.memory.curator,
     state.config.threading_config,
+    state.redact_secrets,
   )
 }

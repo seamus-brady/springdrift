@@ -2,15 +2,16 @@ import agent/types.{
   type AgentResult, type AgentTask, AgentResult, AgentTask, ExtractedFact,
   GenericFindings, ResearcherFindings,
 }
-import cbr/types as cbr_types
 import facts/types as facts_types
 import gleam/erlang/process
 import gleam/list
 import gleam/option
 import gleam/string
 import gleeunit/should
+import identity
 import narrative/curator
 import narrative/librarian
+import narrative/types as narrative_types
 import narrative/virtual_memory.{CbrSlotEntry}
 import simplifile
 
@@ -215,20 +216,6 @@ pub fn curator_write_back_extracts_facts_test() {
   process.send(lib, librarian.Shutdown)
 }
 
-pub fn curator_housekeeping_runs_without_error_test() {
-  let #(lib, cur) = start_both("housekeeping")
-  // Just verify it doesn't crash
-  curator.run_housekeeping(cur)
-  process.sleep(50)
-
-  // Curator should still be responsive
-  let ctx = curator.get_virtual_context(cur)
-  ctx |> should.equal("")
-
-  process.send(cur, curator.Shutdown)
-  process.send(lib, librarian.Shutdown)
-}
-
 // ---------------------------------------------------------------------------
 // Virtual memory slot tests
 // ---------------------------------------------------------------------------
@@ -383,122 +370,6 @@ pub fn curator_all_vm_slots_populated_test() {
 }
 
 // ---------------------------------------------------------------------------
-// Housekeeping integration tests
-// ---------------------------------------------------------------------------
-
-fn make_cbr_case(
-  id: String,
-  timestamp: String,
-  _embedding: List(Float),
-  status: String,
-  confidence: Float,
-  pitfalls: List(String),
-) -> cbr_types.CbrCase {
-  cbr_types.CbrCase(
-    case_id: id,
-    timestamp: timestamp,
-    schema_version: 1,
-    problem: cbr_types.CbrProblem(
-      user_input: "test",
-      intent: "research",
-      domain: "test",
-      entities: [],
-      keywords: ["test"],
-      query_complexity: "simple",
-    ),
-    solution: cbr_types.CbrSolution(
-      approach: "test",
-      agents_used: [],
-      tools_used: [],
-      steps: [],
-    ),
-    outcome: cbr_types.CbrOutcome(
-      status: status,
-      confidence: confidence,
-      assessment: "test",
-      pitfalls: pitfalls,
-    ),
-    source_narrative_id: "n-" <> id,
-    profile: option.None,
-  )
-}
-
-pub fn curator_housekeeping_prunes_old_failures_test() {
-  let #(lib, cur) = start_both("hk_prune")
-
-  // Add an old failure case with low confidence and no pitfalls
-  let old_failure =
-    make_cbr_case("old-fail", "2025-01-01T10:00:00Z", [], "failure", 0.2, [])
-  librarian.notify_new_case(lib, old_failure)
-
-  // Add a good case
-  let good_case =
-    make_cbr_case("good", "2026-03-01T10:00:00Z", [], "success", 0.9, [])
-  librarian.notify_new_case(lib, good_case)
-  process.sleep(100)
-
-  // Verify both are present
-  let before = librarian.load_all_cases(lib)
-  list.length(before) |> should.equal(2)
-
-  // Run housekeeping
-  curator.run_housekeeping(cur)
-  process.sleep(500)
-
-  // Old failure should be pruned
-  let after = librarian.load_all_cases(lib)
-  list.length(after) |> should.equal(1)
-  let assert [remaining] = after
-  remaining.case_id |> should.equal("good")
-
-  process.send(cur, curator.Shutdown)
-  process.send(lib, librarian.Shutdown)
-}
-
-pub fn curator_housekeeping_deduplicates_similar_cases_test() {
-  let #(lib, cur) = start_both("hk_dedup")
-
-  // Add two nearly identical cases with the same embedding
-  let case_a =
-    make_cbr_case(
-      "dup-a",
-      "2026-03-01T10:00:00Z",
-      [1.0, 0.0, 0.0],
-      "success",
-      0.9,
-      [],
-    )
-  let case_b =
-    make_cbr_case(
-      "dup-b",
-      "2026-03-02T10:00:00Z",
-      [1.0, 0.0, 0.0],
-      "success",
-      0.9,
-      [],
-    )
-  librarian.notify_new_case(lib, case_a)
-  librarian.notify_new_case(lib, case_b)
-  process.sleep(100)
-
-  // Both present
-  let before = librarian.load_all_cases(lib)
-  list.length(before) |> should.equal(2)
-
-  // Run housekeeping
-  curator.run_housekeeping(cur)
-  process.sleep(500)
-
-  // Field similarity is 0.9 (intent+domain+keywords+status) which is below
-  // the default dedup threshold of 0.92. Both cases should still be present.
-  let after = librarian.load_all_cases(lib)
-  list.length(after) |> should.equal(2)
-
-  process.send(cur, curator.Shutdown)
-  process.send(lib, librarian.Shutdown)
-}
-
-// ---------------------------------------------------------------------------
 // Build system prompt
 // ---------------------------------------------------------------------------
 
@@ -529,9 +400,8 @@ pub fn build_system_prompt_fallback_when_no_identity_test() {
       option.None,
       "Springdrift",
       "",
-      curator.default_housekeeping_config(),
     )
-  let prompt = curator.build_system_prompt(cur, "You are helpful.")
+  let prompt = curator.build_system_prompt(cur, "You are helpful.", option.None)
   prompt |> should.equal("You are helpful.")
   process.send(cur, curator.Shutdown)
   process.send(lib, librarian.Shutdown)
@@ -566,11 +436,236 @@ pub fn build_system_prompt_with_persona_test() {
       option.None,
       "Springdrift",
       "",
-      curator.default_housekeeping_config(),
     )
-  let prompt = curator.build_system_prompt(cur, "fallback")
+  let prompt = curator.build_system_prompt(cur, "fallback", option.None)
   should.be_true(string.contains(prompt, "I am Springdrift."))
   should.be_true(!string.contains(prompt, "fallback"))
   process.send(cur, curator.Shutdown)
   process.send(lib, librarian.Shutdown)
+}
+
+// ---------------------------------------------------------------------------
+// Preamble budget tests
+// ---------------------------------------------------------------------------
+
+pub fn preamble_budget_plenty_of_room_test() {
+  // With a large budget, all slots pass through unchanged
+  let slots = [
+    identity.SlotValue(key: "agent_name", value: "Test"),
+    identity.SlotValue(key: "sensorium", value: "<sensorium/>"),
+    identity.SlotValue(key: "recent_narrative", value: "Some narrative text"),
+    identity.SlotValue(key: "active_threads", value: "Thread A"),
+    identity.SlotValue(key: "memory_health", value: "Nominal"),
+  ]
+  let result = curator.apply_preamble_budget(slots, 10_000)
+  // All values should be preserved (order may differ due to priority sort)
+  let values =
+    list.map(result, fn(s) { s.value })
+    |> list.sort(string.compare)
+  should.be_true(list.contains(values, "Test"))
+  should.be_true(list.contains(values, "<sensorium/>"))
+  should.be_true(list.contains(values, "Some narrative text"))
+  should.be_true(list.contains(values, "Thread A"))
+  should.be_true(list.contains(values, "Nominal"))
+}
+
+pub fn preamble_budget_trims_low_priority_test() {
+  // Budget only fits high-priority slots — low-priority ones get cleared
+  let slots = [
+    identity.SlotValue(key: "agent_name", value: "Bot"),
+    identity.SlotValue(key: "sensorium", value: "<sensorium/>"),
+    identity.SlotValue(key: "recent_narrative", value: "A long narrative..."),
+    identity.SlotValue(key: "active_threads", value: "Thread detail"),
+    identity.SlotValue(key: "memory_health", value: "Nominal"),
+  ]
+  // Budget = 20 chars: enough for "Bot" (3) + "<sensorium/>" (12) = 15, not enough for all
+  let result = curator.apply_preamble_budget(slots, 20)
+  let find = fn(key) {
+    list.find(result, fn(s) { s.key == key })
+    |> option.from_result
+  }
+  // High priority: agent_name (pri=1) and sensorium (pri=2) should survive
+  let assert option.Some(name) = find("agent_name")
+  name.value |> should.equal("Bot")
+  let assert option.Some(sensor) = find("sensorium")
+  sensor.value |> should.equal("<sensorium/>")
+  // Low priority: memory_health (pri=10) should be cleared
+  let assert option.Some(health) = find("memory_health")
+  health.value |> should.equal("")
+}
+
+pub fn preamble_budget_zero_clears_all_test() {
+  let slots = [
+    identity.SlotValue(key: "agent_name", value: "Bot"),
+    identity.SlotValue(key: "sensorium", value: "<sensorium/>"),
+  ]
+  let result = curator.apply_preamble_budget(slots, 0)
+  list.each(result, fn(s) { s.value |> should.equal("") })
+}
+
+// ---------------------------------------------------------------------------
+// Sensorium pure renderer tests
+// ---------------------------------------------------------------------------
+
+pub fn render_sensorium_clock_no_prior_test() {
+  let result =
+    curator.render_sensorium_clock(
+      "2026-03-19T14:30:00",
+      "2026-03-19T12:15:00",
+      [],
+    )
+  should.be_true(string.contains(result, "now=\"2026-03-19T14:30:00\""))
+  should.be_true(string.contains(result, "session_uptime="))
+  should.be_false(string.contains(result, "last_cycle="))
+}
+
+pub fn render_sensorium_clock_with_elapsed_test() {
+  let entries = [
+    narrative_entry_stub("2026-03-19T14:25:00"),
+  ]
+  let result =
+    curator.render_sensorium_clock(
+      "2026-03-19T14:30:00",
+      "2026-03-19T12:00:00",
+      entries,
+    )
+  should.be_true(string.contains(result, "now=\"2026-03-19T14:30:00\""))
+  should.be_true(string.contains(result, "session_uptime="))
+  should.be_true(string.contains(result, "last_cycle="))
+}
+
+pub fn render_sensorium_situation_user_test() {
+  let result = curator.render_sensorium_situation("user", 0, 6, option.None)
+  should.be_true(string.contains(result, "input=\"user\""))
+  should.be_true(string.contains(result, "queue_depth=\"0\""))
+  should.be_true(string.contains(result, "conversation_depth=\"6\""))
+  should.be_false(string.contains(result, "thread="))
+}
+
+pub fn render_sensorium_situation_scheduler_queued_test() {
+  let result =
+    curator.render_sensorium_situation(
+      "scheduler",
+      2,
+      12,
+      option.Some("CBR implementation"),
+    )
+  should.be_true(string.contains(result, "input=\"scheduler\""))
+  should.be_true(string.contains(result, "queue_depth=\"2\""))
+  should.be_true(string.contains(result, "conversation_depth=\"12\""))
+  should.be_true(string.contains(result, "thread=\"CBR implementation\""))
+}
+
+pub fn render_sensorium_schedule_empty_test() {
+  let result = curator.render_sensorium_schedule(option.None)
+  result |> should.equal("")
+}
+
+pub fn render_sensorium_vitals_test() {
+  let constitution =
+    virtual_memory.ConstitutionSlot(
+      today_cycles: 5,
+      today_success_rate: 0.8,
+      agent_health: "All agents nominal",
+    )
+  let result =
+    curator.render_sensorium_vitals(constitution, 2, "", "", option.None)
+  should.be_true(string.contains(result, "cycles_today=\"5\""))
+  should.be_true(string.contains(result, "agents_active=\"2\""))
+  should.be_false(string.contains(result, "agent_health="))
+  should.be_false(string.contains(result, "last_failure="))
+  // success_rate removed — not actionable per agent feedback
+  should.be_false(string.contains(result, "success_rate"))
+}
+
+pub fn render_sensorium_vitals_health_issue_test() {
+  let constitution =
+    virtual_memory.ConstitutionSlot(
+      today_cycles: 3,
+      today_success_rate: 0.6,
+      agent_health: "researcher restarting",
+    )
+  let result =
+    curator.render_sensorium_vitals(
+      constitution,
+      1,
+      "researcher restarting",
+      "",
+      option.None,
+    )
+  should.be_true(string.contains(
+    result,
+    "agent_health=\"researcher restarting\"",
+  ))
+  should.be_true(string.contains(result, "agents_active=\"1\""))
+}
+
+pub fn render_sensorium_vitals_with_failure_test() {
+  let constitution =
+    virtual_memory.ConstitutionSlot(
+      today_cycles: 5,
+      today_success_rate: 0.6,
+      agent_health: "All agents nominal",
+    )
+  let result =
+    curator.render_sensorium_vitals(
+      constitution,
+      2,
+      "",
+      "researcher timeout 2h ago",
+      option.None,
+    )
+  should.be_true(string.contains(
+    result,
+    "last_failure=\"researcher timeout 2h ago\"",
+  ))
+}
+
+// ---------------------------------------------------------------------------
+// Sensorium test helpers
+// ---------------------------------------------------------------------------
+
+fn narrative_entry_stub(ts: String) -> narrative_types.NarrativeEntry {
+  narrative_types.NarrativeEntry(
+    schema_version: 1,
+    cycle_id: "test-cycle",
+    parent_cycle_id: option.None,
+    timestamp: ts,
+    entry_type: narrative_types.Narrative,
+    summary: "Test entry",
+    intent: narrative_types.Intent(
+      classification: narrative_types.Exploration,
+      description: "test",
+      domain: "test",
+    ),
+    outcome: narrative_types.Outcome(
+      status: narrative_types.Success,
+      confidence: 0.9,
+      assessment: "ok",
+    ),
+    delegation_chain: [],
+    decisions: [],
+    keywords: [],
+    topics: [],
+    entities: narrative_types.Entities(
+      locations: [],
+      organisations: [],
+      data_points: [],
+      temporal_references: [],
+    ),
+    sources: [],
+    thread: option.None,
+    metrics: narrative_types.Metrics(
+      total_duration_ms: 0,
+      input_tokens: 0,
+      output_tokens: 0,
+      thinking_tokens: 0,
+      tool_calls: 0,
+      agent_delegations: 0,
+      dprime_evaluations: 0,
+      model_used: "",
+    ),
+    observations: [],
+    redacted: False,
+  )
 }

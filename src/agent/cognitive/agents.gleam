@@ -118,7 +118,7 @@ fn handle_memory_tools(
   let memory_results =
     list.map(memory_calls, fn(call) {
       // Log tool call to cycle log
-      cycle_log.log_tool_call(cycle_id, call)
+      cycle_log.log_tool_call(cycle_id, call, state.redact_secrets)
       let facts_ctx = case state.cycle_id {
         Some(cid) ->
           Some(memory.FactsContext(
@@ -181,7 +181,7 @@ fn handle_memory_tools(
           state.config.how_to_content,
         )
       // Log tool result to cycle log
-      cycle_log.log_tool_result(cycle_id, result)
+      cycle_log.log_tool_result(cycle_id, result, state.redact_secrets)
       case result {
         llm_types.ToolSuccess(tool_use_id: id, content: c) ->
           llm_types.ToolResultContent(
@@ -533,7 +533,7 @@ fn do_dispatch_agents(
       // Log agent dispatch calls and accumulate ToolSummaries
       let agent_summaries =
         list.map(agent_calls, fn(call) {
-          cycle_log.log_tool_call(cycle_id, call)
+          cycle_log.log_tool_call(cycle_id, call, state.redact_secrets)
           dag_types.ToolSummary(name: call.name, success: True, error: None)
         })
 
@@ -557,7 +557,23 @@ pub fn handle_agent_complete(
   outcome: AgentOutcome,
 ) -> CognitiveState {
   let #(outcome_task_id, result_text) = case outcome {
-    AgentSuccess(task_id, result:, ..) -> #(task_id, result)
+    AgentSuccess(task_id, agent:, result:, tool_errors:, ..) -> {
+      // If the agent "succeeded" but had tool failures, prefix them so the
+      // orchestrating LLM knows the result may be unreliable.
+      let prefixed = case tool_errors {
+        [] -> result
+        errors -> {
+          let error_lines = string.join(errors, "\n  ")
+          "[WARNING: agent "
+          <> agent
+          <> " had tool failures during execution:\n  "
+          <> error_lines
+          <> "\nThe following result may be unreliable.]\n\n"
+          <> result
+        }
+      }
+      #(task_id, prefixed)
+    }
     AgentFailure(task_id, error:, ..) -> #(
       task_id,
       "[Agent error: " <> error <> "]",
@@ -622,6 +638,23 @@ pub fn handle_agent_complete(
       completion,
       ..state.agent_completions
     ])
+
+  // Push agent health to Curator when tools failed (degraded status)
+  case outcome {
+    AgentSuccess(agent:, tool_errors: [first_err, ..], ..) ->
+      case state.memory.curator {
+        Some(cur) ->
+          curator.update_agent_health(cur, agent <> " degraded: " <> first_err)
+        None -> Nil
+      }
+    AgentFailure(agent:, error:, ..) ->
+      case state.memory.curator {
+        Some(cur) ->
+          curator.update_agent_health(cur, agent <> " failed: " <> error)
+        None -> Nil
+      }
+    _ -> Nil
+  }
 
   // Write back to Curator scratchpad for inter-agent context
   case state.memory.curator {
@@ -771,6 +804,7 @@ pub fn handle_agent_complete(
               let provider = state.provider
               let scorer_model = state.task_model
               let verbose = state.verbose
+              let redact_secrets = state.redact_secrets
               // Get the pre-execution D' score from the most recent history
               let pre_score = case dprime_st.history {
                 [latest, ..] -> latest.score
@@ -786,6 +820,7 @@ pub fn handle_agent_complete(
                     scorer_model,
                     cycle_id,
                     verbose,
+                    redact_secrets,
                   )
                 process.send(
                   self,

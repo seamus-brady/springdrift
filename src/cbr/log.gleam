@@ -133,6 +133,7 @@ pub fn encode_case(c: CbrCase) -> json.Json {
       option.Some(p) -> json.string(p)
       option.None -> json.null()
     }),
+    #("redacted", json.bool(c.redacted)),
   ])
 }
 
@@ -184,6 +185,7 @@ pub fn case_decoder() -> decode.Decoder(CbrCase) {
     decode.optional(decode.string) |> decode.map(option.unwrap(_, "")),
   )
   use profile <- decode.field("profile", decode.optional(decode.string))
+  use redacted <- decode.optional_field("redacted", False, decode.bool)
   decode.success(CbrCase(
     case_id:,
     timestamp:,
@@ -193,6 +195,7 @@ pub fn case_decoder() -> decode.Decoder(CbrCase) {
     outcome:,
     source_narrative_id:,
     profile:,
+    redacted:,
   ))
 }
 

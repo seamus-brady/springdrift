@@ -20,6 +20,7 @@ pub type CbrCase {
     outcome: CbrOutcome,
     source_narrative_id: String,
     profile: Option(String),
+    redacted: Bool,
   )
 }
 

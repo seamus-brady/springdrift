@@ -100,6 +100,7 @@ pub fn spec(
     restart: agent_types.Permanent,
     tool_executor: scheduler_executor(runner),
     inter_turn_delay_ms: 100,
+    redact_secrets: True,
   )
 }
 

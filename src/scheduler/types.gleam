@@ -146,6 +146,18 @@ pub type SchedulerMessage {
   GetJobs(query: JobQuery, reply_to: Subject(List(ScheduledJob)))
   /// Mark a job completed (for Todos and Reminders).
   CompleteJob(name: String, reply_to: Subject(Result(Nil, String)))
+  /// Get remaining budget for the current hour (cycles + tokens).
+  GetBudgetRemaining(reply_to: Subject(BudgetStatus))
+}
+
+/// Budget status for the current rolling hour window.
+pub type BudgetStatus {
+  BudgetStatus(
+    cycles_used: Int,
+    cycles_limit: Int,
+    tokens_used: Int,
+    tokens_limit: Int,
+  )
 }
 
 // ---------------------------------------------------------------------------

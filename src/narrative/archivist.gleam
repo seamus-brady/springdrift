@@ -22,6 +22,7 @@ import llm/response
 import narrative/curator.{type CuratorMessage}
 import narrative/librarian.{type LibrarianMessage}
 import narrative/log as narrative_log
+import narrative/redactor
 import narrative/threading
 import narrative/types.{
   type Entities, type NarrativeEntry, Conversation, Entities, Failure, Intent,
@@ -216,6 +217,7 @@ pub fn spawn(
   lib: Option(Subject(LibrarianMessage)),
   cur: Option(Subject(CuratorMessage)),
   threading_config: threading.ThreadingConfig,
+  redact_secrets: Bool,
 ) -> Nil {
   let _ =
     process.spawn_unlinked(fn() {
@@ -230,11 +232,27 @@ pub fn spawn(
               lib,
               threading_config,
             )
-          narrative_log.append(narrative_dir, threaded)
+          // Redact secrets before persisting
+          let final_entry = case redact_secrets {
+            False -> threaded
+            True ->
+              NarrativeEntry(
+                ..threaded,
+                summary: redactor.redact(threaded.summary),
+                observations: list.map(threaded.observations, fn(obs) {
+                  types.Observation(..obs, detail: redactor.redact(obs.detail))
+                }),
+                decisions: list.map(threaded.decisions, fn(d) {
+                  types.Decision(..d, rationale: redactor.redact(d.rationale))
+                }),
+                redacted: True,
+              )
+          }
+          narrative_log.append(narrative_dir, final_entry)
           // Notify the Librarian to index the new entry
           case lib {
             Some(l) -> {
-              librarian.notify_new_entry(l, threaded)
+              librarian.notify_new_entry(l, final_entry)
               // Also update the thread index in the Librarian
               let idx = narrative_log.load_thread_index(narrative_dir)
               librarian.notify_thread_index(l, idx)
@@ -264,8 +282,28 @@ pub fn spawn(
           }
 
           // Step 2: Generate CBR case from the narrative entry
-          case generate_cbr_case(ctx, threaded, provider, model) {
-            Some(cbr_case) -> {
+          case generate_cbr_case(ctx, final_entry, provider, model) {
+            Some(raw_case) -> {
+              let cbr_case = case redact_secrets {
+                False -> raw_case
+                True ->
+                  cbr_types.CbrCase(
+                    ..raw_case,
+                    problem: cbr_types.CbrProblem(
+                      ..raw_case.problem,
+                      user_input: redactor.redact(raw_case.problem.user_input),
+                    ),
+                    solution: cbr_types.CbrSolution(
+                      ..raw_case.solution,
+                      approach: redactor.redact(raw_case.solution.approach),
+                    ),
+                    outcome: cbr_types.CbrOutcome(
+                      ..raw_case.outcome,
+                      assessment: redactor.redact(raw_case.outcome.assessment),
+                    ),
+                    redacted: True,
+                  )
+              }
               // Persist to JSONL and notify Librarian (which encodes into CaseBase)
               cbr_log.append(cbr_dir, cbr_case)
               case lib {
@@ -426,6 +464,7 @@ fn extract_narrative_entry(
     thread: None,
     metrics: extract_metrics(elements),
     observations: extract_observations(elements),
+    redacted: False,
   )
 }
 
@@ -935,6 +974,7 @@ fn extract_cbr_case(
     outcome: outcome,
     source_narrative_id: ctx.cycle_id,
     profile: None,
+    redacted: False,
   )
 }
 
@@ -1110,6 +1150,7 @@ fn fallback_entry(ctx: ArchivistContext) -> NarrativeEntry {
       model_used: ctx.model_used,
     ),
     observations: [],
+    redacted: False,
   )
 }
 

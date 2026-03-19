@@ -21,6 +21,7 @@ pub fn hijack_probe_safe_response_returns_false_test() {
     "mock",
     "test-cycle",
     False,
+    False,
   )
   |> should.be_false
 }
@@ -34,6 +35,7 @@ pub fn hijack_probe_token_echoed_returns_true_test() {
     provider,
     "mock",
     "test-cycle",
+    False,
     False,
   )
   |> should.be_true
@@ -52,6 +54,7 @@ pub fn hijack_probe_token_embedded_in_text_returns_true_test() {
     "mock",
     "test-cycle",
     False,
+    False,
   )
   |> should.be_true
 }
@@ -66,6 +69,7 @@ pub fn hijack_probe_case_insensitive_detection_test() {
     "mock",
     "test-cycle",
     False,
+    False,
   )
   |> should.be_true
 }
@@ -79,6 +83,7 @@ pub fn hijack_probe_fail_closed_on_error_test() {
     provider,
     "mock",
     "test-cycle",
+    False,
     False,
   )
   |> should.be_true
@@ -98,6 +103,7 @@ pub fn leakage_probe_safe_response_returns_false_test() {
     "mock",
     "test-cycle",
     False,
+    False,
   )
   |> should.be_false
 }
@@ -111,6 +117,7 @@ pub fn leakage_probe_token_revealed_returns_true_test() {
     provider,
     "mock",
     "test-cycle",
+    False,
     False,
   )
   |> should.be_true
@@ -126,6 +133,7 @@ pub fn leakage_probe_exact_token_match_test() {
     "mock",
     "test-cycle",
     False,
+    False,
   )
   |> should.be_true
 }
@@ -139,6 +147,7 @@ pub fn leakage_probe_fail_closed_on_error_test() {
     provider,
     "mock",
     "test-cycle",
+    False,
     False,
   )
   |> should.be_true
@@ -157,6 +166,7 @@ pub fn run_probes_with_tokens_both_clean_test() {
       provider,
       "mock",
       "test-cycle",
+      False,
       False,
       "hijack-tok-aaa",
       "leak-tok-bbb",
@@ -194,6 +204,7 @@ pub fn run_probes_with_tokens_hijack_detected_test() {
       "mock",
       "test-cycle",
       False,
+      False,
       "hijack-tok-aaa",
       "leak-tok-bbb",
     )
@@ -216,6 +227,7 @@ pub fn run_probes_with_tokens_leakage_detected_test() {
       provider,
       "mock",
       "test-cycle",
+      False,
       False,
       "hijack-tok-aaa",
       "leak-tok-bbb",
@@ -240,6 +252,7 @@ pub fn run_probes_with_tokens_both_detected_test() {
       "mock",
       "test-cycle",
       False,
+      False,
       "hijack-tok-aaa",
       "leak-tok-bbb",
     )
@@ -257,6 +270,7 @@ pub fn run_probes_with_tokens_fail_closed_on_error_test() {
       provider,
       "mock",
       "test-cycle",
+      False,
       False,
       "tok-a",
       "tok-b",
@@ -279,6 +293,7 @@ pub fn details_no_issues_pattern_test() {
       "mock",
       "test-cycle",
       False,
+      False,
       "unique-hijack-token",
       "unique-leakage-token",
     )
@@ -295,6 +310,7 @@ pub fn details_hijack_only_pattern_test() {
       "mock",
       "test-cycle",
       False,
+      False,
       "unique-hijack-token",
       "unique-leakage-token",
     )
@@ -310,6 +326,7 @@ pub fn details_leakage_only_pattern_test() {
       provider,
       "mock",
       "test-cycle",
+      False,
       False,
       "unique-hijack-token",
       "unique-leakage-token",
@@ -334,6 +351,7 @@ pub fn hijack_probe_safe_refusal_not_flagged_test() {
     "mock",
     "test-cycle",
     False,
+    False,
   )
   |> should.be_false
 }
@@ -348,6 +366,7 @@ pub fn hijack_probe_token_at_start_still_detected_test() {
     provider,
     "mock",
     "test-cycle",
+    False,
     False,
   )
   |> should.be_true
@@ -364,6 +383,7 @@ pub fn hijack_probe_refusal_without_token_still_safe_test() {
     "mock",
     "test-cycle",
     False,
+    False,
   )
   |> should.be_false
 }
@@ -379,6 +399,7 @@ pub fn hijack_probe_compliance_no_refusal_pattern_test() {
     "mock",
     "test-cycle",
     False,
+    False,
   )
   |> should.be_true
 }
@@ -392,6 +413,7 @@ pub fn details_both_detected_pattern_test() {
       provider,
       "mock",
       "test-cycle",
+      False,
       False,
       "unique-hijack-token",
       "unique-leakage-token",

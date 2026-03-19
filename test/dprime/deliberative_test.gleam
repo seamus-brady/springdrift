@@ -46,6 +46,7 @@ pub fn build_situation_model_returns_text_test() {
       "mock",
       "test-cycle",
       False,
+      False,
     )
   let assert True = result != ""
 }
@@ -59,6 +60,7 @@ pub fn build_situation_model_fallback_on_error_test() {
       provider,
       "mock",
       "test-cycle",
+      False,
       False,
     )
   // Falls back to instruction
@@ -185,6 +187,7 @@ pub fn explain_modification_no_concerns_test() {
       "mock",
       "test-cycle",
       False,
+      False,
     )
   result |> should.equal("No specific concerns identified")
 }
@@ -207,6 +210,7 @@ pub fn explain_modification_with_concerns_test() {
       provider,
       "mock",
       "test-cycle",
+      False,
       False,
     )
   let assert True = result != ""

@@ -1,13 +1,12 @@
-//// Curator — supervised actor managing memory housekeeping, virtual context
-//// window (Letta layer), and inter-agent context injection.
+//// Curator — supervised actor managing virtual context window (Letta layer)
+//// and inter-agent context injection.
 ////
 //// The Curator starts after the Librarian and before the cognitive loop. It
-//// owns three distinct responsibilities:
+//// owns two distinct responsibilities:
 ////
-//// 1. Periodic housekeeping: dedup, pruning, conflict resolution, compaction
-//// 2. Virtual context window: managed Letta-style memory slots injected into
+//// 1. Virtual context window: managed Letta-style memory slots injected into
 ////    every LLM request
-//// 3. Inter-agent context injection: enriches agent tasks with prior results
+//// 2. Inter-agent context injection: enriches agent tasks with prior results
 ////    and intercepts agent results for write-back
 ////
 //// The Curator communicates with the Librarian for ETS queries and scratchpad
@@ -15,7 +14,6 @@
 //// single owner of all memory indexes.
 
 import agent/types as agent_types
-import facts/log as facts_log
 import facts/types as facts_types
 import gleam/erlang/process.{type Subject}
 import gleam/float
@@ -24,9 +22,8 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import identity
-import narrative/housekeeping
 import narrative/librarian
-import narrative/log as narrative_log
+import narrative/types as narrative_types
 import narrative/virtual_memory.{
   type CbrSlotEntry, type VirtualMemory, ScratchEntry,
 }
@@ -35,30 +32,23 @@ import scheduler/types as scheduler_types
 import slog
 
 // ---------------------------------------------------------------------------
-// Housekeeping config
+// Cycle context — ephemeral per-call data from the cognitive loop
 // ---------------------------------------------------------------------------
 
-pub type HousekeepingConfig {
-  HousekeepingConfig(
-    tick_ms: Int,
-    interval_ticks: Int,
-    dedup_similarity: Float,
-    pruning_confidence: Float,
-    fact_confidence: Float,
-    cbr_pruning_days: Int,
-    thread_pruning_days: Int,
-  )
-}
-
-pub fn default_housekeeping_config() -> HousekeepingConfig {
-  HousekeepingConfig(
-    tick_ms: 86_400_000,
-    interval_ticks: 60,
-    dedup_similarity: 0.92,
-    pruning_confidence: 0.3,
-    fact_confidence: 0.7,
-    cbr_pruning_days: 60,
-    thread_pruning_days: 7,
+/// Ephemeral context from the cognitive loop, passed with each
+/// BuildSystemPrompt call. Carries data the Curator can't derive itself.
+pub type CycleContext {
+  CycleContext(
+    /// "user" or "scheduler"
+    input_source: String,
+    /// Number of inputs waiting after this one
+    queue_depth: Int,
+    /// ISO timestamp of when the session started
+    session_since: String,
+    /// Count of agents with Running status in the registry
+    agents_active: Int,
+    /// Total messages in conversation history (conversation depth signal)
+    message_count: Int,
   )
 }
 
@@ -93,9 +83,11 @@ pub type CuratorMessage {
   /// Set CBR cases for the current query.
   SetCbrCases(cases: List(CbrSlotEntry))
   /// Build the system prompt from persona + rendered preamble.
-  BuildSystemPrompt(fallback_prompt: String, reply_to: Subject(String))
-  /// Trigger a housekeeping pass (manual or timer-driven).
-  RunHousekeeping
+  BuildSystemPrompt(
+    fallback_prompt: String,
+    context: Option(CycleContext),
+    reply_to: Subject(String),
+  )
   /// Update constitution cache (called by Archivist after each cycle).
   UpdateConstitution(
     today_cycles: Int,
@@ -106,6 +98,8 @@ pub type CuratorMessage {
   UpdateAgentHealth(health: String)
   /// Set the scheduler subject (called after scheduler starts).
   SetScheduler(scheduler: Subject(scheduler_types.SchedulerMessage))
+  /// Set the preamble budget in chars (called after Curator starts).
+  SetPreambleBudget(chars: Int)
   /// Shutdown the Curator.
   Shutdown
 }
@@ -121,8 +115,7 @@ type CuratorState {
     narrative_dir: String,
     cbr_dir: String,
     facts_dir: String,
-    housekeeping_config: HousekeepingConfig,
-    housekeeping_ticks: Int,
+    fact_confidence: Float,
     vm: VirtualMemory,
     identity_dirs: List(String),
     memory_tag: String,
@@ -130,6 +123,7 @@ type CuratorState {
     agent_name: String,
     agent_version: String,
     scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
+    preamble_budget_chars: Int,
   )
 }
 
@@ -154,7 +148,6 @@ pub fn start(
     None,
     "Springdrift",
     "",
-    default_housekeeping_config(),
   )
 }
 
@@ -169,7 +162,6 @@ pub fn start_with_identity(
   active_profile: Option(String),
   agent_name: String,
   agent_version: String,
-  housekeeping_config: HousekeepingConfig,
 ) -> Result(Subject(CuratorMessage), Nil) {
   let setup: Subject(Subject(CuratorMessage)) = process.new_subject()
   process.spawn_unlinked(fn() {
@@ -183,8 +175,7 @@ pub fn start_with_identity(
         narrative_dir:,
         cbr_dir:,
         facts_dir:,
-        housekeeping_config:,
-        housekeeping_ticks: 0,
+        fact_confidence: 0.7,
         vm: virtual_memory.empty(),
         identity_dirs:,
         memory_tag:,
@@ -192,6 +183,7 @@ pub fn start_with_identity(
         agent_name:,
         agent_version:,
         scheduler: None,
+        preamble_budget_chars: 8000,
       )
 
     slog.info("narrative/curator", "start", "Curator ready", None)
@@ -310,18 +302,17 @@ pub fn set_cbr_cases(
 pub fn build_system_prompt(
   curator: Subject(CuratorMessage),
   fallback_prompt: String,
+  context: Option(CycleContext),
 ) -> String {
   let reply_to = process.new_subject()
-  process.send(curator, BuildSystemPrompt(fallback_prompt:, reply_to:))
+  process.send(
+    curator,
+    BuildSystemPrompt(fallback_prompt:, context:, reply_to:),
+  )
   case process.receive(reply_to, 5000) {
     Ok(prompt) -> prompt
     Error(_) -> fallback_prompt
   }
-}
-
-/// Trigger a housekeeping pass (fire-and-forget).
-pub fn run_housekeeping(curator: Subject(CuratorMessage)) -> Nil {
-  process.send(curator, RunHousekeeping)
 }
 
 /// Update constitution cache (fire-and-forget). Called by the Archivist.
@@ -335,6 +326,11 @@ pub fn update_constitution(
     curator,
     UpdateConstitution(today_cycles:, today_success_rate:, agent_health:),
   )
+}
+
+/// Set the preamble budget in chars (fire-and-forget).
+pub fn set_preamble_budget(curator: Subject(CuratorMessage), chars: Int) -> Nil {
+  process.send(curator, SetPreambleBudget(chars:))
 }
 
 /// Update agent health only (fire-and-forget). Called on lifecycle events.
@@ -352,15 +348,7 @@ pub fn update_agent_health(
 fn loop(state: CuratorState) -> Nil {
   case process.receive(state.self, 60_000) {
     Error(_) -> {
-      // Timeout — idle heartbeat; check if housekeeping is due
-      let ticks = state.housekeeping_ticks + 1
-      case ticks >= state.housekeeping_config.interval_ticks {
-        True -> {
-          do_housekeeping(state)
-          loop(CuratorState(..state, housekeeping_ticks: 0))
-        }
-        False -> loop(CuratorState(..state, housekeeping_ticks: ticks))
-      }
+      loop(state)
     }
     Ok(msg) ->
       case msg {
@@ -371,6 +359,9 @@ fn loop(state: CuratorState) -> Nil {
 
         SetScheduler(scheduler:) ->
           loop(CuratorState(..state, scheduler: Some(scheduler)))
+
+        SetPreambleBudget(chars:) ->
+          loop(CuratorState(..state, preamble_budget_chars: chars))
 
         InjectContext(task:, reply_to:) -> {
           let enriched = do_inject_context(state, task)
@@ -445,14 +436,9 @@ fn loop(state: CuratorState) -> Nil {
           loop(CuratorState(..state, vm: updated_vm))
         }
 
-        BuildSystemPrompt(fallback_prompt:, reply_to:) -> {
-          let prompt = do_build_system_prompt(state, fallback_prompt)
+        BuildSystemPrompt(fallback_prompt:, context:, reply_to:) -> {
+          let prompt = do_build_system_prompt(state, fallback_prompt, context)
           process.send(reply_to, prompt)
-          loop(state)
-        }
-
-        RunHousekeeping -> {
-          do_housekeeping(state)
           loop(state)
         }
 
@@ -573,7 +559,7 @@ fn write_extracted_facts(
   case facts {
     [] -> Nil
     [fact, ..rest] -> {
-      case fact.confidence >=. state.housekeeping_config.fact_confidence {
+      case fact.confidence >=. state.fact_confidence {
         True -> {
           let memory_fact =
             make_memory_fact(
@@ -621,115 +607,39 @@ fn generate_id() -> String
 @external(erlang, "springdrift_ffi", "get_datetime")
 fn get_timestamp() -> String
 
-// ---------------------------------------------------------------------------
-// Housekeeping — stub for Phase 6
-// ---------------------------------------------------------------------------
+/// Milliseconds from now until an ISO 8601 datetime (negative if in the past).
+@external(erlang, "springdrift_ffi", "ms_until_datetime")
+fn ms_until_datetime(iso: String) -> Int
 
-fn do_housekeeping(state: CuratorState) -> Nil {
-  slog.info(
-    "narrative/curator",
-    "housekeeping",
-    "Starting housekeeping pass",
-    None,
-  )
-
-  // 1. CBR deduplication
-  let all_cases = librarian.load_all_cases(state.librarian)
-  let dedup_results =
-    housekeeping.find_duplicate_cases(
-      all_cases,
-      state.housekeeping_config.dedup_similarity,
-    )
-  let dedup_count = list.length(dedup_results)
-  list.each(dedup_results, fn(d: housekeeping.DedupResult) {
-    librarian.remove_case(state.librarian, d.supersede_id)
-  })
-
-  // 2. CBR pruning
-  let cutoff_date = days_ago_date(state.housekeeping_config.cbr_pruning_days)
-  let remaining_cases = librarian.load_all_cases(state.librarian)
-  let prune_results =
-    housekeeping.find_prunable_cases(
-      remaining_cases,
-      cutoff_date,
-      state.housekeeping_config.pruning_confidence,
-    )
-  let prune_count = list.length(prune_results)
-  list.each(prune_results, fn(p: housekeeping.PruneResult) {
-    librarian.remove_case(state.librarian, p.case_id)
-  })
-
-  // 3. Fact conflict resolution
-  let all_facts = librarian.get_all_facts(state.librarian)
-  let conflict_results = housekeeping.find_fact_conflicts(all_facts)
-  let conflict_count = list.length(conflict_results)
-  let timestamp = get_timestamp()
-  list.each(conflict_results, fn(c: housekeeping.ConflictResult) {
-    // Find the original fact to build the superseded record
-    let original =
-      list.find(all_facts, fn(f) { f.fact_id == c.supersede_fact_id })
-    case original {
-      Ok(orig) -> {
-        let superseded_fact =
-          housekeeping.make_superseded_fact(
-            orig,
-            c.keep_fact_id,
-            "housekeeping",
-            timestamp,
-          )
-        // Write to JSONL
-        facts_log.append(state.facts_dir, superseded_fact)
-        // Update Librarian indices
-        librarian.supersede_fact(state.librarian, superseded_fact)
-      }
-      Error(_) -> Nil
+/// Format elapsed time since an ISO 8601 timestamp as a human-readable string.
+fn format_elapsed_since(iso_timestamp: String) -> String {
+  // ms_until_datetime returns negative for past timestamps
+  let elapsed_ms = 0 - ms_until_datetime(iso_timestamp)
+  case elapsed_ms {
+    ms if ms < 0 -> "just now"
+    ms if ms < 60_000 -> int.to_string(ms / 1000) <> "s ago"
+    ms if ms < 3_600_000 -> int.to_string(ms / 60_000) <> "m ago"
+    ms if ms < 86_400_000 -> {
+      let hours = ms / 3_600_000
+      let mins = { ms - hours * 3_600_000 } / 60_000
+      int.to_string(hours) <> "h " <> int.to_string(mins) <> "m ago"
     }
-  })
-
-  // 4. Thread pruning — remove single-cycle old threads with no signal
-  let thread_cutoff =
-    days_ago_date(state.housekeeping_config.thread_pruning_days)
-  let thread_index = librarian.load_thread_index(state.librarian)
-  let thread_prune_results =
-    housekeeping.find_prunable_threads(thread_index.threads, thread_cutoff)
-  let thread_prune_count = list.length(thread_prune_results)
-  case thread_prune_count > 0 {
-    True -> {
-      let cleaned_index =
-        housekeeping.apply_thread_pruning(thread_index, thread_prune_results)
-      narrative_log.save_thread_index(state.narrative_dir, cleaned_index)
-      librarian.notify_thread_index(state.librarian, cleaned_index)
+    ms -> {
+      let days = ms / 86_400_000
+      int.to_string(days) <> "d ago"
     }
-    False -> Nil
   }
-
-  let report =
-    housekeeping.HousekeepingReport(
-      cases_deduplicated: dedup_count,
-      cases_pruned: prune_count,
-      facts_resolved: conflict_count,
-      threads_pruned: thread_prune_count,
-    )
-  slog.info(
-    "narrative/curator",
-    "housekeeping",
-    housekeeping.format_report(report),
-    None,
-  )
-}
-
-@external(erlang, "springdrift_ffi", "days_ago_date")
-fn days_ago_date(days: Int) -> String
-
-fn get_today_date() -> String {
-  days_ago_date(0)
 }
 
 // ---------------------------------------------------------------------------
 // System prompt assembly from identity files
 // ---------------------------------------------------------------------------
 
-fn do_build_system_prompt(state: CuratorState, fallback: String) -> String {
+fn do_build_system_prompt(
+  state: CuratorState,
+  fallback: String,
+  context: Option(CycleContext),
+) -> String {
   let persona = identity.load_persona(state.identity_dirs)
   let template = identity.load_preamble_template(state.identity_dirs)
 
@@ -739,7 +649,7 @@ fn do_build_system_prompt(state: CuratorState, fallback: String) -> String {
       let rendered_preamble = case template {
         None -> None
         Some(tmpl) -> {
-          let slots = build_preamble_slots(state)
+          let slots = build_preamble_slots(state, context)
           let rendered = identity.render_preamble(tmpl, slots)
           case rendered {
             "" -> None
@@ -761,9 +671,10 @@ fn do_build_system_prompt(state: CuratorState, fallback: String) -> String {
   }
 }
 
-fn build_preamble_slots(state: CuratorState) -> List(identity.SlotValue) {
-  let today = get_today_date()
-
+fn build_preamble_slots(
+  state: CuratorState,
+  context: Option(CycleContext),
+) -> List(identity.SlotValue) {
   // Query Librarian for counts
   let thread_count = librarian.get_thread_count(state.librarian)
   let fact_count = librarian.get_persistent_fact_count(state.librarian)
@@ -824,10 +735,13 @@ fn build_preamble_slots(state: CuratorState) -> List(identity.SlotValue) {
     })
     |> string.join("\n")
 
-  // Build slot values
-  [
-    identity.SlotValue(key: "session_status", value: "Active session"),
-    identity.SlotValue(key: "last_session_date", value: today),
+  // Assemble sensorium — self-describing XML perceptual input block
+  let sensorium = build_sensorium(state, context, recent_entries)
+
+  // Build slot values — session_status, last_session_date, today_cycles,
+  // today_success_rate, and agent_health are now inside the sensorium XML.
+  let slots = [
+    identity.SlotValue(key: "sensorium", value: sensorium),
     identity.SlotValue(key: "last_session_summary", value: last_session_summary),
     identity.SlotValue(
       key: "active_thread_count",
@@ -840,27 +754,8 @@ fn build_preamble_slots(state: CuratorState) -> List(identity.SlotValue) {
     ),
     identity.SlotValue(key: "recent_fact_sample", value: recent_fact_text),
     identity.SlotValue(key: "cbr_case_count", value: int.to_string(case_count)),
-    identity.SlotValue(
-      key: "today_cycles",
-      value: int.to_string(state.vm.constitution.today_cycles),
-    ),
-    identity.SlotValue(
-      key: "today_success_rate",
-      value: float.to_string(state.vm.constitution.today_success_rate),
-    ),
-    identity.SlotValue(
-      key: "agent_health",
-      value: case state.vm.constitution.agent_health {
-        "All agents nominal" -> ""
-        h -> h
-      },
-    ),
     identity.SlotValue(key: "recent_narrative", value: recent_narrative_text),
-    identity.SlotValue(
-      key: "open_commitments",
-      value: build_open_commitments(state.scheduler),
-    ),
-    identity.SlotValue(key: "memory_health", value: "Nominal"),
+    identity.SlotValue(key: "memory_health", value: ""),
     identity.SlotValue(key: "active_profile", value: case state.active_profile {
       Some(name) -> name
       None -> ""
@@ -869,13 +764,281 @@ fn build_preamble_slots(state: CuratorState) -> List(identity.SlotValue) {
     identity.SlotValue(key: "agent_name", value: state.agent_name),
     identity.SlotValue(key: "agent_version", value: state.agent_version),
   ]
+  apply_preamble_budget(slots, state.preamble_budget_chars)
 }
 
-fn build_open_commitments(
+/// Apply a character budget to preamble slots. Slots are prioritized
+/// (lower number = higher priority). When the budget is exceeded,
+/// remaining lower-priority slots are cleared to "" so that existing
+/// [OMIT IF EMPTY] template rules drop them naturally.
+pub fn apply_preamble_budget(
+  slots: List(identity.SlotValue),
+  budget_chars: Int,
+) -> List(identity.SlotValue) {
+  let prioritized = assign_priorities(slots)
+  // Sort by priority (ascending = most important first)
+  let sorted = list.sort(prioritized, fn(a, b) { int.compare(a.0, b.0) })
+  // Walk in priority order, accumulate chars, truncate when over
+  let #(_, budgeted) =
+    list.fold(sorted, #(0, []), fn(acc, entry) {
+      let #(used, kept) = acc
+      let #(_pri, slot) = entry
+      let slot_len = string.length(slot.value)
+      let remaining = budget_chars - used
+      case remaining <= 0 {
+        True -> #(used, [identity.SlotValue(..slot, value: ""), ..kept])
+        False ->
+          case slot_len <= remaining {
+            True -> #(used + slot_len, [slot, ..kept])
+            False -> {
+              let truncated = string.slice(slot.value, 0, remaining)
+              #(budget_chars, [
+                identity.SlotValue(..slot, value: truncated),
+                ..kept
+              ])
+            }
+          }
+      }
+    })
+  budgeted
+}
+
+fn assign_priorities(
+  slots: List(identity.SlotValue),
+) -> List(#(Int, identity.SlotValue)) {
+  list.map(slots, fn(slot) {
+    let pri = case slot.key {
+      "agent_name" | "agent_version" -> 1
+      "sensorium" -> 2
+      "active_thread_count" | "cbr_case_count" | "persistent_fact_count" -> 5
+      "last_session_summary" -> 6
+      "recent_narrative" -> 7
+      "active_threads" -> 8
+      "recent_fact_sample" -> 9
+      _ -> 10
+    }
+    #(pri, slot)
+  })
+}
+
+/// Assemble the sensorium — a self-describing XML block of ambient perception.
+/// Answers: what time is it, how long was I away, who woke me, what's
+/// happening, is anything waiting, and is anything wrong?
+fn build_sensorium(
+  state: CuratorState,
+  context: Option(CycleContext),
+  recent_entries: List(narrative_types.NarrativeEntry),
+) -> String {
+  let now = get_timestamp()
+
+  // Resolve cycle context (defaults when None)
+  let input_source = case context {
+    Some(ctx) -> ctx.input_source
+    None -> "user"
+  }
+  let queue_depth = case context {
+    Some(ctx) -> ctx.queue_depth
+    None -> 0
+  }
+  let session_since = case context {
+    Some(ctx) -> ctx.session_since
+    None -> now
+  }
+  let agents_active = case context {
+    Some(ctx) -> ctx.agents_active
+    None -> 0
+  }
+  let message_count = case context {
+    Some(ctx) -> ctx.message_count
+    None -> 0
+  }
+  let agent_health = state.vm.constitution.agent_health
+
+  // Find the most recent active thread for situation context
+  let thread_index = librarian.load_thread_index(state.librarian)
+  let active_thread_name =
+    thread_index.threads
+    |> list.sort(fn(a, b) { string.compare(b.last_cycle_at, a.last_cycle_at) })
+    |> list.first
+    |> option.from_result
+    |> option.map(fn(t) { t.thread_name })
+
+  // Find last failure from recent entries for vitals
+  let last_failure = find_last_failure(recent_entries)
+
+  let clock = render_sensorium_clock(now, session_since, recent_entries)
+  let situation =
+    render_sensorium_situation(
+      input_source,
+      queue_depth,
+      message_count,
+      active_thread_name,
+    )
+  let schedule = render_sensorium_schedule(state.scheduler)
+  let vitals =
+    render_sensorium_vitals(
+      state.vm.constitution,
+      agents_active,
+      agent_health,
+      last_failure,
+      state.scheduler,
+    )
+
+  let sections =
+    [clock, situation, schedule, vitals]
+    |> list.filter(fn(s) { s != "" })
+    |> string.join("\n")
+
+  "<!-- Sensorium: ambient perception injected each cycle. No tool calls needed. -->\n<sensorium>\n"
+  <> sections
+  <> "\n</sensorium>"
+}
+
+/// Render the <clock> element with temporal orientation.
+pub fn render_sensorium_clock(
+  now: String,
+  session_since: String,
+  recent_entries: List(narrative_types.NarrativeEntry),
+) -> String {
+  let uptime = format_elapsed_since(session_since)
+  let last_cycle_attr = case recent_entries {
+    [entry, ..] ->
+      " last_cycle=\"" <> format_elapsed_since(entry.timestamp) <> "\""
+    _ -> ""
+  }
+  "  <clock now=\""
+  <> now
+  <> "\" session_uptime=\""
+  <> uptime
+  <> "\""
+  <> last_cycle_attr
+  <> "/>"
+}
+
+/// Render the <situation> element — who triggered this cycle, what's waiting,
+/// conversation depth, and active thread context.
+pub fn render_sensorium_situation(
+  input_source: String,
+  queue_depth: Int,
+  message_count: Int,
+  active_thread: Option(String),
+) -> String {
+  let thread_attr = case active_thread {
+    Some(name) -> " thread=\"" <> name <> "\""
+    None -> ""
+  }
+  "  <situation input=\""
+  <> input_source
+  <> "\" queue_depth=\""
+  <> int.to_string(queue_depth)
+  <> "\" conversation_depth=\""
+  <> int.to_string(message_count)
+  <> "\""
+  <> thread_attr
+  <> "/>"
+}
+
+/// Render the <schedule> element with per-job detail.
+/// Returns "" when no scheduler or no active jobs.
+pub fn render_sensorium_schedule(
   scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
 ) -> String {
-  case scheduler {
+  let jobs = query_schedule_jobs(scheduler)
+  case jobs {
+    [] -> ""
+    _ -> {
+      let pending_count =
+        list.count(jobs, fn(j) { status_is_pending(j.status) })
+      let overdue_count = list.count(jobs, fn(j) { is_overdue(j) })
+      let job_lines =
+        jobs
+        |> list.map(fn(j) {
+          "    <job title=\""
+          <> j.title
+          <> "\" kind=\""
+          <> scheduler_types.encode_job_kind(j.kind)
+          <> "\" status=\""
+          <> job_display_status(j)
+          <> "\""
+          <> case j.due_at {
+            Some(due) -> " due=\"" <> due <> "\""
+            None -> ""
+          }
+          <> "/>"
+        })
+        |> string.join("\n")
+      "  <schedule pending=\""
+      <> int.to_string(pending_count)
+      <> "\" overdue=\""
+      <> int.to_string(overdue_count)
+      <> "\">\n"
+      <> job_lines
+      <> "\n  </schedule>"
+    }
+  }
+}
+
+/// Render the <vitals> element — operational health.
+/// `last_failure` is a human-readable description of the most recent failure
+/// from narrative entries, or "" if none. Replaces raw success_rate float
+/// which was not actionable.
+pub fn render_sensorium_vitals(
+  constitution: virtual_memory.ConstitutionSlot,
+  agents_active: Int,
+  agent_health: String,
+  last_failure: String,
+  scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
+) -> String {
+  let health_attr = case agent_health {
+    "" -> ""
+    "All agents nominal" -> ""
+    h -> " agent_health=\"" <> h <> "\""
+  }
+  let failure_attr = case last_failure {
+    "" -> ""
+    f -> " last_failure=\"" <> f <> "\""
+  }
+  let budget = query_budget(scheduler)
+  let budget_attrs = case budget {
     None -> ""
+    Some(b) -> {
+      let cycles_attr = case b.cycles_limit > 0 {
+        True ->
+          " cycles_remaining=\""
+          <> int.to_string(int.max(0, b.cycles_limit - b.cycles_used))
+          <> "\""
+        False -> ""
+      }
+      let tokens_attr = case b.tokens_limit > 0 {
+        True ->
+          " tokens_remaining=\""
+          <> int.to_string(int.max(0, b.tokens_limit - b.tokens_used))
+          <> "\""
+        False -> ""
+      }
+      cycles_attr <> tokens_attr
+    }
+  }
+  "  <vitals cycles_today=\""
+  <> int.to_string(constitution.today_cycles)
+  <> "\" agents_active=\""
+  <> int.to_string(agents_active)
+  <> "\""
+  <> health_attr
+  <> failure_attr
+  <> budget_attrs
+  <> "/>"
+}
+
+// ---------------------------------------------------------------------------
+// Sensorium helpers
+// ---------------------------------------------------------------------------
+
+fn query_schedule_jobs(
+  scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
+) -> List(scheduler_types.ScheduledJob) {
+  case scheduler {
+    None -> []
     Some(sched) -> {
       let reply_to = process.new_subject()
       process.send(
@@ -892,24 +1055,63 @@ fn build_open_commitments(
         ),
       )
       case process.receive(reply_to, 2000) {
-        Error(_) -> ""
-        Ok(jobs) ->
-          case jobs {
-            [] -> ""
-            _ ->
-              list.map(jobs, fn(j) {
-                j.title
-                <> " ("
-                <> scheduler_types.encode_job_kind(j.kind)
-                <> case j.due_at {
-                  Some(due) -> ", due " <> due
-                  None -> ""
-                }
-                <> ")"
-              })
-              |> string.join(", ")
-          }
+        Error(_) -> []
+        Ok(jobs) -> jobs
       }
     }
+  }
+}
+
+fn query_budget(
+  scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
+) -> Option(scheduler_types.BudgetStatus) {
+  case scheduler {
+    None -> None
+    Some(sched) -> {
+      let reply_to = process.new_subject()
+      process.send(sched, scheduler_types.GetBudgetRemaining(reply_to:))
+      case process.receive(reply_to, 2000) {
+        Error(_) -> None
+        Ok(b) -> Some(b)
+      }
+    }
+  }
+}
+
+/// Find the most recent failure from narrative entries (already sorted recent-first).
+/// Returns a brief human-readable description like "researcher timeout 2h ago", or "".
+fn find_last_failure(entries: List(narrative_types.NarrativeEntry)) -> String {
+  case entries {
+    [] -> ""
+    [entry, ..rest] ->
+      case entry.outcome.status {
+        narrative_types.Failure | narrative_types.Partial -> {
+          let elapsed = format_elapsed_since(entry.timestamp)
+          let assessment = string.slice(entry.outcome.assessment, 0, 40)
+          assessment <> " " <> elapsed
+        }
+        _ -> find_last_failure(rest)
+      }
+  }
+}
+
+fn status_is_pending(status: scheduler_types.JobStatus) -> Bool {
+  case status {
+    scheduler_types.Pending -> True
+    _ -> False
+  }
+}
+
+fn is_overdue(job: scheduler_types.ScheduledJob) -> Bool {
+  case job.due_at {
+    Some(due) -> ms_until_datetime(due) < 0
+    None -> False
+  }
+}
+
+fn job_display_status(job: scheduler_types.ScheduledJob) -> String {
+  case is_overdue(job) {
+    True -> "overdue"
+    False -> scheduler_types.encode_job_status(job.status)
   }
 }

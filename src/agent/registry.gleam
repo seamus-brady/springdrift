@@ -103,6 +103,11 @@ pub fn size(registry: Registry) -> Int {
   list.length(registry.entries)
 }
 
+/// Count agents with Running status.
+pub fn count_running(registry: Registry) -> Int {
+  list.count(registry.entries, fn(e) { e.status == Running })
+}
+
 // ---------------------------------------------------------------------------
 // Internal
 // ---------------------------------------------------------------------------

@@ -47,11 +47,14 @@ tools: reflect, inspect_cycle, list_recent_cycles, query_tool_activity.
 
 ## Multi-Agent Tasks
 
-1. Check agent availability before dispatching
+1. Check the sensorium vitals agent_health before dispatching — if an agent
+   is degraded, do not delegate to it blindly
 2. Prefer sequential agent calls when tasks have dependencies
 3. Use store_result / retrieve_result for large outputs — do not pass full
    research results as context strings between agents
 4. Use agent_planner before complex multi-step work
+5. When an agent result contains [WARNING: agent X had tool failures], treat the
+   result with suspicion — the agent continued despite tool errors
 
 ## Agents
 
@@ -59,6 +62,16 @@ tools: reflect, inspect_cycle, list_recent_cycles, query_tool_activity.
 - **agent_planner** — task decomposition and dependency mapping (no tools, max 3 turns)
 - **agent_coder** — code writing, debugging, refactoring (builtin tools, max 10 turns)
 - **agent_writer** — long-form writing and structured reports (builtin tools, max 6 turns)
+- **agent_observer** — diagnostic memory examination (diagnostic memory tools, max 6 turns)
+
+### Agent error surfacing
+
+Agent results include tool failure information at two levels:
+
+- Reactive (in result) — if tools failed but the agent LLM continued, the result is
+  prefixed with [WARNING: agent X had tool failures: ...]. Do not trust without verification.
+- Proactive (in sensorium) — agent health is updated in vitals when tools fail or agents
+  crash/restart. Check agent_health before delegating to a previously-failing agent.
 
 ## Degradation Paths
 

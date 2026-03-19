@@ -49,6 +49,7 @@ pub type CognitiveConfig {
     memory_limits: memory.MemoryLimits,
     input_queue_cap: Int,
     how_to_content: Option(String),
+    redact_secrets: Bool,
   )
 }
 
@@ -94,5 +95,6 @@ pub fn default_test_config(
     memory_limits: memory.default_limits(),
     input_queue_cap: 10,
     how_to_content: None,
+    redact_secrets: False,
   )
 }

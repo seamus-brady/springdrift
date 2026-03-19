@@ -1,4 +1,5 @@
 import agent/cognitive_state.{type CognitiveState, CognitiveState}
+import agent/registry
 import agent/types.{type CognitiveReply, CognitiveReply, PendingThink, Thinking}
 import agent/worker
 import context
@@ -33,10 +34,23 @@ pub fn proceed_with_model(
     "Using model: " <> model,
     Some(cycle_id),
   )
-  // Refresh system prompt from Curator if available
+  // Refresh system prompt from Curator if available, passing cycle context
   let state = case state.memory.curator {
     Some(cur) -> {
-      let prompt = curator.build_system_prompt(cur, state.system)
+      let input_source = case node_type {
+        dag_types.SchedulerCycle -> "scheduler"
+        _ -> "user"
+      }
+      let cycle_context =
+        curator.CycleContext(
+          input_source:,
+          queue_depth: list.length(state.input_queue),
+          session_since: state.identity.session_since,
+          agents_active: registry.count_running(state.registry),
+          message_count: list.length(state.messages),
+        )
+      let prompt =
+        curator.build_system_prompt(cur, state.system, Some(cycle_context))
       CognitiveState(..state, system: prompt)
     }
     None -> state

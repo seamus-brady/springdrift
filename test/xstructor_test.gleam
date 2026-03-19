@@ -122,7 +122,7 @@ pub fn extract_list_single_test() {
 
 pub fn generate_valid_first_try_test() {
   // Write schema to temp dir, compile, then test generate
-  let schema_dir = ".springdrift/test-schemas-" <> unique_id()
+  let schema_dir = "/tmp/springdrift-test-schemas-" <> unique_id()
   let schema_content =
     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
 <xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">
@@ -161,7 +161,7 @@ pub fn generate_valid_first_try_test() {
 }
 
 pub fn generate_fenced_valid_xml_test() {
-  let schema_dir = ".springdrift/test-schemas-" <> unique_id()
+  let schema_dir = "/tmp/springdrift-test-schemas-" <> unique_id()
   let schema_content =
     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
 <xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">
@@ -201,7 +201,7 @@ pub fn generate_fenced_valid_xml_test() {
 }
 
 pub fn generate_llm_error_test() {
-  let schema_dir = ".springdrift/test-schemas-" <> unique_id()
+  let schema_dir = "/tmp/springdrift-test-schemas-" <> unique_id()
   let schema_content =
     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
 <xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">
@@ -236,7 +236,7 @@ pub fn generate_llm_error_test() {
 }
 
 pub fn generate_all_retries_fail_test() {
-  let schema_dir = ".springdrift/test-schemas-" <> unique_id()
+  let schema_dir = "/tmp/springdrift-test-schemas-" <> unique_id()
   let schema_content =
     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
 <xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">
@@ -270,7 +270,7 @@ pub fn generate_all_retries_fail_test() {
 }
 
 pub fn generate_invalid_then_valid_retry_test() {
-  let schema_dir = ".springdrift/test-schemas-" <> unique_id()
+  let schema_dir = "/tmp/springdrift-test-schemas-" <> unique_id()
   let schema_content =
     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
 <xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">
@@ -320,7 +320,7 @@ pub fn generate_invalid_then_valid_retry_test() {
 // ---------------------------------------------------------------------------
 
 pub fn compile_schema_valid_test() {
-  let schema_dir = ".springdrift/test-schemas-" <> unique_id()
+  let schema_dir = "/tmp/springdrift-test-schemas-" <> unique_id()
   let schema_content =
     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
 <xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">
@@ -334,7 +334,7 @@ pub fn compile_schema_valid_test() {
 }
 
 pub fn compile_schema_invalid_test() {
-  let schema_dir = ".springdrift/test-schemas-" <> unique_id()
+  let schema_dir = "/tmp/springdrift-test-schemas-" <> unique_id()
   let result =
     xstructor.compile_schema(schema_dir, "bad.xsd", "not valid xsd at all")
   result |> should.be_error
@@ -346,7 +346,7 @@ pub fn compile_schema_invalid_test() {
 // ---------------------------------------------------------------------------
 
 pub fn validate_valid_xml_test() {
-  let schema_dir = ".springdrift/test-schemas-" <> unique_id()
+  let schema_dir = "/tmp/springdrift-test-schemas-" <> unique_id()
   let schema_content =
     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
 <xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">
@@ -363,7 +363,7 @@ pub fn validate_valid_xml_test() {
 }
 
 pub fn validate_invalid_xml_test() {
-  let schema_dir = ".springdrift/test-schemas-" <> unique_id()
+  let schema_dir = "/tmp/springdrift-test-schemas-" <> unique_id()
   let schema_content =
     "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
 <xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">

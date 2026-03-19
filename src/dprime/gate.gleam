@@ -32,6 +32,7 @@ pub fn evaluate(
   model: String,
   cycle_id: String,
   verbose: Bool,
+  redact: Bool,
 ) -> GateResult {
   slog.info(
     "dprime/gate",
@@ -49,7 +50,14 @@ pub fn evaluate(
         Some(cycle_id),
       )
       let probe_result =
-        canary.run_probes(instruction, provider, model, cycle_id, verbose)
+        canary.run_probes(
+          instruction,
+          provider,
+          model,
+          cycle_id,
+          verbose,
+          redact,
+        )
       cycle_log.log_dprime_canary(
         cycle_id,
         probe_result.hijack_detected,
@@ -90,6 +98,7 @@ pub fn evaluate(
             Some(probe_result),
             cycle_id,
             verbose,
+            redact,
           )
       }
     }
@@ -103,6 +112,7 @@ pub fn evaluate(
         None,
         cycle_id,
         verbose,
+        redact,
       )
   }
 }
@@ -116,6 +126,7 @@ pub fn post_execution_evaluate(
   model: String,
   cycle_id: String,
   verbose: Bool,
+  _redact: Bool,
 ) -> GateResult {
   deliberative.post_execution_check(
     result_text,
@@ -141,6 +152,7 @@ fn evaluate_reactive(
   canary_result: Option(types.ProbeResult),
   cycle_id: String,
   verbose: Bool,
+  redact: Bool,
 ) -> GateResult {
   slog.debug(
     "dprime/gate",
@@ -162,6 +174,7 @@ fn evaluate_reactive(
         0.0,
         cycle_id,
         verbose,
+        redact,
       )
     _ -> {
       let forecasts =
@@ -238,6 +251,7 @@ fn evaluate_reactive(
                 score,
                 cycle_id,
                 verbose,
+                redact,
               )
           }
         }
@@ -260,6 +274,7 @@ fn evaluate_deliberative(
   reactive_dprime: Float,
   cycle_id: String,
   verbose: Bool,
+  redact: Bool,
 ) -> GateResult {
   slog.debug(
     "dprime/gate",
@@ -281,6 +296,7 @@ fn evaluate_deliberative(
       model,
       cycle_id,
       verbose,
+      redact,
     )
 
   // Determine candidate count based on reactive D' score
@@ -349,6 +365,7 @@ fn evaluate_deliberative(
         model,
         cycle_id,
         verbose,
+        redact,
       )
     Reject ->
       case layer {

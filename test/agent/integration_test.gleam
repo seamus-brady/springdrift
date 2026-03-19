@@ -47,6 +47,7 @@ fn make_spec(
     restart:,
     tool_executor: noop_executor,
     inter_turn_delay_ms: 200,
+    redact_secrets: False,
   )
 }
 
@@ -312,6 +313,7 @@ pub fn agent_tool_execution_test() {
           _ -> llm_types.ToolFailure(tool_use_id: call.id, error: "unknown")
         }
       },
+      redact_secrets: False,
     )
 
   let assert Ok(#(_pid, task_subj)) = framework.start_agent(spec)

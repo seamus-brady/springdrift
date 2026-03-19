@@ -31,6 +31,7 @@ import llm/provider.{type Provider}
 import llm/retry
 import llm/types as llm_types
 import narrative/curator
+import narrative/housekeeper
 import narrative/librarian
 import narrative/threading as narrative_threading
 import paths
@@ -257,6 +258,18 @@ fn run(cfg: AppConfig) -> Nil {
   let archivist_model = option.unwrap(cfg.archivist_model, task_model)
   let archivist_max_tokens = option.unwrap(cfg.archivist_max_tokens, 8192)
 
+  let redact_secrets = option.unwrap(cfg.redact_secrets, True)
+  case redact_secrets {
+    True -> Nil
+    False ->
+      slog.warn(
+        "springdrift",
+        "run",
+        "Secret redaction is DISABLED — logs may contain sensitive data",
+        option.None,
+      )
+  }
+
   // Migrate legacy facts.jsonl to daily rotation (no-op if already done)
   facts_log.migrate_legacy(paths.facts_dir())
 
@@ -334,6 +347,65 @@ fn run(cfg: AppConfig) -> Nil {
     }
   }
   let lib = option.Some(librarian_subj)
+
+  // Start the Housekeeper (non-critical — log + continue on failure)
+  let hk_default = housekeeper.default_config()
+  let housekeeper_config =
+    housekeeper.HousekeeperConfig(
+      short_tick_ms: option.unwrap(
+        cfg.housekeeper_short_tick_ms,
+        hk_default.short_tick_ms,
+      ),
+      medium_tick_ms: option.unwrap(
+        cfg.housekeeper_medium_tick_ms,
+        hk_default.medium_tick_ms,
+      ),
+      long_tick_ms: option.unwrap(
+        cfg.housekeeper_long_tick_ms,
+        hk_default.long_tick_ms,
+      ),
+      narrative_days: option.unwrap(
+        cfg.housekeeper_narrative_days,
+        hk_default.narrative_days,
+      ),
+      cbr_days: option.unwrap(cfg.housekeeper_cbr_days, hk_default.cbr_days),
+      dag_days: option.unwrap(cfg.housekeeper_dag_days, hk_default.dag_days),
+      artifact_days: option.unwrap(
+        cfg.housekeeper_artifact_days,
+        hk_default.artifact_days,
+      ),
+      dedup_similarity: option.unwrap(
+        cfg.dedup_similarity,
+        hk_default.dedup_similarity,
+      ),
+      pruning_confidence: option.unwrap(
+        cfg.pruning_confidence,
+        hk_default.pruning_confidence,
+      ),
+      fact_confidence: option.unwrap(
+        cfg.fact_confidence,
+        hk_default.fact_confidence,
+      ),
+      cbr_pruning_days: option.unwrap(
+        cfg.cbr_pruning_days,
+        hk_default.cbr_pruning_days,
+      ),
+      thread_pruning_days: option.unwrap(
+        cfg.thread_pruning_days,
+        hk_default.thread_pruning_days,
+      ),
+    )
+  case
+    housekeeper.start(
+      librarian_subj,
+      narrative_dir,
+      paths.facts_dir(),
+      housekeeper_config,
+    )
+  {
+    Ok(_subj) -> io.println("Housekeeper: started")
+    Error(_) -> io.println("Housekeeper: failed to start (non-critical)")
+  }
 
   // Start cache and rate limiter actors for web tools
   let brave_cache = case cache.start() {
@@ -441,6 +513,7 @@ fn run(cfg: AppConfig) -> Nil {
         llm_types.ToolFailure(tool_use_id: "", error: "stub")
       },
       inter_turn_delay_ms: 0,
+      redact_secrets:,
     ))
   let agent_tools =
     list.append(list.map(agent_specs, cognitive.agent_to_tool), [scheduler_tool])
@@ -467,37 +540,6 @@ fn run(cfg: AppConfig) -> Nil {
     }
   }
 
-  // Build housekeeping config
-  let hk_default = curator.default_housekeeping_config()
-  let housekeeping_config =
-    curator.HousekeepingConfig(
-      tick_ms: option.unwrap(cfg.housekeeping_tick_ms, hk_default.tick_ms),
-      interval_ticks: option.unwrap(
-        cfg.housekeeping_interval_ticks,
-        hk_default.interval_ticks,
-      ),
-      dedup_similarity: option.unwrap(
-        cfg.dedup_similarity,
-        hk_default.dedup_similarity,
-      ),
-      pruning_confidence: option.unwrap(
-        cfg.pruning_confidence,
-        hk_default.pruning_confidence,
-      ),
-      fact_confidence: option.unwrap(
-        cfg.fact_confidence,
-        hk_default.fact_confidence,
-      ),
-      cbr_pruning_days: option.unwrap(
-        cfg.cbr_pruning_days,
-        hk_default.cbr_pruning_days,
-      ),
-      thread_pruning_days: option.unwrap(
-        cfg.thread_pruning_days,
-        hk_default.thread_pruning_days,
-      ),
-    )
-
   // Start Curator (stays alive for dynamic system prompt assembly)
   let curator_subj = case
     curator.start_with_identity(
@@ -510,7 +552,6 @@ fn run(cfg: AppConfig) -> Nil {
       active_profile,
       agent_name,
       agent_version,
-      housekeeping_config,
     )
   {
     Ok(subj) -> subj
@@ -625,6 +666,7 @@ fn run(cfg: AppConfig) -> Nil {
       ),
       input_queue_cap: option.unwrap(cfg.input_queue_cap, 10),
       how_to_content: option.Some(how_to_content),
+      redact_secrets:,
     ))
   {
     Ok(subj) -> subj
@@ -751,6 +793,10 @@ fn run(cfg: AppConfig) -> Nil {
     option.Some(sched) -> curator.set_scheduler(curator_subj, sched)
     option.None -> Nil
   }
+
+  // Set preamble budget from config
+  let preamble_budget = option.unwrap(cfg.preamble_budget_chars, 8000)
+  curator.set_preamble_budget(curator_subj, preamble_budget)
 
   // Start GUI
   let tui_input_limit = option.unwrap(cfg.tui_input_limit, 102_400)
@@ -932,6 +978,7 @@ fn default_agent_specs(
       tools_memory.MemoryLimits(recall_max_entries:, cbr_max_results:),
       option.None,
     )
+  let redact = option.unwrap(cfg.redact_secrets, True)
   [
     agent_types.AgentSpec(
       ..p_spec,
@@ -942,6 +989,7 @@ fn default_agent_specs(
         p_spec.max_consecutive_errors,
       ),
       inter_turn_delay_ms: delay,
+      redact_secrets: redact,
     ),
     agent_types.AgentSpec(
       ..r_spec,
@@ -956,6 +1004,7 @@ fn default_agent_specs(
         option.None -> r_spec.max_context_messages
       },
       inter_turn_delay_ms: delay,
+      redact_secrets: redact,
     ),
     agent_types.AgentSpec(
       ..c_spec,
@@ -966,8 +1015,9 @@ fn default_agent_specs(
         c_spec.max_consecutive_errors,
       ),
       inter_turn_delay_ms: delay,
+      redact_secrets: redact,
     ),
-    o_spec,
+    agent_types.AgentSpec(..o_spec, redact_secrets: redact),
   ]
 }
 
@@ -1001,6 +1051,7 @@ fn build_profile_agent_specs(
       restart: agent_types.Permanent,
       tool_executor:,
       inter_turn_delay_ms: 200,
+      redact_secrets: True,
     )
   })
 }

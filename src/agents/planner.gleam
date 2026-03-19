@@ -42,5 +42,6 @@ pub fn spec(provider: Provider, model: String) -> AgentSpec {
       llm_types.ToolFailure(tool_use_id: call.id, error: "Planner has no tools")
     },
     inter_turn_delay_ms: 200,
+    redact_secrets: True,
   )
 }

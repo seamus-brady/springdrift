@@ -111,6 +111,7 @@ pub fn start(
           memory_limits: cfg.memory_limits,
           how_to_content: cfg.how_to_content,
         ),
+        redact_secrets: cfg.redact_secrets,
       )
     process.send(setup, self)
     cognitive_loop(state)
@@ -346,7 +347,12 @@ fn handle_user_input(
   case state.status {
     Idle -> {
       let cycle_id = cycle_log.generate_uuid()
-      cycle_log.log_human_input(cycle_id, state.cycle_id, text)
+      cycle_log.log_human_input(
+        cycle_id,
+        state.cycle_id,
+        text,
+        state.redact_secrets,
+      )
       // Clear Curator scratchpad from previous cycle
       case state.memory.curator {
         option.Some(cur) ->
@@ -467,6 +473,7 @@ fn handle_scheduler_input(
         cycle_id,
         state.cycle_id,
         "[scheduler:" <> job_name <> "] " <> query,
+        state.redact_secrets,
       )
       // Clear Curator scratchpad from previous cycle
       case state.memory.curator {
@@ -693,7 +700,7 @@ fn handle_think_complete(
       ..,
     )) -> {
       let cycle_id = option.unwrap(state.cycle_id, task_id)
-      cycle_log.log_llm_response(cycle_id, resp)
+      cycle_log.log_llm_response(cycle_id, resp, state.redact_secrets)
       case response.needs_tool_execution(resp) {
         False -> {
           // Final text response

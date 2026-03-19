@@ -101,6 +101,7 @@ pub fn accept_clean_report_test() {
       "mock",
       "test-cycle",
       False,
+      False,
     )
   result.decision |> should.equal(Accept)
   result.dprime_score |> should.equal(0.0)
@@ -123,6 +124,7 @@ pub fn modify_on_moderate_issues_test() {
       "mock",
       "test-cycle",
       False,
+      False,
     )
   result.decision |> should.equal(Modify)
   // Score = (3*3 + 2*2 + 1*1) / 9 = 14/9 ≈ 1.556
@@ -142,6 +144,7 @@ pub fn modify_explanation_mentions_concerns_test() {
       provider,
       "mock",
       "test-cycle",
+      False,
       False,
     )
   result.decision |> should.equal(Modify)
@@ -168,6 +171,7 @@ pub fn reject_on_severe_issues_test() {
       "mock",
       "test-cycle",
       False,
+      False,
     )
   result.decision |> should.equal(Reject)
   { result.dprime_score >=. 2.0 } |> should.be_true()
@@ -184,6 +188,7 @@ pub fn reject_explanation_mentions_concerns_test() {
       provider,
       "mock",
       "test-cycle",
+      False,
       False,
     )
   result.decision |> should.equal(Reject)
@@ -209,6 +214,7 @@ pub fn llm_error_uses_cautious_fallback_test() {
       "mock",
       "test-cycle",
       False,
+      False,
     )
   // Cautious forecasts (magnitude 1 for all 3 features) should produce
   // a low D' score — likely Accept or Modify depending on thresholds
@@ -229,6 +235,7 @@ pub fn parse_error_uses_cautious_fallback_test() {
       provider,
       "mock",
       "test-cycle",
+      False,
       False,
     )
   // Same as LLM error — cautious fallback
@@ -251,6 +258,7 @@ pub fn result_layer_is_deliberative_test() {
       "mock",
       "test-cycle",
       False,
+      False,
     )
   result.layer |> should.equal(types.Deliberative)
 }
@@ -271,6 +279,7 @@ pub fn no_canary_in_output_gate_test() {
       "mock",
       "test-cycle",
       False,
+      False,
     )
   result.canary_result |> should.be_none()
 }
@@ -290,6 +299,7 @@ pub fn forecasts_populated_test() {
       provider,
       "mock",
       "test-cycle",
+      False,
       False,
     )
   // Should have forecasts for all 3 features
@@ -318,6 +328,7 @@ pub fn custom_thresholds_respected_test() {
       provider,
       "mock",
       "test-cycle",
+      False,
       False,
     )
   result.decision |> should.equal(Reject)

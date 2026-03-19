@@ -211,6 +211,7 @@ fn profile_agent_specs(
       restart: types.Permanent,
       tool_executor:,
       inter_turn_delay_ms: 200,
+      redact_secrets: True,
     )
   })
 }
