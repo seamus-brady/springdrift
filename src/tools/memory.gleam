@@ -9,13 +9,12 @@
 
 import cbr/types as cbr_types
 import dag/types as dag_types
-import embedding/client as embedding_client
-import embedding/types as embedding_types
 import facts/log as facts_log
 import facts/types as facts_types
 import gleam/dynamic/decode
 import gleam/erlang/process.{type Subject}
 import gleam/float
+
 import gleam/int
 import gleam/json
 import gleam/list
@@ -60,6 +59,27 @@ pub fn all() -> List(Tool) {
     query_tool_activity_tool(),
     introspect_tool(),
     list_recent_cycles_tool(),
+    how_to_tool(),
+    correct_case_tool(),
+    annotate_case_tool(),
+    suppress_case_tool(),
+    boost_case_tool(),
+  ]
+}
+
+/// Tools for the Observer agent — diagnostic + read-only memory tools.
+pub fn observer_tools() -> List(Tool) {
+  [
+    reflect_tool(),
+    inspect_cycle_tool(),
+    list_recent_cycles_tool(),
+    query_tool_activity_tool(),
+    memory_trace_tool(),
+    recall_recent_tool(),
+    recall_search_tool(),
+    recall_threads_tool(),
+    recall_cases_tool(),
+    introspect_tool(),
   ]
 }
 
@@ -257,11 +277,33 @@ fn list_recent_cycles_tool() -> Tool {
   |> tool.with_description(
     "List recent cycle IDs for a given date. Returns cycle IDs that can be passed "
     <> "to inspect_cycle for detailed analysis. Use this to discover which cycles "
-    <> "happened without needing to know IDs in advance.",
+    <> "happened without needing to know IDs in advance. By default shows only root "
+    <> "cognitive cycles; set include_agents=true to see agent sub-cycles too.",
   )
   |> tool.add_string_param(
     "date",
     "Date to query in YYYY-MM-DD format (default: today)",
+    False,
+  )
+  |> tool.add_boolean_param(
+    "include_agents",
+    "Include agent sub-cycles (default: false). When true, shows all cycles with [root]/[agent] labels.",
+    False,
+  )
+  |> tool.build()
+}
+
+fn how_to_tool() -> Tool {
+  tool.new("how_to")
+  |> tool.with_description(
+    "Get guidance on using this system's tools effectively. Returns decision "
+    <> "heuristics, tool combinations, and degradation paths. Call when unsure "
+    <> "which tool to use for a task type. Optionally provide a topic.",
+  )
+  |> tool.add_string_param(
+    "topic",
+    "Optional: task type ('research', 'memory', 'code', 'agents') or a specific "
+      <> "tool name. Omit for the full guide.",
     False,
   )
   |> tool.build()
@@ -287,6 +329,11 @@ pub fn is_memory_tool(name: String) -> Bool {
   || name == "query_tool_activity"
   || name == "introspect"
   || name == "list_recent_cycles"
+  || name == "how_to"
+  || name == "correct_case"
+  || name == "annotate_case"
+  || name == "suppress_case"
+  || name == "boost_case"
 }
 
 /// Context for facts-based memory tools.
@@ -334,9 +381,29 @@ pub fn execute(
   narrative_dir: String,
   lib: Option(Subject(LibrarianMessage)),
   facts_ctx: Option(FactsContext),
-  embed_config: embedding_types.EmbeddingConfig,
   introspect_ctx: Option(IntrospectContext),
   limits: MemoryLimits,
+) -> ToolResult {
+  execute_with_how_to(
+    call,
+    narrative_dir,
+    lib,
+    facts_ctx,
+    introspect_ctx,
+    limits,
+    None,
+  )
+}
+
+/// Execute a memory tool call with optional how_to content.
+pub fn execute_with_how_to(
+  call: ToolCall,
+  narrative_dir: String,
+  lib: Option(Subject(LibrarianMessage)),
+  facts_ctx: Option(FactsContext),
+  introspect_ctx: Option(IntrospectContext),
+  limits: MemoryLimits,
+  how_to_content: Option(String),
 ) -> ToolResult {
   slog.debug("memory", "execute", "tool=" <> call.name, None)
   case call.name {
@@ -352,11 +419,15 @@ pub fn execute(
     "memory_trace_fact" -> run_memory_trace(call, facts_ctx)
     "reflect" -> run_reflect(call, lib)
     "inspect_cycle" -> run_inspect_cycle(call, lib)
-    "recall_cases" ->
-      run_recall_cases(call, lib, embed_config, limits.cbr_max_results)
+    "recall_cases" -> run_recall_cases(call, lib, limits.cbr_max_results)
     "query_tool_activity" -> run_query_tool_activity(call, lib)
     "introspect" -> run_introspect(call, introspect_ctx)
     "list_recent_cycles" -> run_list_recent_cycles(call, lib)
+    "how_to" -> run_how_to(call, how_to_content)
+    "correct_case" -> run_correct_case(call, lib)
+    "annotate_case" -> run_annotate_case(call, lib)
+    "suppress_case" -> run_suppress_case(call, lib)
+    "boost_case" -> run_boost_case(call, lib)
     _ -> ToolFailure(tool_use_id: call.id, error: "Unknown tool: " <> call.name)
   }
 }
@@ -998,7 +1069,11 @@ fn format_day_stats(stats: dag_types.DayStats) -> String {
       <> "\n\n"
       <> "Total cycles: "
       <> int.to_string(total)
-      <> "\n"
+      <> " (root: "
+      <> int.to_string(stats.root_cycles)
+      <> ", agent: "
+      <> int.to_string(stats.agent_cycles)
+      <> ")\n"
       <> "  Success: "
       <> int.to_string(stats.success_count)
       <> " | Partial: "
@@ -1226,7 +1301,6 @@ fn format_subtree(tree: dag_types.DagSubtree, depth: Int) -> String {
 fn run_recall_cases(
   call: ToolCall,
   lib: Option(Subject(LibrarianMessage)),
-  embed_config: embedding_types.EmbeddingConfig,
   cbr_max: Int,
 ) -> ToolResult {
   case lib {
@@ -1255,24 +1329,15 @@ fn run_recall_cases(
               |> list.map(string.trim)
               |> list.filter(fn(k) { k != "" })
           }
-          let clamped = int.min(cbr_max, int.max(1, max_results))
-          // Embed the query text for semantic retrieval
-          let query_text =
-            intent <> " " <> domain <> " " <> string.join(keywords, " ")
-          let query_embedding = case
-            embedding_client.embed(embed_config, query_text)
-          {
-            Ok(result) -> Some(result.embedding)
-            Error(_) -> None
-          }
+          let clamped = int.min(cbr_max, int.max(0, max_results))
           let query =
             cbr_types.CbrQuery(
               intent:,
               domain:,
               keywords:,
               entities: [],
-              embedding: query_embedding,
               max_results: clamped,
+              query_complexity: None,
             )
           let results = librarian.retrieve_cases(l, query)
           case results {
@@ -1317,7 +1382,9 @@ fn format_scored_case(sc: cbr_types.ScoredCase) -> String {
     [] -> ""
     k -> "  Keywords: " <> string.join(k, ", ") <> "\n"
   }
-  "[score: "
+  "[case_id: "
+  <> c.case_id
+  <> "] [score: "
   <> float.to_string(sc.score)
   <> "] "
   <> c.problem.intent
@@ -1526,19 +1593,33 @@ fn run_list_recent_cycles(
     Some(l) -> {
       let decoder = {
         use date <- decode.optional_field("date", get_date(), decode.string)
-        decode.success(date)
+        use include_agents <- decode.optional_field(
+          "include_agents",
+          False,
+          decode.bool,
+        )
+        decode.success(#(date, include_agents))
       }
-      let date = case json.parse(call.input_json, decoder) {
-        Ok(d) -> d
-        Error(_) -> get_date()
+      let #(date, include_agents) = case json.parse(call.input_json, decoder) {
+        Ok(pair) -> pair
+        Error(_) -> #(get_date(), False)
       }
       let subj = process.new_subject()
-      process.send(l, librarian.QueryDayRoots(date:, reply_to: subj))
+      process.send(l, librarian.QueryDayAll(date:, reply_to: subj))
       case process.receive(subj, 5000) {
         Error(_) ->
-          ToolFailure(tool_use_id: call.id, error: "Timeout querying day roots")
-        Ok(roots) ->
-          case roots {
+          ToolFailure(tool_use_id: call.id, error: "Timeout querying cycles")
+        Ok(all_nodes) -> {
+          let total = list.length(all_nodes)
+          let roots =
+            list.filter(all_nodes, fn(n) { option.is_none(n.parent_id) })
+          let root_count = list.length(roots)
+          let agent_count = total - root_count
+          let nodes = case include_agents {
+            True -> all_nodes
+            False -> roots
+          }
+          case nodes {
             [] ->
               ToolSuccess(
                 tool_use_id: call.id,
@@ -1546,17 +1627,28 @@ fn run_list_recent_cycles(
               )
             _ -> {
               let lines =
-                list.map(roots, fn(node: dag_types.CycleNode) {
+                list.map(nodes, fn(node: dag_types.CycleNode) {
                   let outcome_str = case node.outcome {
                     dag_types.NodeSuccess -> "success"
                     dag_types.NodePartial -> "partial"
                     dag_types.NodeFailure(reason:) -> "failure: " <> reason
                     dag_types.NodePending -> "pending"
                   }
-                  node.cycle_id
+                  let type_label = case node.parent_id {
+                    None -> "[root]"
+                    Some(pid) -> "[agent of " <> string.slice(pid, 0, 8) <> "]"
+                  }
+                  let indent = case node.parent_id {
+                    None -> ""
+                    Some(_) -> "  "
+                  }
+                  indent
+                  <> node.cycle_id
                   <> " ["
                   <> node.timestamp
                   <> "] "
+                  <> type_label
+                  <> " "
                   <> outcome_str
                   <> " [tokens: "
                   <> int.to_string(node.tokens_in)
@@ -1564,17 +1656,33 @@ fn run_list_recent_cycles(
                   <> int.to_string(node.tokens_out)
                   <> "]"
                 })
-              ToolSuccess(
-                tool_use_id: call.id,
-                content: "Cycles for "
+              let header = case include_agents {
+                False ->
+                  "Root cycles for "
                   <> date
                   <> " ("
-                  <> int.to_string(list.length(roots))
-                  <> "):\n"
-                  <> string.join(lines, "\n"),
+                  <> int.to_string(root_count)
+                  <> " of "
+                  <> int.to_string(total)
+                  <> " total — pass include_agents=true to see all):"
+                True ->
+                  "All cycles for "
+                  <> date
+                  <> " ("
+                  <> int.to_string(total)
+                  <> " total, "
+                  <> int.to_string(root_count)
+                  <> " root + "
+                  <> int.to_string(agent_count)
+                  <> " agent):"
+              }
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: header <> "\n" <> string.join(lines, "\n"),
               )
             }
           }
+        }
       }
     }
   }
@@ -1639,5 +1747,317 @@ fn run_query_tool_activity(
         }
       }
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// how_to — operator guidance
+// ---------------------------------------------------------------------------
+
+fn run_how_to(call: ToolCall, content: Option(String)) -> ToolResult {
+  case content {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "HOW_TO content not loaded — no HOW_TO.md file found.",
+      )
+    Some(guide) -> {
+      let decoder = {
+        use topic <- decode.optional_field(
+          "topic",
+          None,
+          decode.string |> decode.map(Some),
+        )
+        decode.success(topic)
+      }
+      let result = case json.parse(call.input_json, decoder) {
+        Error(_) -> guide
+        Ok(None) -> guide
+        Ok(Some(topic)) -> filter_by_topic(guide, topic)
+      }
+      ToolSuccess(tool_use_id: call.id, content: result)
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// CBR mutation tools (Phase 3)
+// ---------------------------------------------------------------------------
+
+fn correct_case_tool() -> Tool {
+  tool.new("correct_case")
+  |> tool.with_description(
+    "Correct a misclassified CBR case. Update status, confidence, or assessment. "
+    <> "Provide the case_id and any fields to change.",
+  )
+  |> tool.add_string_param("case_id", "The case ID to correct", True)
+  |> tool.add_string_param(
+    "status",
+    "New outcome status (e.g. 'success', 'failure', 'partial')",
+    False,
+  )
+  |> tool.add_number_param(
+    "confidence",
+    "New confidence score (0.0 to 1.0)",
+    False,
+  )
+  |> tool.add_string_param("assessment", "New outcome assessment", False)
+  |> tool.build()
+}
+
+fn annotate_case_tool() -> Tool {
+  tool.new("annotate_case")
+  |> tool.with_description(
+    "Add an annotation (pitfall or note) to an existing CBR case. "
+    <> "The annotation is appended to the case's pitfalls list.",
+  )
+  |> tool.add_string_param("case_id", "The case ID to annotate", True)
+  |> tool.add_string_param("annotation", "The annotation to add", True)
+  |> tool.build()
+}
+
+fn suppress_case_tool() -> Tool {
+  tool.new("suppress_case")
+  |> tool.with_description(
+    "Suppress a CBR case — removes it from retrieval results. "
+    <> "Use this for cases that are incorrect, misleading, or no longer relevant. "
+    <> "The case is preserved on disk but marked as suppressed.",
+  )
+  |> tool.add_string_param("case_id", "The case ID to suppress", True)
+  |> tool.add_string_param("reason", "Optional reason for suppression", False)
+  |> tool.build()
+}
+
+fn boost_case_tool() -> Tool {
+  tool.new("boost_case")
+  |> tool.with_description(
+    "Adjust a CBR case's confidence score. Higher confidence makes the case "
+    <> "more prominent in retrieval. Value is clamped to [0.0, 1.0].",
+  )
+  |> tool.add_string_param("case_id", "The case ID to boost", True)
+  |> tool.add_number_param(
+    "confidence",
+    "New confidence score (0.0 to 1.0)",
+    True,
+  )
+  |> tool.build()
+}
+
+fn run_correct_case(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+) -> ToolResult {
+  case lib {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "correct_case not available: Librarian not initialised",
+      )
+    Some(l) -> {
+      let decoder = {
+        use case_id <- decode.field("case_id", decode.string)
+        use status <- decode.optional_field("status", "", decode.string)
+        use confidence <- decode.optional_field(
+          "confidence",
+          -1.0,
+          decode.float,
+        )
+        use assessment <- decode.optional_field("assessment", "", decode.string)
+        decode.success(#(case_id, status, confidence, assessment))
+      }
+      case json.parse(call.input_json, decoder) {
+        Error(_) ->
+          ToolFailure(
+            tool_use_id: call.id,
+            error: "Invalid correct_case input: case_id required",
+          )
+        Ok(#(case_id, status, confidence, assessment)) -> {
+          // Look up the existing case first
+          let reply_to = process.new_subject()
+          process.send(l, librarian.QueryCaseById(case_id:, reply_to:))
+          case process.receive(reply_to, 5000) {
+            Error(_) ->
+              ToolFailure(
+                tool_use_id: call.id,
+                error: "Timeout looking up case " <> case_id,
+              )
+            Ok(Error(_)) ->
+              ToolFailure(
+                tool_use_id: call.id,
+                error: "Case not found: " <> case_id,
+              )
+            Ok(Ok(existing)) -> {
+              let new_status = case status {
+                "" -> existing.outcome.status
+                s -> s
+              }
+              let new_confidence = case confidence <. 0.0 {
+                True -> existing.outcome.confidence
+                False -> float.min(1.0, float.max(0.0, confidence))
+              }
+              let new_assessment = case assessment {
+                "" -> existing.outcome.assessment
+                a -> a
+              }
+              let updated =
+                cbr_types.CbrCase(
+                  ..existing,
+                  outcome: cbr_types.CbrOutcome(
+                    ..existing.outcome,
+                    status: new_status,
+                    confidence: new_confidence,
+                    assessment: new_assessment,
+                  ),
+                )
+              case librarian.update_case(l, case_id, updated) {
+                Ok(_) ->
+                  ToolSuccess(
+                    tool_use_id: call.id,
+                    content: "Case " <> case_id <> " corrected.",
+                  )
+                Error(e) ->
+                  ToolFailure(
+                    tool_use_id: call.id,
+                    error: "Update failed: " <> e,
+                  )
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+fn run_annotate_case(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+) -> ToolResult {
+  case lib {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "annotate_case not available: Librarian not initialised",
+      )
+    Some(l) -> {
+      let decoder = {
+        use case_id <- decode.field("case_id", decode.string)
+        use annotation <- decode.field("annotation", decode.string)
+        decode.success(#(case_id, annotation))
+      }
+      case json.parse(call.input_json, decoder) {
+        Error(_) ->
+          ToolFailure(
+            tool_use_id: call.id,
+            error: "Invalid annotate_case input: case_id and annotation required",
+          )
+        Ok(#(case_id, annotation)) ->
+          case librarian.annotate_case(l, case_id, annotation) {
+            Ok(_) ->
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: "Annotation added to case " <> case_id <> ".",
+              )
+            Error(e) ->
+              ToolFailure(tool_use_id: call.id, error: "Annotate failed: " <> e)
+          }
+      }
+    }
+  }
+}
+
+fn run_suppress_case(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+) -> ToolResult {
+  case lib {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "suppress_case not available: Librarian not initialised",
+      )
+    Some(l) -> {
+      let decoder = {
+        use case_id <- decode.field("case_id", decode.string)
+        use reason <- decode.optional_field("reason", "", decode.string)
+        decode.success(#(case_id, reason))
+      }
+      case json.parse(call.input_json, decoder) {
+        Error(_) ->
+          ToolFailure(
+            tool_use_id: call.id,
+            error: "Invalid suppress_case input: case_id required",
+          )
+        Ok(#(case_id, _reason)) ->
+          case librarian.suppress_case(l, case_id) {
+            Ok(_) ->
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: "Case "
+                  <> case_id
+                  <> " suppressed — removed from retrieval.",
+              )
+            Error(e) ->
+              ToolFailure(tool_use_id: call.id, error: "Suppress failed: " <> e)
+          }
+      }
+    }
+  }
+}
+
+fn run_boost_case(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+) -> ToolResult {
+  case lib {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "boost_case not available: Librarian not initialised",
+      )
+    Some(l) -> {
+      let decoder = {
+        use case_id <- decode.field("case_id", decode.string)
+        use confidence <- decode.field("confidence", decode.float)
+        decode.success(#(case_id, confidence))
+      }
+      case json.parse(call.input_json, decoder) {
+        Error(_) ->
+          ToolFailure(
+            tool_use_id: call.id,
+            error: "Invalid boost_case input: case_id and confidence required",
+          )
+        Ok(#(case_id, confidence)) ->
+          case librarian.boost_case(l, case_id, confidence) {
+            Ok(_) ->
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: "Case "
+                  <> case_id
+                  <> " confidence updated to "
+                  <> float.to_string(float.min(1.0, float.max(0.0, confidence)))
+                  <> ".",
+              )
+            Error(e) ->
+              ToolFailure(tool_use_id: call.id, error: "Boost failed: " <> e)
+          }
+      }
+    }
+  }
+}
+
+fn filter_by_topic(content: String, topic: String) -> String {
+  let lower = string.lowercase(topic)
+  let sections = string.split(content, "\n## ")
+  case sections {
+    [intro, ..rest] -> {
+      let matching =
+        list.filter(rest, fn(s) { string.contains(string.lowercase(s), lower) })
+      case matching {
+        [] -> content
+        _ -> intro <> "\n\n## " <> string.join(matching, "\n\n## ")
+      }
+    }
+    [] -> content
   }
 }

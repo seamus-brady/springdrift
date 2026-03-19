@@ -8,6 +8,7 @@ import cbr/types.{
   type CbrCase, type CbrOutcome, type CbrProblem, type CbrSolution, CbrCase,
   CbrOutcome, CbrProblem, CbrSolution,
 }
+import gleam/dict
 import gleam/dynamic/decode
 import gleam/json
 import gleam/list
@@ -56,15 +57,17 @@ pub fn append(dir: String, cbr_case: CbrCase) -> Nil {
 // ---------------------------------------------------------------------------
 
 /// Load all CBR cases from a specific date file.
+/// Uses last-write-wins deduplication by case_id to handle mutations.
 pub fn load_date(dir: String, date: String) -> List(CbrCase) {
   let path = dir <> "/" <> date <> ".jsonl"
   case simplifile.read(path) {
     Error(_) -> []
-    Ok(content) -> parse_jsonl(content)
+    Ok(content) -> dedup_by_case_id(parse_jsonl(content))
   }
 }
 
 /// Load all cases from all date files in the directory.
+/// Uses last-write-wins deduplication by case_id to handle mutations.
 pub fn load_all(dir: String) -> List(CbrCase) {
   case simplifile.read_directory(dir) {
     Error(_) -> []
@@ -73,12 +76,28 @@ pub fn load_all(dir: String) -> List(CbrCase) {
         files
         |> list.filter(fn(f) { string.ends_with(f, ".jsonl") })
         |> list.sort(string.compare)
-      list.flat_map(jsonl_files, fn(f) {
-        let date = string.drop_end(f, 6)
-        load_date(dir, date)
-      })
+      let all_cases =
+        list.flat_map(jsonl_files, fn(f) {
+          let date = string.drop_end(f, 6)
+          // Raw parse without per-file dedup (dedup across all files)
+          let path = dir <> "/" <> date <> ".jsonl"
+          case simplifile.read(path) {
+            Error(_) -> []
+            Ok(content) -> parse_jsonl(content)
+          }
+        })
+      dedup_by_case_id(all_cases)
     }
   }
+}
+
+/// Deduplicate cases by case_id using last-write-wins (dict fold preserves
+/// insertion order, last entry for a key wins).
+fn dedup_by_case_id(cases: List(CbrCase)) -> List(CbrCase) {
+  cases
+  |> list.fold(dict.new(), fn(acc, c) { dict.insert(acc, c.case_id, c) })
+  |> dict.values
+  |> list.sort(fn(a, b) { string.compare(a.timestamp, b.timestamp) })
 }
 
 // ---------------------------------------------------------------------------
@@ -109,7 +128,6 @@ pub fn encode_case(c: CbrCase) -> json.Json {
     #("problem", encode_problem(c.problem)),
     #("solution", encode_solution(c.solution)),
     #("outcome", encode_outcome(c.outcome)),
-    #("embedding", json.array(c.embedding, json.float)),
     #("source_narrative_id", json.string(c.source_narrative_id)),
     #("profile", case c.profile {
       option.Some(p) -> json.string(p)
@@ -161,11 +179,6 @@ pub fn case_decoder() -> decode.Decoder(CbrCase) {
   use problem <- decode.field("problem", problem_decoder())
   use solution <- decode.field("solution", solution_decoder())
   use outcome <- decode.field("outcome", outcome_decoder())
-  use embedding <- decode.field(
-    "embedding",
-    decode.optional(decode.list(decode.float))
-      |> decode.map(option.unwrap(_, [])),
-  )
   use source_narrative_id <- decode.field(
     "source_narrative_id",
     decode.optional(decode.string) |> decode.map(option.unwrap(_, "")),
@@ -178,7 +191,6 @@ pub fn case_decoder() -> decode.Decoder(CbrCase) {
     problem:,
     solution:,
     outcome:,
-    embedding:,
     source_narrative_id:,
     profile:,
   ))

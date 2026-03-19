@@ -14,9 +14,9 @@ import profile/types as profile_types
 import scheduler/delivery
 import scheduler/persist
 import scheduler/types.{
-  type ScheduledJob, type SchedulerMessage, Completed, Failed, GetStatus,
-  JobComplete, JobFailed, Pending, Running, ScheduledJob, StopAll, StuckJobCheck,
-  Tick,
+  type ScheduledJob, type SchedulerMessage, Cancelled, Completed, Failed,
+  ForAgent, GetStatus, JobComplete, JobFailed, Pending, ProfileJob,
+  RecurringTask, Running, ScheduledJob, StopAll, StuckJobCheck, Tick,
 }
 import slog
 
@@ -34,6 +34,8 @@ pub fn start(
   cognitive: Subject(agent_types.CognitiveMessage),
   checkpoint_path: String,
   stuck_timeout_ms: Int,
+  max_cycles_per_hour: Int,
+  token_budget_per_hour: Int,
 ) -> Result(Subject(SchedulerMessage), Nil) {
   let setup = process.new_subject()
   process.spawn_unlinked(fn() {
@@ -76,6 +78,18 @@ pub fn start(
               last_result: None,
               run_count: 0,
               error_count: 0,
+              job_source: ProfileJob,
+              kind: RecurringTask,
+              due_at: None,
+              for_: ForAgent,
+              title: task.name,
+              body: "",
+              duration_minutes: 0,
+              tags: [],
+              created_at: get_datetime(),
+              fired_count: 0,
+              recurrence_end_at: None,
+              max_occurrences: None,
             )
         }
         dict.insert(acc, task.name, job)
@@ -111,7 +125,17 @@ pub fn start(
     )
 
     // Enter event loop
-    scheduler_loop(self, jobs, cognitive, checkpoint_path, stuck_timeout_ms)
+    scheduler_loop(
+      self,
+      jobs,
+      cognitive,
+      checkpoint_path,
+      stuck_timeout_ms,
+      max_cycles_per_hour,
+      token_budget_per_hour,
+      [],
+      [],
+    )
   })
 
   case process.receive(setup, 5000) {
@@ -134,6 +158,10 @@ fn scheduler_loop(
   cognitive: Subject(agent_types.CognitiveMessage),
   checkpoint_path: String,
   stuck_timeout_ms: Int,
+  max_cycles_per_hour: Int,
+  token_budget_per_hour: Int,
+  cycle_timestamps: List(Int),
+  token_usage: List(#(Int, Int)),
 ) -> Nil {
   let selector =
     process.new_selector()
@@ -141,7 +169,30 @@ fn scheduler_loop(
 
   let msg = process.selector_receive_forever(selector)
   let loop = fn(j) {
-    scheduler_loop(self, j, cognitive, checkpoint_path, stuck_timeout_ms)
+    scheduler_loop(
+      self,
+      j,
+      cognitive,
+      checkpoint_path,
+      stuck_timeout_ms,
+      max_cycles_per_hour,
+      token_budget_per_hour,
+      cycle_timestamps,
+      token_usage,
+    )
+  }
+  let loop_with_tracking = fn(j, cts, tu) {
+    scheduler_loop(
+      self,
+      j,
+      cognitive,
+      checkpoint_path,
+      stuck_timeout_ms,
+      max_cycles_per_hour,
+      token_budget_per_hour,
+      cts,
+      tu,
+    )
   }
   case msg {
     StopAll -> {
@@ -171,24 +222,74 @@ fn scheduler_loop(
               schedule_tick(self, name, job.interval_ms)
               loop(jobs)
             }
+            Cancelled | Completed -> loop(jobs)
             _ -> {
-              slog.info(
-                "scheduler",
-                "loop",
-                "Tick: running job '" <> name <> "'",
-                None,
-              )
-              // Mark as running
-              let updated_job = ScheduledJob(..job, status: Running)
-              let updated_jobs = dict.insert(jobs, name, updated_job)
+              // Rate limit check
+              let now = monotonic_now_ms()
+              let hour_ago = now - 3_600_000
+              let recent_cycles =
+                list.filter(cycle_timestamps, fn(ts) { ts > hour_ago })
+              let recent_tokens =
+                list.filter(token_usage, fn(tu) { tu.0 > hour_ago })
+              let total_tokens =
+                list.fold(recent_tokens, 0, fn(acc, tu) { acc + tu.1 })
+              let cycles_at_limit =
+                max_cycles_per_hour > 0
+                && list.length(recent_cycles) >= max_cycles_per_hour
+              let tokens_at_limit =
+                token_budget_per_hour > 0
+                && total_tokens >= token_budget_per_hour
+              case cycles_at_limit || tokens_at_limit {
+                True -> {
+                  let reason = case cycles_at_limit, tokens_at_limit {
+                    True, True -> "cycle + token budget"
+                    True, False -> "cycle limit"
+                    False, True -> "token budget"
+                    False, False -> "rate limit"
+                  }
+                  slog.warn(
+                    "scheduler",
+                    "loop",
+                    "Rate limit ("
+                      <> reason
+                      <> "): skipping job '"
+                      <> name
+                      <> "', rescheduling",
+                    None,
+                  )
+                  schedule_tick(self, name, job.interval_ms)
+                  loop(jobs)
+                }
+                False -> {
+                  slog.info(
+                    "scheduler",
+                    "loop",
+                    "Tick: running job '" <> name <> "'",
+                    None,
+                  )
+                  // Mark as running
+                  let updated_job = ScheduledJob(..job, status: Running)
+                  let updated_jobs = dict.insert(jobs, name, updated_job)
 
-              // Spawn async query to cognitive loop
-              spawn_job(self, cognitive, job)
+                  // Spawn async query to cognitive loop
+                  spawn_job(self, cognitive, job)
 
-              // Schedule stuck-job timeout check
-              process.send_after(self, stuck_timeout_ms, StuckJobCheck(name:))
+                  // Schedule stuck-job timeout check
+                  process.send_after(
+                    self,
+                    stuck_timeout_ms,
+                    StuckJobCheck(name:),
+                  )
 
-              loop(updated_jobs)
+                  // Track this cycle for rate limiting
+                  let new_timestamps = [now, ..recent_cycles]
+                  loop_with_tracking(
+                    updated_jobs,
+                    new_timestamps,
+                    recent_tokens,
+                  )
+                }
+              }
             }
           }
       }
@@ -210,16 +311,36 @@ fn scheduler_loop(
                   <> "ms",
                 None,
               )
+              let should_recur =
+                job.interval_ms > 0
+                && {
+                  case job.max_occurrences {
+                    Some(max) -> job.fired_count < max
+                    None -> True
+                  }
+                }
+                && {
+                  case job.recurrence_end_at {
+                    Some(end_at) -> ms_until_datetime(end_at) > 0
+                    None -> True
+                  }
+                }
               let updated_job =
                 ScheduledJob(
                   ..job,
-                  status: Failed(reason: "Stuck job timeout"),
+                  status: case should_recur {
+                    True -> Failed(reason: "Stuck job timeout")
+                    False -> Completed
+                  },
                   error_count: job.error_count + 1,
                 )
               let updated_jobs = dict.insert(jobs, name, updated_job)
 
-              // Schedule next tick
-              schedule_tick(self, name, job.interval_ms)
+              // Only schedule next tick if recurring
+              case should_recur {
+                True -> schedule_tick(self, name, job.interval_ms)
+                False -> Nil
+              }
 
               // Save checkpoint
               let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
@@ -232,7 +353,7 @@ fn scheduler_loop(
       }
     }
 
-    JobComplete(name:, result:) -> {
+    JobComplete(name:, result:, tokens_used:) -> {
       case dict.get(jobs, name) {
         Error(_) -> loop(jobs)
         Ok(job) -> {
@@ -281,23 +402,54 @@ fn scheduler_loop(
               )
           }
 
+          let new_fired = job.fired_count + 1
+          let should_recur =
+            job.interval_ms > 0
+            && {
+              case job.max_occurrences {
+                Some(max) -> new_fired < max
+                None -> True
+              }
+            }
+            && {
+              case job.recurrence_end_at {
+                Some(end_at) -> ms_until_datetime(end_at) > 0
+                None -> True
+              }
+            }
+
           let updated_job =
             ScheduledJob(
               ..job,
-              status: Completed,
+              status: case should_recur {
+                True -> Pending
+                False -> Completed
+              },
               last_run_ms: Some(now),
               last_result: Some(result),
               run_count: job.run_count + 1,
+              fired_count: new_fired,
             )
           let updated_jobs = dict.insert(jobs, name, updated_job)
 
-          // Schedule next tick
-          schedule_tick(self, name, job.interval_ms)
+          // Only schedule next tick if recurring
+          case should_recur {
+            True -> schedule_tick(self, name, job.interval_ms)
+            False -> Nil
+          }
 
           // Save checkpoint after completion
           let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
 
-          loop(updated_jobs)
+          // Track token usage for rate limiting
+          let hour_ago = now - 3_600_000
+          let recent_tokens =
+            list.filter(token_usage, fn(tu) { tu.0 > hour_ago })
+          let new_tokens = case tokens_used > 0 {
+            True -> [#(now, tokens_used), ..recent_tokens]
+            False -> recent_tokens
+          }
+          loop_with_tracking(updated_jobs, cycle_timestamps, new_tokens)
         }
       }
     }
@@ -312,16 +464,36 @@ fn scheduler_loop(
             "Job '" <> name <> "' failed: " <> reason,
             None,
           )
+          let should_recur =
+            job.interval_ms > 0
+            && {
+              case job.max_occurrences {
+                Some(max) -> job.fired_count < max
+                None -> True
+              }
+            }
+            && {
+              case job.recurrence_end_at {
+                Some(end_at) -> ms_until_datetime(end_at) > 0
+                None -> True
+              }
+            }
           let updated_job =
             ScheduledJob(
               ..job,
-              status: Failed(reason:),
+              status: case should_recur {
+                True -> Failed(reason:)
+                False -> Completed
+              },
               error_count: job.error_count + 1,
             )
           let updated_jobs = dict.insert(jobs, name, updated_job)
 
-          // Schedule next tick (retry on next interval)
-          schedule_tick(self, name, job.interval_ms)
+          // Only schedule next tick if recurring
+          case should_recur {
+            True -> schedule_tick(self, name, job.interval_ms)
+            False -> Nil
+          }
 
           // Save checkpoint after failure
           let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
@@ -330,8 +502,165 @@ fn scheduler_loop(
         }
       }
     }
+
+    types.AddJob(job:, reply_to:) -> {
+      case dict.get(jobs, job.name) {
+        Ok(_) -> {
+          process.send(reply_to, Error("Job already exists: " <> job.name))
+          loop(jobs)
+        }
+        Error(_) -> {
+          let updated_jobs = dict.insert(jobs, job.name, job)
+          // Arm timer for due_at items
+          case job.kind {
+            RecurringTask ->
+              case job.interval_ms > 0 {
+                True -> schedule_tick(self, job.name, job.interval_ms)
+                False -> Nil
+              }
+            types.Reminder | types.Appointment ->
+              case job.due_at {
+                Some(due) -> {
+                  let delay = ms_until_datetime(due)
+                  schedule_tick(self, job.name, case delay < 1 {
+                    True -> 1
+                    False -> delay
+                  })
+                }
+                None -> Nil
+              }
+            types.Todo -> Nil
+          }
+          let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
+          process.send(reply_to, Ok(job.name))
+          slog.info("scheduler", "loop", "Added job '" <> job.name <> "'", None)
+          loop(updated_jobs)
+        }
+      }
+    }
+
+    types.RemoveJob(name:, reply_to:) -> {
+      case dict.get(jobs, name) {
+        Error(_) -> {
+          process.send(reply_to, Error("Job not found: " <> name))
+          loop(jobs)
+        }
+        Ok(job) -> {
+          let cancelled_job = ScheduledJob(..job, status: Cancelled)
+          let updated_jobs = dict.insert(jobs, name, cancelled_job)
+          let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
+          process.send(reply_to, Ok(Nil))
+          slog.info("scheduler", "loop", "Removed job '" <> name <> "'", None)
+          loop(updated_jobs)
+        }
+      }
+    }
+
+    types.UpdateJob(name:, updates:, reply_to:) -> {
+      case dict.get(jobs, name) {
+        Error(_) -> {
+          process.send(reply_to, Error("Job not found: " <> name))
+          loop(jobs)
+        }
+        Ok(job) -> {
+          let updated_job =
+            ScheduledJob(
+              ..job,
+              title: option.unwrap(updates.title, job.title),
+              body: option.unwrap(updates.body, job.body),
+              due_at: case updates.due_at {
+                Some(d) -> Some(d)
+                None -> job.due_at
+              },
+              tags: option.unwrap(updates.tags, job.tags),
+            )
+          // Re-arm timer if due_at changed
+          case updates.due_at {
+            Some(new_due) ->
+              case updated_job.kind {
+                types.Reminder | types.Appointment -> {
+                  let delay = ms_until_datetime(new_due)
+                  schedule_tick(self, name, case delay < 1 {
+                    True -> 1
+                    False -> delay
+                  })
+                }
+                _ -> Nil
+              }
+            None -> Nil
+          }
+          let updated_jobs = dict.insert(jobs, name, updated_job)
+          let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
+          process.send(reply_to, Ok(Nil))
+          loop(updated_jobs)
+        }
+      }
+    }
+
+    types.GetJobs(query:, reply_to:) -> {
+      let all_jobs = dict.values(jobs)
+      let filtered =
+        all_jobs
+        |> list.filter(fn(j) {
+          let kind_ok = case query.kinds {
+            [] -> True
+            ks -> list.contains(ks, j.kind)
+          }
+          let status_ok = case query.statuses {
+            [] -> True
+            ss -> list.any(ss, fn(s) { status_eq(s, j.status) })
+          }
+          let for_ok = case query.for_ {
+            None -> True
+            Some(f) -> j.for_ == f
+          }
+          let overdue_ok = case query.overdue_only {
+            False -> True
+            True ->
+              case j.due_at {
+                Some(due) -> ms_until_datetime(due) < 0
+                None -> False
+              }
+          }
+          kind_ok && status_ok && for_ok && overdue_ok
+        })
+        |> list.take(query.max_results)
+      process.send(reply_to, filtered)
+      loop(jobs)
+    }
+
+    types.CompleteJob(name:, reply_to:) -> {
+      case dict.get(jobs, name) {
+        Error(_) -> {
+          process.send(reply_to, Error("Job not found: " <> name))
+          loop(jobs)
+        }
+        Ok(job) -> {
+          let completed_job = ScheduledJob(..job, status: Completed)
+          let updated_jobs = dict.insert(jobs, name, completed_job)
+          let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
+          process.send(reply_to, Ok(Nil))
+          slog.info("scheduler", "loop", "Completed job '" <> name <> "'", None)
+          loop(updated_jobs)
+        }
+      }
+    }
   }
 }
+
+fn status_eq(a: types.JobStatus, b: types.JobStatus) -> Bool {
+  case a, b {
+    Pending, Pending -> True
+    Running, Running -> True
+    Completed, Completed -> True
+    Cancelled, Cancelled -> True
+    Failed(_), Failed(_) -> True
+    _, _ -> False
+  }
+}
+
+@external(erlang, "springdrift_ffi", "ms_until_datetime")
+fn ms_until_datetime(iso: String) -> Int
 
 fn spawn_job(
   scheduler: Subject(SchedulerMessage),
@@ -339,16 +668,32 @@ fn spawn_job(
   job: ScheduledJob,
 ) -> Nil {
   let name = job.name
-  let query = job.query
   process.spawn_unlinked(fn() {
     let reply_subj: Subject(agent_types.CognitiveReply) = process.new_subject()
     process.send(
       cognitive,
-      agent_types.UserInput(text: query, reply_to: reply_subj),
+      agent_types.SchedulerInput(
+        job_name: name,
+        query: job.query,
+        kind: job.kind,
+        for_: job.for_,
+        title: job.title,
+        body: job.body,
+        tags: job.tags,
+        reply_to: reply_subj,
+      ),
     )
     case process.receive(reply_subj, 300_000) {
-      Ok(reply) ->
-        process.send(scheduler, JobComplete(name:, result: reply.response))
+      Ok(reply) -> {
+        let tokens = case reply.usage {
+          Some(usage) -> usage.input_tokens + usage.output_tokens
+          None -> 0
+        }
+        process.send(
+          scheduler,
+          JobComplete(name:, result: reply.response, tokens_used: tokens),
+        )
+      }
       Error(_) ->
         process.send(scheduler, JobFailed(name:, reason: "Timeout (5 minutes)"))
     }

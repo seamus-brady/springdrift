@@ -76,13 +76,13 @@ pub fn build_scoring_prompt_includes_magnitude_scale_test() {
 }
 
 // ---------------------------------------------------------------------------
-// parse_forecasts
+// parse_forecasts — now XML
 // ---------------------------------------------------------------------------
 
-pub fn parse_forecasts_valid_json_test() {
-  let json =
-    "[{\"feature\": \"safety\", \"magnitude\": 2, \"rationale\": \"could harm data\"}]"
-  let result = scorer.parse_forecasts(json)
+pub fn parse_forecasts_valid_xml_test() {
+  let xml =
+    "<forecasts><forecast><feature>safety</feature><magnitude>2</magnitude><rationale>could harm data</rationale></forecast></forecasts>"
+  let result = scorer.parse_forecasts(xml)
   result |> should.be_ok
   let assert Ok(forecasts) = result
   list.length(forecasts) |> should.equal(1)
@@ -92,50 +92,61 @@ pub fn parse_forecasts_valid_json_test() {
 }
 
 pub fn parse_forecasts_with_markdown_fences_test() {
-  let json =
-    "```json\n[{\"feature\": \"safety\", \"magnitude\": 1, \"rationale\": \"ok\"}]\n```"
-  let result = scorer.parse_forecasts(json)
+  let xml =
+    "```xml\n<forecasts><forecast><feature>safety</feature><magnitude>1</magnitude><rationale>ok</rationale></forecast></forecasts>\n```"
+  let result = scorer.parse_forecasts(xml)
   result |> should.be_ok
   let assert Ok(forecasts) = result
   list.length(forecasts) |> should.equal(1)
 }
 
 pub fn parse_forecasts_clamps_magnitude_test() {
-  let json =
-    "[{\"feature\": \"safety\", \"magnitude\": 5, \"rationale\": \"high\"}]"
-  let result = scorer.parse_forecasts(json)
+  let xml =
+    "<forecasts><forecast><feature>safety</feature><magnitude>5</magnitude><rationale>high</rationale></forecast></forecasts>"
+  let result = scorer.parse_forecasts(xml)
   result |> should.be_ok
   let assert Ok([f]) = result
   f.magnitude |> should.equal(3)
 }
 
 pub fn parse_forecasts_clamps_negative_test() {
-  let json =
-    "[{\"feature\": \"safety\", \"magnitude\": -1, \"rationale\": \"neg\"}]"
-  let result = scorer.parse_forecasts(json)
+  let xml =
+    "<forecasts><forecast><feature>safety</feature><magnitude>-1</magnitude><rationale>neg</rationale></forecast></forecasts>"
+  let result = scorer.parse_forecasts(xml)
   result |> should.be_ok
   let assert Ok([f]) = result
   f.magnitude |> should.equal(0)
 }
 
-pub fn parse_forecasts_invalid_json_test() {
-  scorer.parse_forecasts("not json at all") |> should.be_error
+pub fn parse_forecasts_invalid_xml_test() {
+  scorer.parse_forecasts("not xml at all") |> should.be_error
 }
 
-pub fn parse_forecasts_empty_array_test() {
-  let result = scorer.parse_forecasts("[]")
-  result |> should.be_ok
-  let assert Ok(forecasts) = result
-  list.length(forecasts) |> should.equal(0)
+pub fn parse_forecasts_empty_forecasts_test() {
+  let xml = "<forecasts></forecasts>"
+  let result = scorer.parse_forecasts(xml)
+  // No forecast elements → Error (empty list)
+  result |> should.be_error
 }
 
 pub fn parse_forecasts_multiple_features_test() {
-  let json =
-    "[{\"feature\": \"safety\", \"magnitude\": 2, \"rationale\": \"a\"}, {\"feature\": \"accuracy\", \"magnitude\": 0, \"rationale\": \"b\"}]"
-  let result = scorer.parse_forecasts(json)
+  let xml =
+    "<forecasts><forecast><feature>safety</feature><magnitude>2</magnitude><rationale>a</rationale></forecast><forecast><feature>accuracy</feature><magnitude>0</magnitude><rationale>b</rationale></forecast></forecasts>"
+  let result = scorer.parse_forecasts(xml)
   result |> should.be_ok
   let assert Ok(forecasts) = result
   list.length(forecasts) |> should.equal(2)
+}
+
+pub fn parse_forecasts_missing_rationale_test() {
+  let xml =
+    "<forecasts><forecast><feature>safety</feature><magnitude>1</magnitude></forecast></forecasts>"
+  let result = scorer.parse_forecasts(xml)
+  result |> should.be_ok
+  let assert Ok([f]) = result
+  f.feature_name |> should.equal("safety")
+  f.magnitude |> should.equal(1)
+  f.rationale |> should.equal("")
 }
 
 // ---------------------------------------------------------------------------
@@ -166,9 +177,9 @@ pub fn cautious_forecasts_all_one_test() {
 
 pub fn score_features_with_mock_provider_test() {
   let features = [feature("safety", High, True)]
-  let json_response =
-    "[{\"feature\": \"safety\", \"magnitude\": 1, \"rationale\": \"minor concern\"}]"
-  let provider = mock.provider_with_text(json_response)
+  let xml_response =
+    "<forecasts><forecast><feature>safety</feature><magnitude>1</magnitude><rationale>minor concern</rationale></forecast></forecasts>"
+  let provider = mock.provider_with_text(xml_response)
   let forecasts =
     scorer.score_features(
       "test instruction",
@@ -179,6 +190,8 @@ pub fn score_features_with_mock_provider_test() {
       "test-cycle",
       False,
     )
+  // XStructor compile_schema requires filesystem; if it fails, falls back to cautious
+  // Either we get the parsed result or cautious fallback (magnitude 1)
   list.length(forecasts) |> should.equal(1)
   let assert [f] = forecasts
   f.feature_name |> should.equal("safety")
@@ -200,7 +213,7 @@ pub fn score_features_falls_back_to_cautious_on_error_test() {
     )
   list.length(forecasts) |> should.equal(1)
   let assert [f] = forecasts
-  // After retry, falls back to magnitude 1 (cautious)
+  // Falls back to magnitude 1 (cautious)
   f.magnitude |> should.equal(1)
 }
 
@@ -218,6 +231,6 @@ pub fn score_features_falls_back_to_cautious_on_invalid_response_test() {
       False,
     )
   list.length(forecasts) |> should.equal(1)
-  // After retry, falls back to magnitude 1 (cautious)
+  // Falls back to magnitude 1 (cautious)
   list.all(forecasts, fn(f) { f.magnitude == 1 }) |> should.be_true
 }

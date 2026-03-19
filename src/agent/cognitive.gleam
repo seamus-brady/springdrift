@@ -11,8 +11,9 @@ import agent/cognitive_state.{
 import agent/types.{
   type CognitiveMessage, type CognitiveReply, AgentComplete, AgentEvent,
   Classifying, CognitiveReply, Idle, InputQueueFull, InputQueued, PendingThink,
-  QueuedInput, RestoreMessages, SaveResult, SetModel, ThinkComplete, ThinkError,
-  ThinkWorkerDown, Thinking, UserAnswer, UserInput,
+  QueuedInput, QueuedSchedulerInput, RestoreMessages, SaveResult,
+  SchedulerJobStarted, SetModel, ThinkComplete, ThinkError, ThinkWorkerDown,
+  Thinking, UserAnswer, UserInput,
 }
 import agent/worker
 import cycle_log
@@ -28,12 +29,16 @@ import llm/types as llm_types
 import narrative/curator as narrative_curator
 import narrative/librarian
 import query_complexity
+import scheduler/types as scheduler_types
 import slog
 import tools/builtin
 import tools/memory
 
 @external(erlang, "springdrift_ffi", "rescue")
 fn rescue(body: fn() -> a) -> Result(a, String)
+
+@external(erlang, "springdrift_ffi", "monotonic_now_ms")
+fn monotonic_now_ms() -> Int
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -77,13 +82,15 @@ pub fn start(
         save_pending: None,
         dprime_state: cfg.dprime_state,
         output_dprime_state: cfg.output_dprime_state,
+        cycle_tool_calls: [],
+        cycle_started_ms: 0,
+        cycle_node_type: dag_types.CognitiveCycle,
         dprime_decisions: [],
         memory: MemoryContext(
           narrative_dir: cfg.narrative_dir,
           cbr_dir: cfg.cbr_dir,
           librarian: cfg.librarian,
           curator: cfg.curator,
-          embedding_config: cfg.embedding_config,
         ),
         agent_completions: [],
         last_user_input: "",
@@ -102,6 +109,7 @@ pub fn start(
           classify_timeout_ms: cfg.classify_timeout_ms,
           threading_config: cfg.threading_config,
           memory_limits: cfg.memory_limits,
+          how_to_content: cfg.how_to_content,
         ),
       )
     process.send(setup, self)
@@ -164,6 +172,7 @@ fn handle_message(
       types.PostExecutionGateComplete(..) -> "PostExecutionGateComplete"
       types.LoadProfile(..) -> "LoadProfile"
       types.SetSupervisor(..) -> "SetSupervisor"
+      types.SchedulerInput(..) -> "SchedulerInput"
       types.OutputGateComplete(..) -> "OutputGateComplete"
     },
     state.cycle_id,
@@ -220,6 +229,27 @@ fn handle_message(
       cognitive_profile.handle_load_profile(state, name, reply_to)
     types.SetSupervisor(supervisor:) ->
       CognitiveState(..state, supervisor: Some(supervisor))
+    types.SchedulerInput(
+      job_name:,
+      query:,
+      kind:,
+      for_:,
+      title:,
+      body:,
+      tags:,
+      reply_to:,
+    ) ->
+      handle_scheduler_input(
+        state,
+        job_name,
+        query,
+        kind,
+        for_,
+        title,
+        body,
+        tags,
+        reply_to,
+      )
     types.OutputGateComplete(
       cycle_id,
       result,
@@ -253,6 +283,43 @@ fn maybe_drain_queue(state: CognitiveState) -> CognitiveState {
       handle_user_input(
         CognitiveState(..state, input_queue: rest),
         text,
+        reply_to,
+      )
+    }
+    Idle,
+      [
+        QueuedSchedulerInput(
+          job_name:,
+          query:,
+          kind:,
+          for_:,
+          title:,
+          body:,
+          tags:,
+          reply_to:,
+        ),
+        ..rest
+      ]
+    -> {
+      slog.info(
+        "cognitive",
+        "maybe_drain_queue",
+        "Draining queued scheduler input '"
+          <> job_name
+          <> "' (remaining: "
+          <> int.to_string(list.length(rest))
+          <> ")",
+        state.cycle_id,
+      )
+      handle_scheduler_input(
+        CognitiveState(..state, input_queue: rest),
+        job_name,
+        query,
+        kind,
+        for_,
+        title,
+        body,
+        tags,
         reply_to,
       )
     }
@@ -291,6 +358,9 @@ fn handle_user_input(
           ..state,
           last_user_input: text,
           agent_completions: [],
+          cycle_tool_calls: [],
+          cycle_started_ms: monotonic_now_ms(),
+          cycle_node_type: dag_types.CognitiveCycle,
           dprime_decisions: [],
         )
 
@@ -374,6 +444,167 @@ fn handle_user_input(
   }
 }
 
+// ---------------------------------------------------------------------------
+// SchedulerInput — typed input from the scheduler subsystem
+// ---------------------------------------------------------------------------
+
+fn handle_scheduler_input(
+  state: CognitiveState,
+  job_name: String,
+  query: String,
+  kind: scheduler_types.JobKind,
+  for_: scheduler_types.ForTarget,
+  title: String,
+  body: String,
+  tags: List(String),
+  reply_to: Subject(CognitiveReply),
+) -> CognitiveState {
+  // Guard: queue if not idle
+  case state.status {
+    Idle -> {
+      let cycle_id = cycle_log.generate_uuid()
+      cycle_log.log_human_input(
+        cycle_id,
+        state.cycle_id,
+        "[scheduler:" <> job_name <> "] " <> query,
+      )
+      // Clear Curator scratchpad from previous cycle
+      case state.memory.curator {
+        option.Some(cur) ->
+          narrative_curator.clear_cycle(cur, option.unwrap(state.cycle_id, ""))
+        option.None -> Nil
+      }
+      let state =
+        CognitiveState(
+          ..state,
+          last_user_input: query,
+          agent_completions: [],
+          cycle_tool_calls: [],
+          cycle_started_ms: monotonic_now_ms(),
+          cycle_node_type: dag_types.SchedulerCycle,
+          dprime_decisions: [],
+        )
+
+      // Select input text based on job kind
+      let input_text = case kind {
+        scheduler_types.Reminder | scheduler_types.Appointment -> body
+        scheduler_types.RecurringTask | scheduler_types.Todo -> query
+      }
+
+      // Build scheduler context XML block
+      let kind_str = case kind {
+        scheduler_types.RecurringTask -> "recurring_task"
+        scheduler_types.Reminder -> "reminder"
+        scheduler_types.Todo -> "todo"
+        scheduler_types.Appointment -> "appointment"
+      }
+      let for_str = case for_ {
+        scheduler_types.ForAgent -> "agent"
+        scheduler_types.ForUser -> "user"
+      }
+      let tags_str = string.join(tags, ", ")
+      let context_xml =
+        "<scheduler_context>\n  <job_name>"
+        <> job_name
+        <> "</job_name>\n  <kind>"
+        <> kind_str
+        <> "</kind>\n  <for>"
+        <> for_str
+        <> "</for>\n  <title>"
+        <> title
+        <> "</title>\n  <tags>"
+        <> tags_str
+        <> "</tags>\n</scheduler_context>\n\n"
+      let text_with_context = context_xml <> input_text
+
+      // Emit SchedulerJobStarted notification
+      process.send(
+        state.notify,
+        SchedulerJobStarted(name: job_name, kind: kind_str),
+      )
+
+      // If ForUser, also send SchedulerReminder for TUI display
+      case for_ {
+        scheduler_types.ForUser ->
+          process.send(
+            state.notify,
+            types.SchedulerReminder(name: job_name, title:, body:),
+          )
+        scheduler_types.ForAgent -> Nil
+      }
+
+      // Skip classification — always use task_model, go straight to LLM
+      cognitive_llm.proceed_with_model(
+        state,
+        state.task_model,
+        text_with_context,
+        cycle_id,
+        reply_to,
+        dag_types.SchedulerCycle,
+      )
+    }
+    _ -> {
+      // Queue the scheduler input
+      let queue_len = list.length(state.input_queue)
+      case queue_len >= state.input_queue_cap {
+        True -> {
+          slog.warn(
+            "cognitive",
+            "handle_scheduler_input",
+            "Input queue full, rejecting scheduler job '" <> job_name <> "'",
+            state.cycle_id,
+          )
+          process.send(
+            state.notify,
+            InputQueueFull(queue_cap: state.input_queue_cap),
+          )
+          process.send(
+            reply_to,
+            CognitiveReply(
+              response: "[System: input queue full, scheduler job '"
+                <> job_name
+                <> "' rejected]",
+              model: state.model,
+              usage: None,
+            ),
+          )
+          state
+        }
+        False -> {
+          let position = queue_len + 1
+          let new_queue =
+            list.append(state.input_queue, [
+              types.QueuedSchedulerInput(
+                job_name:,
+                query:,
+                kind:,
+                for_:,
+                title:,
+                body:,
+                tags:,
+                reply_to:,
+              ),
+            ])
+          slog.info(
+            "cognitive",
+            "handle_scheduler_input",
+            "Scheduler job '"
+              <> job_name
+              <> "' queued at position "
+              <> int.to_string(position),
+            state.cycle_id,
+          )
+          process.send(
+            state.notify,
+            InputQueued(position:, queue_size: position),
+          )
+          CognitiveState(..state, input_queue: new_queue)
+        }
+      }
+    }
+  }
+}
+
 fn handle_classify_complete(
   state: CognitiveState,
   cycle_id: String,
@@ -424,6 +655,7 @@ fn handle_classify_complete(
             text,
             cycle_id,
             reply_to,
+            dag_types.CognitiveCycle,
           )
         Some(dprime_st) ->
           cognitive_safety.spawn_input_safety_gate(
@@ -457,6 +689,7 @@ fn handle_think_complete(
       reply_to: rt,
       output_gate_count: ogc,
       empty_retried:,
+      node_type:,
       ..,
     )) -> {
       let cycle_id = option.unwrap(state.cycle_id, task_id)
@@ -508,6 +741,7 @@ fn handle_think_complete(
                     reply_to: rt,
                     output_gate_count: ogc,
                     empty_retried: True,
+                    node_type:,
                   ),
                 ),
               )
@@ -560,6 +794,10 @@ fn handle_think_complete(
                 }
                 None -> {
                   // Update DAG node with final outcome
+                  let duration_ms = case state.cycle_started_ms {
+                    0 -> 0
+                    started -> monotonic_now_ms() - started
+                  }
                   case state.memory.librarian {
                     Some(lib) ->
                       process.send(
@@ -567,12 +805,12 @@ fn handle_think_complete(
                         librarian.UpdateNode(node: dag_types.CycleNode(
                           cycle_id: option.unwrap(state.cycle_id, task_id),
                           parent_id: None,
-                          node_type: dag_types.CognitiveCycle,
+                          node_type: node_type,
                           timestamp: "",
                           outcome: dag_types.NodeSuccess,
                           model: reply_model,
                           complexity: "",
-                          tool_calls: [],
+                          tool_calls: state.cycle_tool_calls,
                           dprime_gates: list.map(state.dprime_decisions, fn(d) {
                             dag_types.GateSummary(
                               gate: d.gate,
@@ -582,7 +820,7 @@ fn handle_think_complete(
                           }),
                           tokens_in: resp.usage.input_tokens,
                           tokens_out: resp.usage.output_tokens,
-                          duration_ms: 0,
+                          duration_ms:,
                           agent_output: None,
                         )),
                       )

@@ -2,24 +2,25 @@
 ////
 //// Builds a structured prompt using the spec's calibration-example approach,
 //// asking the LLM to score each feature's deviation magnitude (0-3).
-//// Retry once on parse failure, then fall back to magnitude 1 (cautious).
+//// Uses XStructor for XML-schema-validated structured output with automatic
+//// retry on validation failure. Falls back to magnitude 1 (cautious).
 
-import cycle_log
 import dprime/types.{type Feature, type Forecast, Forecast}
-import gleam/dynamic/decode
+import gleam/dict.{type Dict}
 import gleam/int
-import gleam/json
 import gleam/list
 import gleam/option.{Some}
 import gleam/string
 import llm/provider.{type Provider}
-import llm/request
-import llm/response
+import paths
 import slog
+import xstructor
+import xstructor/schemas
 
 /// Score all features against an instruction and context.
 /// Uses the LLM to evaluate discrepancy magnitudes.
-/// Retries once on parse failure. Falls back to magnitude 1 (cautious).
+/// XStructor handles validation and retry internally.
+/// Falls back to magnitude 1 (cautious) on any failure.
 pub fn score_features(
   instruction: String,
   context: String,
@@ -27,7 +28,7 @@ pub fn score_features(
   provider: Provider,
   model: String,
   cycle_id: String,
-  verbose: Bool,
+  _verbose: Bool,
 ) -> List(Forecast) {
   slog.debug(
     "dprime/scorer",
@@ -36,109 +37,57 @@ pub fn score_features(
     Some(cycle_id),
   )
   let prompt = build_scoring_prompt(instruction, context, features)
-  do_score(prompt, features, provider, model, cycle_id, verbose, True)
-}
-
-fn do_score(
-  prompt: String,
-  features: List(Feature),
-  provider: Provider,
-  model: String,
-  cycle_id: String,
-  verbose: Bool,
-  can_retry: Bool,
-) -> List(Forecast) {
-  let req =
-    request.new(model, 512)
-    |> request.with_system(
-      "You are a standards compliance evaluator for an AI agent. Respond with ONLY a JSON array. No explanation, no markdown, no preamble.",
-    )
-    |> request.with_user_message(prompt)
-
-  case verbose {
-    True -> cycle_log.log_llm_request(cycle_id, req)
-    False -> Nil
-  }
-
-  case provider.chat(req) {
-    Ok(resp) -> {
-      case verbose {
-        True -> cycle_log.log_llm_response(cycle_id, resp)
-        False -> Nil
-      }
-      let text = response.text(resp)
-      case parse_forecasts(text) {
-        Ok(forecasts) -> {
+  let schema_dir = paths.schemas_dir()
+  case
+    xstructor.compile_schema(schema_dir, "forecasts.xsd", schemas.forecasts_xsd)
+  {
+    Error(e) -> {
+      slog.warn(
+        "dprime/scorer",
+        "score_features",
+        "Schema compilation failed: " <> e <> ", falling back to cautious",
+        Some(cycle_id),
+      )
+      cautious_forecasts(features)
+    }
+    Ok(schema) -> {
+      let system =
+        schemas.build_system_prompt(
+          "You are a standards compliance evaluator for an AI agent.",
+          schemas.forecasts_xsd,
+          schemas.forecasts_example,
+        )
+      let config =
+        xstructor.XStructorConfig(
+          schema: schema,
+          system_prompt: system,
+          xml_example: schemas.forecasts_example,
+          max_retries: 2,
+          max_tokens: 512,
+        )
+      case xstructor.generate(config, prompt, provider, model) {
+        Ok(result) -> {
           slog.debug(
             "dprime/scorer",
             "score_features",
-            "Successfully parsed forecasts",
+            "Successfully parsed forecasts (retries: "
+              <> int.to_string(result.retries_used)
+              <> ")",
             Some(cycle_id),
           )
-          forecasts
+          extract_forecasts(result.elements)
         }
-        Error(_) ->
-          case can_retry {
-            True -> {
-              slog.warn(
-                "dprime/scorer",
-                "score_features",
-                "JSON parse failed, retrying once",
-                Some(cycle_id),
-              )
-              do_score(
-                prompt,
-                features,
-                provider,
-                model,
-                cycle_id,
-                verbose,
-                False,
-              )
-            }
-            False -> {
-              slog.warn(
-                "dprime/scorer",
-                "score_features",
-                "JSON parse failed on retry, falling back to magnitude 1 (cautious)",
-                Some(cycle_id),
-              )
-              cycle_log.log_dprime_scorer_fallback(
-                cycle_id,
-                "JSON parse failed after retry",
-                list.length(features),
-              )
-              cautious_forecasts(features)
-            }
-          }
-      }
-    }
-    Error(_) ->
-      case can_retry {
-        True -> {
+        Error(e) -> {
           slog.warn(
             "dprime/scorer",
             "score_features",
-            "LLM error, retrying once",
+            "XStructor generate failed: " <> e <> ", falling back to cautious",
             Some(cycle_id),
-          )
-          do_score(prompt, features, provider, model, cycle_id, verbose, False)
-        }
-        False -> {
-          slog.warn(
-            "dprime/scorer",
-            "score_features",
-            "LLM error on retry, falling back to magnitude 1 (cautious)",
-            Some(cycle_id),
-          )
-          cycle_log.log_dprime_scorer_fallback(
-            cycle_id,
-            "LLM error after retry",
-            list.length(features),
           )
           cautious_forecasts(features)
         }
       }
+    }
   }
 }
 
@@ -172,7 +121,6 @@ pub fn build_scoring_prompt(
   <> "- Evaluate each standard independently. Do not let a high score on one standard influence another.\n"
   <> "- A score of 0 means genuinely no concern, not 'probably fine'.\n"
   <> "- A score of 3 means clear, significant violation, not 'could theoretically be a problem'.\n"
-  <> "- Respond with ONLY a JSON array of objects with \"feature\", \"magnitude\", and \"rationale\" fields. No explanation, no markdown, no preamble.\n"
   <> "\n"
   <> "PROPOSED ACTION: "
   <> instruction
@@ -192,21 +140,21 @@ pub fn build_scoring_prompt(
   <> instruction
 }
 
-/// Parse LLM response text into forecasts.
-/// Handles markdown code fences and whitespace.
+/// Parse XML text into forecasts.
+/// Uses XStructor clean_response + extract for XML parsing.
 pub fn parse_forecasts(text: String) -> Result(List(Forecast), Nil) {
-  let cleaned =
-    strip_markdown_fences(string.trim(text))
-    |> sanitize_json
-  let decoder = decode.list(forecast_decoder())
-  case json.parse(cleaned, decoder) {
-    Ok(forecasts) -> Ok(list.map(forecasts, clamp_forecast))
+  let cleaned = xstructor.clean_response(text)
+  case xstructor.extract(cleaned) {
+    Ok(elements) -> {
+      let forecasts = extract_forecasts(elements)
+      case forecasts {
+        [] -> Error(Nil)
+        _ -> Ok(forecasts)
+      }
+    }
     Error(_) -> Error(Nil)
   }
 }
-
-@external(erlang, "springdrift_ffi", "sanitize_json")
-fn sanitize_json(json_text: String) -> String
 
 /// Generate default (all-zero) forecasts for all features.
 pub fn default_forecasts(features: List(Feature)) -> List(Forecast) {
@@ -216,7 +164,7 @@ pub fn default_forecasts(features: List(Feature)) -> List(Forecast) {
 }
 
 /// Generate cautious (magnitude 1) forecasts for all features.
-/// Used as fallback when scoring fails after retry — errs on side of caution.
+/// Used as fallback when scoring fails — errs on side of caution.
 pub fn cautious_forecasts(features: List(Feature)) -> List(Forecast) {
   list.map(features, fn(f) {
     Forecast(
@@ -231,36 +179,70 @@ pub fn cautious_forecasts(features: List(Feature)) -> List(Forecast) {
 // Internal
 // ---------------------------------------------------------------------------
 
-fn forecast_decoder() -> decode.Decoder(Forecast) {
-  use feature <- decode.field("feature", decode.string)
-  use magnitude <- decode.field("magnitude", decode.int)
-  use rationale <- decode.optional_field("rationale", "", decode.string)
-  decode.success(Forecast(feature_name: feature, magnitude:, rationale:))
+fn extract_forecasts(elements: Dict(String, String)) -> List(Forecast) {
+  // xmerl uses indexed paths (forecast.0.feature) for multiple elements,
+  // but non-indexed paths (forecast.feature) for a single element.
+  // Try indexed first, then fall back to non-indexed single-element form.
+  case extract_forecasts_loop(elements, 0, []) {
+    [] -> extract_single_forecast(elements)
+    forecasts -> forecasts
+  }
 }
 
-fn clamp_forecast(f: Forecast) -> Forecast {
-  Forecast(..f, magnitude: int.min(3, int.max(0, f.magnitude)))
-}
-
-fn strip_markdown_fences(text: String) -> String {
-  let trimmed = string.trim(text)
-  case string.starts_with(trimmed, "```") {
-    True -> {
-      let after_open = case string.split(trimmed, "\n") {
-        [_, ..rest] -> string.join(rest, "\n")
-        _ -> trimmed
+fn extract_forecasts_loop(
+  elements: Dict(String, String),
+  idx: Int,
+  acc: List(Forecast),
+) -> List(Forecast) {
+  let prefix = "forecasts.forecast." <> int.to_string(idx)
+  case dict.get(elements, prefix <> ".feature") {
+    Ok(feature) -> {
+      let magnitude = parse_magnitude(elements, prefix <> ".magnitude")
+      let rationale = case dict.get(elements, prefix <> ".rationale") {
+        Ok(r) -> r
+        Error(_) -> ""
       }
-      case string.ends_with(string.trim(after_open), "```") {
-        True -> {
-          let lines = string.split(after_open, "\n")
-          let without_last =
-            list.take(lines, int.max(0, list.length(lines) - 1))
-          string.join(without_last, "\n")
-        }
-        False -> after_open
-      }
+      extract_forecasts_loop(elements, idx + 1, [
+        Forecast(
+          feature_name: feature,
+          magnitude: magnitude,
+          rationale: rationale,
+        ),
+        ..acc
+      ])
     }
-    False -> trimmed
+    Error(_) -> list.reverse(acc)
+  }
+}
+
+fn extract_single_forecast(elements: Dict(String, String)) -> List(Forecast) {
+  case dict.get(elements, "forecasts.forecast.feature") {
+    Ok(feature) -> {
+      let magnitude = parse_magnitude(elements, "forecasts.forecast.magnitude")
+      let rationale = case dict.get(elements, "forecasts.forecast.rationale") {
+        Ok(r) -> r
+        Error(_) -> ""
+      }
+      [
+        Forecast(
+          feature_name: feature,
+          magnitude: magnitude,
+          rationale: rationale,
+        ),
+      ]
+    }
+    Error(_) -> []
+  }
+}
+
+fn parse_magnitude(elements: Dict(String, String), key: String) -> Int {
+  case dict.get(elements, key) {
+    Ok(m) ->
+      case int.parse(m) {
+        Ok(n) -> int.min(3, int.max(0, n))
+        Error(_) -> 1
+      }
+    Error(_) -> 1
   }
 }
 

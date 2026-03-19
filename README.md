@@ -83,7 +83,7 @@ interval = "24h"
 
 [jobs.delivery]
 type = "file"
-directory = "./reports"
+directory = ".springdrift/scheduler/outputs"
 format = "markdown"
 ```
 
@@ -94,7 +94,7 @@ format = "markdown"
 ```toml
 [jobs.delivery]
 type = "file"
-directory = "./reports"
+directory = ".springdrift/scheduler/outputs"
 format = "markdown"  # or "json"
 ```
 

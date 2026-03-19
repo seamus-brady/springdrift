@@ -31,6 +31,7 @@ import narrative/virtual_memory.{
   type CbrSlotEntry, type VirtualMemory, ScratchEntry,
 }
 import paths
+import scheduler/types as scheduler_types
 import slog
 
 // ---------------------------------------------------------------------------
@@ -103,6 +104,8 @@ pub type CuratorMessage {
   )
   /// Update agent health only (called on lifecycle events).
   UpdateAgentHealth(health: String)
+  /// Set the scheduler subject (called after scheduler starts).
+  SetScheduler(scheduler: Subject(scheduler_types.SchedulerMessage))
   /// Shutdown the Curator.
   Shutdown
 }
@@ -126,6 +129,7 @@ type CuratorState {
     active_profile: Option(String),
     agent_name: String,
     agent_version: String,
+    scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
   )
 }
 
@@ -187,6 +191,7 @@ pub fn start_with_identity(
         active_profile:,
         agent_name:,
         agent_version:,
+        scheduler: None,
       )
 
     slog.info("narrative/curator", "start", "Curator ready", None)
@@ -228,6 +233,14 @@ pub fn write_back_result(
   result: agent_types.AgentResult,
 ) -> Nil {
   process.send(curator, WriteBackResult(cycle_id:, result:))
+}
+
+/// Set the scheduler reference (fire-and-forget).
+pub fn set_scheduler(
+  curator: Subject(CuratorMessage),
+  scheduler: Subject(scheduler_types.SchedulerMessage),
+) -> Nil {
+  process.send(curator, SetScheduler(scheduler:))
 }
 
 /// Clear the scratchpad for a cycle (fire-and-forget).
@@ -355,6 +368,9 @@ fn loop(state: CuratorState) -> Nil {
           slog.info("narrative/curator", "shutdown", "Curator stopped", None)
           Nil
         }
+
+        SetScheduler(scheduler:) ->
+          loop(CuratorState(..state, scheduler: Some(scheduler)))
 
         InjectContext(task:, reply_to:) -> {
           let enriched = do_inject_context(state, task)
@@ -840,7 +856,10 @@ fn build_preamble_slots(state: CuratorState) -> List(identity.SlotValue) {
       },
     ),
     identity.SlotValue(key: "recent_narrative", value: recent_narrative_text),
-    identity.SlotValue(key: "open_commitments", value: ""),
+    identity.SlotValue(
+      key: "open_commitments",
+      value: build_open_commitments(state.scheduler),
+    ),
     identity.SlotValue(key: "memory_health", value: "Nominal"),
     identity.SlotValue(key: "active_profile", value: case state.active_profile {
       Some(name) -> name
@@ -850,4 +869,47 @@ fn build_preamble_slots(state: CuratorState) -> List(identity.SlotValue) {
     identity.SlotValue(key: "agent_name", value: state.agent_name),
     identity.SlotValue(key: "agent_version", value: state.agent_version),
   ]
+}
+
+fn build_open_commitments(
+  scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
+) -> String {
+  case scheduler {
+    None -> ""
+    Some(sched) -> {
+      let reply_to = process.new_subject()
+      process.send(
+        sched,
+        scheduler_types.GetJobs(
+          query: scheduler_types.JobQuery(
+            kinds: [],
+            statuses: [scheduler_types.Pending, scheduler_types.Running],
+            for_: None,
+            overdue_only: False,
+            max_results: 10,
+          ),
+          reply_to:,
+        ),
+      )
+      case process.receive(reply_to, 2000) {
+        Error(_) -> ""
+        Ok(jobs) ->
+          case jobs {
+            [] -> ""
+            _ ->
+              list.map(jobs, fn(j) {
+                j.title
+                <> " ("
+                <> scheduler_types.encode_job_kind(j.kind)
+                <> case j.due_at {
+                  Some(due) -> ", due " <> due
+                  None -> ""
+                }
+                <> ")"
+              })
+              |> string.join(", ")
+          }
+      }
+    }
+  }
 }

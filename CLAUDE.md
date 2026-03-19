@@ -36,9 +36,15 @@ src/
 ├── context.gleam              Context window trim helper (sliding window)
 ├── query_complexity.gleam     LLM-based + heuristic query classifier (Simple | Complex)
 ├── skills.gleam               Skill discovery, frontmatter parsing, XML-escaped injection
+├── xstructor.gleam            XStructor — XML-schema-validated structured LLM output
+├── xstructor_ffi.erl          Erlang FFI for xmerl: compile_schema, validate_xml, extract_elements
+├── embedding.gleam            Ollama embedding — HTTP client for /api/embeddings, startup probe
+│
+├── xstructor/                 XStructor schemas
+│   └── schemas.gleam          XSD schemas + XML examples for all structured LLM call sites
 │
 ├── agent/                     Agent substrate
-│   ├── types.gleam            CognitiveMessage, Notification, PendingTask, CognitiveReply
+│   ├── types.gleam            CognitiveMessage (incl. SchedulerInput), Notification, PendingTask, CognitiveReply
 │   ├── cognitive.gleam        Cognitive loop — orchestrates agents, model switching, fallback
 │   ├── framework.gleam        Gen-server wrapper for agent specs → running agent processes
 │   ├── supervisor.gleam       Restart strategies (Permanent/Transient/Temporary)
@@ -49,7 +55,8 @@ src/
 │   ├── planner.gleam          Planning agent (no tools, max_turns=3)
 │   ├── researcher.gleam       Research agent (web+artifacts+builtin, max_turns=8)
 │   ├── coder.gleam            Coding agent (builtin, max_turns=10)
-│   └── writer.gleam           Writer agent (builtin, max_turns=6)
+│   ├── writer.gleam           Writer agent (builtin, max_turns=6)
+│   └── observer.gleam         Observer agent (diagnostic memory tools, max_turns=6)
 │
 ├── dprime/                    D' discrepancy-gated safety system
 │   ├── types.gleam            Feature, Forecast, GateDecision, GateResult, DprimeConfig/State
@@ -75,7 +82,8 @@ src/
 │
 ├── cbr/                       Case-Based Reasoning memory
 │   ├── types.gleam            CbrCase, CbrProblem, CbrSolution, CbrOutcome, CbrQuery
-│   └── log.gleam              Append-only JSON-L log for CBR cases
+│   ├── log.gleam              Append-only JSON-L log for CBR cases
+│   └── bridge.gleam           CaseBase (inverted index + embeddings), weighted field scoring, retrieval
 │
 ├── facts/                     Fact store — key-value memory with scopes
 │   ├── types.gleam            MemoryFact, FactScope, FactOperation
@@ -91,21 +99,22 @@ src/
 │   └── types.gleam            Profile, ProfileModels, AgentDef, DeliveryConfig, ScheduleTaskConfig
 ├── profile.gleam              Profile discovery, parsing, validation, schedule loading
 │
-├── scheduler/                 BEAM-native task scheduler
-│   ├── types.gleam            ScheduledJob, JobStatus, SchedulerMessage
-│   ├── runner.gleam           OTP scheduler process with send_after tick loop
+├── scheduler/                 BEAM-native task scheduler with autonomous cycles
+│   ├── types.gleam            ScheduledJob, JobStatus, SchedulerMessage, JSON encoders
+│   ├── runner.gleam           OTP scheduler process with send_after tick loop + rate limiting
 │   ├── delivery.gleam         Report delivery (file, webhook via gleam_httpc)
 │   └── persist.gleam          Atomic checkpoint persistence with reconciliation
 │
 ├── tools/builtin.gleam        Built-in tools: calculator, get_current_datetime,
 │                              request_human_input, read_skill
+├── tools/how_to_content.gleam Default HOW_TO content (builtin fallback)
 ├── tools/web.gleam            Web tools: fetch_url, web_search
 ├── tools/artifacts.gleam      Artifact tools: store_result, retrieve_result (researcher agent)
 ├── tui.gleam                  Alternate-screen TUI; Chat + Log + Narrative tabs
 │
-├── web/                       Web chat GUI
+├── web/                       Web chat GUI + admin dashboard
 │   ├── gui.gleam              Mist HTTP + WebSocket server with bearer token auth
-│   ├── html.gleam             Embedded HTML/CSS/JS chat page
+│   ├── html.gleam             Embedded HTML/CSS/JS chat + admin page (4 tabs)
 │   └── protocol.gleam         WebSocket JSON codec (ClientMessage/ServerMessage)
 │
 └── llm/
@@ -157,6 +166,54 @@ gleam format
 This formats every `.gleam` file in `src/` and `test/` in place. The formatter is
 non-negotiable — unformatted code should not be committed. If you are unsure whether
 formatting is needed, run `gleam format` anyway; it is idempotent.
+
+### Build must be warning-free
+
+**All compiler warnings must be resolved before a task is complete.** Run:
+
+```sh
+gleam build
+```
+
+If `gleam build` produces any warnings (unused variables, unused imports, etc.),
+fix them. Warnings indicate code quality issues — unused `_` prefixing, removing
+dead imports, or deleting unreachable code are all acceptable fixes. Do not leave
+warnings for the next person to clean up.
+
+### Structured LLM output must use XStructor
+
+**When an LLM call needs structured output, use XStructor (XML + XSD validation).**
+Do not parse JSON from LLM responses. Do not write JSON repair heuristics.
+
+XStructor (`src/xstructor.gleam`) provides schema-validated XML generation with
+automatic retry. The workflow:
+1. Define an XSD schema and XML example in `src/xstructor/schemas.gleam`
+2. Compile the schema with `xstructor.compile_schema(schemas_dir, name, xsd_content)`
+3. Build a config with `XStructorConfig(schema, system_prompt, xml_example, max_retries, max_tokens)`
+4. Call `xstructor.generate(config, user_prompt, provider, model)` — handles LLM call,
+   response cleaning, validation, and retry on error
+5. Extract fields from `XStructorResult.elements` (a `Dict(String, String)` with dotted
+   paths like `root.child.value`; repeated elements use `.0`, `.1` indexing)
+
+Use `schemas.build_system_prompt(base_prompt, xsd, example)` to build the system prompt.
+Always provide a fallback path for when XStructor generation fails entirely.
+
+### All output goes into `.springdrift/`
+
+**All files the system generates — logs, reports, schemas, memory, scheduler
+output — must be written inside the `.springdrift/` directory.** Never write output
+to the project root or arbitrary directories.
+
+This is a hard rule. The `.springdrift/` directory is the single, predictable
+location for all runtime data. This makes backup simple: copy one directory and
+you have everything. Use `paths.gleam` to define any new output paths and always
+go through the centralised path functions.
+
+Current output directories:
+- `.springdrift/logs/` — system logs
+- `.springdrift/memory/` — narrative, CBR, facts, artifacts, cycle-log
+- `.springdrift/schemas/` — compiled XSD schemas
+- `.springdrift/scheduler/outputs/` — scheduler report delivery
 
 ### No magic numbers, no invisible settings, no hidden system vars
 
@@ -230,6 +287,12 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `narrative_summary_schedule` | — | `"weekly"` | Summary schedule: `"weekly"` or `"monthly"` |
 | `profiles_dirs` | `--profiles-dir` (repeatable) | `[~/.config/springdrift/profiles, .springdrift/profiles]` | Profile directories |
 | `default_profile` | `--profile` | None | Profile to load at startup |
+| `max_autonomous_cycles_per_hour` | — | 20 | Max scheduler-triggered cycles per hour (0 = unlimited) |
+| `autonomous_token_budget_per_hour` | — | 500000 | Max tokens (input+output) scheduler may consume per hour (0 = unlimited) |
+| `xstructor_max_retries` | — | 3 | Max XStructor XML validation+retry attempts |
+| `cbr_embedding_enabled` | — | True | Enable Ollama embedding for CBR retrieval (fails on startup if Ollama unreachable) |
+| `cbr_embedding_model` | — | `nomic-embed-text` | Ollama embedding model name |
+| `cbr_embedding_base_url` | — | `http://localhost:11434` | Ollama API base URL |
 
 ## Memory architecture
 
@@ -259,7 +322,8 @@ tools go through it when available, falling back to direct JSONL reads when it's
 `None`. It owns ETS tables for narrative entries, threads, facts, CBR cases, artifacts,
 and DAG nodes. Messages: `QueryDayRoots`, `QueryDayStats`, `QueryNodeWithDescendants`,
 `QueryThreadCount`, `QueryPersistentFactCount`, `QueryCaseCount`, `IndexArtifact`,
-`QueryArtifactsByCycle`, `QueryArtifactById`, `RetrieveArtifactContent`, etc.
+`QueryArtifactsByCycle`, `QueryArtifactById`, `RetrieveArtifactContent`,
+`QuerySchedulerCycles`, etc.
 At startup, the Librarian replays artifact metadata from disk (configurable via
 `librarian_max_days`, default 30).
 
@@ -283,6 +347,7 @@ At startup, the Librarian replays artifact metadata from disk (configurable via
 | `list_recent_cycles` | DAG | Discover cycle IDs for a date (feed into `inspect_cycle`) |
 | `query_tool_activity` | DAG | Per-tool usage stats for a date |
 | `introspect` | All | Perceive system state: identity, agent roster, D' config, cycle ID |
+| `how_to` | HOW_TO.md | Operator guide: tool selection heuristics, degradation paths |
 
 **Curator** (`narrative/curator.gleam`) assembles the system prompt from memory.
 On each `BuildSystemPrompt` message it loads identity files (persona + preamble
@@ -303,8 +368,9 @@ cognitive loop delegates work to.
 **Supervisor** (`agent/supervisor.gleam`) manages agent lifecycle with three restart
 strategies: `Permanent` (always restart), `Transient` (restart on abnormal exit), and
 `Temporary` (never restart). Lifecycle events (`AgentStarted`, `AgentCrashed`,
-`AgentRestarted`, `AgentStopped`) are forwarded through the cognitive loop to the
-notification channel for TUI/web GUI display.
+`AgentRestarted`, `AgentStopped`) and scheduler events (`SchedulerJobStarted`,
+`SchedulerJobCompleted`, `SchedulerJobFailed`) are forwarded through the cognitive loop
+to the notification channel for TUI/web GUI display.
 
 **Framework** (`agent/framework.gleam`) wraps each `AgentSpec` into a running OTP
 process with a react loop. Each agent has its own message history, tool set, and
@@ -324,6 +390,7 @@ exposes this (and other system state) to the LLM.
 | Researcher | web + artifacts + builtin | 8 | 30 | Permanent | Gather information via search and extraction |
 | Coder | builtin | 10 | unlimited | Permanent | Write and modify code, fix errors |
 | Writer | builtin | 6 | unlimited | Permanent | Draft and edit text |
+| Observer | diagnostic memory (10 tools) | 6 | 20 | Transient | Examine past activity, explain failures, identify patterns |
 
 **Structured output** — when an agent completes, the framework populates
 `AgentSuccess.structured_result` with typed `AgentFindings` based on the agent name
@@ -344,8 +411,12 @@ accessor in a `case` arm extracts from the same root dynamic value.
 functions. Build requests by piping: `request.new(model, max_tokens) |> request.with_system(...) |> ...`.
 
 **Actor messages as the API surface** — public API of the cognitive loop is the
-`CognitiveMessage` type. Add new capabilities by adding variants, not by exposing
-internal functions.
+`CognitiveMessage` type (`UserInput`, `SchedulerInput`, `SetModel`, `RestoreMessages`,
+etc.). Add new capabilities by adding variants, not by exposing internal functions.
+`QueuedInput` has corresponding `QueuedUserInput` and `QueuedSchedulerInput` variants.
+`PendingThink` carries a `node_type: CycleNodeType` field so the cognitive loop can
+tag DAG nodes with the correct type (`UserCycle` vs `SchedulerCycle`).
+`CognitiveState` tracks `cycle_node_type: CycleNodeType` for the current cycle.
 
 **Cycle logging** — every LLM call must thread a `cycle_id: String` and log events
 via `cycle_log.*`. Do not add LLM calls that bypass this logging. `llm_request` /
@@ -391,14 +462,18 @@ The Archivist notifies the Librarian when new entries are written. The Librarian
 supports count queries (`QueryThreadCount`, `QueryPersistentFactCount`, `QueryCaseCount`)
 used by the Curator for session preamble population.
 
-**CBR memory** — case-based reasoning in `cbr/types.gleam` and `cbr/log.gleam`. Each
-`CbrCase` captures problem (intent, domain, entities, keywords), solution (approach,
-agents, tools, steps), outcome (status, confidence, assessment, pitfalls), embedding
-vector, source narrative ID, and optional profile hint. The Librarian actor indexes
-CBR cases in ETS alongside narrative entries, supports `CbrQuery` retrieval with
-multi-signal scoring (intent, domain, keyword overlap, entity overlap, recency),
-and threshold filtering (0.1 minimum score). `cbr/log.gleam` provides append-only
-JSON-L persistence with lenient decoders (null → defaults).
+**CBR memory** — case-based reasoning in `cbr/types.gleam`, `cbr/log.gleam`, and
+`cbr/bridge.gleam`. Each `CbrCase` captures problem (intent, domain, entities,
+keywords), solution (approach, agents, tools, steps), outcome (status, confidence,
+assessment, pitfalls), source narrative ID, and optional profile hint. The Librarian
+actor indexes CBR cases in ETS alongside narrative entries. `cbr/bridge.gleam`
+provides `CaseBase` with inverted index and optional semantic embeddings. Retrieval
+uses a weighted sum of 4-5 signals: weighted field score (intent/domain match,
+keyword/entity Jaccard), inverted index overlap, recency, domain match, and optional
+embedding cosine similarity. Weights are configurable via `RetrievalWeights`; when
+embeddings are unavailable, embedding weight is redistributed to the other signals.
+`cbr/log.gleam` provides append-only JSON-L persistence with lenient decoders
+(null → defaults).
 
 **Facts store** — key-value memory in `facts/types.gleam` and `facts/log.gleam`.
 `MemoryFact` has scope (Session/Persistent/Global), operation (Write/Delete/Superseded),
@@ -415,8 +490,8 @@ metadata-only projection indexed in ETS by the Librarian. The `store_result` and
 web content to disk and retrieve it by ID, keeping the agent's context window lean.
 The researcher executor captures `artifacts_dir` and `librarian` via closure.
 
-**Housekeeping** — `narrative/housekeeping.gleam` provides CBR deduplication (cosine
-similarity on embeddings, configurable threshold), case pruning (old low-confidence
+**Housekeeping** — `narrative/housekeeping.gleam` provides CBR deduplication (symmetric
+weighted field similarity, configurable threshold), case pruning (old low-confidence
 failures without pitfalls), and fact conflict resolution (same-key different-value,
 keeps higher confidence). The Curator triggers housekeeping periodically.
 
@@ -434,7 +509,10 @@ FACTS EXIST). `assemble_system_prompt` combines persona + rendered preamble in c
 counts, renders preamble slots (including `agent_name`, `agent_version`, and constitution
 stats like `today_cycles` and `today_success_rate`), and assembles the final system prompt.
 The Archivist pushes `UpdateConstitution` after each cycle; `handle_agent_event` pushes
-`UpdateAgentHealth` on crash/restart/stop events. Falls back to a provided fallback prompt
+`UpdateAgentHealth` on crash/restart/stop events. `SetScheduler` message wires the
+scheduler subject into the Curator so it can query pending/running jobs via
+`build_open_commitments` and populate the `{{open_commitments}}` preamble slot with
+upcoming schedule items (sensorium integration). Falls back to a provided fallback prompt
 when no identity files exist.
 
 **Profiles** — startup-only agent team configurations loaded from TOML directories.
@@ -452,7 +530,40 @@ modification loop (max 2 iterations).
 `process.send_after` for recurring tick-based execution. `scheduler/delivery.gleam`
 handles report delivery (file with timestamps, webhook/websocket stubs).
 `scheduler/persist.gleam` provides atomic checkpoint persistence (tmp + rename) with
-`reconcile` to align checkpoint state with current config.
+`reconcile` to align checkpoint state with current config. Recurring jobs track
+`fired_count` and check `max_occurrences` / `recurrence_end_at` before rescheduling.
+The scheduler agent (`agents/scheduler.gleam`) has 10 tools including
+`schedule_from_spec` (structured params, preferred) and `inspect_job` (introspection).
+`schedule_from_spec` returns structured confirmation with fire time preview.
+
+Scheduler-triggered cycles use the `SchedulerInput` cognitive message variant (not
+`UserInput`), which skips query complexity classification, always uses `task_model`,
+and prepends `<scheduler_context>` XML to the prompt with job metadata. DAG nodes for
+these cycles are tagged with `SchedulerCycle` node type (vs `UserCycle` for interactive
+input). The scheduler reports `JobComplete` with `tokens_used` to enable token budget
+tracking.
+
+**Scheduler resource limits** — autonomous execution is rate-limited by two configurable
+guards: `max_autonomous_cycles_per_hour` (default 20) and
+`autonomous_token_budget_per_hour` (default 500000). The runner tracks cycle counts and
+token consumption per rolling hour window. When either limit is hit, jobs are skipped
+until the window rolls over. Set either to 0 for unlimited.
+
+**Scheduler notifications** — `SchedulerJobStarted`, `SchedulerJobCompleted`, and
+`SchedulerJobFailed` notification variants are emitted by the scheduler and displayed
+in both TUI (spinner label and notice) and web GUI (mapped to `ToolNotification`).
+
+**XStructor** — XML-schema-validated structured LLM output (`xstructor.gleam` +
+`xstructor_ffi.erl`). Replaces JSON parsing + repair heuristics with XSD validation
+and retry. All 5 structured LLM call sites use XStructor: D' candidates
+(`deliberative.gleam`), D' forecasts (`scorer.gleam`), narrative summaries
+(`summary.gleam`), CBR cases (`archivist.gleam`), and narrative entries
+(`archivist.gleam`). XSD schemas live in `xstructor/schemas.gleam`. Compiled schemas
+are written to `.springdrift/schemas/`. The `generate` function handles the full
+LLM call → clean response → validate against schema → retry on error loop.
+`extract` returns a flat `Dict(String, String)` with dotted paths
+(`root.child.grandchild`). Repeated elements use indexed paths
+(`root.items.item.0`, `root.items.item.1`).
 
 **Config validation** — `parse_config_toml` validates unknown TOML keys and warns via
 `slog`. Numeric values are range-checked (must be positive). Provider and GUI mode
@@ -471,7 +582,11 @@ legacy plain-array format. Corruption is detected and logged.
 
 **Web GUI auth** — when `SPRINGDRIFT_WEB_TOKEN` is set, all HTTP and WebSocket requests
 require authentication via `Authorization: Bearer <token>` header or `?token=` query
-parameter. No auth required when the env var is unset.
+parameter. No auth required when the env var is unset. The web admin page has four tabs:
+Narrative, Log, Scheduler (job list with status and next-run times), and Cycles
+(scheduler-triggered cycle history with token usage and agent output). WebSocket messages
+`RequestSchedulerData`/`SchedulerData` and `RequestSchedulerCycles`/`SchedulerCyclesData`
+power the admin tabs. The scheduler subject is threaded through `web/gui.gleam`.
 
 **Web research tools** — `tools/web.gleam` provides two tools. `web_search`
 (DuckDuckGo, no key) and `fetch_url` (raw HTTP GET, no key). The researcher agent
@@ -496,9 +611,10 @@ The config is organized into these TOML sections:
 | `[retry]` | LLM retry: max retries, backoff delays, cap |
 | `[limits]` | Size limits: artifacts, fetch, TUI, WebSocket, mailbox, query results |
 | `[scoring.threading]` | Thread assignment overlap weights and threshold |
-| `[scoring.cbr]` | CBR retrieval: cosine/symbolic weights, min score, decay |
+| `[cbr]` | CBR retrieval: signal weights, min score, optional embedding config |
 | `[housekeeping]` | Dedup similarity, pruning confidence, fact threshold |
-| `[embedding]` | Ollama: model, base_url, dimensions |
+| `[scheduler]` | Autonomous cycle resource limits (cycles/hour, token budget/hour) |
+| `[xstructor]` | XStructor XML validation settings (max_retries) |
 | `[agents.planner]` | Planner agent: max_tokens, max_turns, max_errors |
 | `[agents.researcher]` | Researcher agent: max_tokens, max_turns, max_errors, max_context |
 | `[agents.coder]` | Coder agent: max_tokens, max_turns, max_errors |
@@ -522,10 +638,9 @@ name = "Springdrift"
 [narrative]
 threading = true
 
-[embedding]
-model = "nomic-embed-text"
-base_url = "http://localhost:11434"
-dimensions = 768
+[cbr]
+# embedding_enabled = true
+# embedding_model = "nomic-embed-text"
 ```
 
 ### Profile directory format
@@ -554,6 +669,27 @@ CLI flags override config files. `--skills-dir` is repeatable and appends to the
 `SKILL.md` must open with `---`-fenced YAML frontmatter containing at least `name:`
 and `description:`. Everything after the closing `---` is the Markdown instruction
 body loaded by `read_skill`.
+
+## Documentation maintenance
+
+The following files form the project's documentation set and must be kept up to date
+after any development work that changes behaviour, adds features, or modifies the
+tool/agent surface:
+
+| File | Purpose |
+|---|---|
+| `CLAUDE.md` | Claude Code guide — architecture, patterns, config fields, key source files |
+| `.springdrift/skills/HOW_TO.md` | Operator guide — tool selection heuristics, agent usage, degradation paths |
+| `.springdrift_example/skills/HOW_TO.md` | Template copy of HOW_TO.md shipped with the project |
+| `.springdrift_example/README.md` | Setup instructions and directory layout for new users |
+
+After completing a task, check whether any of these files need updating. Common triggers:
+
+- **New or renamed tool** → update HOW_TO.md (both copies) and CLAUDE.md tool tables
+- **New or removed agent** → update HOW_TO.md Agents section and CLAUDE.md agent tables
+- **New config field** → update CLAUDE.md Config fields table and both config.toml files
+- **Changed directory layout** → update `.springdrift_example/README.md` and CLAUDE.md Key source files
+- **New environment variable** → update HOW_TO.md Degradation Paths and CLAUDE.md
 
 ## Shell Commands
 Do not warn about consecutive quote characters in shell commands.

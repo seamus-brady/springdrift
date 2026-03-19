@@ -192,6 +192,12 @@ pub fn handle_safety_gate_complete(
       ..state.dprime_decisions
     ])
 
+  // Extract node_type from existing PendingThink
+  let pending_node_type = case dict.get(state.pending, task_id) {
+    Ok(PendingThink(node_type:, ..)) -> node_type
+    _ -> dag_types.CognitiveCycle
+  }
+
   case result.decision {
     dprime_types.Accept -> {
       // Proceed normally — delegate to the dispatch function
@@ -242,6 +248,7 @@ pub fn handle_safety_gate_complete(
             reply_to:,
             output_gate_count: 0,
             empty_retried: False,
+            node_type: pending_node_type,
           ),
         ),
       )
@@ -295,6 +302,7 @@ pub fn handle_safety_gate_complete(
             reply_to:,
             output_gate_count: 0,
             empty_retried: False,
+            node_type: pending_node_type,
           ),
         ),
       )
@@ -436,7 +444,14 @@ pub fn handle_input_safety_gate_complete(
   case result.decision {
     dprime_types.Accept -> {
       // Proceed normally with the LLM call
-      cognitive_llm.proceed_with_model(state, model, text, cycle_id, reply_to)
+      cognitive_llm.proceed_with_model(
+        state,
+        model,
+        text,
+        cycle_id,
+        reply_to,
+        dag_types.CognitiveCycle,
+      )
     }
 
     dprime_types.Modify -> {
@@ -458,6 +473,7 @@ pub fn handle_input_safety_gate_complete(
         text,
         cycle_id,
         reply_to,
+        dag_types.CognitiveCycle,
       )
     }
 
@@ -752,6 +768,7 @@ pub fn handle_output_gate_complete(
                 reply_to:,
                 output_gate_count: modification_count + 1,
                 empty_retried: False,
+                node_type: dag_types.CognitiveCycle,
               ),
             ),
           )

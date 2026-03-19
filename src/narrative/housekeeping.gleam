@@ -5,11 +5,12 @@
 //// results via the Librarian.
 ////
 //// Operations:
-////   1. CBR deduplication: cosine similarity > 0.92 → merge (supersede older)
+////   1. CBR deduplication: field similarity > 0.92 → merge (supersede older)
 ////   2. CBR pruning: failure + confidence < 0.3 + age > 60 days + no pitfalls → remove
 ////   3. Fact conflict resolution: same key, different values → supersede lower confidence
 ////   4. Thread pruning: single-cycle threads older than cutoff → remove from index
 
+import cbr/bridge
 import cbr/types as cbr_types
 import facts/types as facts_types
 import gleam/float
@@ -20,7 +21,7 @@ import gleam/string
 import narrative/types as narrative_types
 
 // ---------------------------------------------------------------------------
-// CBR deduplication — cosine similarity > threshold
+// CBR deduplication — field similarity > threshold
 // ---------------------------------------------------------------------------
 
 /// A dedup decision: the newer case supersedes the older one.
@@ -28,9 +29,9 @@ pub type DedupResult {
   DedupResult(keep_id: String, supersede_id: String, similarity: Float)
 }
 
-/// Find pairs of CBR cases with cosine similarity > threshold on their
-/// embeddings. Returns a list of DedupResult where the older (by timestamp)
-/// case should be superseded.
+/// Find pairs of CBR cases with field similarity > threshold.
+/// Uses deterministic weighted field scoring.
+/// Returns a list of DedupResult where the older (by timestamp) case should be superseded.
 pub fn find_duplicate_cases(
   cases: List(cbr_types.CbrCase),
   threshold: Float,
@@ -58,66 +59,21 @@ fn compare_against_rest(
   threshold: Float,
 ) -> List(DedupResult) {
   list.filter_map(others, fn(case_b) {
-    case case_a.embedding, case_b.embedding {
-      [], _ -> Error(Nil)
-      _, [] -> Error(Nil)
-      emb_a, emb_b -> {
-        let sim = cosine_similarity(emb_a, emb_b)
-        case sim >. threshold {
-          True -> {
-            // Keep the newer one (later timestamp), supersede the older
-            let #(keep, supersede) = case
-              string.compare(case_a.timestamp, case_b.timestamp)
-            {
-              order.Lt -> #(case_b.case_id, case_a.case_id)
-              _ -> #(case_a.case_id, case_b.case_id)
-            }
-            Ok(DedupResult(
-              keep_id: keep,
-              supersede_id: supersede,
-              similarity: sim,
-            ))
-          }
-          False -> Error(Nil)
+    let sim = bridge.case_similarity(case_a, case_b)
+    case sim >=. threshold {
+      True -> {
+        let #(keep, supersede) = case
+          string.compare(case_a.timestamp, case_b.timestamp)
+        {
+          order.Lt -> #(case_b.case_id, case_a.case_id)
+          _ -> #(case_a.case_id, case_b.case_id)
         }
+        Ok(DedupResult(keep_id: keep, supersede_id: supersede, similarity: sim))
       }
+      False -> Error(Nil)
     }
   })
 }
-
-/// Cosine similarity between two float vectors.
-pub fn cosine_similarity(a: List(Float), b: List(Float)) -> Float {
-  let #(dot, mag_a, mag_b) = dot_and_magnitudes(a, b, 0.0, 0.0, 0.0)
-  let denominator = float_sqrt(mag_a) *. float_sqrt(mag_b)
-  case denominator >. 0.0 {
-    True -> dot /. denominator
-    False -> 0.0
-  }
-}
-
-fn dot_and_magnitudes(
-  a: List(Float),
-  b: List(Float),
-  dot: Float,
-  mag_a: Float,
-  mag_b: Float,
-) -> #(Float, Float, Float) {
-  case a, b {
-    [], _ -> #(dot, mag_a, mag_b)
-    _, [] -> #(dot, mag_a, mag_b)
-    [x, ..rest_a], [y, ..rest_b] ->
-      dot_and_magnitudes(
-        rest_a,
-        rest_b,
-        dot +. { x *. y },
-        mag_a +. { x *. x },
-        mag_b +. { y *. y },
-      )
-  }
-}
-
-@external(erlang, "math", "sqrt")
-fn float_sqrt(x: Float) -> Float
 
 // ---------------------------------------------------------------------------
 // CBR pruning — old failures without pitfalls

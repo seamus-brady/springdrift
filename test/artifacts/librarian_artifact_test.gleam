@@ -24,7 +24,7 @@ fn start_lib(suffix: String) {
       dir <> "/facts",
       artifacts_dir,
       0,
-      librarian.default_scoring_config(),
+      librarian.default_cbr_config(),
     )
   #(lib, dir, artifacts_dir)
 }
@@ -180,7 +180,7 @@ pub fn librarian_replays_artifacts_from_disk_test() {
       dir <> "/facts",
       artifacts_dir,
       0,
-      librarian.default_scoring_config(),
+      librarian.default_cbr_config(),
     )
 
   let results = librarian.query_artifacts_by_cycle(lib, "cycle-001")

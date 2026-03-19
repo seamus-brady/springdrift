@@ -310,7 +310,7 @@ fn parse_delivery(
         tom.get_string(toml, ["delivery", "file", "directory"])
       {
         Ok(d) -> d
-        Error(_) -> "./reports"
+        Error(_) -> paths.scheduler_outputs_dir()
       }
       let format = case tom.get_string(toml, ["delivery", "file", "format"]) {
         Ok(f) -> f

@@ -31,6 +31,17 @@ import tools/memory
 @external(erlang, "springdrift_ffi", "get_datetime")
 fn get_datetime() -> String
 
+/// Extract node_type from the PendingThink for a task_id, defaulting to CognitiveCycle.
+fn pending_node_type(
+  state: CognitiveState,
+  task_id: String,
+) -> dag_types.CycleNodeType {
+  case dict.get(state.pending, task_id) {
+    Ok(PendingThink(node_type:, ..)) -> node_type
+    _ -> dag_types.CognitiveCycle
+  }
+}
+
 pub fn dispatch_tool_calls(
   state: CognitiveState,
   task_id: String,
@@ -102,9 +113,12 @@ fn handle_memory_tools(
   remaining_calls: List(llm_types.ToolCall),
   reply_to: Subject(CognitiveReply),
 ) -> CognitiveState {
-  // Execute memory tools synchronously
+  let cycle_id = option.unwrap(state.cycle_id, task_id)
+  // Execute memory tools synchronously, logging each call/result
   let memory_results =
     list.map(memory_calls, fn(call) {
+      // Log tool call to cycle log
+      cycle_log.log_tool_call(cycle_id, call)
       let facts_ctx = case state.cycle_id {
         Some(cid) ->
           Some(memory.FactsContext(
@@ -157,15 +171,17 @@ fn handle_memory_tools(
           thread_multi_cycle: thread_total - thread_single_cycle,
         ))
       let result =
-        memory.execute(
+        memory.execute_with_how_to(
           call,
           state.memory.narrative_dir,
           state.memory.librarian,
           facts_ctx,
-          state.memory.embedding_config,
           introspect_ctx,
           state.config.memory_limits,
+          state.config.how_to_content,
         )
+      // Log tool result to cycle log
+      cycle_log.log_tool_result(cycle_id, result)
       case result {
         llm_types.ToolSuccess(tool_use_id: id, content: c) ->
           llm_types.ToolResultContent(
@@ -181,6 +197,25 @@ fn handle_memory_tools(
           )
       }
     })
+
+  // Accumulate ToolSummaries for DAG telemetry
+  let new_summaries =
+    list.map(memory_calls, fn(call) {
+      let success =
+        list.any(memory_results, fn(r) {
+          case r {
+            llm_types.ToolResultContent(tool_use_id: tuid, is_error: err, ..) ->
+              tuid == call.id && !err
+            _ -> False
+          }
+        })
+      dag_types.ToolSummary(name: call.name, success:, error: None)
+    })
+  let state =
+    CognitiveState(
+      ..state,
+      cycle_tool_calls: list.append(state.cycle_tool_calls, new_summaries),
+    )
 
   // If there are also agent calls, dispatch those with memory results as initial_results
   case remaining_calls {
@@ -226,6 +261,7 @@ fn handle_memory_tools(
             reply_to:,
             output_gate_count: 0,
             empty_retried: False,
+            node_type: pending_node_type(state, task_id),
           ),
         ),
       )
@@ -286,6 +322,7 @@ fn handle_memory_tools(
                 reply_to:,
                 output_gate_count: 0,
                 empty_retried: False,
+                node_type: pending_node_type(state, task_id),
               ),
             ),
           )
@@ -493,9 +530,17 @@ fn do_dispatch_agents(
           },
         )
 
+      // Log agent dispatch calls and accumulate ToolSummaries
+      let agent_summaries =
+        list.map(agent_calls, fn(call) {
+          cycle_log.log_tool_call(cycle_id, call)
+          dag_types.ToolSummary(name: call.name, success: True, error: None)
+        })
+
       CognitiveState(
         ..state,
         messages:,
+        cycle_tool_calls: list.append(state.cycle_tool_calls, agent_summaries),
         status: WaitingForAgents(
           pending_ids:,
           accumulated_results: initial_results,
@@ -787,6 +832,7 @@ pub fn handle_agent_complete(
                 reply_to:,
                 output_gate_count: 0,
                 empty_retried: False,
+                node_type: state.cycle_node_type,
               ),
             ),
           )
@@ -864,6 +910,7 @@ pub fn handle_user_answer(
             reply_to:,
             output_gate_count: 0,
             empty_retried: False,
+            node_type: state.cycle_node_type,
           ),
         ),
       )

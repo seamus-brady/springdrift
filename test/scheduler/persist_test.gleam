@@ -3,7 +3,10 @@ import gleam/option.{None, Some}
 import gleeunit/should
 import profile/types as profile_types
 import scheduler/persist
-import scheduler/types.{type ScheduledJob, Completed, Pending, ScheduledJob}
+import scheduler/types.{
+  type ScheduledJob, Completed, ForAgent, Pending, ProfileJob, RecurringTask,
+  ScheduledJob,
+}
 import simplifile
 
 fn test_job(name: String) -> ScheduledJob {
@@ -12,7 +15,7 @@ fn test_job(name: String) -> ScheduledJob {
     query: "test query for " <> name,
     interval_ms: 3_600_000,
     delivery: profile_types.FileDelivery(
-      directory: "./reports",
+      directory: ".springdrift/scheduler/outputs",
       format: "markdown",
     ),
     only_if_changed: False,
@@ -21,6 +24,18 @@ fn test_job(name: String) -> ScheduledJob {
     last_result: None,
     run_count: 0,
     error_count: 0,
+    job_source: ProfileJob,
+    kind: RecurringTask,
+    due_at: None,
+    for_: ForAgent,
+    title: name,
+    body: "",
+    duration_minutes: 0,
+    tags: [],
+    created_at: "",
+    fired_count: 0,
+    recurrence_end_at: None,
+    max_occurrences: None,
   )
 }
 

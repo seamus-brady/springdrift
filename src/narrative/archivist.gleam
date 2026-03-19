@@ -2,20 +2,19 @@
 ////
 //// Runs asynchronously after the reply is sent to the user. If it fails,
 //// the cycle completes normally — the Archivist is never visible to the user.
-//// Produces a complete NarrativeEntry JSON response in a single LLM call.
+//// Uses XStructor XML-validated generation for structured output.
 
 import agent/types as agent_types
 import cbr/log as cbr_log
 import cbr/types as cbr_types
-import embedding/client as embedding_client
-import embedding/types as embedding_types
+import gleam/dict.{type Dict}
 import gleam/dynamic/decode
 import gleam/erlang/process.{type Subject}
+import gleam/float
 import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import gleam/result
 import gleam/string
 import llm/provider.{type Provider}
 import llm/request
@@ -28,7 +27,10 @@ import narrative/types.{
   type Entities, type NarrativeEntry, Conversation, Entities, Failure, Intent,
   Metrics, Narrative, NarrativeEntry, Outcome, Success,
 }
+import paths
 import slog
+import xstructor
+import xstructor/schemas
 
 @external(erlang, "springdrift_ffi", "get_datetime")
 fn get_datetime() -> String
@@ -71,45 +73,74 @@ pub fn generate(
   _verbose: Bool,
 ) -> Option(NarrativeEntry) {
   let prompt = build_prompt(ctx)
-  let req =
-    request.new(model, max_tokens)
-    |> request.with_system(archivist_system_prompt())
-    |> request.with_user_message(prompt)
-
-  case provider.chat(req) {
-    Ok(resp) -> {
-      let text = response.text(resp)
-      case parse_narrative_entry(text, ctx) {
-        Ok(entry) -> {
+  let schema_dir = paths.schemas_dir()
+  case
+    xstructor.compile_schema(
+      schema_dir,
+      "narrative_entry.xsd",
+      schemas.narrative_entry_xsd,
+    )
+  {
+    Error(e) -> {
+      slog.warn(
+        "narrative/archivist",
+        "generate",
+        "Schema compile failed: " <> e <> " (falling back)",
+        Some(ctx.cycle_id),
+      )
+      Some(fallback_entry(ctx))
+    }
+    Ok(schema) -> {
+      let system =
+        schemas.build_system_prompt(
+          archivist_system_prompt_base(),
+          schemas.narrative_entry_xsd,
+          schemas.narrative_entry_example,
+        )
+      let config =
+        xstructor.XStructorConfig(
+          schema: schema,
+          system_prompt: system,
+          xml_example: schemas.narrative_entry_example,
+          max_retries: 3,
+          max_tokens: max_tokens,
+        )
+      case xstructor.generate(config, prompt, provider, model) {
+        Ok(result) -> {
           slog.info(
             "narrative/archivist",
             "generate",
             "Generated narrative for cycle " <> ctx.cycle_id,
             Some(ctx.cycle_id),
           )
-          Some(entry)
+          Some(extract_narrative_entry(result.elements, ctx))
         }
-        Error(_) -> {
-          slog.warn(
-            "narrative/archivist",
-            "generate",
-            "Archivist JSON parse failed (falling back). Raw response: "
-              <> string.slice(text, 0, 300),
-            Some(ctx.cycle_id),
-          )
-          // Fall back to a minimal entry with context
-          Some(fallback_entry(ctx))
+        Error(e) -> {
+          // Distinguish LLM errors (return None) from validation errors (fallback)
+          case string.starts_with(e, "LLM error:") {
+            True -> {
+              slog.warn(
+                "narrative/archivist",
+                "generate",
+                "LLM call failed, skipping narrative",
+                Some(ctx.cycle_id),
+              )
+              None
+            }
+            False -> {
+              slog.warn(
+                "narrative/archivist",
+                "generate",
+                "XStructor generation failed: "
+                  <> string.slice(e, 0, 300)
+                  <> " (falling back)",
+                Some(ctx.cycle_id),
+              )
+              Some(fallback_entry(ctx))
+            }
+          }
         }
       }
-    }
-    Error(_) -> {
-      slog.warn(
-        "narrative/archivist",
-        "generate",
-        "LLM call failed, skipping narrative",
-        Some(ctx.cycle_id),
-      )
-      None
     }
   }
 }
@@ -153,7 +184,7 @@ fn generate_topics(
       let cleaned =
         text
         |> string.trim
-        |> strip_markdown_fences
+        |> xstructor.clean_response
       case json.parse(cleaned, decode.list(decode.string)) {
         Ok(topics) -> list.take(topics, 7)
         Error(_) -> {
@@ -183,7 +214,6 @@ pub fn spawn(
   cbr_dir: String,
   verbose: Bool,
   lib: Option(Subject(LibrarianMessage)),
-  embed_config: embedding_types.EmbeddingConfig,
   cur: Option(Subject(CuratorMessage)),
   threading_config: threading.ThreadingConfig,
 ) -> Nil {
@@ -236,11 +266,10 @@ pub fn spawn(
           // Step 2: Generate CBR case from the narrative entry
           case generate_cbr_case(ctx, threaded, provider, model) {
             Some(cbr_case) -> {
-              // Embed the case before persisting
-              let embedded = embed_cbr_case(cbr_case, embed_config)
-              cbr_log.append(cbr_dir, embedded)
+              // Persist to JSONL and notify Librarian (which encodes into CaseBase)
+              cbr_log.append(cbr_dir, cbr_case)
               case lib {
-                Some(l) -> librarian.notify_new_case(l, embedded)
+                Some(l) -> librarian.notify_new_case(l, cbr_case)
                 None -> Nil
               }
             }
@@ -257,35 +286,17 @@ pub fn spawn(
 // Prompt
 // ---------------------------------------------------------------------------
 
-fn archivist_system_prompt() -> String {
+fn archivist_system_prompt_base() -> String {
   "You are the Archivist for an AI agent called Springdrift. Your job is to write a first-person narrative record of what just happened in a conversation cycle.
 
 RULES:
 - Write in first person, past tense: 'I was asked...', 'I delegated...', 'I found...'
 - Be honest about confidence and limitations
 - Use the controlled vocabulary for intent classification
-- Extract entities, keywords, and sources from the context
-- Respond with ONLY valid JSON matching the NarrativeEntry schema. No preamble, no markdown.
 
 INTENT CLASSIFICATIONS: data_report, data_query, comparison, trend_analysis, monitoring_check, exploration, clarification, system_command, conversation
 
-OUTCOME STATUS: success, partial, failure
-
-JSON SCHEMA (respond with exactly this structure):
-{
-  \"cycle_id\": \"<copy from CYCLE ID above>\",
-  \"timestamp\": \"<copy from TIMESTAMP above>\",
-  \"summary\": \"First-person 2-5 sentence narrative\",
-  \"intent\": {\"classification\": \"...\", \"description\": \"...\", \"domain\": \"...\"},
-  \"outcome\": {\"status\": \"...\", \"confidence\": 0.0-1.0, \"assessment\": \"...\"},
-  \"delegation_chain\": [{\"agent\": \"...\", \"instruction\": \"...\", \"outcome\": \"...\", \"contribution\": \"...\"}],
-  \"decisions\": [{\"point\": \"...\", \"choice\": \"...\", \"rationale\": \"...\"}],
-  \"keywords\": [\"...\"],
-  \"entities\": {\"locations\": [], \"organisations\": [], \"data_points\": [], \"temporal_references\": []},
-  \"sources\": [{\"type\": \"...\", \"name\": \"...\"}],
-  \"metrics\": {\"total_duration_ms\": 0, \"input_tokens\": 0, \"output_tokens\": 0, \"thinking_tokens\": 0, \"tool_calls\": 0, \"agent_delegations\": 0, \"dprime_evaluations\": 0, \"model_used\": \"...\"},
-  \"observations\": [{\"type\": \"...\", \"severity\": \"info|warning|error\", \"detail\": \"...\"}]
-}"
+OUTCOME STATUS: success, partial, failure"
 }
 
 fn build_prompt(ctx: ArchivistContext) -> String {
@@ -369,213 +380,92 @@ fn build_prompt(ctx: ArchivistContext) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Parse LLM response into NarrativeEntry
+// Extract NarrativeEntry from XStructor elements dict
 // ---------------------------------------------------------------------------
 
-fn parse_narrative_entry(
-  text: String,
+fn extract_narrative_entry(
+  elements: Dict(String, String),
   ctx: ArchivistContext,
-) -> Result(NarrativeEntry, Nil) {
-  let stripped = strip_markdown_fences(string.trim(text))
-  let extracted = extract_json_object(stripped)
-  // Sanitize control characters that LLMs sometimes leave unescaped in JSON strings
-  let cleaned = sanitize_json_string(extracted)
-  // Try parsing as-is first, then with single-quote repair
-  case try_parse_entry(cleaned) {
-    Ok(entry) -> apply_overrides(entry, ctx) |> Ok
+) -> NarrativeEntry {
+  let summary = get_or(elements, "narrative_entry.summary", "")
+  let classification =
+    get_or(elements, "narrative_entry.intent.classification", "conversation")
+  let description = get_or(elements, "narrative_entry.intent.description", "")
+  let domain = get_or(elements, "narrative_entry.intent.domain", "")
+  let status = get_or(elements, "narrative_entry.outcome.status", "success")
+  let confidence =
+    parse_float_or(
+      get_or(elements, "narrative_entry.outcome.confidence", "0.5"),
+      0.5,
+    )
+  let assessment = get_or(elements, "narrative_entry.outcome.assessment", "")
+
+  NarrativeEntry(
+    schema_version: 1,
+    cycle_id: ctx.cycle_id,
+    parent_cycle_id: ctx.parent_cycle_id,
+    timestamp: get_datetime(),
+    entry_type: Narrative,
+    summary: summary,
+    intent: Intent(
+      classification: parse_classification(classification),
+      description: description,
+      domain: domain,
+    ),
+    outcome: Outcome(
+      status: parse_status(status),
+      confidence: confidence,
+      assessment: assessment,
+    ),
+    delegation_chain: extract_delegation_chain(elements),
+    decisions: extract_decisions(elements),
+    keywords: extract_string_list(elements, "narrative_entry.keywords.keyword"),
+    topics: [],
+    entities: extract_entities(elements),
+    sources: extract_sources(elements),
+    thread: None,
+    metrics: extract_metrics(elements),
+    observations: extract_observations(elements),
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Element extraction helpers
+// ---------------------------------------------------------------------------
+
+fn get_or(
+  elements: Dict(String, String),
+  key: String,
+  default: String,
+) -> String {
+  case dict.get(elements, key) {
+    Ok(v) -> v
+    Error(_) -> default
+  }
+}
+
+fn parse_float_or(text: String, default: Float) -> Float {
+  case float.parse(text) {
+    Ok(f) -> f
     Error(_) -> {
-      // Try repairing single quotes to double quotes
-      let sq_repaired = replace_single_quotes(cleaned)
-      let sq_cleaned = sanitize_json_string(sq_repaired)
-      case try_parse_entry(sq_cleaned) {
-        Ok(entry) -> apply_overrides(entry, ctx) |> Ok
-        Error(_) -> {
-          // Try repairing truncated JSON on original
-          let repaired = repair_truncated_json(cleaned)
-          case try_parse_entry(repaired) {
-            Ok(entry) -> apply_overrides(entry, ctx) |> Ok
-            Error(_) -> Error(Nil)
-          }
-        }
+      // Try parsing as int and converting
+      case int.parse(text) {
+        Ok(i) -> int.to_float(i)
+        Error(_) -> default
       }
     }
   }
 }
 
-/// Try parsing JSON text into a NarrativeEntry using the lenient decoder.
-fn try_parse_entry(text: String) -> Result(NarrativeEntry, Nil) {
-  json.parse(text, lenient_entry_decoder())
-  |> result.replace_error(Nil)
-}
-
-/// Apply archivist overrides (cycle_id, timestamp, schema_version, entry_type).
-fn apply_overrides(
-  partial: NarrativeEntry,
-  ctx: ArchivistContext,
-) -> NarrativeEntry {
-  NarrativeEntry(
-    ..partial,
-    schema_version: 1,
-    cycle_id: ctx.cycle_id,
-    parent_cycle_id: ctx.parent_cycle_id,
-    timestamp: case partial.timestamp {
-      "" -> get_datetime()
-      ts -> ts
-    },
-    entry_type: Narrative,
-  )
-}
-
-/// Replace single-quoted JSON keys and string values with double quotes.
-/// This is a best-effort repair for LLMs that produce Python-style JSON.
-/// Walks the string character by character, swapping ' for " when it appears
-/// to be a JSON string delimiter (not inside a double-quoted string, and not
-/// an apostrophe in text like "don't").
-fn replace_single_quotes(text: String) -> String {
-  replace_sq_walk(string.to_graphemes(text), False, False, False, [])
-  |> list.reverse
-  |> string.join("")
-}
-
-fn replace_sq_walk(
-  graphemes: List(String),
-  in_double: Bool,
-  in_single: Bool,
-  escaped: Bool,
-  acc: List(String),
-) -> List(String) {
-  case graphemes {
-    [] -> acc
-    [g, ..rest] ->
-      case escaped {
-        True -> replace_sq_walk(rest, in_double, in_single, False, [g, ..acc])
-        False ->
-          case g {
-            "\\" ->
-              replace_sq_walk(rest, in_double, in_single, True, [g, ..acc])
-            "\"" ->
-              case in_single {
-                // Inside a single-quoted string, keep literal "
-                True ->
-                  replace_sq_walk(rest, False, True, False, ["\\\"", ..acc])
-                False ->
-                  replace_sq_walk(rest, !in_double, False, False, ["\"", ..acc])
-              }
-            "'" ->
-              case in_double {
-                // Inside a double-quoted string, keep as apostrophe
-                True -> replace_sq_walk(rest, True, False, False, ["'", ..acc])
-                False ->
-                  // Swap single quote for double quote
-                  replace_sq_walk(rest, False, !in_single, False, ["\"", ..acc])
-              }
-            _ ->
-              replace_sq_walk(rest, in_double, in_single, escaped, [g, ..acc])
-          }
-      }
+fn parse_int_or_zero(text: String) -> Int {
+  case int.parse(text) {
+    Ok(i) -> i
+    Error(_) -> 0
   }
 }
 
-/// Sanitize a JSON string by escaping unescaped control characters inside
-/// string values. LLMs often produce JSON with literal newlines, tabs, or
-/// other control chars inside quoted strings, which breaks JSON parsers.
-@external(erlang, "springdrift_ffi", "sanitize_json")
-pub fn sanitize_json_string(json_text: String) -> String
-
-/// Lenient decoder for archivist LLM output — all fields optional with defaults.
-fn lenient_entry_decoder() -> decode.Decoder(NarrativeEntry) {
-  use cycle_id <- decode.optional_field("cycle_id", "", decode.string)
-  use timestamp <- decode.optional_field("timestamp", "", decode.string)
-  use summary <- decode.optional_field("summary", "", decode.string)
-  use intent <- decode.optional_field(
-    "intent",
-    Intent(classification: Conversation, description: "", domain: ""),
-    lenient_intent_decoder(),
-  )
-  use outcome <- decode.optional_field(
-    "outcome",
-    Outcome(status: Success, confidence: 0.5, assessment: ""),
-    lenient_outcome_decoder(),
-  )
-  use delegation_chain <- decode.optional_field(
-    "delegation_chain",
-    [],
-    decode.list(lenient_delegation_decoder()),
-  )
-  use decisions <- decode.optional_field(
-    "decisions",
-    [],
-    decode.list(lenient_decision_decoder()),
-  )
-  use keywords <- decode.optional_field(
-    "keywords",
-    [],
-    decode.list(decode.string),
-  )
-  use entities <- decode.optional_field(
-    "entities",
-    Entities(
-      locations: [],
-      organisations: [],
-      data_points: [],
-      temporal_references: [],
-    ),
-    lenient_entities_decoder(),
-  )
-  use sources <- decode.optional_field(
-    "sources",
-    [],
-    decode.list(lenient_source_decoder()),
-  )
-  use metrics <- decode.optional_field(
-    "metrics",
-    Metrics(
-      total_duration_ms: 0,
-      input_tokens: 0,
-      output_tokens: 0,
-      thinking_tokens: 0,
-      tool_calls: 0,
-      agent_delegations: 0,
-      dprime_evaluations: 0,
-      model_used: "",
-    ),
-    lenient_metrics_decoder(),
-  )
-  use observations <- decode.optional_field(
-    "observations",
-    [],
-    decode.list(lenient_observation_decoder()),
-  )
-  decode.success(NarrativeEntry(
-    schema_version: 1,
-    cycle_id:,
-    parent_cycle_id: None,
-    timestamp:,
-    entry_type: Narrative,
-    summary:,
-    intent:,
-    outcome:,
-    delegation_chain:,
-    decisions:,
-    keywords:,
-    topics: [],
-    entities:,
-    sources:,
-    thread: None,
-    metrics:,
-    observations:,
-  ))
-}
-
-fn lenient_intent_decoder() -> decode.Decoder(types.Intent) {
-  use classification_str <- decode.optional_field(
-    "classification",
-    "conversation",
-    decode.string,
-  )
-  use description <- decode.optional_field("description", "", decode.string)
-  use domain <- decode.optional_field("domain", "", decode.string)
-  let classification = case classification_str {
+fn parse_classification(text: String) -> types.IntentClassification {
+  case string.lowercase(text) {
     "data_report" -> types.DataReport
     "data_query" -> types.DataQuery
     "comparison" -> types.Comparison
@@ -586,188 +476,260 @@ fn lenient_intent_decoder() -> decode.Decoder(types.Intent) {
     "system_command" -> types.SystemCommand
     _ -> Conversation
   }
-  decode.success(Intent(classification:, description:, domain:))
 }
 
-fn lenient_outcome_decoder() -> decode.Decoder(types.Outcome) {
-  use status_str <- decode.optional_field("status", "success", decode.string)
-  use confidence <- decode.optional_field("confidence", 0.5, decode.float)
-  use assessment <- decode.optional_field("assessment", "", decode.string)
-  let status = case status_str {
+fn parse_status(text: String) -> types.OutcomeStatus {
+  case string.lowercase(text) {
     "partial" -> types.Partial
     "failure" -> Failure
     _ -> Success
   }
-  decode.success(Outcome(status:, confidence:, assessment:))
 }
 
-fn lenient_delegation_decoder() -> decode.Decoder(types.DelegationStep) {
-  use agent <- decode.optional_field("agent", "", decode.string)
-  use agent_id <- decode.optional_field("agent_id", "", decode.string)
-  use agent_human_name <- decode.optional_field(
-    "agent_human_name",
-    "",
-    decode.string,
-  )
-  use agent_cycle_id <- decode.optional_field(
-    "agent_cycle_id",
-    "",
-    decode.string,
-  )
-  use instruction <- decode.optional_field("instruction", "", decode.string)
-  use outcome <- decode.optional_field("outcome", "", decode.string)
-  use contribution <- decode.optional_field("contribution", "", decode.string)
-  use tools_used <- decode.optional_field(
-    "tools_used",
-    [],
-    decode.list(decode.string),
-  )
-  use sources_accessed <- decode.optional_field(
-    "sources_accessed",
-    0,
-    decode.int,
-  )
-  use input_tokens <- decode.optional_field("input_tokens", 0, decode.int)
-  use output_tokens <- decode.optional_field("output_tokens", 0, decode.int)
-  use duration_ms <- decode.optional_field("duration_ms", 0, decode.int)
-  decode.success(types.DelegationStep(
-    agent:,
-    agent_id:,
-    agent_human_name:,
-    agent_cycle_id:,
-    instruction:,
-    outcome:,
-    contribution:,
-    tools_used:,
-    sources_accessed:,
-    input_tokens:,
-    output_tokens:,
-    duration_ms:,
-  ))
-}
-
-fn lenient_decision_decoder() -> decode.Decoder(types.Decision) {
-  use point <- decode.optional_field("point", "", decode.string)
-  use choice <- decode.optional_field("choice", "", decode.string)
-  use rationale <- decode.optional_field("rationale", "", decode.string)
-  use score <- decode.optional_field(
-    "score",
-    None,
-    decode.optional(decode.float),
-  )
-  decode.success(types.Decision(point:, choice:, rationale:, score:))
-}
-
-fn lenient_entities_decoder() -> decode.Decoder(Entities) {
-  use locations <- decode.optional_field(
-    "locations",
-    [],
-    decode.list(decode.string),
-  )
-  use organisations <- decode.optional_field(
-    "organisations",
-    [],
-    decode.list(decode.string),
-  )
-  use data_points <- decode.optional_field(
-    "data_points",
-    [],
-    decode.list(lenient_data_point_decoder()),
-  )
-  use temporal_references <- decode.optional_field(
-    "temporal_references",
-    [],
-    decode.list(decode.string),
-  )
-  decode.success(Entities(
-    locations:,
-    organisations:,
-    data_points:,
-    temporal_references:,
-  ))
-}
-
-fn lenient_data_point_decoder() -> decode.Decoder(types.DataPoint) {
-  use label <- decode.optional_field("label", "", decode.string)
-  use value <- decode.optional_field("value", "", decode.string)
-  use unit <- decode.optional_field("unit", "", decode.string)
-  use period <- decode.optional_field("period", "", decode.string)
-  use source <- decode.optional_field("source", "", decode.string)
-  decode.success(types.DataPoint(label:, value:, unit:, period:, source:))
-}
-
-fn lenient_source_decoder() -> decode.Decoder(types.Source) {
-  use source_type <- decode.optional_field("type", "", decode.string)
-  use url <- decode.optional_field("url", None, decode.optional(decode.string))
-  use path <- decode.optional_field(
-    "path",
-    None,
-    decode.optional(decode.string),
-  )
-  use name <- decode.optional_field("name", "", decode.string)
-  use accessed_at <- decode.optional_field(
-    "accessed_at",
-    None,
-    decode.optional(decode.string),
-  )
-  use data_date <- decode.optional_field(
-    "data_date",
-    None,
-    decode.optional(decode.string),
-  )
-  decode.success(types.Source(
-    source_type:,
-    url:,
-    path:,
-    name:,
-    accessed_at:,
-    data_date:,
-  ))
-}
-
-fn lenient_metrics_decoder() -> decode.Decoder(types.Metrics) {
-  use total_duration_ms <- decode.optional_field(
-    "total_duration_ms",
-    0,
-    decode.int,
-  )
-  use input_tokens <- decode.optional_field("input_tokens", 0, decode.int)
-  use output_tokens <- decode.optional_field("output_tokens", 0, decode.int)
-  use thinking_tokens <- decode.optional_field("thinking_tokens", 0, decode.int)
-  use tool_calls <- decode.optional_field("tool_calls", 0, decode.int)
-  use agent_delegations <- decode.optional_field(
-    "agent_delegations",
-    0,
-    decode.int,
-  )
-  use dprime_evaluations <- decode.optional_field(
-    "dprime_evaluations",
-    0,
-    decode.int,
-  )
-  use model_used <- decode.optional_field("model_used", "", decode.string)
-  decode.success(Metrics(
-    total_duration_ms:,
-    input_tokens:,
-    output_tokens:,
-    thinking_tokens:,
-    tool_calls:,
-    agent_delegations:,
-    dprime_evaluations:,
-    model_used:,
-  ))
-}
-
-fn lenient_observation_decoder() -> decode.Decoder(types.Observation) {
-  use observation_type <- decode.optional_field("type", "", decode.string)
-  use severity_str <- decode.optional_field("severity", "info", decode.string)
-  use detail <- decode.optional_field("detail", "", decode.string)
-  let severity = case severity_str {
-    "warning" -> types.Warning
-    "error" -> types.ErrorSeverity
-    _ -> types.Info
+/// Extract a list of strings from elements. Handles both indexed form
+/// (prefix.0, prefix.1, ...) for multiple items and bare form (prefix)
+/// for a single item (xmerl only uses indices when count > 1).
+fn extract_string_list(
+  elements: Dict(String, String),
+  prefix: String,
+) -> List(String) {
+  case xstructor.extract_list(elements, prefix) {
+    [] -> {
+      // Try bare key for single-element case
+      case dict.get(elements, prefix) {
+        Ok(v) ->
+          case v {
+            "" -> []
+            _ -> [v]
+          }
+        Error(_) -> []
+      }
+    }
+    items -> items
   }
-  decode.success(types.Observation(observation_type:, severity:, detail:))
+}
+
+fn extract_delegation_chain(
+  elements: Dict(String, String),
+) -> List(types.DelegationStep) {
+  extract_indexed_loop(
+    elements,
+    "narrative_entry.delegation_chain.step",
+    0,
+    [],
+    fn(elems, prefix) {
+      types.DelegationStep(
+        agent: get_or(elems, prefix <> ".agent", ""),
+        agent_id: "",
+        agent_human_name: "",
+        agent_cycle_id: "",
+        instruction: get_or(elems, prefix <> ".instruction", ""),
+        outcome: get_or(elems, prefix <> ".outcome", ""),
+        contribution: get_or(elems, prefix <> ".contribution", ""),
+        tools_used: [],
+        sources_accessed: 0,
+        input_tokens: 0,
+        output_tokens: 0,
+        duration_ms: 0,
+      )
+    },
+  )
+}
+
+fn extract_decisions(elements: Dict(String, String)) -> List(types.Decision) {
+  extract_indexed_loop(
+    elements,
+    "narrative_entry.decisions.decision",
+    0,
+    [],
+    fn(elems, prefix) {
+      types.Decision(
+        point: get_or(elems, prefix <> ".point", ""),
+        choice: get_or(elems, prefix <> ".choice", ""),
+        rationale: get_or(elems, prefix <> ".rationale", ""),
+        score: None,
+      )
+    },
+  )
+}
+
+fn extract_entities(elements: Dict(String, String)) -> Entities {
+  let locations =
+    extract_string_list(elements, "narrative_entry.entities.locations.location")
+  let organisations =
+    extract_string_list(
+      elements,
+      "narrative_entry.entities.organisations.organisation",
+    )
+  let data_points =
+    extract_indexed_loop(
+      elements,
+      "narrative_entry.entities.data_points.data_point",
+      0,
+      [],
+      fn(elems, prefix) {
+        types.DataPoint(
+          label: get_or(elems, prefix <> ".label", ""),
+          value: get_or(elems, prefix <> ".value", ""),
+          unit: get_or(elems, prefix <> ".unit", ""),
+          period: get_or(elems, prefix <> ".period", ""),
+          source: get_or(elems, prefix <> ".source", ""),
+        )
+      },
+    )
+  let temporal_references =
+    extract_string_list(
+      elements,
+      "narrative_entry.entities.temporal_references.reference",
+    )
+  Entities(locations:, organisations:, data_points:, temporal_references:)
+}
+
+fn extract_sources(elements: Dict(String, String)) -> List(types.Source) {
+  extract_indexed_loop(
+    elements,
+    "narrative_entry.sources.source",
+    0,
+    [],
+    fn(elems, prefix) {
+      types.Source(
+        source_type: get_or(elems, prefix <> ".type", ""),
+        url: None,
+        path: None,
+        name: get_or(elems, prefix <> ".name", ""),
+        accessed_at: None,
+        data_date: None,
+      )
+    },
+  )
+}
+
+fn extract_metrics(elements: Dict(String, String)) -> types.Metrics {
+  Metrics(
+    total_duration_ms: parse_int_or_zero(get_or(
+      elements,
+      "narrative_entry.metrics.total_duration_ms",
+      "0",
+    )),
+    input_tokens: parse_int_or_zero(get_or(
+      elements,
+      "narrative_entry.metrics.input_tokens",
+      "0",
+    )),
+    output_tokens: parse_int_or_zero(get_or(
+      elements,
+      "narrative_entry.metrics.output_tokens",
+      "0",
+    )),
+    thinking_tokens: parse_int_or_zero(get_or(
+      elements,
+      "narrative_entry.metrics.thinking_tokens",
+      "0",
+    )),
+    tool_calls: parse_int_or_zero(get_or(
+      elements,
+      "narrative_entry.metrics.tool_calls",
+      "0",
+    )),
+    agent_delegations: parse_int_or_zero(get_or(
+      elements,
+      "narrative_entry.metrics.agent_delegations",
+      "0",
+    )),
+    dprime_evaluations: parse_int_or_zero(get_or(
+      elements,
+      "narrative_entry.metrics.dprime_evaluations",
+      "0",
+    )),
+    model_used: get_or(elements, "narrative_entry.metrics.model_used", ""),
+  )
+}
+
+fn extract_observations(
+  elements: Dict(String, String),
+) -> List(types.Observation) {
+  extract_indexed_loop(
+    elements,
+    "narrative_entry.observations.observation",
+    0,
+    [],
+    fn(elems, prefix) {
+      let severity_str = get_or(elems, prefix <> ".severity", "info")
+      let severity = case severity_str {
+        "warning" -> types.Warning
+        "error" -> types.ErrorSeverity
+        _ -> types.Info
+      }
+      types.Observation(
+        observation_type: get_or(elems, prefix <> ".type", ""),
+        severity: severity,
+        detail: get_or(elems, prefix <> ".detail", ""),
+      )
+    },
+  )
+}
+
+/// Generic indexed loop for extracting repeated complex elements.
+/// The xmerl FFI only uses numeric indexing (prefix.0, prefix.1, ...) when
+/// there are multiple children with the same name. A single child uses the
+/// bare path (prefix.child) with no index. This function checks both forms.
+fn extract_indexed_loop(
+  elements: Dict(String, String),
+  prefix: String,
+  idx: Int,
+  acc: List(a),
+  extractor: fn(Dict(String, String), String) -> a,
+) -> List(a) {
+  let indexed_prefix = prefix <> "." <> int.to_string(idx)
+  // Check if any key starts with the indexed prefix (e.g. prefix.0.child)
+  let has_indexed =
+    dict.keys(elements)
+    |> list.any(fn(k) { string.starts_with(k, indexed_prefix) })
+  case has_indexed {
+    True -> {
+      let item = extractor(elements, indexed_prefix)
+      extract_indexed_loop(elements, prefix, idx + 1, [item, ..acc], extractor)
+    }
+    False -> {
+      // If idx == 0 and no indexed keys found, check for bare (non-indexed) prefix.
+      // This handles the single-element case where xmerl doesn't add indices.
+      case idx == 0 {
+        True -> {
+          let has_bare =
+            dict.keys(elements)
+            |> list.any(fn(k) {
+              string.starts_with(k, prefix <> ".") && !is_indexed_key(k, prefix)
+            })
+          case has_bare {
+            True -> {
+              let item = extractor(elements, prefix)
+              [item]
+            }
+            False -> list.reverse(acc)
+          }
+        }
+        False -> list.reverse(acc)
+      }
+    }
+  }
+}
+
+/// Check if a key after the prefix starts with a digit (indicating indexing).
+fn is_indexed_key(key: String, prefix: String) -> Bool {
+  let after = string.drop_start(key, string.length(prefix) + 1)
+  case string.first(after) {
+    Ok("0")
+    | Ok("1")
+    | Ok("2")
+    | Ok("3")
+    | Ok("4")
+    | Ok("5")
+    | Ok("6")
+    | Ok("7")
+    | Ok("8")
+    | Ok("9") -> True
+    _ -> False
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -783,123 +745,65 @@ fn generate_cbr_case(
   model: String,
 ) -> Option(cbr_types.CbrCase) {
   let prompt = build_cbr_prompt(ctx, entry)
-  let req =
-    request.new(model, 1024)
-    |> request.with_system(cbr_system_prompt())
-    |> request.with_user_message(prompt)
-
-  case provider.chat(req) {
-    Ok(resp) -> {
-      let text = response.text(resp)
-      case parse_cbr_case(text, ctx, entry) {
-        Ok(cbr_case) -> {
+  let schema_dir = paths.schemas_dir()
+  case
+    xstructor.compile_schema(schema_dir, "cbr_case.xsd", schemas.cbr_case_xsd)
+  {
+    Error(e) -> {
+      slog.warn(
+        "narrative/archivist",
+        "generate_cbr",
+        "CBR schema compile failed: " <> e,
+        Some(ctx.cycle_id),
+      )
+      None
+    }
+    Ok(schema) -> {
+      let system =
+        schemas.build_system_prompt(
+          cbr_system_prompt_base(),
+          schemas.cbr_case_xsd,
+          schemas.cbr_case_example,
+        )
+      let config =
+        xstructor.XStructorConfig(
+          schema: schema,
+          system_prompt: system,
+          xml_example: schemas.cbr_case_example,
+          max_retries: 3,
+          max_tokens: 1024,
+        )
+      case xstructor.generate(config, prompt, provider, model) {
+        Ok(result) -> {
           slog.info(
             "narrative/archivist",
             "generate_cbr",
             "Generated CBR case for cycle " <> ctx.cycle_id,
             Some(ctx.cycle_id),
           )
-          Some(cbr_case)
+          Some(extract_cbr_case(result.elements, ctx, entry))
         }
-        Error(_) -> {
+        Error(e) -> {
           slog.warn(
             "narrative/archivist",
             "generate_cbr",
-            "CBR case parse failed, skipping. Raw: "
-              <> string.slice(text, 0, 200),
+            "CBR XStructor generation failed: " <> string.slice(e, 0, 200),
             Some(ctx.cycle_id),
           )
           None
         }
       }
     }
-    Error(_) -> {
-      slog.warn(
-        "narrative/archivist",
-        "generate_cbr",
-        "CBR LLM call failed, skipping",
-        Some(ctx.cycle_id),
-      )
-      None
-    }
   }
 }
 
-/// Generate an embedding for a CBR case and attach it.
-/// Falls back to empty embedding on any error (best-effort).
-fn embed_cbr_case(
-  cbr_case: cbr_types.CbrCase,
-  config: embedding_types.EmbeddingConfig,
-) -> cbr_types.CbrCase {
-  // Build a text representation for embedding from the case's key fields
-  let text =
-    cbr_case.problem.intent
-    <> " "
-    <> cbr_case.problem.domain
-    <> " "
-    <> string.join(cbr_case.problem.keywords, " ")
-    <> " "
-    <> cbr_case.problem.user_input
-    <> " "
-    <> cbr_case.solution.approach
-  case embedding_client.embed(config, text) {
-    Ok(result) -> {
-      slog.info(
-        "narrative/archivist",
-        "embed_cbr",
-        "Embedded CBR case "
-          <> cbr_case.case_id
-          <> " ("
-          <> int.to_string(list.length(result.embedding))
-          <> " dims)",
-        Some(cbr_case.case_id),
-      )
-      cbr_types.CbrCase(..cbr_case, embedding: result.embedding)
-    }
-    Error(_) -> {
-      slog.warn(
-        "narrative/archivist",
-        "embed_cbr",
-        "Embedding failed for CBR case " <> cbr_case.case_id <> ", using empty",
-        Some(cbr_case.case_id),
-      )
-      cbr_case
-    }
-  }
-}
-
-fn cbr_system_prompt() -> String {
+fn cbr_system_prompt_base() -> String {
   "You are the Archivist extracting a Case-Based Reasoning record from a completed cognitive cycle. Your goal is to produce a structured problem/solution/outcome record optimised for future retrieval.
 
 RULES:
 - Focus on retrievability: use clear, specific terms in problem descriptors
 - Capture the approach, not just the result
-- Document pitfalls and what went wrong
-- Respond with ONLY valid JSON matching the CbrCase schema. No preamble, no markdown.
-
-JSON SCHEMA:
-{
-  \"problem\": {
-    \"user_input\": \"<original query, truncated to 500 chars>\",
-    \"intent\": \"<data_report|data_query|comparison|trend_analysis|monitoring_check|exploration|clarification|system_command|conversation>\",
-    \"domain\": \"<domain>\",
-    \"entities\": [\"<locations + organisations>\"],
-    \"keywords\": [\"<key terms>\"],
-    \"query_complexity\": \"<simple|moderate|complex>\"
-  },
-  \"solution\": {
-    \"approach\": \"<1-3 sentence description of how the problem was approached>\",
-    \"agents_used\": [\"<agent names>\"],
-    \"tools_used\": [\"<tool names>\"],
-    \"steps\": [\"<key decision points, in order>\"]
-  },
-  \"outcome\": {
-    \"status\": \"<success|partial|failure>\",
-    \"confidence\": 0.0-1.0,
-    \"assessment\": \"<brief assessment>\",
-    \"pitfalls\": [\"<what went wrong or nearly wrong>\"]
-  }
-}"
+- Document pitfalls and what went wrong"
 }
 
 fn build_cbr_prompt(ctx: ArchivistContext, entry: NarrativeEntry) -> String {
@@ -968,143 +872,75 @@ fn build_cbr_prompt(ctx: ArchivistContext, entry: NarrativeEntry) -> String {
   <> string.join(entry.entities.organisations, ", ")
 }
 
-fn parse_cbr_case(
-  text: String,
+// ---------------------------------------------------------------------------
+// Extract CbrCase from XStructor elements dict
+// ---------------------------------------------------------------------------
+
+fn extract_cbr_case(
+  elements: Dict(String, String),
   ctx: ArchivistContext,
   entry: NarrativeEntry,
-) -> Result(cbr_types.CbrCase, Nil) {
-  let stripped = strip_markdown_fences(string.trim(text))
-  let extracted = extract_json_object(stripped)
-  let cleaned = sanitize_json_string(extracted)
-  case json.parse(cleaned, lenient_cbr_decoder()) {
-    Ok(partial) ->
-      Ok(
-        cbr_types.CbrCase(
-          ..partial,
-          case_id: ctx.cycle_id,
-          timestamp: entry.timestamp,
-          schema_version: 1,
-          embedding: [],
-          source_narrative_id: ctx.cycle_id,
-          profile: option.None,
-        ),
-      )
-    Error(_) -> Error(Nil)
-  }
-}
-
-fn lenient_cbr_decoder() -> decode.Decoder(cbr_types.CbrCase) {
-  use problem <- decode.optional_field(
-    "problem",
+) -> cbr_types.CbrCase {
+  let problem =
     cbr_types.CbrProblem(
-      user_input: "",
-      intent: "",
-      domain: "",
-      entities: [],
-      keywords: [],
-      query_complexity: "simple",
-    ),
-    lenient_cbr_problem_decoder(),
-  )
-  use solution <- decode.optional_field(
-    "solution",
+      user_input: get_or(elements, "cbr_case.problem.user_input", ""),
+      intent: get_or(elements, "cbr_case.problem.intent", ""),
+      domain: get_or(elements, "cbr_case.problem.domain", ""),
+      entities: extract_string_list(
+        elements,
+        "cbr_case.problem.entities.entity",
+      ),
+      keywords: extract_string_list(
+        elements,
+        "cbr_case.problem.keywords.keyword",
+      ),
+      query_complexity: get_or(
+        elements,
+        "cbr_case.problem.query_complexity",
+        "simple",
+      ),
+    )
+  let solution =
     cbr_types.CbrSolution(
-      approach: "",
-      agents_used: [],
-      tools_used: [],
-      steps: [],
-    ),
-    lenient_cbr_solution_decoder(),
-  )
-  use outcome <- decode.optional_field(
-    "outcome",
+      approach: get_or(elements, "cbr_case.solution.approach", ""),
+      agents_used: extract_string_list(
+        elements,
+        "cbr_case.solution.agents_used.agent",
+      ),
+      tools_used: extract_string_list(
+        elements,
+        "cbr_case.solution.tools_used.tool",
+      ),
+      steps: extract_string_list(elements, "cbr_case.solution.steps.step"),
+    )
+  let outcome =
     cbr_types.CbrOutcome(
-      status: "success",
-      confidence: 0.5,
-      assessment: "",
-      pitfalls: [],
-    ),
-    lenient_cbr_outcome_decoder(),
-  )
-  decode.success(cbr_types.CbrCase(
-    case_id: "",
-    timestamp: "",
+      status: get_or(elements, "cbr_case.outcome.status", "success"),
+      confidence: parse_float_or(
+        get_or(elements, "cbr_case.outcome.confidence", "0.5"),
+        0.5,
+      ),
+      assessment: get_or(elements, "cbr_case.outcome.assessment", ""),
+      pitfalls: extract_string_list(
+        elements,
+        "cbr_case.outcome.pitfalls.pitfall",
+      ),
+    )
+  cbr_types.CbrCase(
+    case_id: ctx.cycle_id,
+    timestamp: entry.timestamp,
     schema_version: 1,
-    problem:,
-    solution:,
-    outcome:,
-    embedding: [],
-    source_narrative_id: "",
-    profile: option.None,
-  ))
+    problem: problem,
+    solution: solution,
+    outcome: outcome,
+    source_narrative_id: ctx.cycle_id,
+    profile: None,
+  )
 }
 
-fn lenient_cbr_problem_decoder() -> decode.Decoder(cbr_types.CbrProblem) {
-  use user_input <- decode.optional_field("user_input", "", decode.string)
-  use intent <- decode.optional_field("intent", "", decode.string)
-  use domain <- decode.optional_field("domain", "", decode.string)
-  use entities <- decode.optional_field(
-    "entities",
-    [],
-    decode.list(decode.string),
-  )
-  use keywords <- decode.optional_field(
-    "keywords",
-    [],
-    decode.list(decode.string),
-  )
-  use query_complexity <- decode.optional_field(
-    "query_complexity",
-    "simple",
-    decode.string,
-  )
-  decode.success(cbr_types.CbrProblem(
-    user_input:,
-    intent:,
-    domain:,
-    entities:,
-    keywords:,
-    query_complexity:,
-  ))
-}
-
-fn lenient_cbr_solution_decoder() -> decode.Decoder(cbr_types.CbrSolution) {
-  use approach <- decode.optional_field("approach", "", decode.string)
-  use agents_used <- decode.optional_field(
-    "agents_used",
-    [],
-    decode.list(decode.string),
-  )
-  use tools_used <- decode.optional_field(
-    "tools_used",
-    [],
-    decode.list(decode.string),
-  )
-  use steps <- decode.optional_field("steps", [], decode.list(decode.string))
-  decode.success(cbr_types.CbrSolution(
-    approach:,
-    agents_used:,
-    tools_used:,
-    steps:,
-  ))
-}
-
-fn lenient_cbr_outcome_decoder() -> decode.Decoder(cbr_types.CbrOutcome) {
-  use status <- decode.optional_field("status", "success", decode.string)
-  use confidence <- decode.optional_field("confidence", 0.5, decode.float)
-  use assessment <- decode.optional_field("assessment", "", decode.string)
-  use pitfalls <- decode.optional_field(
-    "pitfalls",
-    [],
-    decode.list(decode.string),
-  )
-  decode.success(cbr_types.CbrOutcome(
-    status:,
-    confidence:,
-    assessment:,
-    pitfalls:,
-  ))
-}
+// ---------------------------------------------------------------------------
+// Fallback entry
+// ---------------------------------------------------------------------------
 
 fn extract_fallback_domain(text: String) -> String {
   let lower = string.lowercase(text)
@@ -1310,252 +1146,4 @@ fn extract_simple_keywords(text: String) -> List(String) {
   })
   |> list.unique
   |> list.take(10)
-}
-
-/// Strip markdown code fences (```json ... ```) from LLM output.
-/// Handles: ```json, ```JSON, ``` with whitespace, fences not at start of text,
-/// and multiple fenced blocks (takes content from the first one).
-fn strip_markdown_fences(text: String) -> String {
-  // Try to find a code fence anywhere in the text, not just at the start
-  case find_fence_start(string.split(text, "\n"), []) {
-    Ok(#(content_lines, _after_close)) -> {
-      content_lines
-      |> list.reverse
-      |> string.join("\n")
-      |> string.trim
-    }
-    Error(_) -> text
-  }
-}
-
-/// Walk lines looking for an opening fence. When found, collect lines until
-/// the closing fence and return the content between them plus remaining lines.
-fn find_fence_start(
-  lines: List(String),
-  skipped: List(String),
-) -> Result(#(List(String), List(String)), Nil) {
-  case lines {
-    [] -> Error(Nil)
-    [line, ..rest] -> {
-      let trimmed = string.trim(line)
-      case is_opening_fence(trimmed) {
-        True -> collect_until_close(rest, [])
-        False -> find_fence_start(rest, [line, ..skipped])
-      }
-    }
-  }
-}
-
-/// Check if a line is an opening code fence: ``` optionally followed by
-/// a language tag like json, JSON, jsonc, etc.
-fn is_opening_fence(line: String) -> Bool {
-  case string.starts_with(line, "```") {
-    True -> {
-      let after_ticks = string.drop_start(line, 3)
-      let tag = string.trim(after_ticks)
-      // Opening fence: bare ``` or ``` followed by a simple language tag
-      tag == ""
-      || {
-        !string.contains(tag, " ")
-        && !string.contains(tag, "}")
-        && !string.contains(tag, "{")
-      }
-    }
-    False -> False
-  }
-}
-
-/// Collect lines until a closing ``` fence is found.
-fn collect_until_close(
-  lines: List(String),
-  acc: List(String),
-) -> Result(#(List(String), List(String)), Nil) {
-  case lines {
-    // No closing fence found — return what we collected anyway
-    [] -> Ok(#(acc, []))
-    [line, ..rest] -> {
-      case string.trim(line) == "```" {
-        True -> Ok(#(acc, rest))
-        False -> collect_until_close(rest, [line, ..acc])
-      }
-    }
-  }
-}
-
-/// Attempt to repair truncated JSON by closing unclosed strings, arrays,
-/// and objects. Best-effort — if the JSON is too broken, returns it unchanged.
-fn repair_truncated_json(text: String) -> String {
-  let graphemes = string.to_graphemes(text)
-  let #(open_braces, open_brackets, in_string) =
-    count_open_structures(graphemes, 0, 0, False, False)
-  case open_braces > 0 || open_brackets > 0 || in_string {
-    False -> text
-    True -> {
-      // Close unclosed string first
-      let base = case in_string {
-        True -> text <> "\""
-        False -> text
-      }
-      // Close arrays then objects
-      let with_brackets = close_n(base, "]", open_brackets)
-      close_n(with_brackets, "}", open_braces)
-    }
-  }
-}
-
-fn count_open_structures(
-  graphemes: List(String),
-  braces: Int,
-  brackets: Int,
-  in_string: Bool,
-  escaped: Bool,
-) -> #(Int, Int, Bool) {
-  case graphemes {
-    [] -> #(braces, brackets, in_string)
-    [g, ..rest] -> {
-      case escaped {
-        True -> count_open_structures(rest, braces, brackets, in_string, False)
-        False ->
-          case in_string {
-            True ->
-              case g {
-                "\\" ->
-                  count_open_structures(rest, braces, brackets, True, True)
-                "\"" ->
-                  count_open_structures(rest, braces, brackets, False, False)
-                _ -> count_open_structures(rest, braces, brackets, True, False)
-              }
-            False ->
-              case g {
-                "\"" ->
-                  count_open_structures(rest, braces, brackets, True, False)
-                "{" ->
-                  count_open_structures(
-                    rest,
-                    braces + 1,
-                    brackets,
-                    False,
-                    False,
-                  )
-                "}" ->
-                  count_open_structures(
-                    rest,
-                    int.max(0, braces - 1),
-                    brackets,
-                    False,
-                    False,
-                  )
-                "[" ->
-                  count_open_structures(
-                    rest,
-                    braces,
-                    brackets + 1,
-                    False,
-                    False,
-                  )
-                "]" ->
-                  count_open_structures(
-                    rest,
-                    braces,
-                    int.max(0, brackets - 1),
-                    False,
-                    False,
-                  )
-                _ -> count_open_structures(rest, braces, brackets, False, False)
-              }
-          }
-      }
-    }
-  }
-}
-
-fn close_n(text: String, closer: String, n: Int) -> String {
-  case n > 0 {
-    True -> close_n(text <> closer, closer, n - 1)
-    False -> text
-  }
-}
-
-/// Extract a JSON object from text that may contain preamble or trailing
-/// content. Finds the first '{' and tracks brace depth to find its matching
-/// '}', correctly ignoring braces inside JSON string literals.
-pub fn extract_json_object(text: String) -> String {
-  let graphemes = string.to_graphemes(text)
-  // Skip to the first '{' character
-  case skip_to_open_brace(graphemes, 0) {
-    Error(_) -> text
-    Ok(#(start_idx, rest_graphemes)) -> {
-      // Track depth starting at 1 (we consumed the opening brace)
-      case find_matching_close(rest_graphemes, 1, False, False, start_idx + 1) {
-        Error(_) ->
-          // No matching close found — return from first brace to end
-          string.slice(text, start_idx, string.length(text) - start_idx)
-        Ok(end_idx) -> string.slice(text, start_idx, end_idx - start_idx + 1)
-      }
-    }
-  }
-}
-
-/// Skip graphemes until the first '{' is found.
-/// Returns the index and the remaining graphemes after the '{'.
-fn skip_to_open_brace(
-  graphemes: List(String),
-  idx: Int,
-) -> Result(#(Int, List(String)), Nil) {
-  case graphemes {
-    [] -> Error(Nil)
-    [g, ..rest] ->
-      case g == "{" {
-        True -> Ok(#(idx, rest))
-        False -> skip_to_open_brace(rest, idx + 1)
-      }
-  }
-}
-
-/// Walk graphemes tracking brace depth, respecting JSON string literals.
-/// Returns the index of the closing '}' that brings depth to 0.
-fn find_matching_close(
-  graphemes: List(String),
-  depth: Int,
-  in_string: Bool,
-  escaped: Bool,
-  idx: Int,
-) -> Result(Int, Nil) {
-  case graphemes {
-    [] -> Error(Nil)
-    [g, ..rest] -> {
-      case escaped {
-        // Previous char was backslash inside a string — skip this char
-        True -> find_matching_close(rest, depth, in_string, False, idx + 1)
-        False ->
-          case in_string {
-            True ->
-              case g {
-                "\\" -> find_matching_close(rest, depth, True, True, idx + 1)
-                "\"" -> find_matching_close(rest, depth, False, False, idx + 1)
-                _ -> find_matching_close(rest, depth, True, False, idx + 1)
-              }
-            False ->
-              case g {
-                "\"" -> find_matching_close(rest, depth, True, False, idx + 1)
-                "{" ->
-                  find_matching_close(rest, depth + 1, False, False, idx + 1)
-                "}" ->
-                  case depth - 1 {
-                    0 -> Ok(idx)
-                    new_depth ->
-                      find_matching_close(
-                        rest,
-                        new_depth,
-                        False,
-                        False,
-                        idx + 1,
-                      )
-                  }
-                _ -> find_matching_close(rest, depth, False, False, idx + 1)
-              }
-          }
-      }
-    }
-  }
 }

@@ -1,7 +1,6 @@
 import agent/registry.{type Registry}
 import agent/types.{type Notification}
 import dprime/types as dprime_types
-import embedding/types as embedding_types
 import gleam/erlang/process.{type Subject}
 import gleam/option.{type Option, None}
 import gleam/string
@@ -42,7 +41,6 @@ pub type CognitiveConfig {
     profile_dirs: List(String),
     write_anywhere: Bool,
     curator: Option(Subject(CuratorMessage)),
-    embedding_config: embedding_types.EmbeddingConfig,
     agent_uuid: String,
     session_since: String,
     retry_config: retry.RetryConfig,
@@ -50,6 +48,7 @@ pub type CognitiveConfig {
     threading_config: threading.ThreadingConfig,
     memory_limits: memory.MemoryLimits,
     input_queue_cap: Int,
+    how_to_content: Option(String),
   )
 }
 
@@ -82,12 +81,11 @@ pub fn default_test_config(
     narrative_dir:,
     cbr_dir:,
     archivist_model: "mock-model",
-    archivist_max_tokens: 4096,
+    archivist_max_tokens: 8192,
     librarian: None,
     profile_dirs: [],
     write_anywhere: False,
     curator: None,
-    embedding_config: embedding_types.default_config(),
     agent_uuid: "",
     session_since: "",
     retry_config: retry.default_retry_config(),
@@ -95,5 +93,6 @@ pub fn default_test_config(
     threading_config: threading.default_config(),
     memory_limits: memory.default_limits(),
     input_queue_cap: 10,
+    how_to_content: None,
   )
 }

@@ -10,22 +10,35 @@ Then edit `.springdrift/config.toml` with your provider and API key.
 
 ## Directory layout
 
+Everything the system generates lives inside `.springdrift/`. This makes backup
+simple — copy one directory and you have everything.
+
 ```
 .springdrift/
-├── config.toml          Project-level config (overrides ~/.config/springdrift/config.toml)
-├── identity/            Agent identity files (persona + session preamble template)
-│   ├── persona.md       First-person character text (supports {{agent_name}} slot)
+├── config.toml              Project-level config (overrides ~/.config/springdrift/config.toml)
+├── identity/                Agent identity files (persona + session preamble template)
+│   ├── persona.md           First-person character text (supports {{agent_name}} slot)
 │   └── session_preamble.md  Dynamic session context with {{slot}} and [OMIT IF] rules
-├── identity.json        Stable agent UUID (auto-generated on first run)
-├── session.json         Session persistence (auto-generated)
-├── logs/                System logs (date-rotated JSON-L, auto-generated)
+├── identity.json            Stable agent UUID (auto-generated on first run)
+├── session.json             Session persistence (auto-generated)
+├── skills/                  Skill definitions + operator guide
+│   ├── HOW_TO.md            Operator guide — tool selection heuristics and usage patterns
+│   ├── web-research/        Web research tool selection decision tree
+│   │   └── SKILL.md
+│   └── shell-sandbox/       Shell sandbox usage guide
+│       └── SKILL.md
+├── logs/                    System logs (date-rotated JSON-L, auto-generated)
 ├── memory/
-│   ├── cycle-log/       Per-cycle request/response logs (auto-generated)
-│   ├── narrative/       Prime Narrative memory (auto-generated)
-│   ├── cbr/             Case-Based Reasoning cases (auto-generated)
-│   └── facts/           Key-value fact store (auto-generated)
-├── skills/              Local SKILL.md definitions
-└── profiles/            Agent profile directories
+│   ├── cycle-log/           Per-cycle request/response logs (auto-generated)
+│   ├── narrative/           Prime Narrative memory (auto-generated)
+│   ├── cbr/                 Case-Based Reasoning cases (auto-generated)
+│   ├── facts/               Key-value fact store (auto-generated)
+│   ├── artifacts/           Large content storage (auto-generated)
+│   └── schedule/            Scheduler state persistence (auto-generated)
+├── schemas/                 XStructor XSD schemas (auto-generated, compiled at runtime)
+├── scheduler/
+│   └── outputs/             Scheduler report delivery (auto-generated)
+└── dprime.example.json      Example D' safety gate configuration
 ```
 
 Add `.springdrift/` to your `.gitignore` — it contains runtime state, logs, and
@@ -49,10 +62,42 @@ Identity files are searched in order: `.springdrift/identity/` (local override) 
 `~/.config/springdrift/identity/` (user default). If neither exists, the agent falls
 back to the configured system prompt.
 
+## Skills and HOW_TO.md
+
+Skills live in `.springdrift/skills/`. Each skill is a directory containing a `SKILL.md`
+file with YAML frontmatter (`name:`, `description:`) and Markdown instructions.
+
+`HOW_TO.md` is the operator guide — it contains tool selection heuristics, agent usage
+patterns, and degradation paths. It lives in the skills directory and is served via the
+`how_to` tool so the LLM can orient itself when unsure which tool to use.
+
+Included skills:
+- **`web-research/`** — decision tree for the 8 web tools (Brave tiers, Jina, fallbacks)
+- **`shell-sandbox/`** — Docker sandbox usage guide (environment, conventions)
+
+## Scheduler configuration
+
+The `[scheduler]` section in `config.toml` controls resource limits for autonomous
+scheduler execution:
+
+```toml
+[scheduler]
+# Max autonomous cycles the scheduler may fire per hour (default: 20, 0 = unlimited)
+# max_autonomous_cycles_per_hour = 20
+
+# Max total tokens (input + output) per hour (default: 500000, 0 = unlimited)
+# autonomous_token_budget_per_hour = 500000
+```
+
+Scheduler reports are delivered to `.springdrift/scheduler/outputs/` by default.
+This can be overridden per-job in a profile's schedule configuration.
+
 ## Included examples
 
 - **`identity/`** — default persona and session preamble template.
-- **`profiles/market-monitor/`** — example profile that tracks commercial property
-  prices in Dublin and Cork with daily scheduled jobs and report delivery.
+- **`skills/`** — HOW_TO.md operator guide + web-research and shell-sandbox skills.
 - **`dprime.example.json`** — example D' safety gate configuration with seven
   features and tuned thresholds.
+
+Profiles (advanced agent team configurations) are documented in CLAUDE.md but not
+included in the starter template. Create a `profiles/` directory if needed.

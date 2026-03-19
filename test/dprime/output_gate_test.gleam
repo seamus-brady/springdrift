@@ -68,21 +68,20 @@ fn output_state() -> DprimeState {
 
 fn clean_report_provider() {
   mock.provider_with_text(
-    "[{\"feature\": \"unsourced_claims\", \"magnitude\": 0, \"rationale\": \"well sourced\"}, {\"feature\": \"causal_overreach\", \"magnitude\": 0, \"rationale\": \"careful language\"}, {\"feature\": \"stale_data\", \"magnitude\": 0, \"rationale\": \"current\"}]",
+    "<forecasts><forecast><feature>unsourced_claims</feature><magnitude>0</magnitude><rationale>well sourced</rationale></forecast><forecast><feature>causal_overreach</feature><magnitude>0</magnitude><rationale>careful language</rationale></forecast><forecast><feature>stale_data</feature><magnitude>0</magnitude><rationale>current</rationale></forecast></forecasts>",
   )
 }
 
 fn mixed_report_provider() {
   // High issues across multiple features to exceed modify_threshold
-  // Score = (3*3 + 2*2 + 1*1) / 18 = 14/18 ≈ 0.78 — need lower threshold
   mock.provider_with_text(
-    "[{\"feature\": \"unsourced_claims\", \"magnitude\": 3, \"rationale\": \"several claims lack sources\"}, {\"feature\": \"causal_overreach\", \"magnitude\": 2, \"rationale\": \"some overreach\"}, {\"feature\": \"stale_data\", \"magnitude\": 1, \"rationale\": \"slightly dated\"}]",
+    "<forecasts><forecast><feature>unsourced_claims</feature><magnitude>3</magnitude><rationale>several claims lack sources</rationale></forecast><forecast><feature>causal_overreach</feature><magnitude>2</magnitude><rationale>some overreach</rationale></forecast><forecast><feature>stale_data</feature><magnitude>1</magnitude><rationale>slightly dated</rationale></forecast></forecasts>",
   )
 }
 
 fn bad_report_provider() {
   mock.provider_with_text(
-    "[{\"feature\": \"unsourced_claims\", \"magnitude\": 3, \"rationale\": \"no sources\"}, {\"feature\": \"causal_overreach\", \"magnitude\": 3, \"rationale\": \"wild claims\"}, {\"feature\": \"stale_data\", \"magnitude\": 3, \"rationale\": \"ancient data\"}]",
+    "<forecasts><forecast><feature>unsourced_claims</feature><magnitude>3</magnitude><rationale>no sources</rationale></forecast><forecast><feature>causal_overreach</feature><magnitude>3</magnitude><rationale>wild claims</rationale></forecast><forecast><feature>stale_data</feature><magnitude>3</magnitude><rationale>ancient data</rationale></forecast></forecasts>",
   )
 }
 

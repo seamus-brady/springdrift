@@ -50,7 +50,6 @@ fn make_case(case_id: String, intent: String, domain: String) -> CbrCase {
       assessment: "Good result",
       pitfalls: ["stale data"],
     ),
-    embedding: [],
     source_narrative_id: "cycle-001",
     profile: None,
   )
@@ -154,7 +153,6 @@ pub fn lenient_decoder_null_optional_fields_test() {
   let assert Ok(decoded) = json.parse(with_nulls, cbr_log.case_decoder())
   decoded.case_id |> should.equal("case-min")
   decoded.schema_version |> should.equal(1)
-  decoded.embedding |> should.equal([])
   decoded.source_narrative_id |> should.equal("")
   decoded.problem.user_input |> should.equal("")
   decoded.problem.intent |> should.equal("")

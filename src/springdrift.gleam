@@ -5,19 +5,22 @@ import agent/supervisor
 import agent/types as agent_types
 import agent_identity
 import agents/coder
+import agents/observer
 import agents/planner
 import agents/researcher
+import agents/scheduler as scheduler_agent
+import cbr/bridge as cbr_bridge
 import config.{type AppConfig}
 import dot_env
 import dprime/config as dprime_config_mod
-import embedding/health as embedding_health
-import embedding/types as embedding_types
+import embedding
 import facts/log as facts_log
 import gleam/erlang/process
 import gleam/int
 import gleam/io
 import gleam/list
 import gleam/option
+import gleam/result
 import gleam/string
 import llm/adapters/anthropic as anthropic_adapter
 import llm/adapters/local as local_adapter
@@ -33,6 +36,7 @@ import narrative/threading as narrative_threading
 import paths
 import profile
 import profile/types as profile_types
+import scheduler/log as schedule_log
 import scheduler/runner as scheduler_runner
 import simplifile
 import skills
@@ -41,6 +45,7 @@ import storage
 import tools/brave as tools_brave
 import tools/builtin as tools_builtin
 import tools/cache
+import tools/how_to_content
 import tools/jina as tools_jina
 import tools/memory as tools_memory
 import tools/rate_limiter
@@ -250,52 +255,63 @@ fn run(cfg: AppConfig) -> Nil {
   // Narrative config (always enabled)
   let narrative_dir = option.unwrap(cfg.narrative_dir, paths.narrative_dir())
   let archivist_model = option.unwrap(cfg.archivist_model, task_model)
-  let archivist_max_tokens = option.unwrap(cfg.archivist_max_tokens, 4096)
+  let archivist_max_tokens = option.unwrap(cfg.archivist_max_tokens, 8192)
 
   // Migrate legacy facts.jsonl to daily rotation (no-op if already done)
   facts_log.migrate_legacy(paths.facts_dir())
 
-  // Build CBR scoring config
-  let default_sc = librarian.default_scoring_config()
-  let scoring_config =
-    librarian.CbrScoringConfig(
-      cosine_weight: option.unwrap(
-        cfg.cbr_cosine_weight,
-        default_sc.cosine_weight,
+  // Build CBR retrieval config
+  let default_weights = cbr_bridge.default_weights()
+  let embedding_base_url =
+    option.unwrap(cfg.cbr_embedding_base_url, "http://localhost:11434")
+  let embed_fn = case option.unwrap(cfg.cbr_embedding_enabled, True) {
+    True -> {
+      let model = option.unwrap(cfg.cbr_embedding_model, "nomic-embed-text")
+      case embedding.start_serving(embedding_base_url, model) {
+        Ok(_) -> {
+          io.println(
+            "CBR      : embeddings via Ollama ("
+            <> model
+            <> " at "
+            <> embedding_base_url
+            <> ")",
+          )
+          option.Some(embedding.make_embed_fn(embedding_base_url, model))
+        }
+        Error(reason) -> {
+          io.println("Fatal: CBR embedding startup failed: " <> reason)
+          panic as "CBR embedding startup failed"
+        }
+      }
+    }
+    False -> option.None
+  }
+  let cbr_config =
+    librarian.CbrConfig(
+      weights: cbr_bridge.RetrievalWeights(
+        field_weight: option.unwrap(
+          cfg.cbr_field_weight,
+          default_weights.field_weight,
+        ),
+        index_weight: option.unwrap(
+          cfg.cbr_index_weight,
+          default_weights.index_weight,
+        ),
+        recency_weight: option.unwrap(
+          cfg.cbr_recency_weight,
+          default_weights.recency_weight,
+        ),
+        domain_weight: option.unwrap(
+          cfg.cbr_domain_weight,
+          default_weights.domain_weight,
+        ),
+        embedding_weight: option.unwrap(
+          cfg.cbr_embedding_weight,
+          default_weights.embedding_weight,
+        ),
       ),
-      symbolic_weight: option.unwrap(
-        cfg.cbr_symbolic_weight,
-        default_sc.symbolic_weight,
-      ),
-      intent_weight: option.unwrap(
-        cfg.cbr_intent_weight,
-        default_sc.intent_weight,
-      ),
-      keyword_weight: option.unwrap(
-        cfg.cbr_keyword_weight,
-        default_sc.keyword_weight,
-      ),
-      entity_weight: option.unwrap(
-        cfg.cbr_entity_weight,
-        default_sc.entity_weight,
-      ),
-      domain_weight: option.unwrap(
-        cfg.cbr_domain_weight,
-        default_sc.domain_weight,
-      ),
-      recency_weight: option.unwrap(
-        cfg.cbr_recency_weight,
-        default_sc.recency_weight,
-      ),
-      min_score: option.unwrap(cfg.cbr_min_score, default_sc.min_score),
-      recency_decay_days: option.unwrap(
-        cfg.cbr_recency_decay_days,
-        default_sc.recency_decay_days,
-      ),
-      mailbox_warn_threshold: option.unwrap(
-        cfg.mailbox_warn_threshold,
-        default_sc.mailbox_warn_threshold,
-      ),
+      min_score: option.unwrap(cfg.cbr_min_score, 0.0),
+      embed_fn:,
     )
 
   // Start the Librarian (supervised — auto-restarts on crash)
@@ -308,7 +324,7 @@ fn run(cfg: AppConfig) -> Nil {
       paths.artifacts_dir(),
       librarian_max_days,
       5,
-      scoring_config,
+      cbr_config,
     )
   {
     Ok(subj) -> subj
@@ -402,8 +418,32 @@ fn run(cfg: AppConfig) -> Nil {
     )
   }
 
-  // Build agent tools for the cognitive loop
-  let agent_tools = list.map(agent_specs, cognitive.agent_to_tool)
+  // Build agent tools for the cognitive loop (includes scheduler)
+  let scheduler_tool =
+    agent_types.agent_to_tool(agent_types.AgentSpec(
+      name: "scheduler",
+      human_name: "Scheduler",
+      description: "Manage reminders, todos, and appointments. "
+        <> "Set one-shot or recurring reminders that fire at a specific time — "
+        <> "as input to the cognitive loop (for agent self-reminders) or as "
+        <> "user notifications. Maintain a todo list. Schedule appointments. "
+        <> "List, cancel, complete, or reschedule existing items.",
+      system_prompt: "",
+      provider: p,
+      model: task_model,
+      max_tokens: 1024,
+      max_turns: 4,
+      max_consecutive_errors: 2,
+      max_context_messages: option.None,
+      tools: [],
+      restart: agent_types.Permanent,
+      tool_executor: fn(_call) {
+        llm_types.ToolFailure(tool_use_id: "", error: "stub")
+      },
+      inter_turn_delay_ms: 0,
+    ))
+  let agent_tools =
+    list.append(list.map(agent_specs, cognitive.agent_to_tool), [scheduler_tool])
 
   // Create notification channel
   let notify: process.Subject(agent_types.Notification) = process.new_subject()
@@ -424,56 +464,6 @@ fn run(cfg: AppConfig) -> Nil {
         option.None -> option.None
       }
       #(tool_state, output_state)
-    }
-  }
-
-  // Ollama embedding service — obligatory health check at startup
-  let default_embed = embedding_types.default_config()
-  let embedding_config =
-    embedding_types.EmbeddingConfig(
-      model: option.unwrap(cfg.embedding_model, default_embed.model),
-      base_url: option.unwrap(cfg.embedding_base_url, default_embed.base_url),
-      dimensions: option.unwrap(
-        cfg.embedding_dimensions,
-        default_embed.dimensions,
-      ),
-      fallback: default_embed.fallback,
-    )
-  case embedding_health.check(embedding_config) {
-    embedding_types.Healthy(model: m, dimensions: d) ->
-      io.println(
-        "Embeddings: " <> m <> " (" <> int.to_string(d) <> " dims) — OK",
-      )
-    embedding_types.Unhealthy(error: e) -> {
-      io.println("FATAL: Ollama embedding service is required but unavailable.")
-      case e {
-        embedding_types.NotReachable(reason:) ->
-          io.println(
-            "  Ollama not reachable: " <> reason <> "\n  Fix: ollama serve",
-          )
-        embedding_types.ModelNotFound(model:) ->
-          io.println(
-            "  Model '" <> model <> "' not found.\n  Fix: ollama pull " <> model,
-          )
-        embedding_types.DimensionMismatch(expected:, got:) ->
-          io.println(
-            "  Dimension mismatch: expected "
-            <> int.to_string(expected)
-            <> ", got "
-            <> int.to_string(got)
-            <> "\n  Fix: ollama rm "
-            <> embedding_config.model
-            <> " && ollama pull "
-            <> embedding_config.model,
-          )
-        embedding_types.HttpError(status:, body:) ->
-          io.println("  HTTP error " <> int.to_string(status) <> ": " <> body)
-        embedding_types.NetworkError(reason:) ->
-          io.println("  Network error: " <> reason)
-        embedding_types.DecodeError(reason:) ->
-          io.println("  Decode error: " <> reason)
-      }
-      do_halt(1)
     }
   }
 
@@ -590,6 +580,17 @@ fn run(cfg: AppConfig) -> Nil {
   let recall_max_entries = option.unwrap(cfg.recall_max_entries, 50)
   let cbr_max_results = option.unwrap(cfg.cbr_max_results, 20)
 
+  // Load HOW_TO content (file on disk, or built-in default)
+  let how_to_content =
+    paths.how_to_paths()
+    |> list.find_map(fn(path) {
+      case simplifile.read(path) {
+        Ok(c) -> Ok(c)
+        Error(_) -> Error(Nil)
+      }
+    })
+    |> result.unwrap(how_to_content.builtin())
+
   let cognitive_subj = case
     cognitive.start(CognitiveConfig(
       provider: p,
@@ -613,7 +614,6 @@ fn run(cfg: AppConfig) -> Nil {
       profile_dirs:,
       write_anywhere:,
       curator: option.Some(curator_subj),
-      embedding_config:,
       agent_uuid: stable_identity.agent_uuid,
       session_since:,
       retry_config:,
@@ -624,6 +624,7 @@ fn run(cfg: AppConfig) -> Nil {
         cbr_max_results:,
       ),
       input_queue_cap: option.unwrap(cfg.input_queue_cap, 10),
+      how_to_content: option.Some(how_to_content),
     ))
   {
     Ok(subj) -> subj
@@ -676,46 +677,78 @@ fn run(cfg: AppConfig) -> Nil {
     _ -> io.println("Profiles : " <> string.join(available_profiles, ", "))
   }
 
-  // Start scheduler if profile has a schedule
-  case cfg.default_profile {
+  // Migrate old scheduler checkpoint to JSONL (no-op if already done)
+  let schedule_dir = paths.schedule_dir()
+  schedule_log.migrate_checkpoint(schedule_dir, paths.scheduler_checkpoint())
+
+  // Load profile schedule tasks if applicable
+  let profile_schedule_tasks = case cfg.default_profile {
     option.Some(profile_name) ->
       case profile.load(profile_name, profile_dirs) {
         Ok(loaded_profile) ->
           case loaded_profile.schedule_path {
             option.Some(schedule_path) ->
               case profile.parse_schedule(schedule_path) {
-                Ok(tasks) ->
-                  case tasks {
-                    [] -> Nil
-                    _ -> {
-                      let checkpoint_path =
-                        ".springdrift/scheduler-checkpoint.json"
-                      let stuck_timeout_ms =
-                        option.unwrap(cfg.scheduler_stuck_timeout_ms, 600_000)
-                      case
-                        scheduler_runner.start(
-                          tasks,
-                          cognitive_subj,
-                          checkpoint_path,
-                          stuck_timeout_ms,
-                        )
-                      {
-                        Ok(_) ->
-                          io.println(
-                            "Scheduler: "
-                            <> int.to_string(list.length(tasks))
-                            <> " task(s) scheduled",
-                          )
-                        Error(_) -> io.println("Scheduler: failed to start")
-                      }
-                    }
-                  }
-                Error(_) -> Nil
+                Ok(tasks) -> tasks
+                Error(_) -> []
               }
-            option.None -> Nil
+            option.None -> []
           }
-        Error(_) -> Nil
+        Error(_) -> []
       }
+    option.None -> []
+  }
+
+  // Always start the scheduler runner
+  let stuck_timeout_ms = option.unwrap(cfg.scheduler_stuck_timeout_ms, 600_000)
+  let max_cycles_per_hour =
+    option.unwrap(cfg.max_autonomous_cycles_per_hour, 20)
+  let token_budget_per_hour =
+    option.unwrap(cfg.autonomous_token_budget_per_hour, 500_000)
+  let runner_result =
+    scheduler_runner.start(
+      profile_schedule_tasks,
+      cognitive_subj,
+      paths.scheduler_checkpoint(),
+      stuck_timeout_ms,
+      max_cycles_per_hour,
+      token_budget_per_hour,
+    )
+  let scheduler_subj = case runner_result {
+    Ok(runner_subj) -> {
+      case profile_schedule_tasks {
+        [] -> io.println("Scheduler: started (no profile tasks)")
+        tasks ->
+          io.println(
+            "Scheduler: "
+            <> int.to_string(list.length(tasks))
+            <> " task(s) scheduled",
+          )
+      }
+      // Register scheduler agent with the supervisor
+      let sched_spec = scheduler_agent.spec(p, task_model, runner_subj)
+      let reply_subj = process.new_subject()
+      process.send(
+        sup,
+        agent_types.StartChild(spec: sched_spec, reply_to: reply_subj),
+      )
+      case process.receive(reply_subj, 5000) {
+        Ok(Ok(_)) -> io.println("  Agent  : scheduler started")
+        Ok(Error(msg)) ->
+          io.println("  Agent  : scheduler failed (" <> msg <> ")")
+        Error(_) -> io.println("  Agent  : scheduler failed (timeout)")
+      }
+      option.Some(runner_subj)
+    }
+    Error(_) -> {
+      io.println("Scheduler: failed to start")
+      option.None
+    }
+  }
+
+  // Wire scheduler to curator for open_commitments slot
+  case scheduler_subj {
+    option.Some(sched) -> curator.set_scheduler(curator_subj, sched)
     option.None -> Nil
   }
 
@@ -740,6 +773,7 @@ fn run(cfg: AppConfig) -> Nil {
         agent_name,
         agent_version,
         ws_max_bytes,
+        scheduler_subj,
       )
     }
     _ ->
@@ -887,6 +921,17 @@ fn default_agent_specs(
       brave_cache_ttl_ms,
     )
   let c_spec = coder.spec(provider, task_model, sandbox_timeout)
+  let recall_max_entries = option.unwrap(cfg.recall_max_entries, 50)
+  let cbr_max_results = option.unwrap(cfg.cbr_max_results, 20)
+  let o_spec =
+    observer.spec(
+      provider,
+      task_model,
+      option.unwrap(cfg.narrative_dir, paths.narrative_dir()),
+      librarian_subj,
+      tools_memory.MemoryLimits(recall_max_entries:, cbr_max_results:),
+      option.None,
+    )
   [
     agent_types.AgentSpec(
       ..p_spec,
@@ -922,6 +967,7 @@ fn default_agent_specs(
       ),
       inter_turn_delay_ms: delay,
     ),
+    o_spec,
   ]
 }
 

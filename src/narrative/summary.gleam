@@ -4,20 +4,21 @@
 //// to the LLM for distillation. Supports weekly and monthly schedules.
 
 import cycle_log
+import gleam/dict.{type Dict}
 import gleam/int
-import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import llm/provider.{type Provider}
-import llm/request
-import llm/response
 import narrative/log as narrative_log
 import narrative/types.{
   type NarrativeEntry, Conversation, Entities, Intent, Metrics, NarrativeEntry,
   Outcome, Success, Summary,
 }
+import paths
 import slog
+import xstructor
+import xstructor/schemas
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -31,7 +32,7 @@ pub fn generate(
   to: String,
   provider: Provider,
   model: String,
-  verbose: Bool,
+  _verbose: Bool,
 ) -> Option(NarrativeEntry) {
   let entries = narrative_log.load_entries(dir, from, to)
   case entries {
@@ -46,16 +47,30 @@ pub fn generate(
     }
     _ -> {
       let prompt = build_summary_prompt(entries, from, to)
-      let req =
-        request.new(model, 2048)
-        |> request.with_system(summary_system_prompt())
-        |> request.with_user_message(prompt)
-      case provider.chat(req) {
-        Ok(resp) -> {
-          let text = response.text(resp)
-          let cycle_id = cycle_log.generate_uuid()
-          case parse_summary_response(text, cycle_id, from, to, entries) {
-            Ok(entry) -> {
+      let schema_dir = paths.schemas_dir()
+      case
+        xstructor.compile_schema(schema_dir, "summary.xsd", schemas.summary_xsd)
+      {
+        Error(_) -> Some(fallback_summary(entries, from, to))
+        Ok(schema) -> {
+          let system =
+            schemas.build_system_prompt(
+              summary_system_prompt_base(),
+              schemas.summary_xsd,
+              schemas.summary_example,
+            )
+          let config =
+            xstructor.XStructorConfig(
+              schema: schema,
+              system_prompt: system,
+              xml_example: schemas.summary_example,
+              max_retries: 2,
+              max_tokens: 2048,
+            )
+          case xstructor.generate(config, prompt, provider, model) {
+            Ok(result) -> {
+              let #(summary_text, keywords) = extract_summary(result.elements)
+              let cycle_id = cycle_log.generate_uuid()
               slog.info(
                 "narrative/summary",
                 "generate",
@@ -68,37 +83,25 @@ pub fn generate(
                   <> " entries)",
                 Some(cycle_id),
               )
-              Some(entry)
+              Some(build_summary_entry(
+                cycle_id,
+                summary_text,
+                keywords,
+                from,
+                to,
+                entries,
+              ))
             }
             Error(_) -> {
               slog.warn(
                 "narrative/summary",
                 "generate",
-                "Failed to parse summary response",
+                "XStructor generation failed for summary",
                 None,
               )
-              case verbose {
-                True ->
-                  slog.debug(
-                    "narrative/summary",
-                    "generate",
-                    "Raw: " <> string.slice(text, 0, 500),
-                    None,
-                  )
-                False -> Nil
-              }
               Some(fallback_summary(entries, from, to))
             }
           }
-        }
-        Error(_) -> {
-          slog.warn(
-            "narrative/summary",
-            "generate",
-            "LLM call failed for summary",
-            None,
-          )
-          None
         }
       }
     }
@@ -141,7 +144,7 @@ pub fn monthly_range(today: String) -> #(String, String) {
 // Prompt
 // ---------------------------------------------------------------------------
 
-fn summary_system_prompt() -> String {
+fn summary_system_prompt_base() -> String {
   "You are the Archivist for an AI agent called Springdrift. Your job is to write a first-person summary of what happened over a period of conversations.
 
 RULES:
@@ -149,17 +152,7 @@ RULES:
 - Identify themes, patterns, and recurring topics
 - Note any trends in data or questions
 - Highlight key decisions and their outcomes
-- Be concise but comprehensive
-- Respond with ONLY valid JSON. No preamble, no markdown fences.
-
-JSON SCHEMA:
-{
-  \"summary\": \"First-person 3-8 sentence overview of the period\",
-  \"themes\": [\"recurring topic or pattern\"],
-  \"key_decisions\": [{\"point\": \"...\", \"choice\": \"...\", \"rationale\": \"...\"}],
-  \"keywords\": [\"aggregated keywords\"],
-  \"stats\": {\"total_cycles\": 0, \"success_rate\": 0.0, \"top_domains\": [\"...\"]}
-}"
+- Be concise but comprehensive"
 }
 
 fn build_summary_prompt(
@@ -205,39 +198,28 @@ fn build_summary_prompt(
 }
 
 // ---------------------------------------------------------------------------
-// Parse / fallback
+// XML extraction / fallback
 // ---------------------------------------------------------------------------
 
-fn parse_summary_response(
-  text: String,
-  cycle_id: String,
-  from: String,
-  to: String,
-  entries: List(NarrativeEntry),
-) -> Result(NarrativeEntry, Nil) {
-  let cleaned = strip_markdown_fences(string.trim(text))
-  case json.parse(cleaned, summary_decoder()) {
-    Ok(#(summary_text, keywords)) ->
-      Ok(build_summary_entry(
-        cycle_id,
-        summary_text,
-        keywords,
-        from,
-        to,
-        entries,
-      ))
-    Error(_) -> Error(Nil)
+fn extract_summary(elements: Dict(String, String)) -> #(String, List(String)) {
+  let summary = case dict.get(elements, "summary_response.summary") {
+    Ok(s) -> s
+    Error(_) -> ""
   }
+  let keywords = extract_keywords_loop(elements, 0, [])
+  #(summary, keywords)
 }
 
-fn summary_decoder() -> decode.Decoder(#(String, List(String))) {
-  use summary <- decode.field("summary", decode.string)
-  use keywords <- decode.optional_field(
-    "keywords",
-    [],
-    decode.list(decode.string),
-  )
-  decode.success(#(summary, keywords))
+fn extract_keywords_loop(
+  elements: Dict(String, String),
+  idx: Int,
+  acc: List(String),
+) -> List(String) {
+  let key = "summary_response.keywords.keyword." <> int.to_string(idx)
+  case dict.get(elements, key) {
+    Ok(kw) -> extract_keywords_loop(elements, idx + 1, [kw, ..acc])
+    Error(_) -> list.reverse(acc)
+  }
 }
 
 fn build_summary_entry(
@@ -410,27 +392,3 @@ fn parse_int_or(s: String, default: Int) -> Int {
     Error(_) -> default
   }
 }
-
-fn strip_markdown_fences(text: String) -> String {
-  let trimmed = string.trim(text)
-  case string.starts_with(trimmed, "```") {
-    True -> {
-      let after_open = case string.split(trimmed, "\n") {
-        [_, ..rest] -> string.join(rest, "\n")
-        _ -> trimmed
-      }
-      case string.ends_with(string.trim(after_open), "```") {
-        True -> {
-          let lines = string.split(after_open, "\n")
-          let without_last =
-            list.take(lines, int.max(0, list.length(lines) - 1))
-          string.join(without_last, "\n")
-        }
-        False -> after_open
-      }
-    }
-    False -> trimmed
-  }
-}
-
-import gleam/dynamic/decode

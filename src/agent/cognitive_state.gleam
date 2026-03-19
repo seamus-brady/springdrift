@@ -5,7 +5,6 @@ import agent/types.{
 }
 import dag/types as dag_types
 import dprime/types as dprime_types
-import embedding/types as embedding_types
 import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Subject}
 import gleam/option.{type Option}
@@ -36,7 +35,6 @@ pub type MemoryContext {
     cbr_dir: String,
     librarian: Option(Subject(LibrarianMessage)),
     curator: Option(Subject(CuratorMessage)),
-    embedding_config: embedding_types.EmbeddingConfig,
   )
 }
 
@@ -58,6 +56,7 @@ pub type RuntimeConfig {
     classify_timeout_ms: Int,
     threading_config: threading.ThreadingConfig,
     memory_limits: memory.MemoryLimits,
+    how_to_content: Option(String),
   )
 }
 
@@ -93,6 +92,10 @@ pub type CognitiveState {
     agent_completions: List(AgentCompletionRecord),
     last_user_input: String,
     supervisor: Option(Subject(SupervisorMessage)),
+    // --- Cycle telemetry ---
+    cycle_tool_calls: List(dag_types.ToolSummary),
+    cycle_started_ms: Int,
+    cycle_node_type: dag_types.CycleNodeType,
     // --- D' safety ---
     dprime_state: Option(dprime_types.DprimeState),
     output_dprime_state: Option(dprime_types.DprimeState),

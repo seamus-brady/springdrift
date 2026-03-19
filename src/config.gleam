@@ -15,6 +15,7 @@
 //// --skills-dir is repeatable and appends to (rather than replaces) the list.
 
 import gleam/dict
+import gleam/float
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -99,26 +100,23 @@ pub type AppConfig {
     threading_keyword_weight: Option(Int),
     threading_topic_weight: Option(Int),
     threading_threshold: Option(Int),
-    // ── CBR scoring ──
-    cbr_cosine_weight: Option(Float),
-    cbr_symbolic_weight: Option(Float),
-    cbr_intent_weight: Option(Float),
-    cbr_keyword_weight: Option(Float),
-    cbr_entity_weight: Option(Float),
-    cbr_domain_weight: Option(Float),
+    // ── CBR embedding (Ollama) ──
+    cbr_embedding_enabled: Option(Bool),
+    cbr_embedding_model: Option(String),
+    cbr_embedding_base_url: Option(String),
+    // ── CBR retrieval weights ──
+    cbr_field_weight: Option(Float),
+    cbr_index_weight: Option(Float),
     cbr_recency_weight: Option(Float),
+    cbr_domain_weight: Option(Float),
+    cbr_embedding_weight: Option(Float),
     cbr_min_score: Option(Float),
-    cbr_recency_decay_days: Option(Int),
     // ── Housekeeping ──
     dedup_similarity: Option(Float),
     pruning_confidence: Option(Float),
     fact_confidence: Option(Float),
     cbr_pruning_days: Option(Int),
     thread_pruning_days: Option(Int),
-    // ── Embedding ──
-    embedding_model: Option(String),
-    embedding_base_url: Option(String),
-    embedding_dimensions: Option(Int),
     // ── Agent specs ──
     planner_max_tokens: Option(Int),
     planner_max_turns: Option(Int),
@@ -150,6 +148,13 @@ pub type AppConfig {
     input_queue_cap: Option(Int),
     // ── Scheduler stuck timeout ──
     scheduler_stuck_timeout_ms: Option(Int),
+    // ── Scheduler tool timeout ──
+    scheduler_tool_timeout_ms: Option(Int),
+    // ── Scheduler resource limits ──
+    max_autonomous_cycles_per_hour: Option(Int),
+    autonomous_token_budget_per_hour: Option(Int),
+    // ── XStructor ──
+    xstructor_max_retries: Option(Int),
   )
 }
 
@@ -222,23 +227,20 @@ pub fn default() -> AppConfig {
     threading_keyword_weight: None,
     threading_topic_weight: None,
     threading_threshold: None,
-    cbr_cosine_weight: None,
-    cbr_symbolic_weight: None,
-    cbr_intent_weight: None,
-    cbr_keyword_weight: None,
-    cbr_entity_weight: None,
-    cbr_domain_weight: None,
+    cbr_embedding_enabled: None,
+    cbr_embedding_model: None,
+    cbr_embedding_base_url: None,
+    cbr_field_weight: None,
+    cbr_index_weight: None,
     cbr_recency_weight: None,
+    cbr_domain_weight: None,
+    cbr_embedding_weight: None,
     cbr_min_score: None,
-    cbr_recency_decay_days: None,
     dedup_similarity: None,
     pruning_confidence: None,
     fact_confidence: None,
     cbr_pruning_days: None,
     thread_pruning_days: None,
-    embedding_model: None,
-    embedding_base_url: None,
-    embedding_dimensions: None,
     planner_max_tokens: None,
     planner_max_turns: None,
     planner_max_errors: None,
@@ -264,6 +266,10 @@ pub fn default() -> AppConfig {
     brave_cache_ttl_ms: None,
     input_queue_cap: None,
     scheduler_stuck_timeout_ms: None,
+    scheduler_tool_timeout_ms: None,
+    max_autonomous_cycles_per_hour: None,
+    autonomous_token_budget_per_hour: None,
+    xstructor_max_retries: None,
   )
 }
 
@@ -449,40 +455,41 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       override_cfg.threading_threshold,
       base.threading_threshold,
     ),
-    // CBR scoring
-    cbr_cosine_weight: option.or(
-      override_cfg.cbr_cosine_weight,
-      base.cbr_cosine_weight,
+    // CBR embedding
+    cbr_embedding_enabled: option.or(
+      override_cfg.cbr_embedding_enabled,
+      base.cbr_embedding_enabled,
     ),
-    cbr_symbolic_weight: option.or(
-      override_cfg.cbr_symbolic_weight,
-      base.cbr_symbolic_weight,
+    cbr_embedding_model: option.or(
+      override_cfg.cbr_embedding_model,
+      base.cbr_embedding_model,
     ),
-    cbr_intent_weight: option.or(
-      override_cfg.cbr_intent_weight,
-      base.cbr_intent_weight,
+    cbr_embedding_base_url: option.or(
+      override_cfg.cbr_embedding_base_url,
+      base.cbr_embedding_base_url,
     ),
-    cbr_keyword_weight: option.or(
-      override_cfg.cbr_keyword_weight,
-      base.cbr_keyword_weight,
+    // CBR retrieval weights
+    cbr_field_weight: option.or(
+      override_cfg.cbr_field_weight,
+      base.cbr_field_weight,
     ),
-    cbr_entity_weight: option.or(
-      override_cfg.cbr_entity_weight,
-      base.cbr_entity_weight,
-    ),
-    cbr_domain_weight: option.or(
-      override_cfg.cbr_domain_weight,
-      base.cbr_domain_weight,
+    cbr_index_weight: option.or(
+      override_cfg.cbr_index_weight,
+      base.cbr_index_weight,
     ),
     cbr_recency_weight: option.or(
       override_cfg.cbr_recency_weight,
       base.cbr_recency_weight,
     ),
-    cbr_min_score: option.or(override_cfg.cbr_min_score, base.cbr_min_score),
-    cbr_recency_decay_days: option.or(
-      override_cfg.cbr_recency_decay_days,
-      base.cbr_recency_decay_days,
+    cbr_domain_weight: option.or(
+      override_cfg.cbr_domain_weight,
+      base.cbr_domain_weight,
     ),
+    cbr_embedding_weight: option.or(
+      override_cfg.cbr_embedding_weight,
+      base.cbr_embedding_weight,
+    ),
+    cbr_min_score: option.or(override_cfg.cbr_min_score, base.cbr_min_score),
     // Housekeeping
     dedup_similarity: option.or(
       override_cfg.dedup_similarity,
@@ -503,19 +510,6 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     thread_pruning_days: option.or(
       override_cfg.thread_pruning_days,
       base.thread_pruning_days,
-    ),
-    // Embedding
-    embedding_model: option.or(
-      override_cfg.embedding_model,
-      base.embedding_model,
-    ),
-    embedding_base_url: option.or(
-      override_cfg.embedding_base_url,
-      base.embedding_base_url,
-    ),
-    embedding_dimensions: option.or(
-      override_cfg.embedding_dimensions,
-      base.embedding_dimensions,
     ),
     // Agent specs
     planner_max_tokens: option.or(
@@ -610,6 +604,22 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     scheduler_stuck_timeout_ms: option.or(
       override_cfg.scheduler_stuck_timeout_ms,
       base.scheduler_stuck_timeout_ms,
+    ),
+    scheduler_tool_timeout_ms: option.or(
+      override_cfg.scheduler_tool_timeout_ms,
+      base.scheduler_tool_timeout_ms,
+    ),
+    max_autonomous_cycles_per_hour: option.or(
+      override_cfg.max_autonomous_cycles_per_hour,
+      base.max_autonomous_cycles_per_hour,
+    ),
+    autonomous_token_budget_per_hour: option.or(
+      override_cfg.autonomous_token_budget_per_hour,
+      base.autonomous_token_budget_per_hour,
+    ),
+    xstructor_max_retries: option.or(
+      override_cfg.xstructor_max_retries,
+      base.xstructor_max_retries,
     ),
   )
 }
@@ -744,11 +754,9 @@ pub fn to_string(cfg: AppConfig) -> String {
     option.map(cfg.mailbox_warn_threshold, fn(v) {
       "mailbox_warn_threshold: " <> int.to_string(v)
     }),
-    // Embedding
-    option.map(cfg.embedding_model, fn(v) { "embedding.model: " <> v }),
-    option.map(cfg.embedding_base_url, fn(v) { "embedding.base_url: " <> v }),
-    option.map(cfg.embedding_dimensions, fn(v) {
-      "embedding.dimensions: " <> int.to_string(v)
+    // CBR
+    option.map(cfg.cbr_min_score, fn(v) {
+      "cbr.min_score: " <> float.to_string(v)
     }),
     // Web
     option.map(cfg.web_port, fn(v) { "web.port: " <> int.to_string(v) }),
@@ -1009,24 +1017,16 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     threading_threshold: get_toml_int(table, [
       "scoring", "threading", "threshold",
     ]),
-    // ── [scoring.cbr] ──
-    cbr_cosine_weight: get_toml_float(table, ["scoring", "cbr", "cosine_weight"]),
-    cbr_symbolic_weight: get_toml_float(table, [
-      "scoring", "cbr", "symbolic_weight",
-    ]),
-    cbr_intent_weight: get_toml_float(table, ["scoring", "cbr", "intent_weight"]),
-    cbr_keyword_weight: get_toml_float(table, [
-      "scoring", "cbr", "keyword_weight",
-    ]),
-    cbr_entity_weight: get_toml_float(table, ["scoring", "cbr", "entity_weight"]),
-    cbr_domain_weight: get_toml_float(table, ["scoring", "cbr", "domain_weight"]),
-    cbr_recency_weight: get_toml_float(table, [
-      "scoring", "cbr", "recency_weight",
-    ]),
-    cbr_min_score: get_toml_float(table, ["scoring", "cbr", "min_score"]),
-    cbr_recency_decay_days: get_toml_int(table, [
-      "scoring", "cbr", "recency_decay_days",
-    ]),
+    // ── [cbr] ──
+    cbr_embedding_enabled: get_toml_bool(table, ["cbr", "embedding_enabled"]),
+    cbr_embedding_model: get_toml_str(table, ["cbr", "embedding_model"]),
+    cbr_embedding_base_url: get_toml_str(table, ["cbr", "embedding_base_url"]),
+    cbr_field_weight: get_toml_float(table, ["cbr", "field_weight"]),
+    cbr_index_weight: get_toml_float(table, ["cbr", "index_weight"]),
+    cbr_recency_weight: get_toml_float(table, ["cbr", "recency_weight"]),
+    cbr_domain_weight: get_toml_float(table, ["cbr", "domain_weight"]),
+    cbr_embedding_weight: get_toml_float(table, ["cbr", "embedding_weight"]),
+    cbr_min_score: get_toml_float(table, ["cbr", "min_score"]),
     // ── [housekeeping] ──
     dedup_similarity: get_toml_float(table, ["housekeeping", "dedup_similarity"]),
     pruning_confidence: get_toml_float(table, [
@@ -1037,10 +1037,6 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     thread_pruning_days: get_toml_int(table, [
       "housekeeping", "thread_pruning_days",
     ]),
-    // ── [embedding] ──
-    embedding_model: get_toml_str(table, ["embedding", "model"]),
-    embedding_base_url: get_toml_str(table, ["embedding", "base_url"]),
-    embedding_dimensions: get_toml_int(table, ["embedding", "dimensions"]),
     // ── [agents.*] ──
     planner_max_tokens: get_toml_int(table, ["agents", "planner", "max_tokens"]),
     planner_max_turns: get_toml_int(table, ["agents", "planner", "max_turns"]),
@@ -1092,6 +1088,17 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     scheduler_stuck_timeout_ms: get_toml_int(table, [
       "timeouts", "scheduler_stuck_ms",
     ]),
+    scheduler_tool_timeout_ms: get_toml_int(table, [
+      "timeouts", "scheduler_tool_ms",
+    ]),
+    max_autonomous_cycles_per_hour: get_toml_int(table, [
+      "scheduler", "max_autonomous_cycles_per_hour",
+    ]),
+    autonomous_token_budget_per_hour: get_toml_int(table, [
+      "scheduler", "autonomous_token_budget_per_hour",
+    ]),
+    // ── [xstructor] ──
+    xstructor_max_retries: get_toml_int(table, ["xstructor", "max_retries"]),
   )
 }
 
@@ -1124,7 +1131,7 @@ const known_keys = [
   "write_anywhere", "skills_dirs", "gui", "dprime_enabled", "dprime_config",
   "narrative", "profile", "profiles_dirs", "agent", "log_retention_days",
   "log_max_file_bytes", "timeouts", "retry", "limits", "scoring", "housekeeping",
-  "embedding", "agents", "web", "services",
+  "cbr", "agents", "web", "services", "scheduler", "xstructor",
 ]
 
 const known_narrative_keys = [
@@ -1196,6 +1203,14 @@ fn validate_config_values(cfg: AppConfig) -> Nil {
   validate_positive(
     "scheduler_stuck_timeout_ms",
     cfg.scheduler_stuck_timeout_ms,
+  )
+  validate_positive(
+    "scheduler.max_autonomous_cycles_per_hour",
+    cfg.max_autonomous_cycles_per_hour,
+  )
+  validate_positive(
+    "scheduler.autonomous_token_budget_per_hour",
+    cfg.autonomous_token_budget_per_hour,
   )
   case cfg.provider {
     Some(p) ->
