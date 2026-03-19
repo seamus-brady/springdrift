@@ -8,6 +8,7 @@ import gleam/list
 import gleam/option
 import gleam/string
 import gleeunit/should
+import identity
 import narrative/curator
 import narrative/librarian
 import narrative/virtual_memory.{CbrSlotEntry}
@@ -440,4 +441,63 @@ pub fn build_system_prompt_with_persona_test() {
   should.be_true(!string.contains(prompt, "fallback"))
   process.send(cur, curator.Shutdown)
   process.send(lib, librarian.Shutdown)
+}
+
+// ---------------------------------------------------------------------------
+// Preamble budget tests
+// ---------------------------------------------------------------------------
+
+pub fn preamble_budget_plenty_of_room_test() {
+  // With a large budget, all slots pass through unchanged
+  let slots = [
+    identity.SlotValue(key: "agent_name", value: "Test"),
+    identity.SlotValue(key: "session_status", value: "Active"),
+    identity.SlotValue(key: "recent_narrative", value: "Some narrative text"),
+    identity.SlotValue(key: "active_threads", value: "Thread A"),
+    identity.SlotValue(key: "memory_health", value: "Nominal"),
+  ]
+  let result = curator.apply_preamble_budget(slots, 10_000)
+  // All values should be preserved (order may differ due to priority sort)
+  let values =
+    list.map(result, fn(s) { s.value })
+    |> list.sort(string.compare)
+  should.be_true(list.contains(values, "Test"))
+  should.be_true(list.contains(values, "Active"))
+  should.be_true(list.contains(values, "Some narrative text"))
+  should.be_true(list.contains(values, "Thread A"))
+  should.be_true(list.contains(values, "Nominal"))
+}
+
+pub fn preamble_budget_trims_low_priority_test() {
+  // Budget only fits high-priority slots — low-priority ones get cleared
+  let slots = [
+    identity.SlotValue(key: "agent_name", value: "Bot"),
+    identity.SlotValue(key: "session_status", value: "Active"),
+    identity.SlotValue(key: "recent_narrative", value: "A long narrative..."),
+    identity.SlotValue(key: "active_threads", value: "Thread detail"),
+    identity.SlotValue(key: "memory_health", value: "Nominal"),
+  ]
+  // Budget = 15 chars: enough for "Bot" (3) + "Active" (6) = 9, not enough for all
+  let result = curator.apply_preamble_budget(slots, 15)
+  let find = fn(key) {
+    list.find(result, fn(s) { s.key == key })
+    |> option.from_result
+  }
+  // High priority: agent_name (pri=1) and session_status (pri=2) should survive
+  let assert option.Some(name) = find("agent_name")
+  name.value |> should.equal("Bot")
+  let assert option.Some(status) = find("session_status")
+  status.value |> should.equal("Active")
+  // Low priority: memory_health (pri=10) should be cleared
+  let assert option.Some(health) = find("memory_health")
+  health.value |> should.equal("")
+}
+
+pub fn preamble_budget_zero_clears_all_test() {
+  let slots = [
+    identity.SlotValue(key: "agent_name", value: "Bot"),
+    identity.SlotValue(key: "session_status", value: "Active"),
+  ]
+  let result = curator.apply_preamble_budget(slots, 0)
+  list.each(result, fn(s) { s.value |> should.equal("") })
 }

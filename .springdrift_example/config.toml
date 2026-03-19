@@ -83,6 +83,8 @@ summaries = false            # Enable periodic summaries
 summary_schedule = "weekly"  # "weekly" or "monthly"
 # max_days = 30              # Days of history replayed into ETS at startup
 # redact_secrets = true      # Redact API keys/tokens/passwords in logs (default: true, --no-redact to disable)
+# Max chars for rendered preamble slots (default: 8000, ~2000 tokens)
+# preamble_budget_chars = 8000
 
 # ── Timeouts ─────────────────────────────────────────────────────────────────
 # All values in milliseconds unless noted otherwise.

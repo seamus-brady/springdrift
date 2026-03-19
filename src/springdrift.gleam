@@ -794,6 +794,10 @@ fn run(cfg: AppConfig) -> Nil {
     option.None -> Nil
   }
 
+  // Set preamble budget from config
+  let preamble_budget = option.unwrap(cfg.preamble_budget_chars, 8000)
+  curator.set_preamble_budget(curator_subj, preamble_budget)
+
   // Start GUI
   let tui_input_limit = option.unwrap(cfg.tui_input_limit, 102_400)
   let ws_max_bytes = option.unwrap(cfg.websocket_max_bytes, 1_048_576)

@@ -72,6 +72,8 @@ pub type CuratorMessage {
   UpdateAgentHealth(health: String)
   /// Set the scheduler subject (called after scheduler starts).
   SetScheduler(scheduler: Subject(scheduler_types.SchedulerMessage))
+  /// Set the preamble budget in chars (called after Curator starts).
+  SetPreambleBudget(chars: Int)
   /// Shutdown the Curator.
   Shutdown
 }
@@ -95,6 +97,7 @@ type CuratorState {
     agent_name: String,
     agent_version: String,
     scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
+    preamble_budget_chars: Int,
   )
 }
 
@@ -154,6 +157,7 @@ pub fn start_with_identity(
         agent_name:,
         agent_version:,
         scheduler: None,
+        preamble_budget_chars: 8000,
       )
 
     slog.info("narrative/curator", "start", "Curator ready", None)
@@ -294,6 +298,11 @@ pub fn update_constitution(
   )
 }
 
+/// Set the preamble budget in chars (fire-and-forget).
+pub fn set_preamble_budget(curator: Subject(CuratorMessage), chars: Int) -> Nil {
+  process.send(curator, SetPreambleBudget(chars:))
+}
+
 /// Update agent health only (fire-and-forget). Called on lifecycle events.
 pub fn update_agent_health(
   curator: Subject(CuratorMessage),
@@ -320,6 +329,9 @@ fn loop(state: CuratorState) -> Nil {
 
         SetScheduler(scheduler:) ->
           loop(CuratorState(..state, scheduler: Some(scheduler)))
+
+        SetPreambleBudget(chars:) ->
+          loop(CuratorState(..state, preamble_budget_chars: chars))
 
         InjectContext(task:, reply_to:) -> {
           let enriched = do_inject_context(state, task)
@@ -672,7 +684,7 @@ fn build_preamble_slots(state: CuratorState) -> List(identity.SlotValue) {
     |> string.join("\n")
 
   // Build slot values
-  [
+  let slots = [
     identity.SlotValue(key: "session_status", value: "Active session"),
     identity.SlotValue(key: "last_session_date", value: today),
     identity.SlotValue(key: "last_session_summary", value: last_session_summary),
@@ -716,6 +728,63 @@ fn build_preamble_slots(state: CuratorState) -> List(identity.SlotValue) {
     identity.SlotValue(key: "agent_name", value: state.agent_name),
     identity.SlotValue(key: "agent_version", value: state.agent_version),
   ]
+  apply_preamble_budget(slots, state.preamble_budget_chars)
+}
+
+/// Apply a character budget to preamble slots. Slots are prioritized
+/// (lower number = higher priority). When the budget is exceeded,
+/// remaining lower-priority slots are cleared to "" so that existing
+/// [OMIT IF EMPTY] template rules drop them naturally.
+pub fn apply_preamble_budget(
+  slots: List(identity.SlotValue),
+  budget_chars: Int,
+) -> List(identity.SlotValue) {
+  let prioritized = assign_priorities(slots)
+  // Sort by priority (ascending = most important first)
+  let sorted = list.sort(prioritized, fn(a, b) { int.compare(a.0, b.0) })
+  // Walk in priority order, accumulate chars, truncate when over
+  let #(_, budgeted) =
+    list.fold(sorted, #(0, []), fn(acc, entry) {
+      let #(used, kept) = acc
+      let #(_pri, slot) = entry
+      let slot_len = string.length(slot.value)
+      let remaining = budget_chars - used
+      case remaining <= 0 {
+        True -> #(used, [identity.SlotValue(..slot, value: ""), ..kept])
+        False ->
+          case slot_len <= remaining {
+            True -> #(used + slot_len, [slot, ..kept])
+            False -> {
+              let truncated = string.slice(slot.value, 0, remaining)
+              #(budget_chars, [
+                identity.SlotValue(..slot, value: truncated),
+                ..kept
+              ])
+            }
+          }
+      }
+    })
+  budgeted
+}
+
+fn assign_priorities(
+  slots: List(identity.SlotValue),
+) -> List(#(Int, identity.SlotValue)) {
+  list.map(slots, fn(slot) {
+    let pri = case slot.key {
+      "agent_name" | "agent_version" -> 1
+      "session_status" | "last_session_date" -> 2
+      "today_cycles" | "today_success_rate" | "agent_health" -> 3
+      "open_commitments" -> 4
+      "active_thread_count" | "cbr_case_count" | "persistent_fact_count" -> 5
+      "last_session_summary" -> 6
+      "recent_narrative" -> 7
+      "active_threads" -> 8
+      "recent_fact_sample" -> 9
+      _ -> 10
+    }
+    #(pri, slot)
+  })
 }
 
 fn build_open_commitments(

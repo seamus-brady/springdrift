@@ -162,6 +162,8 @@ pub type AppConfig {
     autonomous_token_budget_per_hour: Option(Int),
     // ── XStructor ──
     xstructor_max_retries: Option(Int),
+    // ── Preamble budget ──
+    preamble_budget_chars: Option(Int),
   )
 }
 
@@ -283,6 +285,7 @@ pub fn default() -> AppConfig {
     max_autonomous_cycles_per_hour: None,
     autonomous_token_budget_per_hour: None,
     xstructor_max_retries: None,
+    preamble_budget_chars: None,
   )
 }
 
@@ -654,6 +657,10 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     xstructor_max_retries: option.or(
       override_cfg.xstructor_max_retries,
       base.xstructor_max_retries,
+    ),
+    preamble_budget_chars: option.or(
+      override_cfg.preamble_budget_chars,
+      base.preamble_budget_chars,
     ),
   )
 }
@@ -1150,6 +1157,10 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     ]),
     // ── [xstructor] ──
     xstructor_max_retries: get_toml_int(table, ["xstructor", "max_retries"]),
+    // ── [narrative] preamble budget ──
+    preamble_budget_chars: get_toml_int(table, [
+      "narrative", "preamble_budget_chars",
+    ]),
   )
 }
 
@@ -1188,6 +1199,7 @@ const known_keys = [
 const known_narrative_keys = [
   "directory", "archivist_model", "archivist_max_tokens", "threading",
   "summaries", "summary_schedule", "max_days", "redact_secrets",
+  "preamble_budget_chars",
 ]
 
 fn validate_toml_keys(table: dict.Dict(String, tom.Toml)) -> Nil {
@@ -1262,6 +1274,10 @@ fn validate_config_values(cfg: AppConfig) -> Nil {
   validate_positive(
     "scheduler.autonomous_token_budget_per_hour",
     cfg.autonomous_token_budget_per_hour,
+  )
+  validate_positive(
+    "narrative.preamble_budget_chars",
+    cfg.preamble_budget_chars,
   )
   case cfg.provider {
     Some(p) ->
