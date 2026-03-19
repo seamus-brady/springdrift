@@ -290,6 +290,7 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `max_autonomous_cycles_per_hour` | — | 20 | Max scheduler-triggered cycles per hour (0 = unlimited) |
 | `autonomous_token_budget_per_hour` | — | 500000 | Max tokens (input+output) scheduler may consume per hour (0 = unlimited) |
 | `xstructor_max_retries` | — | 3 | Max XStructor XML validation+retry attempts |
+| `preamble_budget_chars` | — | 8000 | Max chars for rendered preamble slots (~2000 tokens) |
 | `cbr_embedding_enabled` | — | True | Enable Ollama embedding for CBR retrieval (fails on startup if Ollama unreachable) |
 | `cbr_embedding_model` | — | `nomic-embed-text` | Ollama embedding model name |
 | `cbr_embedding_base_url` | — | `http://localhost:11434` | Ollama API base URL |
@@ -350,10 +351,11 @@ At startup, the Librarian replays artifact metadata from disk (configurable via
 | `how_to` | HOW_TO.md | Operator guide: tool selection heuristics, degradation paths |
 
 **Curator** (`narrative/curator.gleam`) assembles the system prompt from memory.
-On each `BuildSystemPrompt` message it loads identity files (persona + preamble
-template), queries the Librarian for thread/fact/case counts, renders `{{slot}}`
-substitutions and `[OMIT IF]` rules, and returns the final prompt. Falls back to a
-plain system prompt when no identity files exist.
+On each `BuildSystemPrompt` message (with optional `CycleContext`) it loads identity
+files (persona + preamble template), queries the Librarian for thread/fact/case counts,
+builds an XML sensorium block with clock/situation/schedule/vitals sections, renders
+`{{slot}}` substitutions and `[OMIT IF]` rules, and returns the final prompt. Falls
+back to a plain system prompt when no identity files exist.
 
 **Archivist** (`narrative/archivist.gleam`) runs after each final reply as a
 fire-and-forget `spawn_unlinked` process. It makes a single LLM call to generate a
@@ -505,15 +507,34 @@ FACTS EXIST). `assemble_system_prompt` combines persona + rendered preamble in c
 `identity/` subdirectories under `.springdrift/` and `~/.config/springdrift/`.
 
 **Curator** — `narrative/curator.gleam` orchestrates memory integration. Handles
-`BuildSystemPrompt` messages: loads identity files, queries Librarian for thread/fact/case
-counts, renders preamble slots (including `agent_name`, `agent_version`, and constitution
-stats like `today_cycles` and `today_success_rate`), and assembles the final system prompt.
-The Archivist pushes `UpdateConstitution` after each cycle; `handle_agent_event` pushes
-`UpdateAgentHealth` on crash/restart/stop events. `SetScheduler` message wires the
-scheduler subject into the Curator so it can query pending/running jobs via
-`build_open_commitments` and populate the `{{open_commitments}}` preamble slot with
-upcoming schedule items (sensorium integration). Falls back to a provided fallback prompt
-when no identity files exist.
+`BuildSystemPrompt` messages (with optional `CycleContext`): loads identity files,
+queries Librarian for thread/fact/case counts, renders preamble slots, and assembles
+the final system prompt. `CycleContext` is an ephemeral record constructed by the
+cognitive loop each cycle carrying `input_source` ("user"/"scheduler"), `queue_depth`,
+`session_since`, and `agents_active` — data the Curator can't derive itself.
+
+`build_sensorium` assembles a self-describing XML `{{sensorium}}` slot — the agent's
+ambient perception block injected at every cycle start (no tool calls needed). It
+contains five sections:
+1. `<clock>` — `now` (ISO timestamp), `session_uptime`, optional `last_cycle` elapsed
+2. `<situation>` — `input` source ("user"/"scheduler"), `queue_depth`
+3. `<schedule>` — `pending`/`overdue` counts + `<job>` elements (omitted when empty)
+4. `<vitals>` — `cycles_today`, `success_rate`, `agents_active`, conditional
+   `agent_health`, and optional `cycles_remaining`/`tokens_remaining` budget attrs
+
+Previously separate preamble slots (`session_status`, `last_session_date`,
+`today_cycles`, `today_success_rate`, `agent_health`) are now absorbed into the
+sensorium XML and removed from the preamble template.
+
+After slot assembly, `apply_preamble_budget` enforces a configurable character budget
+(`preamble_budget_chars`, default 8000) — slots are prioritized (1=identity through
+10=background), and when total chars exceed the budget, lower-priority slots are
+truncated or cleared (existing `[OMIT IF EMPTY]` rules handle omission naturally).
+The Archivist pushes `UpdateConstitution` after each cycle; `handle_agent_event`
+pushes `UpdateAgentHealth` on crash/restart/stop events. `SetScheduler` message wires
+the scheduler subject into the Curator so it can query pending/running jobs and budget
+status for sensorium assembly. `SetPreambleBudget` overrides the default budget from
+config. Falls back to a provided fallback prompt when no identity files exist.
 
 **Profiles** — startup-only agent team configurations loaded from TOML directories.
 `profile.discover(dirs)` scans for directories with `config.toml`. `profile.load(name, dirs)`

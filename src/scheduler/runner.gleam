@@ -629,6 +629,25 @@ fn scheduler_loop(
       loop(jobs)
     }
 
+    types.GetBudgetRemaining(reply_to:) -> {
+      let now = monotonic_now_ms()
+      let hour_ago = now - 3_600_000
+      let recent_cycles =
+        list.filter(cycle_timestamps, fn(ts) { ts > hour_ago })
+      let recent_tokens = list.filter(token_usage, fn(tu) { tu.0 > hour_ago })
+      let total_tokens = list.fold(recent_tokens, 0, fn(acc, tu) { acc + tu.1 })
+      process.send(
+        reply_to,
+        types.BudgetStatus(
+          cycles_used: list.length(recent_cycles),
+          cycles_limit: max_cycles_per_hour,
+          tokens_used: total_tokens,
+          tokens_limit: token_budget_per_hour,
+        ),
+      )
+      loop(jobs)
+    }
+
     types.CompleteJob(name:, reply_to:) -> {
       case dict.get(jobs, name) {
         Error(_) -> {

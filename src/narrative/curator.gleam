@@ -23,12 +23,32 @@ import gleam/option.{type Option, None, Some}
 import gleam/string
 import identity
 import narrative/librarian
+import narrative/types as narrative_types
 import narrative/virtual_memory.{
   type CbrSlotEntry, type VirtualMemory, ScratchEntry,
 }
 import paths
 import scheduler/types as scheduler_types
 import slog
+
+// ---------------------------------------------------------------------------
+// Cycle context — ephemeral per-call data from the cognitive loop
+// ---------------------------------------------------------------------------
+
+/// Ephemeral context from the cognitive loop, passed with each
+/// BuildSystemPrompt call. Carries data the Curator can't derive itself.
+pub type CycleContext {
+  CycleContext(
+    /// "user" or "scheduler"
+    input_source: String,
+    /// Number of inputs waiting after this one
+    queue_depth: Int,
+    /// ISO timestamp of when the session started
+    session_since: String,
+    /// Count of agents with Running status in the registry
+    agents_active: Int,
+  )
+}
 
 // ---------------------------------------------------------------------------
 // Messages
@@ -61,7 +81,11 @@ pub type CuratorMessage {
   /// Set CBR cases for the current query.
   SetCbrCases(cases: List(CbrSlotEntry))
   /// Build the system prompt from persona + rendered preamble.
-  BuildSystemPrompt(fallback_prompt: String, reply_to: Subject(String))
+  BuildSystemPrompt(
+    fallback_prompt: String,
+    context: Option(CycleContext),
+    reply_to: Subject(String),
+  )
   /// Update constitution cache (called by Archivist after each cycle).
   UpdateConstitution(
     today_cycles: Int,
@@ -276,9 +300,13 @@ pub fn set_cbr_cases(
 pub fn build_system_prompt(
   curator: Subject(CuratorMessage),
   fallback_prompt: String,
+  context: Option(CycleContext),
 ) -> String {
   let reply_to = process.new_subject()
-  process.send(curator, BuildSystemPrompt(fallback_prompt:, reply_to:))
+  process.send(
+    curator,
+    BuildSystemPrompt(fallback_prompt:, context:, reply_to:),
+  )
   case process.receive(reply_to, 5000) {
     Ok(prompt) -> prompt
     Error(_) -> fallback_prompt
@@ -406,8 +434,8 @@ fn loop(state: CuratorState) -> Nil {
           loop(CuratorState(..state, vm: updated_vm))
         }
 
-        BuildSystemPrompt(fallback_prompt:, reply_to:) -> {
-          let prompt = do_build_system_prompt(state, fallback_prompt)
+        BuildSystemPrompt(fallback_prompt:, context:, reply_to:) -> {
+          let prompt = do_build_system_prompt(state, fallback_prompt, context)
           process.send(reply_to, prompt)
           loop(state)
         }
@@ -577,18 +605,39 @@ fn generate_id() -> String
 @external(erlang, "springdrift_ffi", "get_datetime")
 fn get_timestamp() -> String
 
-@external(erlang, "springdrift_ffi", "days_ago_date")
-fn days_ago_date(days: Int) -> String
+/// Milliseconds from now until an ISO 8601 datetime (negative if in the past).
+@external(erlang, "springdrift_ffi", "ms_until_datetime")
+fn ms_until_datetime(iso: String) -> Int
 
-fn get_today_date() -> String {
-  days_ago_date(0)
+/// Format elapsed time since an ISO 8601 timestamp as a human-readable string.
+fn format_elapsed_since(iso_timestamp: String) -> String {
+  // ms_until_datetime returns negative for past timestamps
+  let elapsed_ms = 0 - ms_until_datetime(iso_timestamp)
+  case elapsed_ms {
+    ms if ms < 0 -> "just now"
+    ms if ms < 60_000 -> int.to_string(ms / 1000) <> "s ago"
+    ms if ms < 3_600_000 -> int.to_string(ms / 60_000) <> "m ago"
+    ms if ms < 86_400_000 -> {
+      let hours = ms / 3_600_000
+      let mins = { ms - hours * 3_600_000 } / 60_000
+      int.to_string(hours) <> "h " <> int.to_string(mins) <> "m ago"
+    }
+    ms -> {
+      let days = ms / 86_400_000
+      int.to_string(days) <> "d ago"
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
 // System prompt assembly from identity files
 // ---------------------------------------------------------------------------
 
-fn do_build_system_prompt(state: CuratorState, fallback: String) -> String {
+fn do_build_system_prompt(
+  state: CuratorState,
+  fallback: String,
+  context: Option(CycleContext),
+) -> String {
   let persona = identity.load_persona(state.identity_dirs)
   let template = identity.load_preamble_template(state.identity_dirs)
 
@@ -598,7 +647,7 @@ fn do_build_system_prompt(state: CuratorState, fallback: String) -> String {
       let rendered_preamble = case template {
         None -> None
         Some(tmpl) -> {
-          let slots = build_preamble_slots(state)
+          let slots = build_preamble_slots(state, context)
           let rendered = identity.render_preamble(tmpl, slots)
           case rendered {
             "" -> None
@@ -620,9 +669,10 @@ fn do_build_system_prompt(state: CuratorState, fallback: String) -> String {
   }
 }
 
-fn build_preamble_slots(state: CuratorState) -> List(identity.SlotValue) {
-  let today = get_today_date()
-
+fn build_preamble_slots(
+  state: CuratorState,
+  context: Option(CycleContext),
+) -> List(identity.SlotValue) {
   // Query Librarian for counts
   let thread_count = librarian.get_thread_count(state.librarian)
   let fact_count = librarian.get_persistent_fact_count(state.librarian)
@@ -683,10 +733,13 @@ fn build_preamble_slots(state: CuratorState) -> List(identity.SlotValue) {
     })
     |> string.join("\n")
 
-  // Build slot values
+  // Assemble sensorium — self-describing XML perceptual input block
+  let sensorium = build_sensorium(state, context, recent_entries)
+
+  // Build slot values — session_status, last_session_date, today_cycles,
+  // today_success_rate, and agent_health are now inside the sensorium XML.
   let slots = [
-    identity.SlotValue(key: "session_status", value: "Active session"),
-    identity.SlotValue(key: "last_session_date", value: today),
+    identity.SlotValue(key: "sensorium", value: sensorium),
     identity.SlotValue(key: "last_session_summary", value: last_session_summary),
     identity.SlotValue(
       key: "active_thread_count",
@@ -699,26 +752,7 @@ fn build_preamble_slots(state: CuratorState) -> List(identity.SlotValue) {
     ),
     identity.SlotValue(key: "recent_fact_sample", value: recent_fact_text),
     identity.SlotValue(key: "cbr_case_count", value: int.to_string(case_count)),
-    identity.SlotValue(
-      key: "today_cycles",
-      value: int.to_string(state.vm.constitution.today_cycles),
-    ),
-    identity.SlotValue(
-      key: "today_success_rate",
-      value: float.to_string(state.vm.constitution.today_success_rate),
-    ),
-    identity.SlotValue(
-      key: "agent_health",
-      value: case state.vm.constitution.agent_health {
-        "All agents nominal" -> ""
-        h -> h
-      },
-    ),
     identity.SlotValue(key: "recent_narrative", value: recent_narrative_text),
-    identity.SlotValue(
-      key: "open_commitments",
-      value: build_open_commitments(state.scheduler),
-    ),
     identity.SlotValue(key: "memory_health", value: "Nominal"),
     identity.SlotValue(key: "active_profile", value: case state.active_profile {
       Some(name) -> name
@@ -773,9 +807,7 @@ fn assign_priorities(
   list.map(slots, fn(slot) {
     let pri = case slot.key {
       "agent_name" | "agent_version" -> 1
-      "session_status" | "last_session_date" -> 2
-      "today_cycles" | "today_success_rate" | "agent_health" -> 3
-      "open_commitments" -> 4
+      "sensorium" -> 2
       "active_thread_count" | "cbr_case_count" | "persistent_fact_count" -> 5
       "last_session_summary" -> 6
       "recent_narrative" -> 7
@@ -787,11 +819,183 @@ fn assign_priorities(
   })
 }
 
-fn build_open_commitments(
+/// Assemble the sensorium — a self-describing XML block of ambient perception.
+/// Answers: what time is it, how long was I away, who woke me, what's
+/// happening, is anything waiting, and is anything wrong?
+fn build_sensorium(
+  state: CuratorState,
+  context: Option(CycleContext),
+  recent_entries: List(narrative_types.NarrativeEntry),
+) -> String {
+  let now = get_timestamp()
+
+  // Resolve cycle context (defaults when None)
+  let input_source = case context {
+    Some(ctx) -> ctx.input_source
+    None -> "user"
+  }
+  let queue_depth = case context {
+    Some(ctx) -> ctx.queue_depth
+    None -> 0
+  }
+  let session_since = case context {
+    Some(ctx) -> ctx.session_since
+    None -> now
+  }
+  let agents_active = case context {
+    Some(ctx) -> ctx.agents_active
+    None -> 0
+  }
+  let agent_health = state.vm.constitution.agent_health
+
+  let clock = render_sensorium_clock(now, session_since, recent_entries)
+  let situation = render_sensorium_situation(input_source, queue_depth)
+  let schedule = render_sensorium_schedule(state.scheduler)
+  let vitals =
+    render_sensorium_vitals(
+      state.vm.constitution,
+      agents_active,
+      agent_health,
+      state.scheduler,
+    )
+
+  let sections =
+    [clock, situation, schedule, vitals]
+    |> list.filter(fn(s) { s != "" })
+    |> string.join("\n")
+
+  "<!-- Sensorium: ambient perception injected each cycle. No tool calls needed. -->\n<sensorium>\n"
+  <> sections
+  <> "\n</sensorium>"
+}
+
+/// Render the <clock> element with temporal orientation.
+pub fn render_sensorium_clock(
+  now: String,
+  session_since: String,
+  recent_entries: List(narrative_types.NarrativeEntry),
+) -> String {
+  let uptime = format_elapsed_since(session_since)
+  let last_cycle_attr = case recent_entries {
+    [entry, ..] ->
+      " last_cycle=\"" <> format_elapsed_since(entry.timestamp) <> "\""
+    _ -> ""
+  }
+  "  <clock now=\""
+  <> now
+  <> "\" session_uptime=\""
+  <> uptime
+  <> "\""
+  <> last_cycle_attr
+  <> "/>"
+}
+
+/// Render the <situation> element — who triggered this cycle and what's waiting.
+pub fn render_sensorium_situation(
+  input_source: String,
+  queue_depth: Int,
+) -> String {
+  "  <situation input=\""
+  <> input_source
+  <> "\" queue_depth=\""
+  <> int.to_string(queue_depth)
+  <> "\"/>"
+}
+
+/// Render the <schedule> element with per-job detail.
+/// Returns "" when no scheduler or no active jobs.
+pub fn render_sensorium_schedule(
   scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
 ) -> String {
-  case scheduler {
+  let jobs = query_schedule_jobs(scheduler)
+  case jobs {
+    [] -> ""
+    _ -> {
+      let pending_count =
+        list.count(jobs, fn(j) { status_is_pending(j.status) })
+      let overdue_count = list.count(jobs, fn(j) { is_overdue(j) })
+      let job_lines =
+        jobs
+        |> list.map(fn(j) {
+          "    <job title=\""
+          <> j.title
+          <> "\" kind=\""
+          <> scheduler_types.encode_job_kind(j.kind)
+          <> "\" status=\""
+          <> job_display_status(j)
+          <> "\""
+          <> case j.due_at {
+            Some(due) -> " due=\"" <> due <> "\""
+            None -> ""
+          }
+          <> "/>"
+        })
+        |> string.join("\n")
+      "  <schedule pending=\""
+      <> int.to_string(pending_count)
+      <> "\" overdue=\""
+      <> int.to_string(overdue_count)
+      <> "\">\n"
+      <> job_lines
+      <> "\n  </schedule>"
+    }
+  }
+}
+
+/// Render the <vitals> element — operational health.
+pub fn render_sensorium_vitals(
+  constitution: virtual_memory.ConstitutionSlot,
+  agents_active: Int,
+  agent_health: String,
+  scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
+) -> String {
+  let health_attr = case agent_health {
+    "" -> ""
+    "All agents nominal" -> ""
+    h -> " agent_health=\"" <> h <> "\""
+  }
+  let budget = query_budget(scheduler)
+  let budget_attrs = case budget {
     None -> ""
+    Some(b) -> {
+      let cycles_attr = case b.cycles_limit > 0 {
+        True ->
+          " cycles_remaining=\""
+          <> int.to_string(int.max(0, b.cycles_limit - b.cycles_used))
+          <> "\""
+        False -> ""
+      }
+      let tokens_attr = case b.tokens_limit > 0 {
+        True ->
+          " tokens_remaining=\""
+          <> int.to_string(int.max(0, b.tokens_limit - b.tokens_used))
+          <> "\""
+        False -> ""
+      }
+      cycles_attr <> tokens_attr
+    }
+  }
+  "  <vitals cycles_today=\""
+  <> int.to_string(constitution.today_cycles)
+  <> "\" success_rate=\""
+  <> float.to_string(constitution.today_success_rate)
+  <> "\" agents_active=\""
+  <> int.to_string(agents_active)
+  <> "\""
+  <> health_attr
+  <> budget_attrs
+  <> "/>"
+}
+
+// ---------------------------------------------------------------------------
+// Sensorium helpers
+// ---------------------------------------------------------------------------
+
+fn query_schedule_jobs(
+  scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
+) -> List(scheduler_types.ScheduledJob) {
+  case scheduler {
+    None -> []
     Some(sched) -> {
       let reply_to = process.new_subject()
       process.send(
@@ -808,24 +1012,46 @@ fn build_open_commitments(
         ),
       )
       case process.receive(reply_to, 2000) {
-        Error(_) -> ""
-        Ok(jobs) ->
-          case jobs {
-            [] -> ""
-            _ ->
-              list.map(jobs, fn(j) {
-                j.title
-                <> " ("
-                <> scheduler_types.encode_job_kind(j.kind)
-                <> case j.due_at {
-                  Some(due) -> ", due " <> due
-                  None -> ""
-                }
-                <> ")"
-              })
-              |> string.join(", ")
-          }
+        Error(_) -> []
+        Ok(jobs) -> jobs
       }
     }
+  }
+}
+
+fn query_budget(
+  scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
+) -> Option(scheduler_types.BudgetStatus) {
+  case scheduler {
+    None -> None
+    Some(sched) -> {
+      let reply_to = process.new_subject()
+      process.send(sched, scheduler_types.GetBudgetRemaining(reply_to:))
+      case process.receive(reply_to, 2000) {
+        Error(_) -> None
+        Ok(b) -> Some(b)
+      }
+    }
+  }
+}
+
+fn status_is_pending(status: scheduler_types.JobStatus) -> Bool {
+  case status {
+    scheduler_types.Pending -> True
+    _ -> False
+  }
+}
+
+fn is_overdue(job: scheduler_types.ScheduledJob) -> Bool {
+  case job.due_at {
+    Some(due) -> ms_until_datetime(due) < 0
+    None -> False
+  }
+}
+
+fn job_display_status(job: scheduler_types.ScheduledJob) -> String {
+  case is_overdue(job) {
+    True -> "overdue"
+    False -> scheduler_types.encode_job_status(job.status)
   }
 }

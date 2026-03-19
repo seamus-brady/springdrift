@@ -11,6 +11,7 @@ import gleeunit/should
 import identity
 import narrative/curator
 import narrative/librarian
+import narrative/types as narrative_types
 import narrative/virtual_memory.{CbrSlotEntry}
 import simplifile
 
@@ -400,7 +401,7 @@ pub fn build_system_prompt_fallback_when_no_identity_test() {
       "Springdrift",
       "",
     )
-  let prompt = curator.build_system_prompt(cur, "You are helpful.")
+  let prompt = curator.build_system_prompt(cur, "You are helpful.", option.None)
   prompt |> should.equal("You are helpful.")
   process.send(cur, curator.Shutdown)
   process.send(lib, librarian.Shutdown)
@@ -436,7 +437,7 @@ pub fn build_system_prompt_with_persona_test() {
       "Springdrift",
       "",
     )
-  let prompt = curator.build_system_prompt(cur, "fallback")
+  let prompt = curator.build_system_prompt(cur, "fallback", option.None)
   should.be_true(string.contains(prompt, "I am Springdrift."))
   should.be_true(!string.contains(prompt, "fallback"))
   process.send(cur, curator.Shutdown)
@@ -451,7 +452,7 @@ pub fn preamble_budget_plenty_of_room_test() {
   // With a large budget, all slots pass through unchanged
   let slots = [
     identity.SlotValue(key: "agent_name", value: "Test"),
-    identity.SlotValue(key: "session_status", value: "Active"),
+    identity.SlotValue(key: "sensorium", value: "<sensorium/>"),
     identity.SlotValue(key: "recent_narrative", value: "Some narrative text"),
     identity.SlotValue(key: "active_threads", value: "Thread A"),
     identity.SlotValue(key: "memory_health", value: "Nominal"),
@@ -462,7 +463,7 @@ pub fn preamble_budget_plenty_of_room_test() {
     list.map(result, fn(s) { s.value })
     |> list.sort(string.compare)
   should.be_true(list.contains(values, "Test"))
-  should.be_true(list.contains(values, "Active"))
+  should.be_true(list.contains(values, "<sensorium/>"))
   should.be_true(list.contains(values, "Some narrative text"))
   should.be_true(list.contains(values, "Thread A"))
   should.be_true(list.contains(values, "Nominal"))
@@ -472,22 +473,22 @@ pub fn preamble_budget_trims_low_priority_test() {
   // Budget only fits high-priority slots — low-priority ones get cleared
   let slots = [
     identity.SlotValue(key: "agent_name", value: "Bot"),
-    identity.SlotValue(key: "session_status", value: "Active"),
+    identity.SlotValue(key: "sensorium", value: "<sensorium/>"),
     identity.SlotValue(key: "recent_narrative", value: "A long narrative..."),
     identity.SlotValue(key: "active_threads", value: "Thread detail"),
     identity.SlotValue(key: "memory_health", value: "Nominal"),
   ]
-  // Budget = 15 chars: enough for "Bot" (3) + "Active" (6) = 9, not enough for all
-  let result = curator.apply_preamble_budget(slots, 15)
+  // Budget = 20 chars: enough for "Bot" (3) + "<sensorium/>" (12) = 15, not enough for all
+  let result = curator.apply_preamble_budget(slots, 20)
   let find = fn(key) {
     list.find(result, fn(s) { s.key == key })
     |> option.from_result
   }
-  // High priority: agent_name (pri=1) and session_status (pri=2) should survive
+  // High priority: agent_name (pri=1) and sensorium (pri=2) should survive
   let assert option.Some(name) = find("agent_name")
   name.value |> should.equal("Bot")
-  let assert option.Some(status) = find("session_status")
-  status.value |> should.equal("Active")
+  let assert option.Some(sensor) = find("sensorium")
+  sensor.value |> should.equal("<sensorium/>")
   // Low priority: memory_health (pri=10) should be cleared
   let assert option.Some(health) = find("memory_health")
   health.value |> should.equal("")
@@ -496,8 +497,140 @@ pub fn preamble_budget_trims_low_priority_test() {
 pub fn preamble_budget_zero_clears_all_test() {
   let slots = [
     identity.SlotValue(key: "agent_name", value: "Bot"),
-    identity.SlotValue(key: "session_status", value: "Active"),
+    identity.SlotValue(key: "sensorium", value: "<sensorium/>"),
   ]
   let result = curator.apply_preamble_budget(slots, 0)
   list.each(result, fn(s) { s.value |> should.equal("") })
+}
+
+// ---------------------------------------------------------------------------
+// Sensorium pure renderer tests
+// ---------------------------------------------------------------------------
+
+pub fn render_sensorium_clock_no_prior_test() {
+  let result =
+    curator.render_sensorium_clock(
+      "2026-03-19T14:30:00",
+      "2026-03-19T12:15:00",
+      [],
+    )
+  should.be_true(string.contains(result, "now=\"2026-03-19T14:30:00\""))
+  should.be_true(string.contains(result, "session_uptime="))
+  should.be_false(string.contains(result, "last_cycle="))
+}
+
+pub fn render_sensorium_clock_with_elapsed_test() {
+  let entries = [
+    narrative_entry_stub("2026-03-19T14:25:00"),
+  ]
+  let result =
+    curator.render_sensorium_clock(
+      "2026-03-19T14:30:00",
+      "2026-03-19T12:00:00",
+      entries,
+    )
+  should.be_true(string.contains(result, "now=\"2026-03-19T14:30:00\""))
+  should.be_true(string.contains(result, "session_uptime="))
+  should.be_true(string.contains(result, "last_cycle="))
+}
+
+pub fn render_sensorium_situation_user_test() {
+  let result = curator.render_sensorium_situation("user", 0)
+  result
+  |> should.equal("  <situation input=\"user\" queue_depth=\"0\"/>")
+}
+
+pub fn render_sensorium_situation_scheduler_queued_test() {
+  let result = curator.render_sensorium_situation("scheduler", 2)
+  result
+  |> should.equal("  <situation input=\"scheduler\" queue_depth=\"2\"/>")
+}
+
+pub fn render_sensorium_schedule_empty_test() {
+  let result = curator.render_sensorium_schedule(option.None)
+  result |> should.equal("")
+}
+
+pub fn render_sensorium_vitals_test() {
+  let constitution =
+    virtual_memory.ConstitutionSlot(
+      today_cycles: 5,
+      today_success_rate: 0.8,
+      agent_health: "All agents nominal",
+    )
+  let result = curator.render_sensorium_vitals(constitution, 2, "", option.None)
+  should.be_true(string.contains(result, "cycles_today=\"5\""))
+  should.be_true(string.contains(result, "success_rate=\"0.8\""))
+  should.be_true(string.contains(result, "agents_active=\"2\""))
+  should.be_false(string.contains(result, "agent_health="))
+}
+
+pub fn render_sensorium_vitals_health_issue_test() {
+  let constitution =
+    virtual_memory.ConstitutionSlot(
+      today_cycles: 3,
+      today_success_rate: 0.6,
+      agent_health: "researcher restarting",
+    )
+  let result =
+    curator.render_sensorium_vitals(
+      constitution,
+      1,
+      "researcher restarting",
+      option.None,
+    )
+  should.be_true(string.contains(
+    result,
+    "agent_health=\"researcher restarting\"",
+  ))
+  should.be_true(string.contains(result, "agents_active=\"1\""))
+}
+
+// ---------------------------------------------------------------------------
+// Sensorium test helpers
+// ---------------------------------------------------------------------------
+
+fn narrative_entry_stub(ts: String) -> narrative_types.NarrativeEntry {
+  narrative_types.NarrativeEntry(
+    schema_version: 1,
+    cycle_id: "test-cycle",
+    parent_cycle_id: option.None,
+    timestamp: ts,
+    entry_type: narrative_types.Narrative,
+    summary: "Test entry",
+    intent: narrative_types.Intent(
+      classification: narrative_types.Exploration,
+      description: "test",
+      domain: "test",
+    ),
+    outcome: narrative_types.Outcome(
+      status: narrative_types.Success,
+      confidence: 0.9,
+      assessment: "ok",
+    ),
+    delegation_chain: [],
+    decisions: [],
+    keywords: [],
+    topics: [],
+    entities: narrative_types.Entities(
+      locations: [],
+      organisations: [],
+      data_points: [],
+      temporal_references: [],
+    ),
+    sources: [],
+    thread: option.None,
+    metrics: narrative_types.Metrics(
+      total_duration_ms: 0,
+      input_tokens: 0,
+      output_tokens: 0,
+      thinking_tokens: 0,
+      tool_calls: 0,
+      agent_delegations: 0,
+      dprime_evaluations: 0,
+      model_used: "",
+    ),
+    observations: [],
+    redacted: False,
+  )
 }
