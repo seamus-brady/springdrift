@@ -264,17 +264,9 @@ fn run(cfg: AppConfig) -> Nil {
   let default_weights = cbr_bridge.default_weights()
   let embedding_base_url =
     option.unwrap(cfg.cbr_embedding_base_url, "http://localhost:11434")
-  let embed_fn = case option.unwrap(cfg.cbr_embedding_enabled, False) {
+  let embed_fn = case option.unwrap(cfg.cbr_embedding_enabled, True) {
     True -> {
-      let model = case cfg.cbr_embedding_model {
-        option.Some(m) -> m
-        option.None -> {
-          io.println(
-            "Fatal: cbr.embedding_enabled = true but cbr.embedding_model is not set",
-          )
-          panic as "cbr.embedding_model required when embedding_enabled = true"
-        }
-      }
+      let model = option.unwrap(cfg.cbr_embedding_model, "nomic-embed-text")
       case embedding.start_serving(embedding_base_url, model) {
         Ok(_) -> {
           io.println(

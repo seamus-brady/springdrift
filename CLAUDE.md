@@ -290,8 +290,8 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `max_autonomous_cycles_per_hour` | — | 20 | Max scheduler-triggered cycles per hour (0 = unlimited) |
 | `autonomous_token_budget_per_hour` | — | 500000 | Max tokens (input+output) scheduler may consume per hour (0 = unlimited) |
 | `xstructor_max_retries` | — | 3 | Max XStructor XML validation+retry attempts |
-| `cbr_embedding_enabled` | — | False | Enable Ollama embedding for CBR retrieval (fails on startup if Ollama unreachable) |
-| `cbr_embedding_model` | — | None | Ollama model name (required when embedding enabled) |
+| `cbr_embedding_enabled` | — | True | Enable Ollama embedding for CBR retrieval (fails on startup if Ollama unreachable) |
+| `cbr_embedding_model` | — | `nomic-embed-text` | Ollama embedding model name |
 | `cbr_embedding_base_url` | — | `http://localhost:11434` | Ollama API base URL |
 
 ## Memory architecture

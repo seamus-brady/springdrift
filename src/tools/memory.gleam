@@ -1329,7 +1329,7 @@ fn run_recall_cases(
               |> list.map(string.trim)
               |> list.filter(fn(k) { k != "" })
           }
-          let clamped = int.min(cbr_max, int.max(1, max_results))
+          let clamped = int.min(cbr_max, int.max(0, max_results))
           let query =
             cbr_types.CbrQuery(
               intent:,

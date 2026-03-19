@@ -214,12 +214,13 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 # Scores are a weighted sum of four (optionally five) signals, each normalized 0.0–1.0.
 
 [cbr]
-# Enable semantic embeddings via Ollama (default: false)
+# Enable semantic embeddings via Ollama (default: true)
 # Requires Ollama running with the configured model pulled.
-# When enabled, the agent will NOT start if Ollama is unreachable or the model is missing.
-# embedding_enabled = false
+# The agent will NOT start if Ollama is unreachable or the model is missing.
+# Set to false to disable embeddings and use only deterministic signals.
+# embedding_enabled = true
 
-# Ollama embedding model name (required when embedding_enabled = true)
+# Ollama embedding model name (default: "nomic-embed-text")
 # embedding_model = "nomic-embed-text"
 
 # Ollama API base URL (default: http://localhost:11434)
