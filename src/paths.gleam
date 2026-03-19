@@ -29,13 +29,20 @@ fn get_env(name: String) -> Result(String, Nil)
 // ---------------------------------------------------------------------------
 
 /// The local project directory for all Springdrift runtime data.
-pub const project_dir = ".springdrift"
+/// Defaults to `.springdrift` but can be overridden via `SPRINGDRIFT_DATA_DIR`
+/// env var (used by tests to isolate writes to /tmp).
+pub fn project_dir() -> String {
+  case get_env("SPRINGDRIFT_DATA_DIR") {
+    Ok(dir) -> dir
+    Error(_) -> ".springdrift"
+  }
+}
 
 /// The user-level config directory (XDG-style).
 pub fn user_dir() -> String {
   case get_env("HOME") {
     Ok(home) -> home <> "/.config/springdrift"
-    Error(_) -> project_dir
+    Error(_) -> project_dir()
   }
 }
 
@@ -45,7 +52,7 @@ pub fn user_dir() -> String {
 
 /// Local config file path: .springdrift/config.toml
 pub fn local_config() -> String {
-  project_dir <> "/config.toml"
+  project_dir() <> "/config.toml"
 }
 
 /// User-level config file path: ~/.config/springdrift/config.toml
@@ -59,7 +66,7 @@ pub fn user_config() -> String {
 
 /// Session persistence file: .springdrift/session.json
 pub fn session() -> String {
-  project_dir <> "/session.json"
+  project_dir() <> "/session.json"
 }
 
 // ---------------------------------------------------------------------------
@@ -68,7 +75,7 @@ pub fn session() -> String {
 
 /// System log directory: .springdrift/logs/
 pub fn logs_dir() -> String {
-  project_dir <> "/logs"
+  project_dir() <> "/logs"
 }
 
 // ---------------------------------------------------------------------------
@@ -77,47 +84,47 @@ pub fn logs_dir() -> String {
 
 /// Cycle log directory: .springdrift/memory/cycle-log/
 pub fn cycle_log_dir() -> String {
-  project_dir <> "/memory/cycle-log"
+  project_dir() <> "/memory/cycle-log"
 }
 
 /// Narrative log directory: .springdrift/memory/narrative/
 pub fn narrative_dir() -> String {
-  project_dir <> "/memory/narrative"
+  project_dir() <> "/memory/narrative"
 }
 
 /// CBR case directory: .springdrift/memory/cbr/
 pub fn cbr_dir() -> String {
-  project_dir <> "/memory/cbr"
+  project_dir() <> "/memory/cbr"
 }
 
 /// Facts directory: .springdrift/memory/facts/
 pub fn facts_dir() -> String {
-  project_dir <> "/memory/facts"
+  project_dir() <> "/memory/facts"
 }
 
 /// Artifacts directory: .springdrift/memory/artifacts/
 pub fn artifacts_dir() -> String {
-  project_dir <> "/memory/artifacts"
+  project_dir() <> "/memory/artifacts"
 }
 
 /// Schedule directory: .springdrift/memory/schedule/
 pub fn schedule_dir() -> String {
-  project_dir <> "/memory/schedule"
+  project_dir() <> "/memory/schedule"
 }
 
 /// XStructor schema directory: .springdrift/schemas/
 pub fn schemas_dir() -> String {
-  project_dir <> "/schemas"
+  project_dir() <> "/schemas"
 }
 
 /// Scheduler output directory: .springdrift/scheduler/outputs/
 pub fn scheduler_outputs_dir() -> String {
-  project_dir <> "/scheduler/outputs"
+  project_dir() <> "/scheduler/outputs"
 }
 
 /// Legacy scheduler checkpoint (one-time migration source only).
 pub fn scheduler_checkpoint() -> String {
-  project_dir <> "/scheduler-checkpoint.json"
+  project_dir() <> "/scheduler-checkpoint.json"
 }
 
 // ---------------------------------------------------------------------------
@@ -132,12 +139,12 @@ pub const preamble_filename = "session_preamble.md"
 
 /// Stable agent identity file: .springdrift/identity.json
 pub fn agent_identity() -> String {
-  project_dir <> "/identity.json"
+  project_dir() <> "/identity.json"
 }
 
 /// Local identity directory: .springdrift/identity/
 pub fn local_identity_dir() -> String {
-  project_dir <> "/identity"
+  project_dir() <> "/identity"
 }
 
 /// User-level identity directory: ~/.config/springdrift/identity/
@@ -150,10 +157,10 @@ pub fn user_identity_dir() -> String {
 pub fn default_identity_dirs() -> List(String) {
   case get_env("HOME") {
     Ok(home) -> [
-      project_dir <> "/identity",
+      project_dir() <> "/identity",
       home <> "/.config/springdrift/identity",
     ]
-    Error(_) -> [project_dir <> "/identity"]
+    Error(_) -> [project_dir() <> "/identity"]
   }
 }
 
@@ -166,9 +173,9 @@ pub fn default_skills_dirs() -> List(String) {
   case get_env("HOME") {
     Ok(home) -> [
       home <> "/.config/springdrift/skills",
-      project_dir <> "/skills",
+      project_dir() <> "/skills",
     ]
-    Error(_) -> [project_dir <> "/skills"]
+    Error(_) -> [project_dir() <> "/skills"]
   }
 }
 
@@ -183,14 +190,14 @@ pub const how_to_filename = "HOW_TO.md"
 pub fn how_to_paths() -> List(String) {
   case get_env("HOME") {
     Ok(home) -> [
-      project_dir <> "/skills/" <> how_to_filename,
-      project_dir <> "/" <> how_to_filename,
+      project_dir() <> "/skills/" <> how_to_filename,
+      project_dir() <> "/" <> how_to_filename,
       home <> "/.config/springdrift/skills/" <> how_to_filename,
       home <> "/.config/springdrift/" <> how_to_filename,
     ]
     Error(_) -> [
-      project_dir <> "/skills/" <> how_to_filename,
-      project_dir <> "/" <> how_to_filename,
+      project_dir() <> "/skills/" <> how_to_filename,
+      project_dir() <> "/" <> how_to_filename,
     ]
   }
 }
@@ -204,8 +211,8 @@ pub fn default_profiles_dirs() -> List(String) {
   case get_env("HOME") {
     Ok(home) -> [
       home <> "/.config/springdrift/profiles",
-      project_dir <> "/profiles",
+      project_dir() <> "/profiles",
     ]
-    Error(_) -> [project_dir <> "/profiles"]
+    Error(_) -> [project_dir() <> "/profiles"]
   }
 }

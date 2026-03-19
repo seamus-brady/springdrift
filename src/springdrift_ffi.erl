@@ -14,7 +14,8 @@
          ensure_utf8/1, days_between/2,
          mailbox_size/0, add_days/2,
          ms_until_datetime/1, advance_datetime_ms/2,
-         re_replace_all/3]).
+         re_replace_all/3,
+         set_env/2]).
 
 %% Read one line from stdin.
 %% Returns {ok, Binary} (including trailing newline) or {error, nil} on EOF.
@@ -529,3 +530,7 @@ re_replace_all(Text, Pattern, Replacement) when is_binary(Text), is_binary(Patte
             Text
     end.
 
+%% Set an environment variable (converts Gleam binaries to charlists for os:putenv).
+set_env(Name, Value) when is_binary(Name), is_binary(Value) ->
+    os:putenv(binary_to_list(Name), binary_to_list(Value)),
+    nil.

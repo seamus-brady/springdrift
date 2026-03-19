@@ -76,7 +76,7 @@ pub fn save(identity: AgentIdentity) -> Nil {
 // ---------------------------------------------------------------------------
 
 fn identity_path() -> String {
-  paths.project_dir <> "/identity.json"
+  paths.project_dir() <> "/identity.json"
 }
 
 fn create_and_save() -> AgentIdentity {

@@ -24,7 +24,7 @@ type Session {
 }
 
 fn config_dir() -> String {
-  paths.project_dir
+  paths.project_dir()
 }
 
 fn session_path() -> String {
