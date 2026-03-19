@@ -47,6 +47,7 @@ pub fn proceed_with_model(
           queue_depth: list.length(state.input_queue),
           session_since: state.identity.session_since,
           agents_active: registry.count_running(state.registry),
+          message_count: list.length(state.messages),
         )
       let prompt =
         curator.build_system_prompt(cur, state.system, Some(cycle_context))

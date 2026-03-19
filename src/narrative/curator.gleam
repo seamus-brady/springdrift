@@ -47,6 +47,8 @@ pub type CycleContext {
     session_since: String,
     /// Count of agents with Running status in the registry
     agents_active: Int,
+    /// Total messages in conversation history (conversation depth signal)
+    message_count: Int,
   )
 }
 
@@ -753,7 +755,7 @@ fn build_preamble_slots(
     identity.SlotValue(key: "recent_fact_sample", value: recent_fact_text),
     identity.SlotValue(key: "cbr_case_count", value: int.to_string(case_count)),
     identity.SlotValue(key: "recent_narrative", value: recent_narrative_text),
-    identity.SlotValue(key: "memory_health", value: "Nominal"),
+    identity.SlotValue(key: "memory_health", value: ""),
     identity.SlotValue(key: "active_profile", value: case state.active_profile {
       Some(name) -> name
       None -> ""
@@ -846,16 +848,39 @@ fn build_sensorium(
     Some(ctx) -> ctx.agents_active
     None -> 0
   }
+  let message_count = case context {
+    Some(ctx) -> ctx.message_count
+    None -> 0
+  }
   let agent_health = state.vm.constitution.agent_health
 
+  // Find the most recent active thread for situation context
+  let thread_index = librarian.load_thread_index(state.librarian)
+  let active_thread_name =
+    thread_index.threads
+    |> list.sort(fn(a, b) { string.compare(b.last_cycle_at, a.last_cycle_at) })
+    |> list.first
+    |> option.from_result
+    |> option.map(fn(t) { t.thread_name })
+
+  // Find last failure from recent entries for vitals
+  let last_failure = find_last_failure(recent_entries)
+
   let clock = render_sensorium_clock(now, session_since, recent_entries)
-  let situation = render_sensorium_situation(input_source, queue_depth)
+  let situation =
+    render_sensorium_situation(
+      input_source,
+      queue_depth,
+      message_count,
+      active_thread_name,
+    )
   let schedule = render_sensorium_schedule(state.scheduler)
   let vitals =
     render_sensorium_vitals(
       state.vm.constitution,
       agents_active,
       agent_health,
+      last_failure,
       state.scheduler,
     )
 
@@ -890,16 +915,27 @@ pub fn render_sensorium_clock(
   <> "/>"
 }
 
-/// Render the <situation> element — who triggered this cycle and what's waiting.
+/// Render the <situation> element — who triggered this cycle, what's waiting,
+/// conversation depth, and active thread context.
 pub fn render_sensorium_situation(
   input_source: String,
   queue_depth: Int,
+  message_count: Int,
+  active_thread: Option(String),
 ) -> String {
+  let thread_attr = case active_thread {
+    Some(name) -> " thread=\"" <> name <> "\""
+    None -> ""
+  }
   "  <situation input=\""
   <> input_source
   <> "\" queue_depth=\""
   <> int.to_string(queue_depth)
-  <> "\"/>"
+  <> "\" conversation_depth=\""
+  <> int.to_string(message_count)
+  <> "\""
+  <> thread_attr
+  <> "/>"
 }
 
 /// Render the <schedule> element with per-job detail.
@@ -943,16 +979,24 @@ pub fn render_sensorium_schedule(
 }
 
 /// Render the <vitals> element — operational health.
+/// `last_failure` is a human-readable description of the most recent failure
+/// from narrative entries, or "" if none. Replaces raw success_rate float
+/// which was not actionable.
 pub fn render_sensorium_vitals(
   constitution: virtual_memory.ConstitutionSlot,
   agents_active: Int,
   agent_health: String,
+  last_failure: String,
   scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
 ) -> String {
   let health_attr = case agent_health {
     "" -> ""
     "All agents nominal" -> ""
     h -> " agent_health=\"" <> h <> "\""
+  }
+  let failure_attr = case last_failure {
+    "" -> ""
+    f -> " last_failure=\"" <> f <> "\""
   }
   let budget = query_budget(scheduler)
   let budget_attrs = case budget {
@@ -977,12 +1021,11 @@ pub fn render_sensorium_vitals(
   }
   "  <vitals cycles_today=\""
   <> int.to_string(constitution.today_cycles)
-  <> "\" success_rate=\""
-  <> float.to_string(constitution.today_success_rate)
   <> "\" agents_active=\""
   <> int.to_string(agents_active)
   <> "\""
   <> health_attr
+  <> failure_attr
   <> budget_attrs
   <> "/>"
 }
@@ -1032,6 +1075,23 @@ fn query_budget(
         Ok(b) -> Some(b)
       }
     }
+  }
+}
+
+/// Find the most recent failure from narrative entries (already sorted recent-first).
+/// Returns a brief human-readable description like "researcher timeout 2h ago", or "".
+fn find_last_failure(entries: List(narrative_types.NarrativeEntry)) -> String {
+  case entries {
+    [] -> ""
+    [entry, ..rest] ->
+      case entry.outcome.status {
+        narrative_types.Failure | narrative_types.Partial -> {
+          let elapsed = format_elapsed_since(entry.timestamp)
+          let assessment = string.slice(entry.outcome.assessment, 0, 40)
+          assessment <> " " <> elapsed
+        }
+        _ -> find_last_failure(rest)
+      }
   }
 }
 

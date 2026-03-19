@@ -431,6 +431,15 @@ fn outcome_from_result(
       ))
     Error(_) -> None
   }
+  // Extract tool errors — these are tools that failed during the react loop.
+  // If non-empty on AgentSuccess, the agent LLM continued despite failures.
+  let tool_errors =
+    list.filter_map(stats.tool_call_details, fn(d) {
+      case d.success {
+        False -> Ok(d.name <> ": " <> d.output_summary)
+        True -> Error(Nil)
+      }
+    })
   case react_result.result {
     Ok(text) ->
       AgentSuccess(
@@ -444,6 +453,7 @@ fn outcome_from_result(
         instruction:,
         tools_used: unique_tools,
         tool_call_details: stats.tool_call_details,
+        tool_errors:,
         input_tokens: stats.input_tokens,
         output_tokens: stats.output_tokens,
         duration_ms:,

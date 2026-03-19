@@ -557,7 +557,23 @@ pub fn handle_agent_complete(
   outcome: AgentOutcome,
 ) -> CognitiveState {
   let #(outcome_task_id, result_text) = case outcome {
-    AgentSuccess(task_id, result:, ..) -> #(task_id, result)
+    AgentSuccess(task_id, agent:, result:, tool_errors:, ..) -> {
+      // If the agent "succeeded" but had tool failures, prefix them so the
+      // orchestrating LLM knows the result may be unreliable.
+      let prefixed = case tool_errors {
+        [] -> result
+        errors -> {
+          let error_lines = string.join(errors, "\n  ")
+          "[WARNING: agent "
+          <> agent
+          <> " had tool failures during execution:\n  "
+          <> error_lines
+          <> "\nThe following result may be unreliable.]\n\n"
+          <> result
+        }
+      }
+      #(task_id, prefixed)
+    }
     AgentFailure(task_id, error:, ..) -> #(
       task_id,
       "[Agent error: " <> error <> "]",
@@ -622,6 +638,23 @@ pub fn handle_agent_complete(
       completion,
       ..state.agent_completions
     ])
+
+  // Push agent health to Curator when tools failed (degraded status)
+  case outcome {
+    AgentSuccess(agent:, tool_errors: [first_err, ..], ..) ->
+      case state.memory.curator {
+        Some(cur) ->
+          curator.update_agent_health(cur, agent <> " degraded: " <> first_err)
+        None -> Nil
+      }
+    AgentFailure(agent:, error:, ..) ->
+      case state.memory.curator {
+        Some(cur) ->
+          curator.update_agent_health(cur, agent <> " failed: " <> error)
+        None -> Nil
+      }
+    _ -> Nil
+  }
 
   // Write back to Curator scratchpad for inter-agent context
   case state.memory.curator {

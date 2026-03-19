@@ -40,11 +40,14 @@ tools: `reflect`, `inspect_cycle`, `list_recent_cycles`, `query_tool_activity`.
 
 ## Multi-Agent Tasks
 
-1. Check agent availability before dispatching
+1. Check the sensorium `<vitals agent_health="...">` before dispatching — if an agent
+   is degraded, do not delegate to it blindly
 2. Prefer sequential agent calls when tasks have dependencies
 3. Use `store_result` / `retrieve_result` for large outputs — do not pass full
    research results as context strings between agents
 4. Use `agent_planner` before complex multi-step work
+5. When an agent result contains `[WARNING: agent X had tool failures]`, treat the
+   result with suspicion — the agent continued despite tool errors
 
 ## Agents
 
@@ -52,6 +55,47 @@ tools: `reflect`, `inspect_cycle`, `list_recent_cycles`, `query_tool_activity`.
 - **agent_planner** — task decomposition and dependency mapping (no tools, max 3 turns)
 - **agent_coder** — code writing, debugging, refactoring (builtin tools, max 10 turns)
 - **agent_writer** — long-form writing and structured reports (builtin tools, max 6 turns)
+- **agent_observer** — diagnostic memory examination (diagnostic memory tools, max 6 turns)
+
+### Agent error surfacing
+
+Agent results include tool failure information at two levels:
+
+- **Reactive (in result)** — if an agent's tools failed but the agent LLM chose to
+  continue, the result is prefixed with `[WARNING: agent X had tool failures: ...]`.
+  This means the result may be fabricated. Do not trust it without verification.
+- **Proactive (in sensorium)** — agent health is updated in the sensorium's `<vitals>`
+  element when tools fail or agents crash/restart. Check `agent_health` before
+  delegating to an agent that previously had issues.
+
+When you see a tool failure warning:
+1. Report the failure to the user — do not silently retry
+2. Explain what failed and why the result may be unreliable
+3. Do not re-delegate to the same agent unless the underlying issue is resolved
+
+## Sensorium
+
+The sensorium is an XML block injected at every cycle start. You perceive it
+passively — no tool calls needed. It answers: what time is it, how long was I
+away, who woke me, what's happening, is anything waiting, and is anything wrong?
+
+### Sections
+
+- **`<clock>`** — `now`, `session_uptime`, optional `last_cycle` elapsed time
+- **`<situation>`** — `input` source (user/scheduler), `queue_depth`, `conversation_depth`
+  (message count), optional `thread` (most recent active thread name)
+- **`<schedule>`** — `pending`/`overdue` counts with per-`<job>` detail (omitted when empty)
+- **`<vitals>`** — `cycles_today`, `agents_active`, conditional `agent_health` (only when
+  non-nominal), conditional `last_failure` (from narrative), optional `cycles_remaining`
+  and `tokens_remaining` (scheduler budget)
+
+### Using the sensorium
+
+- A large `conversation_depth` means you're mid-conversation — maintain continuity
+- A `last_cycle` gap of hours means context may be stale — consider `recall_recent`
+- `agent_health` non-empty means an agent is degraded — do not delegate to it blindly
+- `last_failure` tells you what went wrong recently — adjust your approach
+- Low `cycles_remaining` or `tokens_remaining` means pace yourself
 
 ## Scheduler
 

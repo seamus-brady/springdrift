@@ -400,6 +400,15 @@ exposes this (and other system state) to the LLM.
 touched). These feed into DAG nodes as typed `AgentOutput` variants and into the
 Curator's inter-agent context via `write_back_result`.
 
+**Tool error surfacing** — `AgentSuccess.tool_errors` captures tool failures that
+occurred during the react loop. When non-empty, the agent's LLM chose to continue
+despite failures — the cognitive loop prefixes a `[WARNING: agent X had tool failures]`
+block to the result text so the orchestrating LLM knows the result may be unreliable.
+Agent completion also pushes `UpdateAgentHealth` to the Curator with the first error,
+making it visible in the sensorium's `<vitals agent_health="...">` before the next
+cycle. This is the dual-path fix: reactive (error in result) + proactive (health in
+sensorium).
+
 ## Patterns to follow
 
 **Provider abstraction** — all LLM work goes through `llm/provider.gleam`. Never call
@@ -511,16 +520,19 @@ FACTS EXIST). `assemble_system_prompt` combines persona + rendered preamble in c
 queries Librarian for thread/fact/case counts, renders preamble slots, and assembles
 the final system prompt. `CycleContext` is an ephemeral record constructed by the
 cognitive loop each cycle carrying `input_source` ("user"/"scheduler"), `queue_depth`,
-`session_since`, and `agents_active` — data the Curator can't derive itself.
+`session_since`, `agents_active`, and `message_count` — data the Curator can't derive
+itself.
 
 `build_sensorium` assembles a self-describing XML `{{sensorium}}` slot — the agent's
 ambient perception block injected at every cycle start (no tool calls needed). It
-contains five sections:
+contains four sections:
 1. `<clock>` — `now` (ISO timestamp), `session_uptime`, optional `last_cycle` elapsed
-2. `<situation>` — `input` source ("user"/"scheduler"), `queue_depth`
+2. `<situation>` — `input` source ("user"/"scheduler"), `queue_depth`,
+   `conversation_depth` (message count), optional `thread` (most recent active thread)
 3. `<schedule>` — `pending`/`overdue` counts + `<job>` elements (omitted when empty)
-4. `<vitals>` — `cycles_today`, `success_rate`, `agents_active`, conditional
-   `agent_health`, and optional `cycles_remaining`/`tokens_remaining` budget attrs
+4. `<vitals>` — `cycles_today`, `agents_active`, conditional `agent_health`,
+   conditional `last_failure` (from narrative entries, replaces raw success_rate),
+   and optional `cycles_remaining`/`tokens_remaining` budget attrs
 
 Previously separate preamble slots (`session_status`, `last_session_date`,
 `today_cycles`, `today_success_rate`, `agent_health`) are now absorbed into the

@@ -535,15 +535,25 @@ pub fn render_sensorium_clock_with_elapsed_test() {
 }
 
 pub fn render_sensorium_situation_user_test() {
-  let result = curator.render_sensorium_situation("user", 0)
-  result
-  |> should.equal("  <situation input=\"user\" queue_depth=\"0\"/>")
+  let result = curator.render_sensorium_situation("user", 0, 6, option.None)
+  should.be_true(string.contains(result, "input=\"user\""))
+  should.be_true(string.contains(result, "queue_depth=\"0\""))
+  should.be_true(string.contains(result, "conversation_depth=\"6\""))
+  should.be_false(string.contains(result, "thread="))
 }
 
 pub fn render_sensorium_situation_scheduler_queued_test() {
-  let result = curator.render_sensorium_situation("scheduler", 2)
-  result
-  |> should.equal("  <situation input=\"scheduler\" queue_depth=\"2\"/>")
+  let result =
+    curator.render_sensorium_situation(
+      "scheduler",
+      2,
+      12,
+      option.Some("CBR implementation"),
+    )
+  should.be_true(string.contains(result, "input=\"scheduler\""))
+  should.be_true(string.contains(result, "queue_depth=\"2\""))
+  should.be_true(string.contains(result, "conversation_depth=\"12\""))
+  should.be_true(string.contains(result, "thread=\"CBR implementation\""))
 }
 
 pub fn render_sensorium_schedule_empty_test() {
@@ -558,11 +568,14 @@ pub fn render_sensorium_vitals_test() {
       today_success_rate: 0.8,
       agent_health: "All agents nominal",
     )
-  let result = curator.render_sensorium_vitals(constitution, 2, "", option.None)
+  let result =
+    curator.render_sensorium_vitals(constitution, 2, "", "", option.None)
   should.be_true(string.contains(result, "cycles_today=\"5\""))
-  should.be_true(string.contains(result, "success_rate=\"0.8\""))
   should.be_true(string.contains(result, "agents_active=\"2\""))
   should.be_false(string.contains(result, "agent_health="))
+  should.be_false(string.contains(result, "last_failure="))
+  // success_rate removed — not actionable per agent feedback
+  should.be_false(string.contains(result, "success_rate"))
 }
 
 pub fn render_sensorium_vitals_health_issue_test() {
@@ -577,6 +590,7 @@ pub fn render_sensorium_vitals_health_issue_test() {
       constitution,
       1,
       "researcher restarting",
+      "",
       option.None,
     )
   should.be_true(string.contains(
@@ -584,6 +598,27 @@ pub fn render_sensorium_vitals_health_issue_test() {
     "agent_health=\"researcher restarting\"",
   ))
   should.be_true(string.contains(result, "agents_active=\"1\""))
+}
+
+pub fn render_sensorium_vitals_with_failure_test() {
+  let constitution =
+    virtual_memory.ConstitutionSlot(
+      today_cycles: 5,
+      today_success_rate: 0.6,
+      agent_health: "All agents nominal",
+    )
+  let result =
+    curator.render_sensorium_vitals(
+      constitution,
+      2,
+      "",
+      "researcher timeout 2h ago",
+      option.None,
+    )
+  should.be_true(string.contains(
+    result,
+    "last_failure=\"researcher timeout 2h ago\"",
+  ))
 }
 
 // ---------------------------------------------------------------------------
