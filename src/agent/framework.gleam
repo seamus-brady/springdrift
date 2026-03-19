@@ -266,9 +266,13 @@ fn do_react(
               // Execute tools and capture details
               let call_results =
                 list.map(calls, fn(call) {
-                  cycle_log.log_tool_call(cycle_id, call)
+                  cycle_log.log_tool_call(cycle_id, call, spec.redact_secrets)
                   let result = execute_tool(call, spec, cognitive)
-                  cycle_log.log_tool_result(cycle_id, result)
+                  cycle_log.log_tool_result(
+                    cycle_id,
+                    result,
+                    spec.redact_secrets,
+                  )
                   #(call, result)
                 })
               let results = list.map(call_results, fn(cr) { cr.1 })

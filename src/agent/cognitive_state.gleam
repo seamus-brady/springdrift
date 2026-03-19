@@ -107,6 +107,8 @@ pub type CognitiveState {
     identity: IdentityContext,
     // --- Runtime config (read-only after init) ---
     config: RuntimeConfig,
+    // --- Secret redaction ---
+    redact_secrets: Bool,
   )
 }
 

@@ -297,6 +297,7 @@ fn build_summary_entry(
       model_used: "summary",
     ),
     observations: [],
+    redacted: False,
   )
 }
 

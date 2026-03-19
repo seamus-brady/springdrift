@@ -13,7 +13,8 @@
          http_get/1, http_get_with_headers/2,
          ensure_utf8/1, days_between/2,
          mailbox_size/0, add_days/2,
-         ms_until_datetime/1, advance_datetime_ms/2]).
+         ms_until_datetime/1, advance_datetime_ms/2,
+         re_replace_all/3]).
 
 %% Read one line from stdin.
 %% Returns {ok, Binary} (including trailing newline) or {error, nil} on EOF.
@@ -516,5 +517,15 @@ parse_datetime_bin(Bin) ->
             %% Fallback: treat as date only (midnight)
             {Y, Mo, D} = parse_date_bin(Bin),
             {Y, Mo, D, 0, 0, 0}
+    end.
+
+%% Replace all matches of a regex pattern in text.
+%% Subject-first convention matching existing FFI style.
+re_replace_all(Text, Pattern, Replacement) when is_binary(Text), is_binary(Pattern), is_binary(Replacement) ->
+    case re:compile(Pattern) of
+        {ok, MP} ->
+            re:replace(Text, MP, Replacement, [global, {return, binary}]);
+        {error, _} ->
+            Text
     end.
 

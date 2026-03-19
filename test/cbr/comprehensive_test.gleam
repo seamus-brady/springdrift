@@ -47,6 +47,7 @@ fn make_case(
     ),
     source_narrative_id: "cycle-" <> id,
     profile: None,
+    redacted: False,
   )
 }
 
@@ -376,6 +377,7 @@ pub fn retain_case_with_empty_fields_test() {
       ),
       source_narrative_id: "",
       profile: None,
+      redacted: False,
     )
 
   let base = bridge.retain_case(base, empty_case)

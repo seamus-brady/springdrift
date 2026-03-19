@@ -43,6 +43,7 @@ fn make_case(
     ),
     source_narrative_id: "n-" <> id,
     profile: None,
+    redacted: False,
   )
 }
 

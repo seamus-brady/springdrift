@@ -54,6 +54,7 @@ pub fn gate_fast_accept_when_all_zero_test() {
       "mock",
       "test-cycle",
       False,
+      False,
     )
   result.decision |> should.equal(Accept)
   result.dprime_score |> should.equal(0.0)
@@ -75,6 +76,7 @@ pub fn gate_reject_when_scores_high_test() {
       "mock",
       "test-cycle",
       False,
+      False,
     )
   result.decision |> should.equal(Reject)
 }
@@ -87,7 +89,16 @@ pub fn gate_canary_reject_on_error_test() {
   let state = test_state_with_canary()
   let provider = mock.provider_with_error("API down")
   let result =
-    gate.evaluate("test", "", state, provider, "mock", "test-cycle", False)
+    gate.evaluate(
+      "test",
+      "",
+      state,
+      provider,
+      "mock",
+      "test-cycle",
+      False,
+      False,
+    )
   result.decision |> should.equal(Reject)
   result.layer |> should.equal(Reactive)
   result.canary_result |> should.not_equal(None)
@@ -105,6 +116,7 @@ pub fn gate_canary_pass_when_safe_test() {
       "mock",
       "test-cycle",
       False,
+      False,
     )
   result.decision |> should.equal(Accept)
 }
@@ -117,7 +129,16 @@ pub fn gate_canary_disabled_skips_probes_test() {
   let state = test_state()
   let provider = safe_response_provider()
   let result =
-    gate.evaluate("test", "", state, provider, "mock", "test-cycle", False)
+    gate.evaluate(
+      "test",
+      "",
+      state,
+      provider,
+      "mock",
+      "test-cycle",
+      False,
+      False,
+    )
   result.canary_result |> should.equal(None)
 }
 
@@ -129,7 +150,16 @@ pub fn gate_result_has_forecasts_test() {
   let state = test_state()
   let provider = safe_response_provider()
   let result =
-    gate.evaluate("test", "", state, provider, "mock", "test-cycle", False)
+    gate.evaluate(
+      "test",
+      "",
+      state,
+      provider,
+      "mock",
+      "test-cycle",
+      False,
+      False,
+    )
   let assert True = result.forecasts != []
 }
 
@@ -137,7 +167,16 @@ pub fn gate_result_has_explanation_test() {
   let state = test_state()
   let provider = safe_response_provider()
   let result =
-    gate.evaluate("test", "", state, provider, "mock", "test-cycle", False)
+    gate.evaluate(
+      "test",
+      "",
+      state,
+      provider,
+      "mock",
+      "test-cycle",
+      False,
+      False,
+    )
   let assert True = result.explanation != ""
 }
 
@@ -156,6 +195,7 @@ pub fn post_execution_evaluate_test() {
       provider,
       "mock",
       "test-cycle",
+      False,
       False,
     )
   // Safe response → should accept

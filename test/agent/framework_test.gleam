@@ -33,6 +33,7 @@ fn make_spec(provider) -> AgentSpec {
     restart: Temporary,
     tool_executor: noop_executor,
     inter_turn_delay_ms: 200,
+    redact_secrets: False,
   )
 }
 

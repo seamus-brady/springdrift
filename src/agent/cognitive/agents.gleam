@@ -118,7 +118,7 @@ fn handle_memory_tools(
   let memory_results =
     list.map(memory_calls, fn(call) {
       // Log tool call to cycle log
-      cycle_log.log_tool_call(cycle_id, call)
+      cycle_log.log_tool_call(cycle_id, call, state.redact_secrets)
       let facts_ctx = case state.cycle_id {
         Some(cid) ->
           Some(memory.FactsContext(
@@ -181,7 +181,7 @@ fn handle_memory_tools(
           state.config.how_to_content,
         )
       // Log tool result to cycle log
-      cycle_log.log_tool_result(cycle_id, result)
+      cycle_log.log_tool_result(cycle_id, result, state.redact_secrets)
       case result {
         llm_types.ToolSuccess(tool_use_id: id, content: c) ->
           llm_types.ToolResultContent(
@@ -533,7 +533,7 @@ fn do_dispatch_agents(
       // Log agent dispatch calls and accumulate ToolSummaries
       let agent_summaries =
         list.map(agent_calls, fn(call) {
-          cycle_log.log_tool_call(cycle_id, call)
+          cycle_log.log_tool_call(cycle_id, call, state.redact_secrets)
           dag_types.ToolSummary(name: call.name, success: True, error: None)
         })
 
@@ -771,6 +771,7 @@ pub fn handle_agent_complete(
               let provider = state.provider
               let scorer_model = state.task_model
               let verbose = state.verbose
+              let redact_secrets = state.redact_secrets
               // Get the pre-execution D' score from the most recent history
               let pre_score = case dprime_st.history {
                 [latest, ..] -> latest.score
@@ -786,6 +787,7 @@ pub fn handle_agent_complete(
                     scorer_model,
                     cycle_id,
                     verbose,
+                    redact_secrets,
                   )
                 process.send(
                   self,

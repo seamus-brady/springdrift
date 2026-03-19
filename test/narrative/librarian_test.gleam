@@ -72,6 +72,7 @@ fn make_entry(cycle_id: String, summary: String) -> NarrativeEntry {
       model_used: "mock",
     ),
     observations: [],
+    redacted: False,
   )
 }
 

@@ -82,6 +82,7 @@ threading = true             # Auto-assign threads by overlap scoring
 summaries = false            # Enable periodic summaries
 summary_schedule = "weekly"  # "weekly" or "monthly"
 # max_days = 30              # Days of history replayed into ETS at startup
+# redact_secrets = true      # Redact API keys/tokens/passwords in logs (default: true, --no-redact to disable)
 
 # ── Timeouts ─────────────────────────────────────────────────────────────────
 # All values in milliseconds unless noted otherwise.
@@ -110,12 +111,6 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 
 # E2B sandbox execution timeout in seconds (default: 600 = 10 min)
 # sandbox_timeout_s = 600
-
-# Curator housekeeping tick — main loop receive timeout (default: 60000 = 60s)
-# housekeeping_tick_ms = 60000
-
-# Housekeeping interval in ticks — ticks before running housekeeping (default: 60)
-# housekeeping_interval_ticks = 60
 
 # Scheduler stuck-job timeout — mark job as failed if still running (default: 600000 = 10 min)
 # scheduler_stuck_ms = 600000
@@ -244,6 +239,32 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 
 # Minimum weighted score to include a case in results — 0.0 returns all (default: 0.0)
 # min_score = 0.01
+
+# ── Housekeeper ──────────────────────────────────────────────────────────────
+# Supervised GenServer for periodic ETS/memory maintenance.
+# Three tick intervals run independent maintenance passes.
+
+[housekeeper]
+# Short tick interval — narrative window trimming (default: 21600000 = 6h)
+# short_tick_ms = 21600000
+
+# Medium tick interval — fact conflicts + thread pruning (default: 43200000 = 12h)
+# medium_tick_ms = 43200000
+
+# Long tick interval — CBR dedup/pruning + DAG/artifact trim (default: 86400000 = 24h)
+# long_tick_ms = 86400000
+
+# Days of narrative entries to retain in ETS (default: 90)
+# narrative_days = 90
+
+# Days of CBR cases to retain (default: 180)
+# cbr_days = 180
+
+# Days of DAG nodes to retain in ETS (default: 30)
+# dag_days = 30
+
+# Days of artifact metadata to retain in ETS (default: 60)
+# artifact_days = 60
 
 # ── Housekeeping ─────────────────────────────────────────────────────────────
 # Maintenance thresholds for CBR dedup, pruning, and fact management.

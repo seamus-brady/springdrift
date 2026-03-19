@@ -60,6 +60,7 @@ pub type AppConfig {
     narrative_threading: Option(Bool),
     narrative_summaries: Option(Bool),
     narrative_summary_schedule: Option(String),
+    redact_secrets: Option(Bool),
     // ── Profiles ──
     profiles_dirs: Option(List(String)),
     default_profile: Option(String),
@@ -77,8 +78,14 @@ pub type AppConfig {
     scheduler_job_timeout_ms: Option(Int),
     restart_window_ms: Option(Int),
     sandbox_timeout_s: Option(Int),
-    housekeeping_tick_ms: Option(Int),
-    housekeeping_interval_ticks: Option(Int),
+    // ── Housekeeper GenServer ──
+    housekeeper_short_tick_ms: Option(Int),
+    housekeeper_medium_tick_ms: Option(Int),
+    housekeeper_long_tick_ms: Option(Int),
+    housekeeper_narrative_days: Option(Int),
+    housekeeper_cbr_days: Option(Int),
+    housekeeper_dag_days: Option(Int),
+    housekeeper_artifact_days: Option(Int),
     // ── Retry ──
     retry_max_retries: Option(Int),
     retry_initial_delay_ms: Option(Int),
@@ -194,6 +201,7 @@ pub fn default() -> AppConfig {
     narrative_threading: None,
     narrative_summaries: None,
     narrative_summary_schedule: None,
+    redact_secrets: None,
     profiles_dirs: None,
     default_profile: None,
     agent_name: None,
@@ -207,8 +215,13 @@ pub fn default() -> AppConfig {
     scheduler_job_timeout_ms: None,
     restart_window_ms: None,
     sandbox_timeout_s: None,
-    housekeeping_tick_ms: None,
-    housekeeping_interval_ticks: None,
+    housekeeper_short_tick_ms: None,
+    housekeeper_medium_tick_ms: None,
+    housekeeper_long_tick_ms: None,
+    housekeeper_narrative_days: None,
+    housekeeper_cbr_days: None,
+    housekeeper_dag_days: None,
+    housekeeper_artifact_days: None,
     retry_max_retries: None,
     retry_initial_delay_ms: None,
     retry_rate_limit_delay_ms: None,
@@ -328,6 +341,7 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       override_cfg.narrative_summary_schedule,
       base.narrative_summary_schedule,
     ),
+    redact_secrets: option.or(override_cfg.redact_secrets, base.redact_secrets),
     profiles_dirs: option.or(override_cfg.profiles_dirs, base.profiles_dirs),
     default_profile: option.or(
       override_cfg.default_profile,
@@ -372,13 +386,33 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       override_cfg.sandbox_timeout_s,
       base.sandbox_timeout_s,
     ),
-    housekeeping_tick_ms: option.or(
-      override_cfg.housekeeping_tick_ms,
-      base.housekeeping_tick_ms,
+    housekeeper_short_tick_ms: option.or(
+      override_cfg.housekeeper_short_tick_ms,
+      base.housekeeper_short_tick_ms,
     ),
-    housekeeping_interval_ticks: option.or(
-      override_cfg.housekeeping_interval_ticks,
-      base.housekeeping_interval_ticks,
+    housekeeper_medium_tick_ms: option.or(
+      override_cfg.housekeeper_medium_tick_ms,
+      base.housekeeper_medium_tick_ms,
+    ),
+    housekeeper_long_tick_ms: option.or(
+      override_cfg.housekeeper_long_tick_ms,
+      base.housekeeper_long_tick_ms,
+    ),
+    housekeeper_narrative_days: option.or(
+      override_cfg.housekeeper_narrative_days,
+      base.housekeeper_narrative_days,
+    ),
+    housekeeper_cbr_days: option.or(
+      override_cfg.housekeeper_cbr_days,
+      base.housekeeper_cbr_days,
+    ),
+    housekeeper_dag_days: option.or(
+      override_cfg.housekeeper_dag_days,
+      base.housekeeper_dag_days,
+    ),
+    housekeeper_artifact_days: option.or(
+      override_cfg.housekeeper_artifact_days,
+      base.housekeeper_artifact_days,
     ),
     // Retry
     retry_max_retries: option.or(
@@ -712,6 +746,8 @@ pub fn to_string(cfg: AppConfig) -> String {
     option.map(cfg.archivist_max_tokens, fn(v) {
       "archivist_max_tokens: " <> int.to_string(v)
     }),
+    // Redaction
+    option.map(cfg.redact_secrets, fn(v) { "redact_secrets: " <> bool_str(v) }),
     // Profile
     option.map(cfg.default_profile, fn(v) { "profile: " <> v }),
     option.map(cfg.profiles_dirs, fn(dirs) {
@@ -834,6 +870,8 @@ fn do_parse_args(args: List(String), acc: AppConfig) -> AppConfig {
     ["--dprime-config", path, ..rest] ->
       do_parse_args(rest, AppConfig(..acc, dprime_config: Some(path)))
     // Narrative
+    ["--no-redact", ..rest] ->
+      do_parse_args(rest, AppConfig(..acc, redact_secrets: Some(False)))
     ["--narrative-dir", path, ..rest] ->
       do_parse_args(rest, AppConfig(..acc, narrative_dir: Some(path)))
     // Profiles
@@ -960,6 +998,7 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     narrative_summary_schedule: get_toml_str(table, [
       "narrative", "summary_schedule",
     ]),
+    redact_secrets: get_toml_bool(table, ["narrative", "redact_secrets"]),
     librarian_max_days: get_toml_int(table, ["narrative", "max_days"]),
     // ── [timeouts] ──
     llm_request_timeout_ms: get_toml_int(table, ["timeouts", "llm_request_ms"]),
@@ -974,11 +1013,23 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     ]),
     restart_window_ms: get_toml_int(table, ["timeouts", "restart_window_ms"]),
     sandbox_timeout_s: get_toml_int(table, ["timeouts", "sandbox_timeout_s"]),
-    housekeeping_tick_ms: get_toml_int(table, [
-      "timeouts", "housekeeping_tick_ms",
+    // ── [housekeeper] ──
+    housekeeper_short_tick_ms: get_toml_int(table, [
+      "housekeeper", "short_tick_ms",
     ]),
-    housekeeping_interval_ticks: get_toml_int(table, [
-      "timeouts", "housekeeping_interval_ticks",
+    housekeeper_medium_tick_ms: get_toml_int(table, [
+      "housekeeper", "medium_tick_ms",
+    ]),
+    housekeeper_long_tick_ms: get_toml_int(table, [
+      "housekeeper", "long_tick_ms",
+    ]),
+    housekeeper_narrative_days: get_toml_int(table, [
+      "housekeeper", "narrative_days",
+    ]),
+    housekeeper_cbr_days: get_toml_int(table, ["housekeeper", "cbr_days"]),
+    housekeeper_dag_days: get_toml_int(table, ["housekeeper", "dag_days"]),
+    housekeeper_artifact_days: get_toml_int(table, [
+      "housekeeper", "artifact_days",
     ]),
     // ── [retry] ──
     retry_max_retries: get_toml_int(table, ["retry", "max_retries"]),
@@ -1131,12 +1182,12 @@ const known_keys = [
   "write_anywhere", "skills_dirs", "gui", "dprime_enabled", "dprime_config",
   "narrative", "profile", "profiles_dirs", "agent", "log_retention_days",
   "log_max_file_bytes", "timeouts", "retry", "limits", "scoring", "housekeeping",
-  "cbr", "agents", "web", "services", "scheduler", "xstructor",
+  "housekeeper", "cbr", "agents", "web", "services", "scheduler", "xstructor",
 ]
 
 const known_narrative_keys = [
   "directory", "archivist_model", "archivist_max_tokens", "threading",
-  "summaries", "summary_schedule", "max_days",
+  "summaries", "summary_schedule", "max_days", "redact_secrets",
 ]
 
 fn validate_toml_keys(table: dict.Dict(String, tom.Toml)) -> Nil {

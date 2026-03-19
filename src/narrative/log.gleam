@@ -234,6 +234,7 @@ pub fn encode_entry(entry: NarrativeEntry) -> json.Json {
     }),
     #("metrics", encode_metrics(entry.metrics)),
     #("observations", json.array(entry.observations, encode_observation)),
+    #("redacted", json.bool(entry.redacted)),
   ])
 }
 
@@ -470,6 +471,7 @@ pub fn entry_decoder() -> decode.Decoder(NarrativeEntry) {
     [],
     decode.list(observation_decoder()),
   )
+  use redacted <- decode.optional_field("redacted", False, decode.bool)
   decode.success(NarrativeEntry(
     schema_version:,
     cycle_id:,
@@ -488,6 +490,7 @@ pub fn entry_decoder() -> decode.Decoder(NarrativeEntry) {
     thread:,
     metrics:,
     observations:,
+    redacted:,
   ))
 }
 

@@ -12,6 +12,7 @@ import llm/types.{
   ObjectProperty, StopSequenceReached, StringProperty, TextContent, ToolFailure,
   ToolResultContent, ToolSuccess, ToolUseContent, ToolUseRequested, User,
 }
+import narrative/redactor
 import paths
 import simplifile
 
@@ -32,6 +33,13 @@ fn log_path() -> String {
   cycle_log_dir() <> "/" <> get_date() <> ".jsonl"
 }
 
+fn maybe_redact(text: String, redact: Bool) -> String {
+  case redact {
+    True -> redactor.redact(text)
+    False -> text
+  }
+}
+
 fn append_entry(entry: json.Json) -> Nil {
   let dir = cycle_log_dir()
   let _ = simplifile.create_directory_all(dir)
@@ -47,6 +55,7 @@ pub fn log_human_input(
   cycle_id: String,
   parent_id: Option(String),
   text: String,
+  redact: Bool,
 ) -> Nil {
   let parent_field = case parent_id {
     None -> json.null()
@@ -58,7 +67,7 @@ pub fn log_human_input(
       #("parent_id", parent_field),
       #("timestamp", json.string(get_datetime())),
       #("type", json.string("human_input")),
-      #("text", json.string(text)),
+      #("text", json.string(maybe_redact(text, redact))),
     ]),
   )
 }
@@ -84,7 +93,21 @@ pub fn log_llm_request(cycle_id: String, req: LlmRequest) -> Nil {
   )
 }
 
-pub fn log_llm_response(cycle_id: String, resp: LlmResponse) -> Nil {
+pub fn log_llm_response(
+  cycle_id: String,
+  resp: LlmResponse,
+  redact: Bool,
+) -> Nil {
+  let redacted_content = case redact {
+    False -> resp.content
+    True ->
+      list.map(resp.content, fn(block) {
+        case block {
+          TextContent(text:) -> TextContent(text: redactor.redact(text))
+          _ -> block
+        }
+      })
+  }
   append_entry(
     json.object([
       #("cycle_id", json.string(cycle_id)),
@@ -93,7 +116,7 @@ pub fn log_llm_response(cycle_id: String, resp: LlmResponse) -> Nil {
       #("response_id", json.string(resp.id)),
       #("model", json.string(resp.model)),
       #("stop_reason", encode_stop_reason(resp.stop_reason)),
-      #("content", json.array(resp.content, encode_content_block)),
+      #("content", json.array(redacted_content, encode_content_block)),
       #("input_tokens", json.int(resp.usage.input_tokens)),
       #("output_tokens", json.int(resp.usage.output_tokens)),
       #("thinking_tokens", json.int(resp.usage.thinking_tokens)),
@@ -112,7 +135,7 @@ pub fn log_llm_error(cycle_id: String, error: String) -> Nil {
   )
 }
 
-pub fn log_tool_call(cycle_id: String, call: ToolCall) -> Nil {
+pub fn log_tool_call(cycle_id: String, call: ToolCall, redact: Bool) -> Nil {
   append_entry(
     json.object([
       #("cycle_id", json.string(cycle_id)),
@@ -120,7 +143,7 @@ pub fn log_tool_call(cycle_id: String, call: ToolCall) -> Nil {
       #("type", json.string("tool_call")),
       #("tool_use_id", json.string(call.id)),
       #("name", json.string(call.name)),
-      #("input", json.string(call.input_json)),
+      #("input", json.string(maybe_redact(call.input_json, redact))),
     ]),
   )
 }
@@ -149,7 +172,11 @@ pub fn log_classification(
   )
 }
 
-pub fn log_tool_result(cycle_id: String, result: ToolResult) -> Nil {
+pub fn log_tool_result(
+  cycle_id: String,
+  result: ToolResult,
+  redact: Bool,
+) -> Nil {
   let #(tool_use_id, success, content) = case result {
     ToolSuccess(tool_use_id:, content:) -> #(tool_use_id, True, content)
     ToolFailure(tool_use_id:, error:) -> #(tool_use_id, False, error)
@@ -161,7 +188,7 @@ pub fn log_tool_result(cycle_id: String, result: ToolResult) -> Nil {
       #("type", json.string("tool_result")),
       #("tool_use_id", json.string(tool_use_id)),
       #("success", json.bool(success)),
-      #("content", json.string(ensure_utf8(content))),
+      #("content", json.string(ensure_utf8(maybe_redact(content, redact)))),
     ]),
   )
 }

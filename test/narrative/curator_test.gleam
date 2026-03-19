@@ -2,7 +2,6 @@ import agent/types.{
   type AgentResult, type AgentTask, AgentResult, AgentTask, ExtractedFact,
   GenericFindings, ResearcherFindings,
 }
-import cbr/types as cbr_types
 import facts/types as facts_types
 import gleam/erlang/process
 import gleam/list
@@ -215,20 +214,6 @@ pub fn curator_write_back_extracts_facts_test() {
   process.send(lib, librarian.Shutdown)
 }
 
-pub fn curator_housekeeping_runs_without_error_test() {
-  let #(lib, cur) = start_both("housekeeping")
-  // Just verify it doesn't crash
-  curator.run_housekeeping(cur)
-  process.sleep(50)
-
-  // Curator should still be responsive
-  let ctx = curator.get_virtual_context(cur)
-  ctx |> should.equal("")
-
-  process.send(cur, curator.Shutdown)
-  process.send(lib, librarian.Shutdown)
-}
-
 // ---------------------------------------------------------------------------
 // Virtual memory slot tests
 // ---------------------------------------------------------------------------
@@ -383,122 +368,6 @@ pub fn curator_all_vm_slots_populated_test() {
 }
 
 // ---------------------------------------------------------------------------
-// Housekeeping integration tests
-// ---------------------------------------------------------------------------
-
-fn make_cbr_case(
-  id: String,
-  timestamp: String,
-  _embedding: List(Float),
-  status: String,
-  confidence: Float,
-  pitfalls: List(String),
-) -> cbr_types.CbrCase {
-  cbr_types.CbrCase(
-    case_id: id,
-    timestamp: timestamp,
-    schema_version: 1,
-    problem: cbr_types.CbrProblem(
-      user_input: "test",
-      intent: "research",
-      domain: "test",
-      entities: [],
-      keywords: ["test"],
-      query_complexity: "simple",
-    ),
-    solution: cbr_types.CbrSolution(
-      approach: "test",
-      agents_used: [],
-      tools_used: [],
-      steps: [],
-    ),
-    outcome: cbr_types.CbrOutcome(
-      status: status,
-      confidence: confidence,
-      assessment: "test",
-      pitfalls: pitfalls,
-    ),
-    source_narrative_id: "n-" <> id,
-    profile: option.None,
-  )
-}
-
-pub fn curator_housekeeping_prunes_old_failures_test() {
-  let #(lib, cur) = start_both("hk_prune")
-
-  // Add an old failure case with low confidence and no pitfalls
-  let old_failure =
-    make_cbr_case("old-fail", "2025-01-01T10:00:00Z", [], "failure", 0.2, [])
-  librarian.notify_new_case(lib, old_failure)
-
-  // Add a good case
-  let good_case =
-    make_cbr_case("good", "2026-03-01T10:00:00Z", [], "success", 0.9, [])
-  librarian.notify_new_case(lib, good_case)
-  process.sleep(100)
-
-  // Verify both are present
-  let before = librarian.load_all_cases(lib)
-  list.length(before) |> should.equal(2)
-
-  // Run housekeeping
-  curator.run_housekeeping(cur)
-  process.sleep(500)
-
-  // Old failure should be pruned
-  let after = librarian.load_all_cases(lib)
-  list.length(after) |> should.equal(1)
-  let assert [remaining] = after
-  remaining.case_id |> should.equal("good")
-
-  process.send(cur, curator.Shutdown)
-  process.send(lib, librarian.Shutdown)
-}
-
-pub fn curator_housekeeping_deduplicates_similar_cases_test() {
-  let #(lib, cur) = start_both("hk_dedup")
-
-  // Add two nearly identical cases with the same embedding
-  let case_a =
-    make_cbr_case(
-      "dup-a",
-      "2026-03-01T10:00:00Z",
-      [1.0, 0.0, 0.0],
-      "success",
-      0.9,
-      [],
-    )
-  let case_b =
-    make_cbr_case(
-      "dup-b",
-      "2026-03-02T10:00:00Z",
-      [1.0, 0.0, 0.0],
-      "success",
-      0.9,
-      [],
-    )
-  librarian.notify_new_case(lib, case_a)
-  librarian.notify_new_case(lib, case_b)
-  process.sleep(100)
-
-  // Both present
-  let before = librarian.load_all_cases(lib)
-  list.length(before) |> should.equal(2)
-
-  // Run housekeeping
-  curator.run_housekeeping(cur)
-  process.sleep(500)
-
-  // Field similarity is 0.9 (intent+domain+keywords+status) which is below
-  // the default dedup threshold of 0.92. Both cases should still be present.
-  let after = librarian.load_all_cases(lib)
-  list.length(after) |> should.equal(2)
-
-  process.send(cur, curator.Shutdown)
-  process.send(lib, librarian.Shutdown)
-}
-
-// ---------------------------------------------------------------------------
 // Build system prompt
 // ---------------------------------------------------------------------------
 
@@ -529,7 +398,6 @@ pub fn build_system_prompt_fallback_when_no_identity_test() {
       option.None,
       "Springdrift",
       "",
-      curator.default_housekeeping_config(),
     )
   let prompt = curator.build_system_prompt(cur, "You are helpful.")
   prompt |> should.equal("You are helpful.")
@@ -566,7 +434,6 @@ pub fn build_system_prompt_with_persona_test() {
       option.None,
       "Springdrift",
       "",
-      curator.default_housekeeping_config(),
     )
   let prompt = curator.build_system_prompt(cur, "fallback")
   should.be_true(string.contains(prompt, "I am Springdrift."))

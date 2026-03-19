@@ -44,6 +44,7 @@ fn make_entry(
       model_used: "test",
     ),
     observations: [],
+    redacted: False,
   )
 }
 

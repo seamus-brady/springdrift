@@ -40,6 +40,7 @@ fn make_entry(cycle_id: String, parent: option.Option(String)) -> NarrativeEntry
       model_used: "",
     ),
     observations: [],
+    redacted: False,
   )
 }
 

@@ -78,6 +78,7 @@ pub fn spawn_safety_gate(
         model,
         cycle_id,
         verbose,
+        state.redact_secrets,
       )
     process.send(
       self,
@@ -354,6 +355,7 @@ pub fn spawn_input_safety_gate(
         scorer_model,
         cycle_id,
         verbose,
+        state.redact_secrets,
       )
     process.send(
       self,
@@ -644,6 +646,7 @@ pub fn spawn_output_gate(
         model,
         cycle_id,
         verbose,
+        state.redact_secrets,
       )
     process.send(
       self,

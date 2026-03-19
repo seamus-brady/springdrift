@@ -63,6 +63,7 @@ pub fn spec(
       introspect_ctx,
     ),
     inter_turn_delay_ms: 0,
+    redact_secrets: True,
   )
 }
 

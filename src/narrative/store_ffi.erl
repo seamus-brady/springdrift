@@ -1,7 +1,7 @@
 -module(store_ffi).
 -export([new_table/2, new_unique_table/2, insert/3, lookup/2, lookup_bag/2,
          all_values/1, last_n/2, delete_table/1, table_size/1,
-         delete_key/2]).
+         delete_key/2, delete_object/2]).
 
 %% Create a new ETS table. Type is one of: set, bag, ordered_set.
 %% Returns the table reference (atom name).
@@ -72,6 +72,12 @@ delete_table(Table) when is_atom(Table) ->
 %% Delete all entries for a key from a table.
 delete_key(Table, Key) when is_atom(Table) ->
     ets:delete(Table, Key),
+    nil.
+
+%% Delete a specific {Key, Value} object from a bag table.
+%% Unlike delete_key which removes all entries for a key, this removes one specific tuple.
+delete_object(Table, Object) when is_atom(Table) ->
+    ets:delete_object(Table, Object),
     nil.
 
 %% Return the number of entries in a table.

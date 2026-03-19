@@ -31,6 +31,7 @@ pub fn evaluate(
   model: String,
   cycle_id: String,
   verbose: Bool,
+  redact: Bool,
 ) -> GateResult {
   slog.info(
     "dprime/output_gate",
@@ -55,6 +56,7 @@ pub fn evaluate(
       model,
       cycle_id,
       verbose,
+      redact,
     )
 
   let score =
@@ -147,6 +149,7 @@ fn score_output(
   model: String,
   cycle_id: String,
   verbose: Bool,
+  redact: Bool,
 ) -> List(Forecast) {
   let req =
     request.new(model, 512)
@@ -163,7 +166,7 @@ fn score_output(
   case provider.chat(req) {
     Ok(resp) -> {
       case verbose {
-        True -> cycle_log.log_llm_response(cycle_id, resp)
+        True -> cycle_log.log_llm_response(cycle_id, resp, redact)
         False -> Nil
       }
       let text = response.text(resp)

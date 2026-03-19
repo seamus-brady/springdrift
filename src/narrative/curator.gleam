@@ -1,13 +1,12 @@
-//// Curator — supervised actor managing memory housekeeping, virtual context
-//// window (Letta layer), and inter-agent context injection.
+//// Curator — supervised actor managing virtual context window (Letta layer)
+//// and inter-agent context injection.
 ////
 //// The Curator starts after the Librarian and before the cognitive loop. It
-//// owns three distinct responsibilities:
+//// owns two distinct responsibilities:
 ////
-//// 1. Periodic housekeeping: dedup, pruning, conflict resolution, compaction
-//// 2. Virtual context window: managed Letta-style memory slots injected into
+//// 1. Virtual context window: managed Letta-style memory slots injected into
 ////    every LLM request
-//// 3. Inter-agent context injection: enriches agent tasks with prior results
+//// 2. Inter-agent context injection: enriches agent tasks with prior results
 ////    and intercepts agent results for write-back
 ////
 //// The Curator communicates with the Librarian for ETS queries and scratchpad
@@ -15,7 +14,6 @@
 //// single owner of all memory indexes.
 
 import agent/types as agent_types
-import facts/log as facts_log
 import facts/types as facts_types
 import gleam/erlang/process.{type Subject}
 import gleam/float
@@ -24,43 +22,13 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import identity
-import narrative/housekeeping
 import narrative/librarian
-import narrative/log as narrative_log
 import narrative/virtual_memory.{
   type CbrSlotEntry, type VirtualMemory, ScratchEntry,
 }
 import paths
 import scheduler/types as scheduler_types
 import slog
-
-// ---------------------------------------------------------------------------
-// Housekeeping config
-// ---------------------------------------------------------------------------
-
-pub type HousekeepingConfig {
-  HousekeepingConfig(
-    tick_ms: Int,
-    interval_ticks: Int,
-    dedup_similarity: Float,
-    pruning_confidence: Float,
-    fact_confidence: Float,
-    cbr_pruning_days: Int,
-    thread_pruning_days: Int,
-  )
-}
-
-pub fn default_housekeeping_config() -> HousekeepingConfig {
-  HousekeepingConfig(
-    tick_ms: 86_400_000,
-    interval_ticks: 60,
-    dedup_similarity: 0.92,
-    pruning_confidence: 0.3,
-    fact_confidence: 0.7,
-    cbr_pruning_days: 60,
-    thread_pruning_days: 7,
-  )
-}
 
 // ---------------------------------------------------------------------------
 // Messages
@@ -94,8 +62,6 @@ pub type CuratorMessage {
   SetCbrCases(cases: List(CbrSlotEntry))
   /// Build the system prompt from persona + rendered preamble.
   BuildSystemPrompt(fallback_prompt: String, reply_to: Subject(String))
-  /// Trigger a housekeeping pass (manual or timer-driven).
-  RunHousekeeping
   /// Update constitution cache (called by Archivist after each cycle).
   UpdateConstitution(
     today_cycles: Int,
@@ -121,8 +87,7 @@ type CuratorState {
     narrative_dir: String,
     cbr_dir: String,
     facts_dir: String,
-    housekeeping_config: HousekeepingConfig,
-    housekeeping_ticks: Int,
+    fact_confidence: Float,
     vm: VirtualMemory,
     identity_dirs: List(String),
     memory_tag: String,
@@ -154,7 +119,6 @@ pub fn start(
     None,
     "Springdrift",
     "",
-    default_housekeeping_config(),
   )
 }
 
@@ -169,7 +133,6 @@ pub fn start_with_identity(
   active_profile: Option(String),
   agent_name: String,
   agent_version: String,
-  housekeeping_config: HousekeepingConfig,
 ) -> Result(Subject(CuratorMessage), Nil) {
   let setup: Subject(Subject(CuratorMessage)) = process.new_subject()
   process.spawn_unlinked(fn() {
@@ -183,8 +146,7 @@ pub fn start_with_identity(
         narrative_dir:,
         cbr_dir:,
         facts_dir:,
-        housekeeping_config:,
-        housekeeping_ticks: 0,
+        fact_confidence: 0.7,
         vm: virtual_memory.empty(),
         identity_dirs:,
         memory_tag:,
@@ -319,11 +281,6 @@ pub fn build_system_prompt(
   }
 }
 
-/// Trigger a housekeeping pass (fire-and-forget).
-pub fn run_housekeeping(curator: Subject(CuratorMessage)) -> Nil {
-  process.send(curator, RunHousekeeping)
-}
-
 /// Update constitution cache (fire-and-forget). Called by the Archivist.
 pub fn update_constitution(
   curator: Subject(CuratorMessage),
@@ -352,15 +309,7 @@ pub fn update_agent_health(
 fn loop(state: CuratorState) -> Nil {
   case process.receive(state.self, 60_000) {
     Error(_) -> {
-      // Timeout — idle heartbeat; check if housekeeping is due
-      let ticks = state.housekeeping_ticks + 1
-      case ticks >= state.housekeeping_config.interval_ticks {
-        True -> {
-          do_housekeeping(state)
-          loop(CuratorState(..state, housekeeping_ticks: 0))
-        }
-        False -> loop(CuratorState(..state, housekeeping_ticks: ticks))
-      }
+      loop(state)
     }
     Ok(msg) ->
       case msg {
@@ -448,11 +397,6 @@ fn loop(state: CuratorState) -> Nil {
         BuildSystemPrompt(fallback_prompt:, reply_to:) -> {
           let prompt = do_build_system_prompt(state, fallback_prompt)
           process.send(reply_to, prompt)
-          loop(state)
-        }
-
-        RunHousekeeping -> {
-          do_housekeeping(state)
           loop(state)
         }
 
@@ -573,7 +517,7 @@ fn write_extracted_facts(
   case facts {
     [] -> Nil
     [fact, ..rest] -> {
-      case fact.confidence >=. state.housekeeping_config.fact_confidence {
+      case fact.confidence >=. state.fact_confidence {
         True -> {
           let memory_fact =
             make_memory_fact(
@@ -620,103 +564,6 @@ fn generate_id() -> String
 
 @external(erlang, "springdrift_ffi", "get_datetime")
 fn get_timestamp() -> String
-
-// ---------------------------------------------------------------------------
-// Housekeeping — stub for Phase 6
-// ---------------------------------------------------------------------------
-
-fn do_housekeeping(state: CuratorState) -> Nil {
-  slog.info(
-    "narrative/curator",
-    "housekeeping",
-    "Starting housekeeping pass",
-    None,
-  )
-
-  // 1. CBR deduplication
-  let all_cases = librarian.load_all_cases(state.librarian)
-  let dedup_results =
-    housekeeping.find_duplicate_cases(
-      all_cases,
-      state.housekeeping_config.dedup_similarity,
-    )
-  let dedup_count = list.length(dedup_results)
-  list.each(dedup_results, fn(d: housekeeping.DedupResult) {
-    librarian.remove_case(state.librarian, d.supersede_id)
-  })
-
-  // 2. CBR pruning
-  let cutoff_date = days_ago_date(state.housekeeping_config.cbr_pruning_days)
-  let remaining_cases = librarian.load_all_cases(state.librarian)
-  let prune_results =
-    housekeeping.find_prunable_cases(
-      remaining_cases,
-      cutoff_date,
-      state.housekeeping_config.pruning_confidence,
-    )
-  let prune_count = list.length(prune_results)
-  list.each(prune_results, fn(p: housekeeping.PruneResult) {
-    librarian.remove_case(state.librarian, p.case_id)
-  })
-
-  // 3. Fact conflict resolution
-  let all_facts = librarian.get_all_facts(state.librarian)
-  let conflict_results = housekeeping.find_fact_conflicts(all_facts)
-  let conflict_count = list.length(conflict_results)
-  let timestamp = get_timestamp()
-  list.each(conflict_results, fn(c: housekeeping.ConflictResult) {
-    // Find the original fact to build the superseded record
-    let original =
-      list.find(all_facts, fn(f) { f.fact_id == c.supersede_fact_id })
-    case original {
-      Ok(orig) -> {
-        let superseded_fact =
-          housekeeping.make_superseded_fact(
-            orig,
-            c.keep_fact_id,
-            "housekeeping",
-            timestamp,
-          )
-        // Write to JSONL
-        facts_log.append(state.facts_dir, superseded_fact)
-        // Update Librarian indices
-        librarian.supersede_fact(state.librarian, superseded_fact)
-      }
-      Error(_) -> Nil
-    }
-  })
-
-  // 4. Thread pruning — remove single-cycle old threads with no signal
-  let thread_cutoff =
-    days_ago_date(state.housekeeping_config.thread_pruning_days)
-  let thread_index = librarian.load_thread_index(state.librarian)
-  let thread_prune_results =
-    housekeeping.find_prunable_threads(thread_index.threads, thread_cutoff)
-  let thread_prune_count = list.length(thread_prune_results)
-  case thread_prune_count > 0 {
-    True -> {
-      let cleaned_index =
-        housekeeping.apply_thread_pruning(thread_index, thread_prune_results)
-      narrative_log.save_thread_index(state.narrative_dir, cleaned_index)
-      librarian.notify_thread_index(state.librarian, cleaned_index)
-    }
-    False -> Nil
-  }
-
-  let report =
-    housekeeping.HousekeepingReport(
-      cases_deduplicated: dedup_count,
-      cases_pruned: prune_count,
-      facts_resolved: conflict_count,
-      threads_pruned: thread_prune_count,
-    )
-  slog.info(
-    "narrative/curator",
-    "housekeeping",
-    housekeeping.format_report(report),
-    None,
-  )
-}
 
 @external(erlang, "springdrift_ffi", "days_ago_date")
 fn days_ago_date(days: Int) -> String

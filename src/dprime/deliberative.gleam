@@ -35,6 +35,7 @@ pub fn build_situation_model(
   model: String,
   cycle_id: String,
   verbose: Bool,
+  redact: Bool,
 ) -> String {
   slog.debug(
     "dprime/deliberative",
@@ -59,7 +60,7 @@ pub fn build_situation_model(
   case provider.chat(req) {
     Ok(resp) -> {
       case verbose {
-        True -> cycle_log.log_llm_response(cycle_id, resp)
+        True -> cycle_log.log_llm_response(cycle_id, resp, redact)
         False -> Nil
       }
       response.text(resp)
@@ -274,6 +275,7 @@ pub fn explain_modification(
   model: String,
   cycle_id: String,
   verbose: Bool,
+  redact: Bool,
 ) -> String {
   // Rank features by discrepancy score (importance × magnitude)
   let scored =
@@ -316,7 +318,7 @@ pub fn explain_modification(
       case provider.chat(req) {
         Ok(resp) -> {
           case verbose {
-            True -> cycle_log.log_llm_response(cycle_id, resp)
+            True -> cycle_log.log_llm_response(cycle_id, resp, redact)
             False -> Nil
           }
           response.text(resp)

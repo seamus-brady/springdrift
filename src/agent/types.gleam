@@ -62,6 +62,7 @@ pub type AgentSpec {
     restart: RestartStrategy,
     tool_executor: fn(ToolCall) -> ToolResult,
     inter_turn_delay_ms: Int,
+    redact_secrets: Bool,
   )
 }
 

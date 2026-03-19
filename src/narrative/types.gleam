@@ -28,6 +28,7 @@ pub type NarrativeEntry {
     thread: Option(Thread),
     metrics: Metrics,
     observations: List(Observation),
+    redacted: Bool,
   )
 }
 

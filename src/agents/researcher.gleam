@@ -94,6 +94,7 @@ pub fn spec(
       brave_cache_ttl_ms,
     ),
     inter_turn_delay_ms: 200,
+    redact_secrets: True,
   )
 }
 
