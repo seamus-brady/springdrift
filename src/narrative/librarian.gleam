@@ -53,11 +53,19 @@ import slog
 
 /// Configuration for CBR retrieval (weighted field scoring + inverted index).
 pub type CbrConfig {
-  CbrConfig(weights: bridge.RetrievalWeights, min_score: Float)
+  CbrConfig(
+    weights: bridge.RetrievalWeights,
+    min_score: Float,
+    embed_fn: option.Option(fn(String) -> Result(List(Float), String)),
+  )
 }
 
 pub fn default_cbr_config() -> CbrConfig {
-  CbrConfig(weights: bridge.default_weights(), min_score: 0.01)
+  CbrConfig(
+    weights: bridge.default_weights(),
+    min_score: 0.01,
+    embed_fn: option.None,
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -512,7 +520,10 @@ fn start_with_pid(
 
       // Create CBR metadata ETS table + CaseBase
       let cbr_cases_table = new_cbr_table("cbr_cases", "set")
-      let case_base = bridge.new()
+      let case_base = case cbr_config.embed_fn {
+        option.Some(embed_fn) -> bridge.new_with_embeddings(embed_fn)
+        option.None -> bridge.new()
+      }
 
       // Create Facts ETS tables
       let facts_key_table = new_fact_table("facts_by_key", "set")

@@ -46,18 +46,23 @@ fn make_case(
   )
 }
 
-pub fn dedup_no_casebase_returns_empty_test() {
-  // Without a CaseBase, dedup has no VSA vectors to compare → always empty
-  let case_a =
-    make_case("a", "2026-03-01T10:00:00Z", [1.0, 0.0, 0.0], "success", 0.9, [])
-  let case_b =
-    make_case("b", "2026-03-02T10:00:00Z", [1.0, 0.0, 0.0], "success", 0.9, [])
-  let results = housekeeping.find_duplicate_cases([case_a, case_b], 0.92, None)
-  results |> should.equal([])
+pub fn dedup_identical_cases_detected_test() {
+  // Two cases with identical fields should be detected as duplicates
+  let case_a = make_case("a", "2026-03-01T10:00:00Z", [], "success", 0.9, [])
+  let case_b = make_case("b", "2026-03-02T10:00:00Z", [], "success", 0.9, [])
+  // Cases have intent=research, domain=test, keywords=[], status=success
+  // Symmetric similarity: intent(0.3) + domain(0.3) + kw(0.0) + entity(0.0) + status(0.1) = 0.7
+  // With threshold 0.6, they should be detected
+  let results = housekeeping.find_duplicate_cases([case_a, case_b], 0.6)
+  list.length(results) |> should.equal(1)
+  let assert [dedup] = results
+  // Newer (b) is kept, older (a) is superseded
+  dedup.keep_id |> should.equal("b")
+  dedup.supersede_id |> should.equal("a")
 }
 
 pub fn dedup_empty_list_test() {
-  let results = housekeeping.find_duplicate_cases([], 0.92, None)
+  let results = housekeeping.find_duplicate_cases([], 0.92)
   results |> should.equal([])
 }
 

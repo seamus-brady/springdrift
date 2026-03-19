@@ -13,6 +13,7 @@ import cbr/bridge as cbr_bridge
 import config.{type AppConfig}
 import dot_env
 import dprime/config as dprime_config_mod
+import embedding
 import facts/log as facts_log
 import gleam/erlang/process
 import gleam/int
@@ -261,6 +262,38 @@ fn run(cfg: AppConfig) -> Nil {
 
   // Build CBR retrieval config
   let default_weights = cbr_bridge.default_weights()
+  let embedding_base_url =
+    option.unwrap(cfg.cbr_embedding_base_url, "http://localhost:11434")
+  let embed_fn = case option.unwrap(cfg.cbr_embedding_enabled, False) {
+    True -> {
+      let model = case cfg.cbr_embedding_model {
+        option.Some(m) -> m
+        option.None -> {
+          io.println(
+            "Fatal: cbr.embedding_enabled = true but cbr.embedding_model is not set",
+          )
+          panic as "cbr.embedding_model required when embedding_enabled = true"
+        }
+      }
+      case embedding.start_serving(embedding_base_url, model) {
+        Ok(_) -> {
+          io.println(
+            "CBR      : embeddings via Ollama ("
+            <> model
+            <> " at "
+            <> embedding_base_url
+            <> ")",
+          )
+          option.Some(embedding.make_embed_fn(embedding_base_url, model))
+        }
+        Error(reason) -> {
+          io.println("Fatal: CBR embedding startup failed: " <> reason)
+          panic as "CBR embedding startup failed"
+        }
+      }
+    }
+    False -> option.None
+  }
   let cbr_config =
     librarian.CbrConfig(
       weights: cbr_bridge.RetrievalWeights(
@@ -286,6 +319,7 @@ fn run(cfg: AppConfig) -> Nil {
         ),
       ),
       min_score: option.unwrap(cfg.cbr_min_score, 0.0),
+      embed_fn:,
     )
 
   // Start the Librarian (supervised — auto-restarts on crash)

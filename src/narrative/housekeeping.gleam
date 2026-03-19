@@ -5,7 +5,7 @@
 //// results via the Librarian.
 ////
 //// Operations:
-////   1. CBR deduplication: cosine similarity > 0.92 → merge (supersede older)
+////   1. CBR deduplication: field similarity > 0.92 → merge (supersede older)
 ////   2. CBR pruning: failure + confidence < 0.3 + age > 60 days + no pitfalls → remove
 ////   3. Fact conflict resolution: same key, different values → supersede lower confidence
 ////   4. Thread pruning: single-cycle threads older than cutoff → remove from index
@@ -15,7 +15,7 @@ import cbr/types as cbr_types
 import facts/types as facts_types
 import gleam/float
 import gleam/list
-import gleam/option.{type Option, None, Some}
+import gleam/option.{None, Some}
 import gleam/order
 import gleam/string
 import narrative/types as narrative_types
@@ -30,12 +30,11 @@ pub type DedupResult {
 }
 
 /// Find pairs of CBR cases with field similarity > threshold.
-/// Uses deterministic weighted field scoring (no CaseBase needed).
+/// Uses deterministic weighted field scoring.
 /// Returns a list of DedupResult where the older (by timestamp) case should be superseded.
 pub fn find_duplicate_cases(
   cases: List(cbr_types.CbrCase),
   threshold: Float,
-  _case_base: Option(bridge.CaseBase),
 ) -> List(DedupResult) {
   do_find_duplicates(cases, threshold, [])
 }

@@ -379,9 +379,8 @@ pub fn retain_case_with_empty_fields_test() {
     )
 
   let base = bridge.retain_case(base, empty_case)
-  // Empty case has no indexable tokens, so case_count (which counts via
-  // inverted index) returns 0. The important thing is it doesn't crash.
-  bridge.case_count(base) |> should.equal(0)
+  // case_count tracks all retained case IDs, even those with no tokens
+  bridge.case_count(base) |> should.equal(1)
 }
 
 pub fn query_with_empty_fields_test() {

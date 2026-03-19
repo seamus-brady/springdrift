@@ -38,6 +38,7 @@ src/
 ├── skills.gleam               Skill discovery, frontmatter parsing, XML-escaped injection
 ├── xstructor.gleam            XStructor — XML-schema-validated structured LLM output
 ├── xstructor_ffi.erl          Erlang FFI for xmerl: compile_schema, validate_xml, extract_elements
+├── embedding.gleam            Ollama embedding — HTTP client for /api/embeddings, startup probe
 │
 ├── xstructor/                 XStructor schemas
 │   └── schemas.gleam          XSD schemas + XML examples for all structured LLM call sites
@@ -81,7 +82,8 @@ src/
 │
 ├── cbr/                       Case-Based Reasoning memory
 │   ├── types.gleam            CbrCase, CbrProblem, CbrSolution, CbrOutcome, CbrQuery
-│   └── log.gleam              Append-only JSON-L log for CBR cases
+│   ├── log.gleam              Append-only JSON-L log for CBR cases
+│   └── bridge.gleam           CaseBase (inverted index + embeddings), weighted field scoring, retrieval
 │
 ├── facts/                     Fact store — key-value memory with scopes
 │   ├── types.gleam            MemoryFact, FactScope, FactOperation
@@ -288,6 +290,9 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `max_autonomous_cycles_per_hour` | — | 20 | Max scheduler-triggered cycles per hour (0 = unlimited) |
 | `autonomous_token_budget_per_hour` | — | 500000 | Max tokens (input+output) scheduler may consume per hour (0 = unlimited) |
 | `xstructor_max_retries` | — | 3 | Max XStructor XML validation+retry attempts |
+| `cbr_embedding_enabled` | — | False | Enable Ollama embedding for CBR retrieval (fails on startup if Ollama unreachable) |
+| `cbr_embedding_model` | — | None | Ollama model name (required when embedding enabled) |
+| `cbr_embedding_base_url` | — | `http://localhost:11434` | Ollama API base URL |
 
 ## Memory architecture
 
@@ -457,14 +462,18 @@ The Archivist notifies the Librarian when new entries are written. The Librarian
 supports count queries (`QueryThreadCount`, `QueryPersistentFactCount`, `QueryCaseCount`)
 used by the Curator for session preamble population.
 
-**CBR memory** — case-based reasoning in `cbr/types.gleam` and `cbr/log.gleam`. Each
-`CbrCase` captures problem (intent, domain, entities, keywords), solution (approach,
-agents, tools, steps), outcome (status, confidence, assessment, pitfalls), embedding
-vector, source narrative ID, and optional profile hint. The Librarian actor indexes
-CBR cases in ETS alongside narrative entries, supports `CbrQuery` retrieval with
-multi-signal scoring (intent, domain, keyword overlap, entity overlap, recency),
-and threshold filtering (0.1 minimum score). `cbr/log.gleam` provides append-only
-JSON-L persistence with lenient decoders (null → defaults).
+**CBR memory** — case-based reasoning in `cbr/types.gleam`, `cbr/log.gleam`, and
+`cbr/bridge.gleam`. Each `CbrCase` captures problem (intent, domain, entities,
+keywords), solution (approach, agents, tools, steps), outcome (status, confidence,
+assessment, pitfalls), source narrative ID, and optional profile hint. The Librarian
+actor indexes CBR cases in ETS alongside narrative entries. `cbr/bridge.gleam`
+provides `CaseBase` with inverted index and optional semantic embeddings. Retrieval
+uses a weighted sum of 4-5 signals: weighted field score (intent/domain match,
+keyword/entity Jaccard), inverted index overlap, recency, domain match, and optional
+embedding cosine similarity. Weights are configurable via `RetrievalWeights`; when
+embeddings are unavailable, embedding weight is redistributed to the other signals.
+`cbr/log.gleam` provides append-only JSON-L persistence with lenient decoders
+(null → defaults).
 
 **Facts store** — key-value memory in `facts/types.gleam` and `facts/log.gleam`.
 `MemoryFact` has scope (Session/Persistent/Global), operation (Write/Delete/Superseded),
@@ -481,8 +490,8 @@ metadata-only projection indexed in ETS by the Librarian. The `store_result` and
 web content to disk and retrieve it by ID, keeping the agent's context window lean.
 The researcher executor captures `artifacts_dir` and `librarian` via closure.
 
-**Housekeeping** — `narrative/housekeeping.gleam` provides CBR deduplication (cosine
-similarity on embeddings, configurable threshold), case pruning (old low-confidence
+**Housekeeping** — `narrative/housekeeping.gleam` provides CBR deduplication (symmetric
+weighted field similarity, configurable threshold), case pruning (old low-confidence
 failures without pitfalls), and fact conflict resolution (same-key different-value,
 keeps higher confidence). The Curator triggers housekeeping periodically.
 
@@ -602,9 +611,8 @@ The config is organized into these TOML sections:
 | `[retry]` | LLM retry: max retries, backoff delays, cap |
 | `[limits]` | Size limits: artifacts, fetch, TUI, WebSocket, mailbox, query results |
 | `[scoring.threading]` | Thread assignment overlap weights and threshold |
-| `[scoring.cbr]` | CBR retrieval: cosine/symbolic weights, min score, decay |
+| `[cbr]` | CBR retrieval: signal weights, min score, optional embedding config |
 | `[housekeeping]` | Dedup similarity, pruning confidence, fact threshold |
-| `[embedding]` | Ollama: model, base_url, dimensions |
 | `[scheduler]` | Autonomous cycle resource limits (cycles/hour, token budget/hour) |
 | `[xstructor]` | XStructor XML validation settings (max_retries) |
 | `[agents.planner]` | Planner agent: max_tokens, max_turns, max_errors |
@@ -630,10 +638,9 @@ name = "Springdrift"
 [narrative]
 threading = true
 
-[embedding]
-model = "nomic-embed-text"
-base_url = "http://localhost:11434"
-dimensions = 768
+[cbr]
+# embedding_enabled = true
+# embedding_model = "nomic-embed-text"
 ```
 
 ### Profile directory format

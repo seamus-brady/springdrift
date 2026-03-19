@@ -489,8 +489,8 @@ pub fn curator_housekeeping_deduplicates_similar_cases_test() {
   curator.run_housekeeping(cur)
   process.sleep(500)
 
-  // Dedup uses field similarity scoring. The Curator passes None for
-  // the CaseBase, so dedup is a no-op. Both cases should still be present.
+  // Field similarity is 0.9 (intent+domain+keywords+status) which is below
+  // the default dedup threshold of 0.92. Both cases should still be present.
   let after = librarian.load_all_cases(lib)
   list.length(after) |> should.equal(2)
 

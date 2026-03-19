@@ -100,6 +100,10 @@ pub type AppConfig {
     threading_keyword_weight: Option(Int),
     threading_topic_weight: Option(Int),
     threading_threshold: Option(Int),
+    // ── CBR embedding (Ollama) ──
+    cbr_embedding_enabled: Option(Bool),
+    cbr_embedding_model: Option(String),
+    cbr_embedding_base_url: Option(String),
     // ── CBR retrieval weights ──
     cbr_field_weight: Option(Float),
     cbr_index_weight: Option(Float),
@@ -223,6 +227,9 @@ pub fn default() -> AppConfig {
     threading_keyword_weight: None,
     threading_topic_weight: None,
     threading_threshold: None,
+    cbr_embedding_enabled: None,
+    cbr_embedding_model: None,
+    cbr_embedding_base_url: None,
     cbr_field_weight: None,
     cbr_index_weight: None,
     cbr_recency_weight: None,
@@ -447,6 +454,19 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     threading_threshold: option.or(
       override_cfg.threading_threshold,
       base.threading_threshold,
+    ),
+    // CBR embedding
+    cbr_embedding_enabled: option.or(
+      override_cfg.cbr_embedding_enabled,
+      base.cbr_embedding_enabled,
+    ),
+    cbr_embedding_model: option.or(
+      override_cfg.cbr_embedding_model,
+      base.cbr_embedding_model,
+    ),
+    cbr_embedding_base_url: option.or(
+      override_cfg.cbr_embedding_base_url,
+      base.cbr_embedding_base_url,
     ),
     // CBR retrieval weights
     cbr_field_weight: option.or(
@@ -998,6 +1018,9 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
       "scoring", "threading", "threshold",
     ]),
     // ── [cbr] ──
+    cbr_embedding_enabled: get_toml_bool(table, ["cbr", "embedding_enabled"]),
+    cbr_embedding_model: get_toml_str(table, ["cbr", "embedding_model"]),
+    cbr_embedding_base_url: get_toml_str(table, ["cbr", "embedding_base_url"]),
     cbr_field_weight: get_toml_float(table, ["cbr", "field_weight"]),
     cbr_index_weight: get_toml_float(table, ["cbr", "index_weight"]),
     cbr_recency_weight: get_toml_float(table, ["cbr", "recency_weight"]),

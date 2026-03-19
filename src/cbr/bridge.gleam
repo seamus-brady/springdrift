@@ -26,6 +26,8 @@ import gleam/string
 /// In-memory CBR store. Owned by the Librarian.
 pub type CaseBase {
   CaseBase(
+    // Tracked case IDs (for accurate case_count regardless of token coverage)
+    case_ids: set.Set(String),
     // Inverted index — token → list of case_ids
     index: Dict(String, List(String)),
     // Optional semantic embeddings — case_id → vector
@@ -64,18 +66,31 @@ pub fn default_weights() -> RetrievalWeights {
 
 /// Create a new empty CaseBase.
 pub fn new() -> CaseBase {
-  CaseBase(index: dict.new(), embeddings: dict.new(), embed_fn: None)
+  CaseBase(
+    case_ids: set.new(),
+    index: dict.new(),
+    embeddings: dict.new(),
+    embed_fn: None,
+  )
 }
 
 /// Create a CaseBase with an embedding function.
 pub fn new_with_embeddings(
   embed_fn: fn(String) -> Result(List(Float), String),
 ) -> CaseBase {
-  CaseBase(index: dict.new(), embeddings: dict.new(), embed_fn: Some(embed_fn))
+  CaseBase(
+    case_ids: set.new(),
+    index: dict.new(),
+    embeddings: dict.new(),
+    embed_fn: Some(embed_fn),
+  )
 }
 
 /// Rebuild the inverted index from a list of cases (after loading metadata).
+/// Also rebuilds the case_ids set.
 pub fn rebuild_index(base: CaseBase, cases: List(CbrCase)) -> CaseBase {
+  let case_ids =
+    list.fold(cases, set.new(), fn(ids, c) { set.insert(ids, c.case_id) })
   let index =
     list.fold(cases, dict.new(), fn(idx, c) {
       let tokens = case_tokens(c)
@@ -84,7 +99,7 @@ pub fn rebuild_index(base: CaseBase, cases: List(CbrCase)) -> CaseBase {
         dict.insert(idx2, tok, [c.case_id, ..existing])
       })
     })
-  CaseBase(..base, index:)
+  CaseBase(..base, case_ids:, index:)
 }
 
 // ---------------------------------------------------------------------------
@@ -94,6 +109,9 @@ pub fn rebuild_index(base: CaseBase, cases: List(CbrCase)) -> CaseBase {
 /// Add a CbrCase to the CaseBase (inverted index + optional embedding).
 /// Returns the updated CaseBase.
 pub fn retain_case(base: CaseBase, cbr_case: CbrCase) -> CaseBase {
+  // Track case ID
+  let case_ids = set.insert(base.case_ids, cbr_case.case_id)
+
   // Update inverted index
   let tokens = case_tokens(cbr_case)
   let index =
@@ -114,7 +132,7 @@ pub fn retain_case(base: CaseBase, cbr_case: CbrCase) -> CaseBase {
     }
   }
 
-  CaseBase(..base, index:, embeddings:)
+  CaseBase(..base, case_ids:, index:, embeddings:)
 }
 
 // ---------------------------------------------------------------------------
@@ -331,11 +349,11 @@ pub fn cosine_similarity(a: List(Float), b: List(Float)) -> Float {
   }
 }
 
-/// Similarity between two cases using weighted field comparison.
-/// Returns a value in 0.0–1.0. Used by housekeeping for deduplication.
+/// Symmetric similarity between two cases using weighted field comparison.
+/// Returns the average of scoring A→B and B→A, giving a value in 0.0–1.0.
+/// Used by housekeeping for deduplication.
 pub fn case_similarity(case_a: CbrCase, case_b: CbrCase) -> Float {
-  // Build a synthetic query from case_a and score case_b against it
-  let query =
+  let query_a =
     types.CbrQuery(
       intent: case_a.problem.intent,
       domain: case_a.problem.domain,
@@ -344,7 +362,18 @@ pub fn case_similarity(case_a: CbrCase, case_b: CbrCase) -> Float {
       max_results: 1,
       query_complexity: None,
     )
-  weighted_field_score(query, case_b)
+  let query_b =
+    types.CbrQuery(
+      intent: case_b.problem.intent,
+      domain: case_b.problem.domain,
+      keywords: case_b.problem.keywords,
+      entities: case_b.problem.entities,
+      max_results: 1,
+      query_complexity: None,
+    )
+  let score_ab = weighted_field_score(query_a, case_b)
+  let score_ba = weighted_field_score(query_b, case_a)
+  { score_ab +. score_ba } /. 2.0
 }
 
 // ---------------------------------------------------------------------------
@@ -553,6 +582,9 @@ fn embedding_score(
 
 /// Remove a case from the CaseBase.
 pub fn remove_case(base: CaseBase, case_id: String) -> CaseBase {
+  // Remove from tracked IDs
+  let case_ids = set.delete(base.case_ids, case_id)
+
   // Remove from inverted index, filtering out empty posting lists
   let index =
     dict.map_values(base.index, fn(_tok, ids) {
@@ -563,15 +595,12 @@ pub fn remove_case(base: CaseBase, case_id: String) -> CaseBase {
   // Remove from embeddings
   let embeddings = dict.delete(base.embeddings, case_id)
 
-  CaseBase(..base, index:, embeddings:)
+  CaseBase(..base, case_ids:, index:, embeddings:)
 }
 
-/// Get the number of unique case IDs in the inverted index.
+/// Get the number of cases in the CaseBase.
 pub fn case_count(base: CaseBase) -> Int {
-  dict.values(base.index)
-  |> list.flatten
-  |> list.unique
-  |> list.length
+  set.size(base.case_ids)
 }
 
 // ---------------------------------------------------------------------------
