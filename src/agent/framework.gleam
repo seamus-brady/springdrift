@@ -513,6 +513,8 @@ fn build_findings(agent: String, stats: ReactStats) -> types.AgentFindings {
         dependencies: [],
         complexity: "",
         risks: [],
+        task_id: option.None,
+        endeavour_id: option.None,
       )
     "coder" -> {
       let files =

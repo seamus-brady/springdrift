@@ -164,6 +164,11 @@ pub type AppConfig {
     xstructor_max_retries: Option(Int),
     // ── Preamble budget ──
     preamble_budget_chars: Option(Int),
+    // ── Forecaster ──
+    forecaster_enabled: Option(Bool),
+    forecaster_tick_ms: Option(Int),
+    forecaster_replan_threshold: Option(Float),
+    forecaster_min_cycles: Option(Int),
   )
 }
 
@@ -286,6 +291,10 @@ pub fn default() -> AppConfig {
     autonomous_token_budget_per_hour: None,
     xstructor_max_retries: None,
     preamble_budget_chars: None,
+    forecaster_enabled: None,
+    forecaster_tick_ms: None,
+    forecaster_replan_threshold: None,
+    forecaster_min_cycles: None,
   )
 }
 
@@ -662,6 +671,22 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       override_cfg.preamble_budget_chars,
       base.preamble_budget_chars,
     ),
+    forecaster_enabled: option.or(
+      override_cfg.forecaster_enabled,
+      base.forecaster_enabled,
+    ),
+    forecaster_tick_ms: option.or(
+      override_cfg.forecaster_tick_ms,
+      base.forecaster_tick_ms,
+    ),
+    forecaster_replan_threshold: option.or(
+      override_cfg.forecaster_replan_threshold,
+      base.forecaster_replan_threshold,
+    ),
+    forecaster_min_cycles: option.or(
+      override_cfg.forecaster_min_cycles,
+      base.forecaster_min_cycles,
+    ),
   )
 }
 
@@ -803,6 +828,19 @@ pub fn to_string(cfg: AppConfig) -> String {
     }),
     // Web
     option.map(cfg.web_port, fn(v) { "web.port: " <> int.to_string(v) }),
+    // Forecaster
+    option.map(cfg.forecaster_enabled, fn(v) {
+      "forecaster.enabled: " <> bool_str(v)
+    }),
+    option.map(cfg.forecaster_tick_ms, fn(v) {
+      "forecaster.tick_ms: " <> int.to_string(v)
+    }),
+    option.map(cfg.forecaster_replan_threshold, fn(v) {
+      "forecaster.replan_threshold: " <> float.to_string(v)
+    }),
+    option.map(cfg.forecaster_min_cycles, fn(v) {
+      "forecaster.min_cycles: " <> int.to_string(v)
+    }),
   ]
   |> list.filter_map(fn(x) { option.to_result(x, Nil) })
   |> string.join("\n")
@@ -1161,6 +1199,13 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     preamble_budget_chars: get_toml_int(table, [
       "narrative", "preamble_budget_chars",
     ]),
+    // ── [forecaster] ──
+    forecaster_enabled: get_toml_bool(table, ["forecaster", "enabled"]),
+    forecaster_tick_ms: get_toml_int(table, ["forecaster", "tick_ms"]),
+    forecaster_replan_threshold: get_toml_float(table, [
+      "forecaster", "replan_threshold",
+    ]),
+    forecaster_min_cycles: get_toml_int(table, ["forecaster", "min_cycles"]),
   )
 }
 
@@ -1194,6 +1239,7 @@ const known_keys = [
   "narrative", "profile", "profiles_dirs", "agent", "log_retention_days",
   "log_max_file_bytes", "timeouts", "retry", "limits", "scoring", "housekeeping",
   "housekeeper", "cbr", "agents", "web", "services", "scheduler", "xstructor",
+  "forecaster",
 ]
 
 const known_narrative_keys = [

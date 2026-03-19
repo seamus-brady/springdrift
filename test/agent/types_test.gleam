@@ -2,6 +2,7 @@ import agent/types.{
   AgentDataPoint, AgentResult, CoderFindings, DiscoveredSource, ExtractedFact,
   GenericFindings, PlannerFindings, ResearcherFindings, WriterFindings,
 }
+import gleam/option
 import gleeunit/should
 
 // ---------------------------------------------------------------------------
@@ -56,10 +57,12 @@ pub fn agent_result_with_planner_findings_test() {
         dependencies: [#("Step 2", "Step 1"), #("Step 3", "Step 2")],
         complexity: "moderate",
         risks: ["API rate limits"],
+        task_id: option.None,
+        endeavour_id: option.None,
       ),
     )
   case result.findings {
-    PlannerFindings(plan_steps:, dependencies:, complexity:, risks:) -> {
+    PlannerFindings(plan_steps:, dependencies:, complexity:, risks:, ..) -> {
       should.equal(3, list_length(plan_steps))
       should.equal(2, list_length(dependencies))
       complexity |> should.equal("moderate")

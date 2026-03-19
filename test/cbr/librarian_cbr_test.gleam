@@ -79,6 +79,7 @@ pub fn librarian_starts_with_no_cases_test() {
       cbr_dir,
       dir <> "/facts",
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )
@@ -97,6 +98,7 @@ pub fn librarian_index_and_query_case_test() {
       cbr_dir,
       dir <> "/facts",
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )
@@ -123,6 +125,7 @@ pub fn librarian_retrieve_by_intent_test() {
       cbr_dir,
       dir <> "/facts",
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )
@@ -164,6 +167,7 @@ pub fn librarian_retrieve_by_keywords_test() {
       cbr_dir,
       dir <> "/facts",
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )
@@ -206,6 +210,7 @@ pub fn librarian_retrieve_max_results_test() {
       cbr_dir,
       dir <> "/facts",
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )
@@ -241,6 +246,7 @@ pub fn librarian_retrieve_no_match_test() {
       cbr_dir,
       dir <> "/facts",
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.CbrConfig(..librarian.default_cbr_config(), min_score: 0.5),
     )
@@ -286,6 +292,7 @@ pub fn librarian_cbr_replay_from_disk_test() {
       cbr_dir,
       dir <> "/facts",
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )
@@ -305,6 +312,7 @@ pub fn librarian_domain_scoring_test() {
       cbr_dir,
       dir <> "/facts",
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )
@@ -342,6 +350,7 @@ pub fn librarian_entity_scoring_test() {
       cbr_dir,
       dir <> "/facts",
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )
@@ -384,6 +393,7 @@ pub fn librarian_suppress_case_test() {
       cbr_dir,
       dir <> "/facts",
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )
@@ -423,6 +433,7 @@ pub fn librarian_annotate_case_test() {
       cbr_dir,
       dir <> "/facts",
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )
@@ -452,6 +463,7 @@ pub fn librarian_boost_case_test() {
       cbr_dir,
       dir <> "/facts",
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )
@@ -481,6 +493,7 @@ pub fn librarian_boost_clamps_confidence_test() {
       cbr_dir,
       dir <> "/facts",
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )
@@ -510,6 +523,7 @@ pub fn librarian_suppress_nonexistent_test() {
       cbr_dir,
       dir <> "/facts",
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )

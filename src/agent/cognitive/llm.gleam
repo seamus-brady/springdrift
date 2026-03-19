@@ -48,10 +48,12 @@ pub fn proceed_with_model(
           session_since: state.identity.session_since,
           agents_active: registry.count_running(state.registry),
           message_count: list.length(state.messages),
+          sensory_events: state.pending_sensory_events,
         )
       let prompt =
         curator.build_system_prompt(cur, state.system, Some(cycle_context))
-      CognitiveState(..state, system: prompt)
+      // Clear consumed sensory events
+      CognitiveState(..state, system: prompt, pending_sensory_events: [])
     }
     None -> state
   }

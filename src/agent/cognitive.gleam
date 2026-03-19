@@ -11,9 +11,9 @@ import agent/cognitive_state.{
 import agent/types.{
   type CognitiveMessage, type CognitiveReply, AgentComplete, AgentEvent,
   Classifying, CognitiveReply, Idle, InputQueueFull, InputQueued, PendingThink,
-  QueuedInput, QueuedSchedulerInput, RestoreMessages, SaveResult,
-  SchedulerJobStarted, SetModel, ThinkComplete, ThinkError, ThinkWorkerDown,
-  Thinking, UserAnswer, UserInput,
+  QueuedInput, QueuedSchedulerInput, QueuedSensoryInput, RestoreMessages,
+  SaveResult, SchedulerJobStarted, SetModel, ThinkComplete, ThinkError,
+  ThinkWorkerDown, Thinking, UserAnswer, UserInput,
 }
 import agent/worker
 import cycle_log
@@ -28,11 +28,14 @@ import llm/response
 import llm/types as llm_types
 import narrative/curator as narrative_curator
 import narrative/librarian
+import planner/log as planner_log
+import planner/types as planner_types
 import query_complexity
 import scheduler/types as scheduler_types
 import slog
 import tools/builtin
 import tools/memory
+import tools/planner as planner_tools
 
 @external(erlang, "springdrift_ffi", "rescue")
 fn rescue(body: fn() -> a) -> Result(a, String)
@@ -48,11 +51,12 @@ fn monotonic_now_ms() -> Int
 pub fn start(
   cfg: cognitive_config.CognitiveConfig,
 ) -> Result(Subject(CognitiveMessage), Nil) {
-  // The cognitive loop gets agent tools + request_human_input + memory tools
+  // The cognitive loop gets agent tools + request_human_input + memory + planner tools
   let tools =
     list.flatten([
       [builtin.human_input_tool()],
       memory.all(),
+      planner_tools.all(),
       cfg.agent_tools,
     ])
   let setup = process.new_subject()
@@ -112,6 +116,9 @@ pub fn start(
           how_to_content: cfg.how_to_content,
         ),
         redact_secrets: cfg.redact_secrets,
+        pending_sensory_events: [],
+        active_task_id: None,
+        planner_dir: cfg.planner_dir,
       )
     process.send(setup, self)
     cognitive_loop(state)
@@ -175,6 +182,7 @@ fn handle_message(
       types.SetSupervisor(..) -> "SetSupervisor"
       types.SchedulerInput(..) -> "SchedulerInput"
       types.OutputGateComplete(..) -> "OutputGateComplete"
+      types.QueuedSensoryEvent(..) -> "QueuedSensoryEvent"
     },
     state.cycle_id,
   )
@@ -266,6 +274,45 @@ fn handle_message(
         modification_count,
         reply_to,
       )
+    types.QueuedSensoryEvent(event:) -> {
+      slog.debug(
+        "cognitive",
+        "handle_message",
+        "Sensory event accumulated: " <> event.name,
+        state.cycle_id,
+      )
+      CognitiveState(
+        ..state,
+        pending_sensory_events: list.append(state.pending_sensory_events, [
+          event,
+        ]),
+      )
+    }
+  }
+  // If a cycle just completed (transition to Idle) and there's an active task,
+  // append the cycle_id to that task so the forecaster can track progress.
+  let next = case
+    next.status,
+    state.status,
+    next.active_task_id,
+    next.cycle_id
+  {
+    Idle, prev_status, Some(task_id), Some(cycle_id) if prev_status != Idle -> {
+      planner_log.append_task_op(
+        next.planner_dir,
+        planner_types.AddCycleId(task_id:, cycle_id:),
+      )
+      case next.memory.librarian {
+        Some(lib) ->
+          librarian.notify_task_op(
+            lib,
+            planner_types.AddCycleId(task_id:, cycle_id:),
+          )
+        None -> Nil
+      }
+      next
+    }
+    _, _, _, _ -> next
   }
   maybe_drain_queue(next)
 }
@@ -323,6 +370,24 @@ fn maybe_drain_queue(state: CognitiveState) -> CognitiveState {
         tags,
         reply_to,
       )
+    }
+    Idle, [QueuedSensoryInput(event:), ..rest] -> {
+      slog.debug(
+        "cognitive",
+        "maybe_drain_queue",
+        "Draining queued sensory event: " <> event.name,
+        state.cycle_id,
+      )
+      let next_state =
+        CognitiveState(
+          ..state,
+          input_queue: rest,
+          pending_sensory_events: list.append(state.pending_sensory_events, [
+            event,
+          ]),
+        )
+      // Sensory events don't trigger cycles, so continue draining
+      maybe_drain_queue(next_state)
     }
     _, _ -> state
   }
