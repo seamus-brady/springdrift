@@ -15,6 +15,7 @@
 //// --skills-dir is repeatable and appends to (rather than replaces) the list.
 
 import gleam/dict
+import gleam/float
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -99,9 +100,12 @@ pub type AppConfig {
     threading_keyword_weight: Option(Int),
     threading_topic_weight: Option(Int),
     threading_threshold: Option(Int),
-    // ── CBR (paperwings) ──
-    vsa_dimensions: Option(Int),
-    cbr_rrf_k: Option(Int),
+    // ── CBR retrieval weights ──
+    cbr_field_weight: Option(Float),
+    cbr_index_weight: Option(Float),
+    cbr_recency_weight: Option(Float),
+    cbr_domain_weight: Option(Float),
+    cbr_embedding_weight: Option(Float),
     cbr_min_score: Option(Float),
     // ── Housekeeping ──
     dedup_similarity: Option(Float),
@@ -219,8 +223,11 @@ pub fn default() -> AppConfig {
     threading_keyword_weight: None,
     threading_topic_weight: None,
     threading_threshold: None,
-    vsa_dimensions: None,
-    cbr_rrf_k: None,
+    cbr_field_weight: None,
+    cbr_index_weight: None,
+    cbr_recency_weight: None,
+    cbr_domain_weight: None,
+    cbr_embedding_weight: None,
     cbr_min_score: None,
     dedup_similarity: None,
     pruning_confidence: None,
@@ -441,9 +448,27 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       override_cfg.threading_threshold,
       base.threading_threshold,
     ),
-    // CBR (paperwings)
-    vsa_dimensions: option.or(override_cfg.vsa_dimensions, base.vsa_dimensions),
-    cbr_rrf_k: option.or(override_cfg.cbr_rrf_k, base.cbr_rrf_k),
+    // CBR retrieval weights
+    cbr_field_weight: option.or(
+      override_cfg.cbr_field_weight,
+      base.cbr_field_weight,
+    ),
+    cbr_index_weight: option.or(
+      override_cfg.cbr_index_weight,
+      base.cbr_index_weight,
+    ),
+    cbr_recency_weight: option.or(
+      override_cfg.cbr_recency_weight,
+      base.cbr_recency_weight,
+    ),
+    cbr_domain_weight: option.or(
+      override_cfg.cbr_domain_weight,
+      base.cbr_domain_weight,
+    ),
+    cbr_embedding_weight: option.or(
+      override_cfg.cbr_embedding_weight,
+      base.cbr_embedding_weight,
+    ),
     cbr_min_score: option.or(override_cfg.cbr_min_score, base.cbr_min_score),
     // Housekeeping
     dedup_similarity: option.or(
@@ -710,8 +735,8 @@ pub fn to_string(cfg: AppConfig) -> String {
       "mailbox_warn_threshold: " <> int.to_string(v)
     }),
     // CBR
-    option.map(cfg.vsa_dimensions, fn(v) {
-      "cbr.vsa_dimensions: " <> int.to_string(v)
+    option.map(cfg.cbr_min_score, fn(v) {
+      "cbr.min_score: " <> float.to_string(v)
     }),
     // Web
     option.map(cfg.web_port, fn(v) { "web.port: " <> int.to_string(v) }),
@@ -973,8 +998,11 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
       "scoring", "threading", "threshold",
     ]),
     // ── [cbr] ──
-    vsa_dimensions: get_toml_int(table, ["cbr", "vsa_dimensions"]),
-    cbr_rrf_k: get_toml_int(table, ["cbr", "rrf_k"]),
+    cbr_field_weight: get_toml_float(table, ["cbr", "field_weight"]),
+    cbr_index_weight: get_toml_float(table, ["cbr", "index_weight"]),
+    cbr_recency_weight: get_toml_float(table, ["cbr", "recency_weight"]),
+    cbr_domain_weight: get_toml_float(table, ["cbr", "domain_weight"]),
+    cbr_embedding_weight: get_toml_float(table, ["cbr", "embedding_weight"]),
     cbr_min_score: get_toml_float(table, ["cbr", "min_score"]),
     // ── [housekeeping] ──
     dedup_similarity: get_toml_float(table, ["housekeeping", "dedup_similarity"]),

@@ -35,7 +35,7 @@ pub fn default_has_all_none_test() {
   cfg.llm_request_timeout_ms |> should.equal(None)
   cfg.retry_max_retries |> should.equal(None)
   cfg.max_artifact_chars |> should.equal(None)
-  cfg.vsa_dimensions |> should.equal(None)
+  cfg.cbr_field_weight |> should.equal(None)
   cfg.web_port |> should.equal(None)
   cfg.planner_max_turns |> should.equal(None)
 }
@@ -644,9 +644,13 @@ mailbox_warn_threshold = 100"
 pub fn parse_config_toml_cbr_test() {
   let toml =
     "[cbr]
-vsa_dimensions = 2000"
+field_weight = 0.4
+min_score = 0.05"
   let assert Ok(cfg) = config.parse_config_toml(toml)
-  cfg.vsa_dimensions |> should.equal(Some(2000))
+  let assert Some(fw) = cfg.cbr_field_weight
+  { fw >. 0.39 && fw <. 0.41 } |> should.be_true
+  let assert Some(ms) = cfg.cbr_min_score
+  { ms >. 0.04 && ms <. 0.06 } |> should.be_true
 }
 
 pub fn parse_config_toml_agents_test() {
@@ -692,12 +696,19 @@ threshold = 6"
   cfg.threading_threshold |> should.equal(Some(6))
 }
 
-pub fn parse_config_toml_cbr_vsa_test() {
+pub fn parse_config_toml_cbr_weights_test() {
   let toml =
     "[cbr]
-vsa_dimensions = 500"
+field_weight = 0.3
+index_weight = 0.2
+recency_weight = 0.2
+domain_weight = 0.2
+embedding_weight = 0.1"
   let assert Ok(cfg) = config.parse_config_toml(toml)
-  cfg.vsa_dimensions |> should.equal(Some(500))
+  let assert Some(fw) = cfg.cbr_field_weight
+  { fw >. 0.29 && fw <. 0.31 } |> should.be_true
+  let assert Some(iw) = cfg.cbr_index_weight
+  { iw >. 0.19 && iw <. 0.21 } |> should.be_true
 }
 
 pub fn parse_config_toml_housekeeping_test() {

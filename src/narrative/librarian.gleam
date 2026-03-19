@@ -16,7 +16,7 @@
 ////
 //// CBR:
 ////   - cbr_cases (set)         — case_id → CbrCase (metadata)
-////   - paperwings CaseBase     — VSA vectors + inverted index (retrieval)
+////   - CaseBase                — inverted index + optional embeddings (retrieval)
 ////
 //// Facts ETS tables:
 ////   - facts_by_key (set)      — key → MemoryFact (current value)
@@ -51,13 +51,13 @@ import slog
 // CBR Configuration
 // ---------------------------------------------------------------------------
 
-/// Configuration for paperwings-based CBR retrieval.
+/// Configuration for CBR retrieval (weighted field scoring + inverted index).
 pub type CbrConfig {
-  CbrConfig(vsa_dimensions: Int, rrf_k: Int, min_score: Float)
+  CbrConfig(weights: bridge.RetrievalWeights, min_score: Float)
 }
 
 pub fn default_cbr_config() -> CbrConfig {
-  CbrConfig(vsa_dimensions: 1000, rrf_k: 60, min_score: 0.0)
+  CbrConfig(weights: bridge.default_weights(), min_score: 0.01)
 }
 
 // ---------------------------------------------------------------------------
@@ -438,7 +438,7 @@ type LibrarianState {
     by_keyword: NarrativeTable,
     by_recency: NarrativeTable,
     thread_index: ThreadIndex,
-    // CBR — metadata ETS + paperwings CaseBase + config
+    // CBR — metadata ETS + CaseBase (inverted index + embeddings) + config
     cbr_cases: CbrTable,
     case_base: bridge.CaseBase,
     cbr_config: CbrConfig,
@@ -510,11 +510,9 @@ fn start_with_pid(
       let by_recency_table =
         new_narrative_table("narrative_by_recency", "ordered_set")
 
-      // Create CBR metadata ETS table + paperwings CaseBase
+      // Create CBR metadata ETS table + CaseBase
       let cbr_cases_table = new_cbr_table("cbr_cases", "set")
-      let case_base =
-        bridge.load(cbr_dir, cbr_config.vsa_dimensions)
-        |> bridge.ensure_roles
+      let case_base = bridge.new()
 
       // Create Facts ETS tables
       let facts_key_table = new_fact_table("facts_by_key", "set")
@@ -1336,9 +1334,7 @@ fn loop(state: LibrarianState) -> Nil {
           ets_delete_table(state.by_date)
           ets_delete_table(state.by_keyword)
           ets_delete_table(state.by_recency)
-          // Save + destroy CBR CaseBase, delete metadata table
-          let _ = bridge.save(state.case_base)
-          bridge.destroy(state.case_base)
+          // Delete CBR metadata table
           cbr_delete_table(state.cbr_cases)
           // Delete Facts tables
           fact_delete_table(state.facts_by_key)
@@ -1427,7 +1423,7 @@ fn loop(state: LibrarianState) -> Nil {
         IndexCase(cbr_case:) -> {
           // Index in metadata ETS
           cbr_insert(state.cbr_cases, cbr_case.case_id, cbr_case)
-          // Encode into paperwings CaseBase
+          // Add to CaseBase (inverted index + optional embedding)
           let case_base = bridge.retain_case(state.case_base, cbr_case)
           loop(LibrarianState(..state, case_base:))
         }
@@ -1439,7 +1435,7 @@ fn loop(state: LibrarianState) -> Nil {
               state.case_base,
               query,
               metadata,
-              state.cbr_config.rrf_k,
+              state.cbr_config.weights,
               state.cbr_config.min_score,
             )
           process.send(reply_to, results)
@@ -1468,7 +1464,7 @@ fn loop(state: LibrarianState) -> Nil {
             Ok(_) -> {
               // Update metadata ETS
               cbr_insert(state.cbr_cases, case_id, updated_case)
-              // Re-encode in CaseBase (remove old, retain new)
+              // Update CaseBase (remove old, retain new)
               let case_base = bridge.remove_case(state.case_base, case_id)
               let case_base = bridge.retain_case(case_base, updated_case)
               // Persist update to disk
@@ -1497,7 +1493,7 @@ fn loop(state: LibrarianState) -> Nil {
                   ),
                 )
               cbr_insert(state.cbr_cases, case_id, updated)
-              // Pitfalls and confidence are not VSA features — no CaseBase re-encoding needed.
+              // Pitfalls don't affect field scoring — no CaseBase update needed.
               cbr_log.append(state.cbr_dir, updated)
               process.send(reply_to, Ok(Nil))
               loop(state)
@@ -1522,7 +1518,7 @@ fn loop(state: LibrarianState) -> Nil {
                   ),
                 )
               cbr_insert(state.cbr_cases, case_id, suppressed)
-              // Remove from CaseBase (no longer retrievable via VSA/index)
+              // Remove from CaseBase (no longer retrievable)
               let case_base = bridge.remove_case(state.case_base, case_id)
               cbr_log.append(state.cbr_dir, suppressed)
               process.send(reply_to, Ok(Nil))
@@ -1549,7 +1545,7 @@ fn loop(state: LibrarianState) -> Nil {
                   ),
                 )
               cbr_insert(state.cbr_cases, case_id, updated)
-              // Pitfalls and confidence are not VSA features — no CaseBase re-encoding needed.
+              // Confidence doesn't affect field scoring — no CaseBase update needed.
               cbr_log.append(state.cbr_dir, updated)
               process.send(reply_to, Ok(Nil))
               loop(state)
@@ -1812,7 +1808,7 @@ fn do_search(state: LibrarianState, keyword: String) -> List(NarrativeEntry) {
 }
 
 // ---------------------------------------------------------------------------
-// CBR query helpers — paperwings bridge delegates retrieval
+// CBR query helpers — bridge delegates retrieval
 // ---------------------------------------------------------------------------
 
 /// Build a metadata dict from the cbr_cases ETS table for bridge lookups.
@@ -1971,7 +1967,7 @@ fn replay_cbr_from_disk(state: LibrarianState, max_files: Int) -> LibrarianState
       // Index metadata in ETS
       list.each(all_cases, fn(c) { cbr_insert(state.cbr_cases, c.case_id, c) })
 
-      // Encode all cases into the CaseBase + rebuild inverted index
+      // Add all cases to the CaseBase + rebuild inverted index
       let case_base =
         list.fold(all_cases, state.case_base, fn(base, c) {
           bridge.retain_case(base, c)

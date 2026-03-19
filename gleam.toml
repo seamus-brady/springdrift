@@ -18,7 +18,6 @@ mist = ">= 5.0.4 and < 6.0.0"
 gleam_http = ">= 4.3.0 and < 5.0.0"
 gleam_httpc = ">= 5.0.0 and < 6.0.0"
 dot_env = ">= 1.2.0 and < 2.0.0"
-paperwings = { path = "../paperwings_gleam" }
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

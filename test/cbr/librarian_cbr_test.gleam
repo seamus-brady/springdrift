@@ -134,7 +134,6 @@ pub fn librarian_retrieve_by_intent_test() {
   librarian.notify_new_case(lib, c3)
   process.sleep(50)
 
-  // Query for research intent — should match c1 and c3 with higher scores
   let query =
     CbrQuery(
       intent: "research",
@@ -146,10 +145,8 @@ pub fn librarian_retrieve_by_intent_test() {
     )
   let results = librarian.retrieve_cases(lib, query)
 
-  // Should have results (at minimum the intent-matching ones)
   should.be_true(list.length(results) >= 1)
 
-  // Top result should be c1 (matches intent + domain + keywords + entities)
   let assert [top, ..] = results
   top.cbr_case.case_id |> should.equal("case-i1")
 
@@ -180,7 +177,6 @@ pub fn librarian_retrieve_by_keywords_test() {
   librarian.notify_new_case(lib, c2)
   process.sleep(50)
 
-  // Query with keyword overlap — "market" + "rental" should favour c1
   let query =
     CbrQuery(
       intent: "research",
@@ -193,7 +189,6 @@ pub fn librarian_retrieve_by_keywords_test() {
   let results = librarian.retrieve_cases(lib, query)
   should.be_true(list.length(results) >= 2)
 
-  // c1 should score higher (2/3 keyword overlap vs 1/3)
   let assert [top, ..] = results
   top.cbr_case.case_id |> should.equal("case-k1")
 
@@ -214,14 +209,12 @@ pub fn librarian_retrieve_max_results_test() {
       librarian.default_cbr_config(),
     )
 
-  // Insert 5 cases with the same intent
   list.each(["c1", "c2", "c3", "c4", "c5"], fn(id) {
     let c = make_case(id, "research", "property", ["market"], [])
     librarian.notify_new_case(lib, c)
   })
   process.sleep(50)
 
-  // Query with max_results=2
   let query =
     CbrQuery(
       intent: "research",
@@ -255,7 +248,6 @@ pub fn librarian_retrieve_no_match_test() {
   librarian.notify_new_case(lib, c)
   process.sleep(50)
 
-  // Query with completely different intent, domain, keywords, entities
   let query =
     CbrQuery(
       intent: "coding",
@@ -267,8 +259,6 @@ pub fn librarian_retrieve_no_match_test() {
     )
   let results = librarian.retrieve_cases(lib, query)
 
-  // With a min_score of 0.5, a completely mismatched query should return no results
-  // because the RRF scores for unrelated cases fall below the threshold.
   list.length(results) |> should.equal(0)
 
   process.send(lib, librarian.Shutdown)
@@ -279,7 +269,6 @@ pub fn librarian_cbr_replay_from_disk_test() {
   let cbr_dir = dir <> "/cbr"
   let _ = simplifile.create_directory_all(cbr_dir)
 
-  // Write cases directly to JSONL before starting Librarian
   let c1 = make_case("case-rp1", "research", "property", ["market"], [])
   let c2 = make_case("case-rp2", "analysis", "finance", ["stocks"], [])
   let json1 = json.to_string(cbr_log.encode_case(c1))
@@ -290,7 +279,6 @@ pub fn librarian_cbr_replay_from_disk_test() {
       json1 <> "\n" <> json2 <> "\n",
     )
 
-  // Start Librarian — should replay CBR cases
   let lib =
     librarian.start(
       dir,
@@ -326,7 +314,6 @@ pub fn librarian_domain_scoring_test() {
   librarian.notify_new_case(lib, c2)
   process.sleep(50)
 
-  // Query matching property domain — c1 should rank higher
   let query =
     CbrQuery(
       intent: "research",
@@ -365,7 +352,6 @@ pub fn librarian_entity_scoring_test() {
   librarian.notify_new_case(lib, c2)
   process.sleep(50)
 
-  // Query for Dublin entities — c1 should score higher on entity overlap
   let query =
     CbrQuery(
       intent: "research",
@@ -407,11 +393,9 @@ pub fn librarian_suppress_case_test() {
   librarian.notify_new_case(lib, c2)
   process.sleep(50)
 
-  // Suppress c1
   let result = librarian.suppress_case(lib, "case-s1")
   result |> should.be_ok
 
-  // Retrieve — suppressed case should not appear
   let query =
     CbrQuery(
       intent: "research",
@@ -446,11 +430,9 @@ pub fn librarian_annotate_case_test() {
   librarian.notify_new_case(lib, c1)
   process.sleep(50)
 
-  // Annotate
   let result = librarian.annotate_case(lib, "case-a1", "rate limits hit")
   result |> should.be_ok
 
-  // Look up — should have the pitfall
   let reply_to = process.new_subject()
   process.send(lib, librarian.QueryCaseById(case_id: "case-a1", reply_to:))
   let assert Ok(Ok(updated)) = process.receive(reply_to, 5000)
@@ -477,11 +459,9 @@ pub fn librarian_boost_case_test() {
   librarian.notify_new_case(lib, c1)
   process.sleep(50)
 
-  // Boost confidence
   let result = librarian.boost_case(lib, "case-b1", 0.95)
   result |> should.be_ok
 
-  // Look up — confidence should be updated
   let reply_to = process.new_subject()
   process.send(lib, librarian.QueryCaseById(case_id: "case-b1", reply_to:))
   let assert Ok(Ok(updated)) = process.receive(reply_to, 5000)
@@ -508,14 +488,12 @@ pub fn librarian_boost_clamps_confidence_test() {
   librarian.notify_new_case(lib, c1)
   process.sleep(50)
 
-  // Boost with value > 1.0 — should clamp
   let result = librarian.boost_case(lib, "case-bc1", 5.0)
   result |> should.be_ok
 
   let reply_to = process.new_subject()
   process.send(lib, librarian.QueryCaseById(case_id: "case-bc1", reply_to:))
   let assert Ok(Ok(updated)) = process.receive(reply_to, 5000)
-  // Clamped to 1.0
   should.be_true(updated.outcome.confidence <=. 1.0)
 
   process.send(lib, librarian.Shutdown)
@@ -535,7 +513,6 @@ pub fn librarian_suppress_nonexistent_test() {
       librarian.default_cbr_config(),
     )
 
-  // Suppress nonexistent case
   let result = librarian.suppress_case(lib, "nonexistent")
   result |> should.be_error
 

@@ -21,7 +21,7 @@ import gleam/string
 import narrative/types as narrative_types
 
 // ---------------------------------------------------------------------------
-// CBR deduplication — cosine similarity > threshold
+// CBR deduplication — field similarity > threshold
 // ---------------------------------------------------------------------------
 
 /// A dedup decision: the newer case supersedes the older one.
@@ -29,33 +29,27 @@ pub type DedupResult {
   DedupResult(keep_id: String, supersede_id: String, similarity: Float)
 }
 
-/// Find pairs of CBR cases with VSA distance < threshold (smaller = more similar).
-/// When a CaseBase is provided, uses VSA structural distance.
+/// Find pairs of CBR cases with field similarity > threshold.
+/// Uses deterministic weighted field scoring (no CaseBase needed).
 /// Returns a list of DedupResult where the older (by timestamp) case should be superseded.
 pub fn find_duplicate_cases(
   cases: List(cbr_types.CbrCase),
   threshold: Float,
-  case_base: Option(bridge.CaseBase),
+  _case_base: Option(bridge.CaseBase),
 ) -> List(DedupResult) {
-  do_find_duplicates(cases, threshold, case_base, [])
+  do_find_duplicates(cases, threshold, [])
 }
 
 fn do_find_duplicates(
   cases: List(cbr_types.CbrCase),
   threshold: Float,
-  case_base: Option(bridge.CaseBase),
   acc: List(DedupResult),
 ) -> List(DedupResult) {
   case cases {
     [] -> acc
     [first, ..rest] -> {
-      let new_results = compare_against_rest(first, rest, threshold, case_base)
-      do_find_duplicates(
-        rest,
-        threshold,
-        case_base,
-        list.append(acc, new_results),
-      )
+      let new_results = compare_against_rest(first, rest, threshold)
+      do_find_duplicates(rest, threshold, list.append(acc, new_results))
     }
   }
 }
@@ -64,38 +58,20 @@ fn compare_against_rest(
   case_a: cbr_types.CbrCase,
   others: List(cbr_types.CbrCase),
   threshold: Float,
-  case_base: Option(bridge.CaseBase),
 ) -> List(DedupResult) {
   list.filter_map(others, fn(case_b) {
-    case case_base {
-      None -> Error(Nil)
-      Some(base) -> {
-        case bridge.case_distance(base, case_a.case_id, case_b.case_id) {
-          Error(_) -> Error(Nil)
-          Ok(dist) -> {
-            // VSA distance: 0.0 = identical, 0.5 = random. Threshold is
-            // similarity (0.92) so convert: distance < (1 - threshold).
-            let dist_threshold = 1.0 -. threshold
-            case dist <. dist_threshold {
-              True -> {
-                let sim = 1.0 -. dist
-                let #(keep, supersede) = case
-                  string.compare(case_a.timestamp, case_b.timestamp)
-                {
-                  order.Lt -> #(case_b.case_id, case_a.case_id)
-                  _ -> #(case_a.case_id, case_b.case_id)
-                }
-                Ok(DedupResult(
-                  keep_id: keep,
-                  supersede_id: supersede,
-                  similarity: sim,
-                ))
-              }
-              False -> Error(Nil)
-            }
-          }
+    let sim = bridge.case_similarity(case_a, case_b)
+    case sim >=. threshold {
+      True -> {
+        let #(keep, supersede) = case
+          string.compare(case_a.timestamp, case_b.timestamp)
+        {
+          order.Lt -> #(case_b.case_id, case_a.case_id)
+          _ -> #(case_a.case_id, case_b.case_id)
         }
+        Ok(DedupResult(keep_id: keep, supersede_id: supersede, similarity: sim))
       }
+      False -> Error(Nil)
     }
   })
 }

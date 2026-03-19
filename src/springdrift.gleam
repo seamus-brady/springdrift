@@ -9,6 +9,7 @@ import agents/observer
 import agents/planner
 import agents/researcher
 import agents/scheduler as scheduler_agent
+import cbr/bridge as cbr_bridge
 import config.{type AppConfig}
 import dot_env
 import dprime/config as dprime_config_mod
@@ -57,11 +58,6 @@ fn do_halt(code: Int) -> Nil
 
 @external(erlang, "springdrift_ffi", "get_date")
 fn get_date_ffi() -> String
-
-/// Seed Nx RNG for paperwings vector generation. No-op if already seeded.
-fn init_paperwings_rng() -> Nil {
-  Nil
-}
 
 fn default_skill_dirs() -> List(String) {
   paths.default_skills_dirs()
@@ -263,11 +259,32 @@ fn run(cfg: AppConfig) -> Nil {
   // Migrate legacy facts.jsonl to daily rotation (no-op if already done)
   facts_log.migrate_legacy(paths.facts_dir())
 
-  // Build CBR config for paperwings
+  // Build CBR retrieval config
+  let default_weights = cbr_bridge.default_weights()
   let cbr_config =
     librarian.CbrConfig(
-      vsa_dimensions: option.unwrap(cfg.vsa_dimensions, 1000),
-      rrf_k: option.unwrap(cfg.cbr_rrf_k, 60),
+      weights: cbr_bridge.RetrievalWeights(
+        field_weight: option.unwrap(
+          cfg.cbr_field_weight,
+          default_weights.field_weight,
+        ),
+        index_weight: option.unwrap(
+          cfg.cbr_index_weight,
+          default_weights.index_weight,
+        ),
+        recency_weight: option.unwrap(
+          cfg.cbr_recency_weight,
+          default_weights.recency_weight,
+        ),
+        domain_weight: option.unwrap(
+          cfg.cbr_domain_weight,
+          default_weights.domain_weight,
+        ),
+        embedding_weight: option.unwrap(
+          cfg.cbr_embedding_weight,
+          default_weights.embedding_weight,
+        ),
+      ),
       min_score: option.unwrap(cfg.cbr_min_score, 0.0),
     )
 
@@ -423,14 +440,6 @@ fn run(cfg: AppConfig) -> Nil {
       #(tool_state, output_state)
     }
   }
-
-  // Initialise paperwings RNG (required before any VSA vector operations)
-  let _ = init_paperwings_rng()
-  io.println(
-    "CBR: paperwings VSA (dimensions="
-    <> int.to_string(option.unwrap(cfg.vsa_dimensions, 1000))
-    <> ") — OK",
-  )
 
   // Build housekeeping config
   let hk_default = curator.default_housekeeping_config()

@@ -209,18 +209,29 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 # Minimum overlap score to assign entry to existing thread (default: 3)
 # threshold = 3
 
-# ── CBR (paperwings) ─────────────────────────────────────────────────────────
-# Case-Based Reasoning retrieval via paperwings VSA + inverted index + RRF.
+# ── CBR retrieval ────────────────────────────────────────────────────────────
+# Case-Based Reasoning retrieval via weighted field scoring + inverted index.
+# Scores are a weighted sum of four (optionally five) signals, each normalized 0.0–1.0.
 
 [cbr]
-# VSA vector dimension for CBR case encoding (default: 1000)
-# vsa_dimensions = 1000
+# Weight for deterministic field scoring: intent, domain, keyword/entity jaccard (default: 0.35)
+# field_weight = 0.35
 
-# Reciprocal Rank Fusion k parameter — higher values smooth ranking differences (default: 60)
-# rrf_k = 60
+# Weight for inverted index token overlap (default: 0.25)
+# index_weight = 0.25
 
-# Minimum RRF score to include a case in results — 0.0 returns all (default: 0.0)
-# min_score = 0.0
+# Weight for recency — newer cases score higher (default: 0.15)
+# recency_weight = 0.15
+
+# Weight for exact domain match (default: 0.15)
+# domain_weight = 0.15
+
+# Weight for semantic embedding similarity — requires embedding model (default: 0.10)
+# When embeddings are unavailable, this weight is redistributed to other signals.
+# embedding_weight = 0.10
+
+# Minimum weighted score to include a case in results — 0.0 returns all (default: 0.0)
+# min_score = 0.01
 
 # ── Housekeeping ─────────────────────────────────────────────────────────────
 # Maintenance thresholds for CBR dedup, pruning, and fact management.

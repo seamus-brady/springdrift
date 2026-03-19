@@ -6,7 +6,7 @@ import gleeunit/should
 import narrative/housekeeping
 
 // ---------------------------------------------------------------------------
-// CBR deduplication (via paperwings VSA distance)
+// CBR deduplication (via weighted field scoring)
 // ---------------------------------------------------------------------------
 
 fn make_case(
