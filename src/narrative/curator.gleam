@@ -1131,6 +1131,8 @@ pub fn render_sensorium_tasks(
             option.Some(eid) -> " endeavour=\"" <> eid <> "\""
             option.None -> ""
           }
+          let updated_attr =
+            " updated=\"" <> format_elapsed_since(t.updated_at) <> "\""
           "    <task id=\""
           <> t.task_id
           <> "\" title=\""
@@ -1141,6 +1143,7 @@ pub fn render_sensorium_tasks(
           <> progress
           <> "\""
           <> endeavour_attr
+          <> updated_attr
           <> "/>"
         })
         |> string.join("\n")

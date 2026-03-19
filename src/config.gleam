@@ -169,6 +169,7 @@ pub type AppConfig {
     forecaster_tick_ms: Option(Int),
     forecaster_replan_threshold: Option(Float),
     forecaster_min_cycles: Option(Int),
+    forecaster_stale_threshold_ms: Option(Int),
   )
 }
 
@@ -295,6 +296,7 @@ pub fn default() -> AppConfig {
     forecaster_tick_ms: None,
     forecaster_replan_threshold: None,
     forecaster_min_cycles: None,
+    forecaster_stale_threshold_ms: None,
   )
 }
 
@@ -687,6 +689,10 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       override_cfg.forecaster_min_cycles,
       base.forecaster_min_cycles,
     ),
+    forecaster_stale_threshold_ms: option.or(
+      override_cfg.forecaster_stale_threshold_ms,
+      base.forecaster_stale_threshold_ms,
+    ),
   )
 }
 
@@ -840,6 +846,9 @@ pub fn to_string(cfg: AppConfig) -> String {
     }),
     option.map(cfg.forecaster_min_cycles, fn(v) {
       "forecaster.min_cycles: " <> int.to_string(v)
+    }),
+    option.map(cfg.forecaster_stale_threshold_ms, fn(v) {
+      "forecaster.stale_threshold_ms: " <> int.to_string(v)
     }),
   ]
   |> list.filter_map(fn(x) { option.to_result(x, Nil) })
@@ -1206,6 +1215,9 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
       "forecaster", "replan_threshold",
     ]),
     forecaster_min_cycles: get_toml_int(table, ["forecaster", "min_cycles"]),
+    forecaster_stale_threshold_ms: get_toml_int(table, [
+      "forecaster", "stale_threshold_ms",
+    ]),
   )
 }
 

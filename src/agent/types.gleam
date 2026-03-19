@@ -382,6 +382,7 @@ pub type Notification {
   SchedulerJobStarted(name: String, kind: String)
   SchedulerJobCompleted(name: String, result_preview: String)
   SchedulerJobFailed(name: String, reason: String)
+  PlannerNotification(task_id: String, title: String, action: String)
 }
 
 // ---------------------------------------------------------------------------

@@ -428,6 +428,67 @@ pub const narrative_entry_example = "<narrative_entry>
 </narrative_entry>"
 
 // ---------------------------------------------------------------------------
+// 6. Planner output (agent/framework.gleam)
+// ---------------------------------------------------------------------------
+
+pub const planner_output_xsd = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">
+  <xs:element name=\"plan\">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name=\"title\" type=\"xs:string\"/>
+        <xs:element name=\"complexity\" type=\"xs:string\"/>
+        <xs:element name=\"steps\">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name=\"step\" type=\"xs:string\" maxOccurs=\"unbounded\"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+        <xs:element name=\"dependencies\" minOccurs=\"0\">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name=\"dep\" minOccurs=\"0\" maxOccurs=\"unbounded\">
+                <xs:complexType>
+                  <xs:attribute name=\"from\" type=\"xs:string\" use=\"required\"/>
+                  <xs:attribute name=\"to\" type=\"xs:string\" use=\"required\"/>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+        <xs:element name=\"risks\" minOccurs=\"0\">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name=\"risk\" type=\"xs:string\" minOccurs=\"0\" maxOccurs=\"unbounded\"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>"
+
+pub const planner_output_example = "<plan>
+  <title>Research competitor pricing</title>
+  <complexity>medium</complexity>
+  <steps>
+    <step>Search for competitor websites</step>
+    <step>Extract pricing data from each site</step>
+    <step>Compare pricing tiers and features</step>
+    <step>Summarise findings in a table</step>
+  </steps>
+  <dependencies>
+    <dep from=\"1\" to=\"2\"/>
+    <dep from=\"2\" to=\"3\"/>
+  </dependencies>
+  <risks>
+    <risk>Pricing pages may require login</risk>
+    <risk>Some competitors may not publish pricing</risk>
+  </risks>
+</plan>"
+
+// ---------------------------------------------------------------------------
 // System prompt fragments
 // ---------------------------------------------------------------------------
 

@@ -5,6 +5,7 @@ import agent/types.{
 }
 import context
 import cycle_log
+import gleam/dict
 import gleam/dynamic/decode
 import gleam/erlang/process.{type ExitMessage, type Pid, type Subject}
 import gleam/int
@@ -16,7 +17,10 @@ import llm/request
 import llm/response
 import llm/retry
 import llm/types as llm_types
+import paths
 import slog
+import xstructor
+import xstructor/schemas
 
 // inter_turn_delay_ms is now on AgentSpec — no module constant needed.
 
@@ -427,7 +431,7 @@ fn outcome_from_result(
         final_text: text,
         agent_id: identity.agent_id,
         cycle_id: agent_cycle_id,
-        findings: build_findings(agent, stats),
+        findings: build_findings(agent, stats, text),
       ))
     Error(_) -> None
   }
@@ -476,7 +480,11 @@ fn outcome_from_result(
   }
 }
 
-fn build_findings(agent: String, stats: ReactStats) -> types.AgentFindings {
+fn build_findings(
+  agent: String,
+  stats: ReactStats,
+  final_text: String,
+) -> types.AgentFindings {
   let details = stats.tool_call_details
   case agent {
     "researcher" -> {
@@ -507,15 +515,7 @@ fn build_findings(agent: String, stats: ReactStats) -> types.AgentFindings {
         })
       types.ResearcherFindings(sources:, facts: [], data_points: [], dead_ends:)
     }
-    "planner" ->
-      types.PlannerFindings(
-        plan_steps: [],
-        dependencies: [],
-        complexity: "",
-        risks: [],
-        task_id: option.None,
-        endeavour_id: option.None,
-      )
+    "planner" -> extract_planner_findings(final_text)
     "coder" -> {
       let files =
         list.filter_map(details, fn(d) {
@@ -540,6 +540,94 @@ fn build_findings(agent: String, stats: ReactStats) -> types.AgentFindings {
     }
     "writer" -> types.WriterFindings(word_count: 0, format: "", sections: [])
     _ -> types.GenericFindings(notes: list.unique(stats.tools_used))
+  }
+}
+
+/// Extract planner findings from XML output using XStructor.
+/// The planner agent outputs <plan> XML validated against planner_output_xsd.
+/// Falls back to empty findings if validation or extraction fails.
+fn extract_planner_findings(text: String) -> types.AgentFindings {
+  let cleaned = xstructor.clean_response(text)
+
+  // Compile schema (cached on disk after first call)
+  let schema_result =
+    xstructor.compile_schema(
+      paths.schemas_dir(),
+      "planner_output.xsd",
+      schemas.planner_output_xsd,
+    )
+
+  case schema_result {
+    Error(e) -> {
+      slog.warn(
+        "agent/framework",
+        "extract_planner_findings",
+        "Failed to compile planner schema: " <> e,
+        None,
+      )
+      empty_planner_findings()
+    }
+    Ok(schema) ->
+      case xstructor.validate(cleaned, schema) {
+        Error(e) -> {
+          slog.warn(
+            "agent/framework",
+            "extract_planner_findings",
+            "Planner XML validation failed: " <> e,
+            None,
+          )
+          empty_planner_findings()
+        }
+        Ok(_) ->
+          case xstructor.extract(cleaned) {
+            Error(_) -> empty_planner_findings()
+            Ok(elements) -> {
+              let steps = xstructor.extract_list(elements, "plan.steps.step")
+              let complexity = case dict.get(elements, "plan.complexity") {
+                Ok(c) -> c
+                Error(_) -> "medium"
+              }
+              let risks = xstructor.extract_list(elements, "plan.risks.risk")
+              // Dependencies: extract from dep.N.@from / dep.N.@to attributes
+              let dependencies = extract_dep_pairs(elements, 0, [])
+              types.PlannerFindings(
+                plan_steps: steps,
+                dependencies:,
+                complexity:,
+                risks:,
+                task_id: None,
+                endeavour_id: None,
+              )
+            }
+          }
+      }
+  }
+}
+
+fn empty_planner_findings() -> types.AgentFindings {
+  types.PlannerFindings(
+    plan_steps: [],
+    dependencies: [],
+    complexity: "",
+    risks: [],
+    task_id: None,
+    endeavour_id: None,
+  )
+}
+
+/// Extract dependency pairs from XStructor elements.
+/// Looks for plan.dependencies.dep.N.@from and plan.dependencies.dep.N.@to
+fn extract_dep_pairs(
+  elements: dict.Dict(String, String),
+  idx: Int,
+  acc: List(#(String, String)),
+) -> List(#(String, String)) {
+  let from_key = "plan.dependencies.dep." <> int.to_string(idx) <> ".@from"
+  let to_key = "plan.dependencies.dep." <> int.to_string(idx) <> ".@to"
+  case dict.get(elements, from_key), dict.get(elements, to_key) {
+    Ok(from), Ok(to) ->
+      extract_dep_pairs(elements, idx + 1, list.append(acc, [#(from, to)]))
+    _, _ -> acc
   }
 }
 

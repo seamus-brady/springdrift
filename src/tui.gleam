@@ -324,6 +324,13 @@ fn handle_notification(
           ),
         ),
       )
+    agent_types.PlannerNotification(task_id: _, title:, action:) ->
+      continue_loop(
+        TuiState(
+          ..state,
+          notice: style.dim("  Planner: " <> action <> " — " <> title),
+        ),
+      )
   }
 }
 

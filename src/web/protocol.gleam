@@ -30,6 +30,7 @@ pub type ClientMessage {
   RequestNarrativeData
   RequestSchedulerData
   RequestSchedulerCycles
+  RequestPlannerData
 }
 
 pub type ServerMessage {
@@ -45,6 +46,7 @@ pub type ServerMessage {
   NarrativeData(entries_json: String)
   SchedulerData(jobs_json: String)
   SchedulerCyclesData(cycles_json: String)
+  PlannerData(tasks_json: String, endeavours_json: String)
 }
 
 pub type CycleDataJson {
@@ -85,6 +87,7 @@ pub fn decode_client_message(json_string: String) -> Result(ClientMessage, Nil) 
       "request_narrative_data" -> decode.success(RequestNarrativeData)
       "request_scheduler_data" -> decode.success(RequestSchedulerData)
       "request_scheduler_cycles" -> decode.success(RequestSchedulerCycles)
+      "request_planner_data" -> decode.success(RequestPlannerData)
       _ -> decode.failure(UserMessage(""), "Unknown client message type")
     }
   }
@@ -194,6 +197,13 @@ pub fn encode_server_message(msg: ServerMessage) -> String {
 
     SchedulerCyclesData(cycles_json:) ->
       "{\"type\":\"scheduler_cycles_data\",\"cycles\":" <> cycles_json <> "}"
+
+    PlannerData(tasks_json:, endeavours_json:) ->
+      "{\"type\":\"planner_data\",\"tasks\":"
+      <> tasks_json
+      <> ",\"endeavours\":"
+      <> endeavours_json
+      <> "}"
   }
 }
 

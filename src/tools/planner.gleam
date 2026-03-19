@@ -3,8 +3,11 @@
 //// These tools let the agent track its own work: manage tasks with steps,
 //// create endeavours for multi-task initiatives, and query active work.
 
+import dprime/engine
+import dprime/types as dprime_types
 import gleam/dynamic/decode
 import gleam/erlang/process.{type Subject}
+import gleam/float
 import gleam/int
 import gleam/json
 import gleam/list
@@ -13,6 +16,7 @@ import gleam/string
 import llm/tool
 import llm/types as llm_types
 import narrative/librarian.{type LibrarianMessage}
+import planner/features
 import planner/log as planner_log
 import planner/types.{
   Active, Endeavour, Open, Pending, PlanStep, PlannerTask, SystemEndeavour,
@@ -39,6 +43,7 @@ pub fn all() -> List(llm_types.Tool) {
     add_task_to_endeavour_tool(),
     get_active_work_tool(),
     get_task_detail_tool(),
+    request_forecast_review_tool(),
   ]
 }
 
@@ -116,6 +121,21 @@ fn get_task_detail_tool() -> llm_types.Tool {
   |> tool.build()
 }
 
+fn request_forecast_review_tool() -> llm_types.Tool {
+  tool.new("request_forecast_review")
+  |> tool.with_description(
+    "Review plan-health forecasts for active tasks. "
+    <> "Returns D' scores and whether replanning is suggested. "
+    <> "Omit task_id to review all active tasks.",
+  )
+  |> tool.add_string_param(
+    "task_id",
+    "Optional task ID to review a specific task (omit for all active tasks)",
+    False,
+  )
+  |> tool.build()
+}
+
 /// Check if a tool call name is a planner tool (for dispatch partitioning).
 pub fn is_planner_tool(name: String) -> Bool {
   name == "complete_task_step"
@@ -126,6 +146,7 @@ pub fn is_planner_tool(name: String) -> Bool {
   || name == "add_task_to_endeavour"
   || name == "get_active_work"
   || name == "get_task_detail"
+  || name == "request_forecast_review"
 }
 
 // ---------------------------------------------------------------------------
@@ -146,6 +167,8 @@ pub fn execute(
     "add_task_to_endeavour" -> run_add_task_to_endeavour(call, planner_dir, lib)
     "get_active_work" -> run_get_active_work(call, lib)
     "get_task_detail" -> run_get_task_detail(call, lib)
+    "request_forecast_review" ->
+      run_request_forecast_review(call, planner_dir, lib)
     _ ->
       llm_types.ToolFailure(
         tool_use_id: call.id,
@@ -496,6 +519,235 @@ fn run_get_task_detail(
         }
       }
   }
+}
+
+fn run_request_forecast_review(
+  call: llm_types.ToolCall,
+  planner_dir: String,
+  lib: Subject(LibrarianMessage),
+) -> llm_types.ToolResult {
+  let decoder = {
+    use task_id <- decode.optional_field(
+      "task_id",
+      None,
+      decode.optional(decode.string),
+    )
+    decode.success(task_id)
+  }
+  let target_id = case json.parse(call.input_json, decoder) {
+    Ok(id) -> id
+    Error(_) -> None
+  }
+
+  case target_id {
+    Some(tid) ->
+      case librarian.get_task_by_id(lib, tid) {
+        Error(_) ->
+          llm_types.ToolFailure(
+            tool_use_id: call.id,
+            error: "Task not found: " <> tid,
+          )
+        Ok(task) -> do_forecast_review(call.id, [task], planner_dir, lib)
+      }
+    None -> {
+      let all_tasks = librarian.get_active_tasks(lib)
+      let active =
+        list.filter(all_tasks, fn(t) {
+          t.status == Active || t.status == Pending
+        })
+      do_forecast_review(call.id, active, planner_dir, lib)
+    }
+  }
+}
+
+fn do_forecast_review(
+  tool_use_id: String,
+  tasks: List(types.PlannerTask),
+  planner_dir: String,
+  lib: Subject(LibrarianMessage),
+) -> llm_types.ToolResult {
+  case tasks {
+    [] ->
+      llm_types.ToolSuccess(tool_use_id:, content: "No active tasks to review.")
+    _ -> {
+      let plan_features = features.plan_health_features()
+      let replan_threshold = features.default_replan_threshold
+      let review_lines =
+        list.map(tasks, fn(task) {
+          let forecasts = compute_task_forecasts(task)
+          let dprime_score = engine.compute_dprime(forecasts, plan_features, 1)
+
+          // Persist the updated score
+          let op =
+            types.UpdateForecastScore(
+              task_id: task.task_id,
+              score: dprime_score,
+            )
+          planner_log.append_task_op(planner_dir, op)
+          librarian.notify_task_op(lib, op)
+
+          let replan = dprime_score >=. replan_threshold
+          let replan_str = case replan {
+            True -> " ** REPLAN SUGGESTED **"
+            False -> ""
+          }
+
+          let high_signals =
+            forecasts
+            |> list.filter(fn(f) { f.magnitude >= 4 })
+            |> list.map(fn(f) {
+              "    - " <> f.feature_name <> ": " <> f.rationale
+            })
+            |> string.join("\n")
+
+          let signals_section = case high_signals {
+            "" -> ""
+            s -> "\n  Elevated signals:\n" <> s
+          }
+
+          "- "
+          <> task.task_id
+          <> " ["
+          <> status_to_string(task.status)
+          <> "] "
+          <> task.title
+          <> "\n  D' score: "
+          <> float.to_string(dprime_score)
+          <> " (threshold: "
+          <> float.to_string(replan_threshold)
+          <> ")"
+          <> replan_str
+          <> signals_section
+        })
+
+      let any_replan =
+        list.any(tasks, fn(task) {
+          let forecasts = compute_task_forecasts(task)
+          let score = engine.compute_dprime(forecasts, plan_features, 1)
+          score >=. replan_threshold
+        })
+      let summary = case any_replan {
+        True ->
+          "\n\nSummary: One or more tasks have elevated D' scores. Consider replanning."
+        False -> "\n\nSummary: All tasks within normal parameters."
+      }
+
+      llm_types.ToolSuccess(
+        tool_use_id:,
+        content: "Forecast Review ("
+          <> int.to_string(list.length(tasks))
+          <> " tasks):\n"
+          <> string.join(review_lines, "\n\n")
+          <> summary,
+      )
+    }
+  }
+}
+
+/// Compute heuristic forecasts for a task (same logic as the Forecaster actor).
+fn compute_task_forecasts(
+  task: types.PlannerTask,
+) -> List(dprime_types.Forecast) {
+  let total_steps = list.length(task.plan_steps)
+  let completed_steps =
+    list.count(task.plan_steps, fn(s) { s.status == types.Complete })
+  let total_cycles = list.length(task.cycle_ids)
+
+  let step_rate_magnitude = case total_steps > 0 && total_cycles > 0 {
+    True -> {
+      let expected_rate =
+        int.to_float(total_cycles) /. int.to_float(total_steps)
+      case expected_rate >. 2.0 && completed_steps < total_steps / 2 {
+        True -> 7
+        False ->
+          case expected_rate >. 1.5 && completed_steps < total_steps {
+            True -> 4
+            False -> 1
+          }
+      }
+    }
+    False -> 1
+  }
+
+  let dep_magnitude = case task.dependencies {
+    [] -> 1
+    deps -> {
+      let blocked =
+        list.count(deps, fn(d) {
+          case
+            list.find(task.plan_steps, fn(s) { int.to_string(s.index) == d.0 })
+          {
+            Ok(step) -> step.status != types.Complete
+            Error(_) -> False
+          }
+        })
+      case blocked > 0 {
+        True -> 5 + blocked
+        False -> 1
+      }
+    }
+  }
+
+  let complexity_magnitude = case task.complexity {
+    "simple" ->
+      case total_cycles > 3 {
+        True -> 5
+        False -> 1
+      }
+    "medium" ->
+      case total_cycles > 6 {
+        True -> 5
+        False -> 1
+      }
+    _ ->
+      case total_cycles > 10 {
+        True -> 5
+        False -> 1
+      }
+  }
+
+  let risk_magnitude = case list.length(task.materialised_risks) {
+    0 -> 1
+    n -> int.min(3 + n * 2, 9)
+  }
+
+  [
+    dprime_types.Forecast(
+      feature_name: "step_completion_rate",
+      magnitude: step_rate_magnitude,
+      rationale: "Steps: "
+        <> int.to_string(completed_steps)
+        <> "/"
+        <> int.to_string(total_steps)
+        <> " in "
+        <> int.to_string(total_cycles)
+        <> " cycles",
+    ),
+    dprime_types.Forecast(
+      feature_name: "dependency_health",
+      magnitude: dep_magnitude,
+      rationale: int.to_string(list.length(task.dependencies))
+        <> " dependencies",
+    ),
+    dprime_types.Forecast(
+      feature_name: "complexity_drift",
+      magnitude: complexity_magnitude,
+      rationale: "Planned: " <> task.complexity,
+    ),
+    dprime_types.Forecast(
+      feature_name: "risk_materialization",
+      magnitude: risk_magnitude,
+      rationale: int.to_string(list.length(task.materialised_risks))
+        <> " risks materialised of "
+        <> int.to_string(list.length(task.risks))
+        <> " predicted",
+    ),
+    dprime_types.Forecast(
+      feature_name: "scope_creep",
+      magnitude: 1,
+      rationale: "No scope drift detected",
+    ),
+  ]
 }
 
 // ---------------------------------------------------------------------------

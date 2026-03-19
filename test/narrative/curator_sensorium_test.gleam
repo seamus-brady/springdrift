@@ -178,6 +178,13 @@ pub fn tasks_only_active_and_pending_included_test() {
   result |> string.contains("id=\"task-done\"") |> should.equal(False)
 }
 
+pub fn tasks_element_includes_updated_attribute_test() {
+  let task = make_active_task("task-001", "Research competitors")
+  let result = curator.render_sensorium_tasks([task], [])
+  // updated_at is "2026-03-19T09:00:00", should render as updated="..."
+  result |> string.contains("updated=\"") |> should.equal(True)
+}
+
 pub fn tasks_no_active_tasks_but_open_endeavour_renders_test() {
   let endeavour = make_endeavour("end-001", "Long project")
   // No active tasks, but open endeavour — should still render

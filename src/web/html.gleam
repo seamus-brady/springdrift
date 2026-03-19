@@ -282,6 +282,7 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
   <button class=\"tab-btn\" data-tab=\"log\">Log</button>
   <button class=\"tab-btn\" data-tab=\"scheduler\">Scheduler</button>
   <button class=\"tab-btn\" data-tab=\"cycles\">Cycles</button>
+  <button class=\"tab-btn\" data-tab=\"planner\">Planner</button>
 </div>
 <div id=\"content-area\">
   <div id=\"narrative-tab\" class=\"tab-content active\">
@@ -306,6 +307,17 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
       <table class=\"admin-table\"><thead><tr>
         <th>Cycle ID</th><th>Time</th><th>Outcome</th><th>Model</th><th>Tools</th><th>Tokens</th><th>Duration</th>
       </tr></thead><tbody id=\"cycles-body\"></tbody></table>
+    </div>
+  </div>
+  <div id=\"planner-tab\" class=\"tab-content\">
+    <button class=\"refresh-btn\" id=\"planner-refresh\">Refresh</button>
+    <div id=\"planner-container\">
+      <div id=\"planner-endeavours\"><h3 style=\"margin:12px 0 8px;font-size:15px;color:var(--text-secondary)\">Endeavours</h3><div id=\"endeavours-list\"><div class=\"narrative-empty\">Loading...</div></div></div>
+      <div id=\"planner-tasks\" style=\"margin-top:20px\"><h3 style=\"margin:12px 0 8px;font-size:15px;color:var(--text-secondary)\">Active Tasks</h3>
+        <table class=\"admin-table\"><thead><tr>
+          <th>Task</th><th>Title</th><th>Status</th><th>Steps</th><th>Complexity</th><th>Forecast</th><th>Cycles</th>
+        </tr></thead><tbody id=\"planner-body\"></tbody></table>
+      </div>
     </div>
   </div>
 </div>
@@ -333,6 +345,7 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
       else if (tab === 'narrative') requestNarrativeData();
       else if (tab === 'scheduler') requestSchedulerData();
       else if (tab === 'cycles') requestSchedulerCycles();
+      else if (tab === 'planner') requestPlannerData();
     });
   });
 
@@ -340,6 +353,7 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
   document.getElementById('narrative-refresh').addEventListener('click', requestNarrativeData);
   document.getElementById('scheduler-refresh').addEventListener('click', requestSchedulerData);
   document.getElementById('cycles-refresh').addEventListener('click', requestSchedulerCycles);
+  document.getElementById('planner-refresh').addEventListener('click', requestPlannerData);
 
   function requestLogData() {
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -365,6 +379,12 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
     }
   }
 
+  function requestPlannerData() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'request_planner_data' }));
+    }
+  }
+
   function renderSchedulerJobs(jobs) {
     var body = document.getElementById('scheduler-body');
     if (!jobs || jobs.length === 0) { body.innerHTML = '<tr><td colspan=\"8\" style=\"text-align:center;opacity:.5\">No scheduled jobs</td></tr>'; return; }
@@ -384,6 +404,66 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
       var dur = c.duration_ms > 0 ? (c.duration_ms/1000).toFixed(1)+'s' : '-';
       return '<tr><td>'+c.cycle_id.substring(0,8)+'</td><td>'+c.timestamp+'</td><td>'+badge+' '+c.outcome+'</td><td>'+c.model+'</td><td>'+c.tool_call_count+'</td><td>'+tokens+'</td><td>'+dur+'</td></tr>';
     }).join('');
+  }
+
+  function forecastColor(score) {
+    if (score === null || score === undefined) return 'var(--text-dim)';
+    if (score < 0.4) return '#248a3d';
+    if (score <= 0.55) return '#c77c00';
+    return '#d70015';
+  }
+
+  function renderPlannerData(tasks, endeavours) {
+    var eList = document.getElementById('endeavours-list');
+    if (!endeavours || endeavours.length === 0) {
+      eList.innerHTML = '<div class=\"narrative-empty\">No endeavours yet.</div>';
+    } else {
+      eList.innerHTML = endeavours.map(function(e) {
+        var statusBadge = e.status === 'open' ? '\\u25CB' : e.status === 'complete' ? '\\u2705' : '\\u274C';
+        return '<div class=\"narrative-entry\">' +
+          '<div class=\"narrative-header\">' +
+            '<span class=\"narrative-status ' + e.status + '\">' + statusBadge + ' ' + e.status + '</span>' +
+            '<strong>' + escapeHtml(e.title) + '</strong>' +
+            '<span class=\"narrative-time\">' + e.task_count + ' task' + (e.task_count !== 1 ? 's' : '') + '</span>' +
+          '</div>' +
+          (e.description ? '<div class=\"narrative-summary\">' + escapeHtml(e.description) + '</div>' : '') +
+        '</div>';
+      }).join('');
+    }
+    var body = document.getElementById('planner-body');
+    if (!tasks || tasks.length === 0) {
+      body.innerHTML = '<tr><td colspan=\"7\" style=\"text-align:center;opacity:.5\">No active tasks</td></tr>';
+    } else {
+      body.innerHTML = tasks.map(function(t) {
+        var progress = t.steps_completed + '/' + t.steps_total;
+        var fc = t.forecast_score !== null ? t.forecast_score.toFixed(2) : '-';
+        var fcStyle = ' style=\"color:' + forecastColor(t.forecast_score) + ';font-weight:600\"';
+        var stepsHtml = '';
+        if (t.steps && t.steps.length > 0) {
+          stepsHtml = '<tr class=\"planner-steps-row\" data-task=\"' + t.task_id + '\" style=\"display:none\"><td colspan=\"7\"><div class=\"planner-steps\">' +
+            t.steps.map(function(s) {
+              var icon = s.status === 'complete' ? '\\u2705' : s.status === 'active' ? '\\u25B6' : '\\u25CB';
+              return '<div style=\"padding:3px 0 3px 20px;font-size:13px\">' + icon + ' ' + escapeHtml(s.description) + '</div>';
+            }).join('') +
+            '</div></td></tr>';
+        }
+        return '<tr class=\"planner-task-row\" data-task=\"' + t.task_id + '\" style=\"cursor:pointer\">' +
+          '<td>' + escapeHtml(t.task_id.substring(0,8)) + '</td>' +
+          '<td>' + escapeHtml(t.title) + '</td>' +
+          '<td>' + escapeHtml(t.status) + '</td>' +
+          '<td>' + progress + '</td>' +
+          '<td>' + escapeHtml(t.complexity) + '</td>' +
+          '<td' + fcStyle + '>' + fc + '</td>' +
+          '<td>' + t.cycle_count + '</td></tr>' + stepsHtml;
+      }).join('');
+      body.querySelectorAll('.planner-task-row').forEach(function(row) {
+        row.addEventListener('click', function() {
+          var tid = row.getAttribute('data-task');
+          var sr = body.querySelector('.planner-steps-row[data-task=\"' + tid + '\"]');
+          if (sr) sr.style.display = sr.style.display === 'none' ? '' : 'none';
+        });
+      });
+    }
   }
 
   function renderNarrativeEntries(entries) {
@@ -468,6 +548,9 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
         break;
       case 'scheduler_cycles_data':
         renderSchedulerCycles(data.cycles);
+        break;
+      case 'planner_data':
+        renderPlannerData(data.tasks, data.endeavours);
         break;
     }
   }

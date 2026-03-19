@@ -43,6 +43,9 @@ fn rescue(body: fn() -> a) -> Result(a, String)
 @external(erlang, "springdrift_ffi", "monotonic_now_ms")
 fn monotonic_now_ms() -> Int
 
+@external(erlang, "springdrift_ffi", "get_datetime")
+fn get_datetime() -> String
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -604,6 +607,20 @@ fn handle_scheduler_input(
           )
         scheduler_types.ForAgent -> Nil
       }
+
+      // Inject scheduler trigger as a sensory event so it appears in <events>
+      let state =
+        CognitiveState(
+          ..state,
+          pending_sensory_events: list.append(state.pending_sensory_events, [
+            types.SensoryEvent(
+              name: "scheduler:" <> job_name,
+              title:,
+              body: input_text,
+              fired_at: get_datetime(),
+            ),
+          ]),
+        )
 
       // Skip classification — always use task_model, go straight to LLM
       cognitive_llm.proceed_with_model(

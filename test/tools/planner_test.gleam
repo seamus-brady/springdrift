@@ -227,6 +227,110 @@ pub fn get_task_detail_not_found_test() {
   process.send(lib, librarian.Shutdown)
 }
 
+pub fn request_forecast_review_all_empty_test() {
+  let dir = test_dir("forecast_empty")
+  let lib = start_lib(dir)
+
+  let result =
+    planner_tools.execute(
+      make_call("request_forecast_review", "{}"),
+      dir <> "/planner",
+      lib,
+    )
+
+  case result {
+    llm_types.ToolSuccess(content:, ..) ->
+      content |> should.equal("No active tasks to review.")
+    _ -> should.fail()
+  }
+  process.send(lib, librarian.Shutdown)
+}
+
+pub fn request_forecast_review_specific_not_found_test() {
+  let dir = test_dir("forecast_notfound")
+  let lib = start_lib(dir)
+
+  let result =
+    planner_tools.execute(
+      make_call("request_forecast_review", "{\"task_id\":\"nonexistent\"}"),
+      dir <> "/planner",
+      lib,
+    )
+
+  case result {
+    llm_types.ToolFailure(error:, ..) ->
+      should.be_true(string.contains(error, "not found"))
+    _ -> should.fail()
+  }
+  process.send(lib, librarian.Shutdown)
+}
+
+pub fn request_forecast_review_with_task_test() {
+  let dir = test_dir("forecast_task")
+  let lib = start_lib(dir)
+  let task_id = create_test_task(dir, lib)
+  process.sleep(50)
+
+  // Activate the task first
+  let _ =
+    planner_tools.execute(
+      make_call("activate_task", "{\"task_id\":\"" <> task_id <> "\"}"),
+      dir <> "/planner",
+      lib,
+    )
+  process.sleep(50)
+
+  let result =
+    planner_tools.execute(
+      make_call("request_forecast_review", "{}"),
+      dir <> "/planner",
+      lib,
+    )
+
+  case result {
+    llm_types.ToolSuccess(content:, ..) -> {
+      should.be_true(string.contains(content, "Forecast Review"))
+      should.be_true(string.contains(content, task_id))
+      should.be_true(string.contains(content, "D' score"))
+    }
+    _ -> should.fail()
+  }
+  process.send(lib, librarian.Shutdown)
+}
+
+pub fn request_forecast_review_specific_task_test() {
+  let dir = test_dir("forecast_specific")
+  let lib = start_lib(dir)
+  let task_id = create_test_task(dir, lib)
+  process.sleep(50)
+
+  let result =
+    planner_tools.execute(
+      make_call(
+        "request_forecast_review",
+        "{\"task_id\":\"" <> task_id <> "\"}",
+      ),
+      dir <> "/planner",
+      lib,
+    )
+
+  case result {
+    llm_types.ToolSuccess(content:, ..) -> {
+      should.be_true(string.contains(content, "Forecast Review"))
+      should.be_true(string.contains(content, task_id))
+      should.be_true(string.contains(content, "D' score"))
+      should.be_true(string.contains(content, "Summary:"))
+    }
+    _ -> should.fail()
+  }
+  process.send(lib, librarian.Shutdown)
+}
+
+pub fn request_forecast_review_is_planner_tool_test() {
+  planner_tools.is_planner_tool("request_forecast_review")
+  |> should.equal(True)
+}
+
 pub fn unknown_tool_test() {
   let dir = test_dir("unknown")
   let lib = start_lib(dir)
