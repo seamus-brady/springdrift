@@ -290,6 +290,12 @@ pub type CognitiveMessage {
     reply_to: Subject(CognitiveReply),
   )
   QueuedSensoryEvent(event: SensoryEvent)
+  ForecasterSuggestion(
+    task_id: String,
+    task_title: String,
+    plan_dprime: Float,
+    explanation: String,
+  )
 }
 
 pub type CognitiveReply {

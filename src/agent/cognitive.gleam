@@ -8,6 +8,7 @@ import agent/cognitive_state.{
   type CognitiveState, CognitiveState, IdentityContext, MemoryContext,
   RuntimeConfig,
 }
+import agent/registry as agent_registry
 import agent/types.{
   type CognitiveMessage, type CognitiveReply, AgentComplete, AgentEvent,
   Classifying, CognitiveReply, Idle, InputQueueFull, InputQueued, PendingThink,
@@ -20,6 +21,7 @@ import cycle_log
 import dag/types as dag_types
 import gleam/dict
 import gleam/erlang/process.{type Subject}
+import gleam/float
 import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
@@ -186,6 +188,7 @@ fn handle_message(
       types.SchedulerInput(..) -> "SchedulerInput"
       types.OutputGateComplete(..) -> "OutputGateComplete"
       types.QueuedSensoryEvent(..) -> "QueuedSensoryEvent"
+      types.ForecasterSuggestion(..) -> "ForecasterSuggestion"
     },
     state.cycle_id,
   )
@@ -291,6 +294,19 @@ fn handle_message(
         ]),
       )
     }
+    types.ForecasterSuggestion(
+      task_id:,
+      task_title:,
+      plan_dprime:,
+      explanation:,
+    ) ->
+      handle_forecaster_suggestion(
+        state,
+        task_id,
+        task_title,
+        plan_dprime,
+        explanation,
+      )
   }
   // If a cycle just completed (transition to Idle) and there's an active task,
   // append the cycle_id to that task so the forecaster can track progress.
@@ -971,6 +987,156 @@ fn handle_think_complete(
     }
     // dict.get only returns what's stored, but guard against non-PendingThink
     Ok(_) -> state
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ForecasterSuggestion — typed replan trigger from the Forecaster
+// ---------------------------------------------------------------------------
+
+fn handle_forecaster_suggestion(
+  state: CognitiveState,
+  task_id: String,
+  task_title: String,
+  plan_dprime: Float,
+  explanation: String,
+) -> CognitiveState {
+  case state.status {
+    Idle -> {
+      slog.info(
+        "cognitive",
+        "handle_forecaster_suggestion",
+        "Dispatching planner replan for task "
+          <> task_id
+          <> " (D'="
+          <> float.to_string(plan_dprime)
+          <> ")",
+        state.cycle_id,
+      )
+      // Build forecast context for the planner
+      let forecast_context =
+        "Task: "
+        <> task_title
+        <> " (id: "
+        <> task_id
+        <> ")\nD' health score: "
+        <> float.to_string(plan_dprime)
+        <> "\nExplanation: "
+        <> explanation
+
+      // Dispatch to the existing planner agent with forecast context
+      case agent_registry.get_task_subject(state.registry, "planner") {
+        Some(task_subject) -> {
+          let cycle_id = cycle_log.generate_uuid()
+          let agent_task_id = cycle_log.generate_uuid()
+          let instruction =
+            "Replan task '"
+            <> task_title
+            <> "': the Forecaster detected health deterioration (D'="
+            <> float.to_string(plan_dprime)
+            <> "). "
+            <> explanation
+            <> "\nProduce a revised plan."
+
+          let agent_task =
+            types.AgentTask(
+              task_id: agent_task_id,
+              tool_use_id: "forecaster_replan_" <> task_id,
+              instruction:,
+              context: forecast_context,
+              parent_cycle_id: cycle_id,
+              reply_to: state.self,
+            )
+          process.send(task_subject, agent_task)
+          process.send(
+            state.notify,
+            types.PlannerNotification(
+              task_id:,
+              title: task_title,
+              action: "replan",
+            ),
+          )
+
+          // Create a synthetic reply_to for the cycle
+          let cycle_reply = process.new_subject()
+
+          CognitiveState(
+            ..state,
+            cycle_id: Some(cycle_id),
+            cycle_started_ms: monotonic_now_ms(),
+            cycle_node_type: dag_types.CognitiveCycle,
+            status: types.WaitingForAgents(
+              pending_ids: [agent_task_id],
+              accumulated_results: [],
+              reply_to: cycle_reply,
+            ),
+            pending: dict.insert(
+              state.pending,
+              agent_task_id,
+              types.PendingAgent(
+                task_id: agent_task_id,
+                tool_use_id: "forecaster_replan_" <> task_id,
+                agent: "planner",
+                reply_to: cycle_reply,
+              ),
+            ),
+          )
+        }
+        None -> {
+          slog.warn(
+            "cognitive",
+            "handle_forecaster_suggestion",
+            "Planner agent not available, deferring as sensory event",
+            state.cycle_id,
+          )
+          let event =
+            types.SensoryEvent(
+              name: "forecaster_replan",
+              title: "Replan suggested: " <> task_title,
+              body: "Task "
+                <> task_id
+                <> " (D'="
+                <> float.to_string(plan_dprime)
+                <> "): "
+                <> explanation,
+              fired_at: get_datetime(),
+            )
+          CognitiveState(
+            ..state,
+            pending_sensory_events: list.append(state.pending_sensory_events, [
+              event,
+            ]),
+          )
+        }
+      }
+    }
+    _ -> {
+      // Not idle — defer as sensory event for next cycle
+      slog.debug(
+        "cognitive",
+        "handle_forecaster_suggestion",
+        "Not idle, deferring forecaster suggestion as sensory event",
+        state.cycle_id,
+      )
+      let event =
+        types.SensoryEvent(
+          name: "forecaster_replan",
+          title: "Replan suggested: " <> task_title,
+          body: "Task "
+            <> task_id
+            <> " (D'="
+            <> float.to_string(plan_dprime)
+            <> "): "
+            <> explanation,
+          fired_at: get_datetime(),
+        )
+      CognitiveState(
+        ..state,
+        pending_sensory_events: list.append(state.pending_sensory_events, [
+          event,
+        ]),
+      )
+    }
   }
 }
 

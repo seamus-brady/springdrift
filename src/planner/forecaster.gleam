@@ -175,28 +175,41 @@ fn evaluate_task(state: ForecasterState, task: planner_types.PlannerTask) -> Nil
   case dprime_score >=. state.config.replan_threshold {
     True -> {
       let explanation = build_explanation(forecasts)
-      let suggested_steps =
+      let completed_steps =
+        list.filter_map(task.plan_steps, fn(s) {
+          case s.status == planner_types.Complete {
+            True -> Ok(s.description)
+            False -> Error(Nil)
+          }
+        })
+      let remaining_steps =
         list.filter_map(task.plan_steps, fn(s) {
           case s.status != planner_types.Complete {
             True -> Ok(s.description)
             False -> Error(Nil)
           }
         })
-      let event =
-        agent_types.SensoryEvent(
-          name: "forecaster_replan",
-          title: "Replan suggested: " <> task.title,
-          body: "Task "
-            <> task.task_id
-            <> " (D'="
-            <> float.to_string(dprime_score)
-            <> "): "
-            <> explanation
-            <> "\nRemaining steps: "
-            <> string.join(suggested_steps, ", "),
-          fired_at: get_datetime(),
-        )
-      process.send(state.cognitive, agent_types.QueuedSensoryEvent(event:))
+      let risk_text = case task.materialised_risks {
+        [] -> "None"
+        risks -> string.join(risks, "; ")
+      }
+      let full_explanation =
+        explanation
+        <> "\nCompleted steps: "
+        <> string.join(completed_steps, ", ")
+        <> "\nRemaining steps: "
+        <> string.join(remaining_steps, ", ")
+        <> "\nMaterialised risks: "
+        <> risk_text
+      process.send(
+        state.cognitive,
+        agent_types.ForecasterSuggestion(
+          task_id: task.task_id,
+          task_title: task.title,
+          plan_dprime: dprime_score,
+          explanation: full_explanation,
+        ),
+      )
       slog.info(
         "planner/forecaster",
         "evaluate_task",
@@ -332,5 +345,3 @@ fn build_explanation(forecasts: List(dprime_types.Forecast)) -> String {
   |> string.join("; ")
 }
 
-@external(erlang, "springdrift_ffi", "get_datetime")
-fn get_datetime() -> String
