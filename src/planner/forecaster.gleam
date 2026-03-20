@@ -344,4 +344,3 @@ fn build_explanation(forecasts: List(dprime_types.Forecast)) -> String {
   |> list.map(fn(f) { f.feature_name <> ": " <> f.rationale })
   |> string.join("; ")
 }
-

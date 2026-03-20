@@ -635,10 +635,10 @@ pub fn parse_config_toml_limits_test() {
   let toml =
     "[limits]
 max_artifact_chars = 100000
-mailbox_warn_threshold = 100"
+recall_max_entries = 30"
   let assert Ok(cfg) = config.parse_config_toml(toml)
   cfg.max_artifact_chars |> should.equal(Some(100_000))
-  cfg.mailbox_warn_threshold |> should.equal(Some(100))
+  cfg.recall_max_entries |> should.equal(Some(30))
 }
 
 pub fn parse_config_toml_cbr_test() {

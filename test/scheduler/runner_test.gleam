@@ -7,9 +7,9 @@ import gleeunit/should
 import profile/types as profile_types
 import scheduler/runner
 import scheduler/types.{
-  type ScheduledJob, Completed, GetStatus, JobComplete, JobFailed, Running,
-  StopAll,
+  type ScheduledJob, GetStatus, JobComplete, JobFailed, Running, StopAll,
 }
+import simplifile
 
 pub fn main() -> Nil {
   gleeunit.main()
@@ -45,6 +45,32 @@ fn auto_reply_cognitive() -> process.Subject(agent_types.CognitiveMessage) {
   })
   let assert Ok(subj) = process.receive(setup, 5000)
   subj
+}
+
+/// Remove a checkpoint file so stale state from prior runs doesn't affect timing.
+fn clean_checkpoint(path: String) -> Nil {
+  let _ = simplifile.delete(path)
+  Nil
+}
+
+/// Poll scheduler status until `pred` returns True or `remaining_ms` is exhausted.
+/// Polls every 100ms.
+fn poll_until(
+  sched: process.Subject(types.SchedulerMessage),
+  pred: fn(List(ScheduledJob)) -> Bool,
+  remaining_ms: Int,
+) -> List(ScheduledJob) {
+  let status_subj = process.new_subject()
+  process.send(sched, GetStatus(reply_to: status_subj))
+  let assert Ok(jobs) = process.receive(status_subj, 5000)
+  case pred(jobs), remaining_ms > 0 {
+    True, _ -> jobs
+    False, True -> {
+      process.sleep(100)
+      poll_until(sched, pred, remaining_ms - 100)
+    }
+    False, False -> jobs
+  }
 }
 
 fn auto_reply_loop(subj: process.Subject(agent_types.CognitiveMessage)) -> Nil {
@@ -146,29 +172,30 @@ pub fn stop_all_terminates_test() {
 // ---------------------------------------------------------------------------
 
 pub fn auto_execution_completes_job_test() {
+  let cp = "/tmp/springdrift-test-no-cp-auto.json"
+  clean_checkpoint(cp)
   let cognitive = auto_reply_cognitive()
   // initial_delay returns 0, so tick fires at 1ms
   let tasks = [make_task("auto-run", 600_000)]
   let assert Ok(sched) =
-    runner.start(
-      tasks,
-      cognitive,
-      "/tmp/springdrift-test-no-cp-auto.json",
-      600_000,
-      20,
-      500_000,
+    runner.start(tasks, cognitive, cp, 600_000, 20, 500_000)
+
+  // Poll until the job has run at least once. Recurring tasks return to Pending
+  // after each completion, so we check run_count rather than status.
+  let jobs =
+    poll_until(
+      sched,
+      fn(js) {
+        case list.find(js, fn(j: ScheduledJob) { j.name == "auto-run" }) {
+          Ok(j) -> j.run_count >= 1
+          Error(_) -> False
+        }
+      },
+      5000,
     )
 
-  // Wait for the full flow: tick → spawn_job → UserInput → reply → JobComplete
-  process.sleep(2000)
-
-  let status_subj = process.new_subject()
-  process.send(sched, GetStatus(reply_to: status_subj))
-  let assert Ok(jobs) = process.receive(status_subj, 5000)
   let assert Ok(job) =
     list.find(jobs, fn(j: ScheduledJob) { j.name == "auto-run" })
-  job.status |> should.equal(Completed)
-  // At least one run; timing may allow a second tick
   { job.run_count >= 1 } |> should.be_true()
   job.last_result |> should.equal(Some("mock result"))
 }
@@ -251,31 +278,32 @@ pub fn start_with_no_tasks_test() {
 // ---------------------------------------------------------------------------
 
 pub fn job_transitions_through_running_test() {
+  let cp = "/tmp/springdrift-test-no-cp-trans.json"
+  clean_checkpoint(cp)
   let cognitive = auto_reply_cognitive()
   let tasks = [make_task("transitions", 600_000)]
   let assert Ok(sched) =
-    runner.start(
-      tasks,
-      cognitive,
-      "/tmp/springdrift-test-no-cp-trans.json",
-      600_000,
-      20,
-      500_000,
+    runner.start(tasks, cognitive, cp, 600_000, 20, 500_000)
+
+  // Poll until the job has left Pending (Running, Completed, or back to Pending
+  // with run_count > 0 for recurring tasks).
+  let jobs =
+    poll_until(
+      sched,
+      fn(js) {
+        case list.find(js, fn(j: ScheduledJob) { j.name == "transitions" }) {
+          Ok(j) -> j.status == Running || j.run_count >= 1
+          Error(_) -> False
+        }
+      },
+      5000,
     )
 
-  // Query very quickly — tick has fired (1ms) so status should be Running or later
-  process.sleep(50)
-  let status_subj = process.new_subject()
-  process.send(sched, GetStatus(reply_to: status_subj))
-  let assert Ok(jobs) = process.receive(status_subj, 5000)
   let assert Ok(job) =
     list.find(jobs, fn(j: ScheduledJob) { j.name == "transitions" })
-  // Job should be Running or already Completed (timing-dependent)
-  case job.status {
-    Running -> Nil
-    Completed -> Nil
-    _ -> should.fail()
-  }
+  // Job should have transitioned: either still Running, or already completed
+  // (recurring tasks return to Pending with run_count incremented).
+  { job.status == Running || job.run_count >= 1 } |> should.be_true()
 }
 
 // ---------------------------------------------------------------------------
@@ -283,29 +311,22 @@ pub fn job_transitions_through_running_test() {
 // ---------------------------------------------------------------------------
 
 pub fn multiple_tasks_all_complete_test() {
+  let cp = "/tmp/springdrift-test-no-cp-multi.json"
+  clean_checkpoint(cp)
   let cognitive = auto_reply_cognitive()
-  let tasks = [
-    make_task("task-1", 600_000),
-    make_task("task-2", 600_000),
-  ]
+  let tasks = [make_task("task-1", 600_000), make_task("task-2", 600_000)]
   let assert Ok(sched) =
-    runner.start(
-      tasks,
-      cognitive,
-      "/tmp/springdrift-test-no-cp-multi.json",
-      600_000,
-      20,
-      500_000,
+    runner.start(tasks, cognitive, cp, 600_000, 20, 500_000)
+
+  // Poll until both jobs have run at least once (recurring tasks return to
+  // Pending after completion, so check run_count).
+  let jobs =
+    poll_until(
+      sched,
+      fn(js) { list.count(js, fn(j: ScheduledJob) { j.run_count >= 1 }) == 2 },
+      5000,
     )
 
-  // Wait for both to complete
-  process.sleep(2000)
-
-  let status_subj = process.new_subject()
-  process.send(sched, GetStatus(reply_to: status_subj))
-  let assert Ok(jobs) = process.receive(status_subj, 5000)
-
-  let completed_count =
-    list.count(jobs, fn(j: ScheduledJob) { j.status == Completed })
-  completed_count |> should.equal(2)
+  let ran_count = list.count(jobs, fn(j: ScheduledJob) { j.run_count >= 1 })
+  ran_count |> should.equal(2)
 }

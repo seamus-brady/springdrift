@@ -163,9 +163,6 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 # WebSocket message size limit in bytes (default: 1048576 = 1MB)
 # websocket_max_bytes = 1048576
 
-# Mailbox warning threshold — log a warning when actor mailbox exceeds this (default: 50)
-# mailbox_warn_threshold = 50
-
 # Max entries returned by recall_recent/recall_search (default: 20, max: 50)
 # recall_max_entries = 20
 

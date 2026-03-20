@@ -97,7 +97,6 @@ pub type AppConfig {
     max_fetch_chars: Option(Int),
     tui_input_limit: Option(Int),
     websocket_max_bytes: Option(Int),
-    mailbox_warn_threshold: Option(Int),
     recall_max_entries: Option(Int),
     cbr_max_results: Option(Int),
     web_search_max_results: Option(Int),
@@ -239,7 +238,6 @@ pub fn default() -> AppConfig {
     max_fetch_chars: None,
     tui_input_limit: None,
     websocket_max_bytes: None,
-    mailbox_warn_threshold: None,
     recall_max_entries: None,
     cbr_max_results: None,
     web_search_max_results: None,
@@ -465,10 +463,6 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     websocket_max_bytes: option.or(
       override_cfg.websocket_max_bytes,
       base.websocket_max_bytes,
-    ),
-    mailbox_warn_threshold: option.or(
-      override_cfg.mailbox_warn_threshold,
-      base.mailbox_warn_threshold,
     ),
     recall_max_entries: option.or(
       override_cfg.recall_max_entries,
@@ -825,9 +819,6 @@ pub fn to_string(cfg: AppConfig) -> String {
     option.map(cfg.max_fetch_chars, fn(v) {
       "max_fetch_chars: " <> int.to_string(v)
     }),
-    option.map(cfg.mailbox_warn_threshold, fn(v) {
-      "mailbox_warn_threshold: " <> int.to_string(v)
-    }),
     // CBR
     option.map(cfg.cbr_min_score, fn(v) {
       "cbr.min_score: " <> float.to_string(v)
@@ -1098,9 +1089,6 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     max_fetch_chars: get_toml_int(table, ["limits", "max_fetch_chars"]),
     tui_input_limit: get_toml_int(table, ["limits", "tui_input_limit"]),
     websocket_max_bytes: get_toml_int(table, ["limits", "websocket_max_bytes"]),
-    mailbox_warn_threshold: get_toml_int(table, [
-      "limits", "mailbox_warn_threshold",
-    ]),
     recall_max_entries: get_toml_int(table, ["limits", "recall_max_entries"]),
     cbr_max_results: get_toml_int(table, ["limits", "cbr_max_results"]),
     web_search_max_results: get_toml_int(table, [
