@@ -23,6 +23,7 @@ fn start_lib(suffix: String) {
       dir <> "/cbr",
       dir <> "/facts",
       artifacts_dir,
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )
@@ -179,6 +180,7 @@ pub fn librarian_replays_artifacts_from_disk_test() {
       dir <> "/cbr",
       dir <> "/facts",
       artifacts_dir,
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )

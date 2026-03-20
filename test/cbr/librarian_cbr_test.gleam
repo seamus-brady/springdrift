@@ -79,6 +79,7 @@ pub fn librarian_starts_with_no_cases_test() {
       cbr_dir,
       dir <> "/facts",
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )
@@ -97,6 +98,7 @@ pub fn librarian_index_and_query_case_test() {
       cbr_dir,
       dir <> "/facts",
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )
@@ -123,6 +125,7 @@ pub fn librarian_retrieve_by_intent_test() {
       cbr_dir,
       dir <> "/facts",
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )
@@ -164,6 +167,7 @@ pub fn librarian_retrieve_by_keywords_test() {
       cbr_dir,
       dir <> "/facts",
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )
@@ -206,6 +210,7 @@ pub fn librarian_retrieve_max_results_test() {
       cbr_dir,
       dir <> "/facts",
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )
@@ -235,21 +240,51 @@ pub fn librarian_retrieve_no_match_test() {
   let dir = test_dir("no_match")
   let cbr_dir = dir <> "/cbr"
   let _ = simplifile.create_directory_all(cbr_dir)
+
+  // First: verify the case IS retrievable with a low threshold (proves
+  // retrieval works and the case is indexed — without this, an always-empty
+  // retrieval path would pass the high-threshold assertion trivially).
+  let lib_low =
+    librarian.start(
+      dir,
+      cbr_dir,
+      dir <> "/facts",
+      dir <> "/artifacts",
+      dir <> "/planner",
+      0,
+      librarian.CbrConfig(..librarian.default_cbr_config(), min_score: 0.0),
+    )
+
+  let c = make_case("case-nm1", "research", "property", ["market"], ["Dublin"])
+  librarian.notify_new_case(lib_low, c)
+  process.sleep(50)
+
+  let matching_query =
+    CbrQuery(
+      intent: "research",
+      domain: "property",
+      keywords: ["market"],
+      entities: ["Dublin"],
+      max_results: 10,
+      query_complexity: None,
+    )
+  let low_results = librarian.retrieve_cases(lib_low, matching_query)
+  list.length(low_results) |> should.equal(1)
+  process.send(lib_low, librarian.Shutdown)
+
+  // Second: verify a completely unrelated query returns nothing at high threshold.
   let lib =
     librarian.start(
       dir,
       cbr_dir,
       dir <> "/facts",
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.CbrConfig(..librarian.default_cbr_config(), min_score: 0.5),
     )
 
-  let c = make_case("case-nm1", "research", "property", ["market"], ["Dublin"])
-  librarian.notify_new_case(lib, c)
-  process.sleep(50)
-
-  let query =
+  let mismatched_query =
     CbrQuery(
       intent: "coding",
       domain: "software",
@@ -258,8 +293,7 @@ pub fn librarian_retrieve_no_match_test() {
       max_results: 10,
       query_complexity: None,
     )
-  let results = librarian.retrieve_cases(lib, query)
-
+  let results = librarian.retrieve_cases(lib, mismatched_query)
   list.length(results) |> should.equal(0)
 
   process.send(lib, librarian.Shutdown)
@@ -286,6 +320,7 @@ pub fn librarian_cbr_replay_from_disk_test() {
       cbr_dir,
       dir <> "/facts",
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )
@@ -305,6 +340,7 @@ pub fn librarian_domain_scoring_test() {
       cbr_dir,
       dir <> "/facts",
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )
@@ -342,6 +378,7 @@ pub fn librarian_entity_scoring_test() {
       cbr_dir,
       dir <> "/facts",
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )
@@ -384,6 +421,7 @@ pub fn librarian_suppress_case_test() {
       cbr_dir,
       dir <> "/facts",
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )
@@ -423,6 +461,7 @@ pub fn librarian_annotate_case_test() {
       cbr_dir,
       dir <> "/facts",
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )
@@ -452,6 +491,7 @@ pub fn librarian_boost_case_test() {
       cbr_dir,
       dir <> "/facts",
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )
@@ -481,6 +521,7 @@ pub fn librarian_boost_clamps_confidence_test() {
       cbr_dir,
       dir <> "/facts",
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )
@@ -510,11 +551,88 @@ pub fn librarian_suppress_nonexistent_test() {
       cbr_dir,
       dir <> "/facts",
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )
 
   let result = librarian.suppress_case(lib, "nonexistent")
+  result |> should.be_error
+
+  process.send(lib, librarian.Shutdown)
+}
+
+pub fn librarian_update_case_test() {
+  let dir = test_dir("update_case")
+  let cbr_dir = dir <> "/cbr"
+  let _ = simplifile.create_directory_all(cbr_dir)
+  let lib =
+    librarian.start(
+      dir,
+      cbr_dir,
+      dir <> "/facts",
+      dir <> "/artifacts",
+      dir <> "/planner",
+      0,
+      librarian.default_cbr_config(),
+    )
+
+  let c1 = make_case("case-u1", "research", "property", ["market"], ["Dublin"])
+  librarian.notify_new_case(lib, c1)
+  process.sleep(50)
+
+  // Update the case with new domain and keywords
+  let updated =
+    CbrCase(
+      ..c1,
+      problem: CbrProblem(..c1.problem, domain: "technology", keywords: [
+        "AI",
+        "agents",
+      ]),
+    )
+  let result = librarian.update_case(lib, "case-u1", updated)
+  result |> should.be_ok
+
+  // Verify the update persisted in ETS
+  let reply_to = process.new_subject()
+  process.send(lib, librarian.QueryCaseById(case_id: "case-u1", reply_to:))
+  let assert Ok(Ok(fetched)) = process.receive(reply_to, 5000)
+  fetched.problem.domain |> should.equal("technology")
+  fetched.problem.keywords |> should.equal(["AI", "agents"])
+
+  // Verify the CaseBase was re-indexed (new keywords are searchable)
+  let query =
+    CbrQuery(
+      intent: "research",
+      domain: "technology",
+      keywords: ["AI"],
+      entities: [],
+      max_results: 10,
+      query_complexity: None,
+    )
+  let results = librarian.retrieve_cases(lib, query)
+  list.length(results) |> should.equal(1)
+
+  process.send(lib, librarian.Shutdown)
+}
+
+pub fn librarian_update_case_not_found_test() {
+  let dir = test_dir("update_case_missing")
+  let cbr_dir = dir <> "/cbr"
+  let _ = simplifile.create_directory_all(cbr_dir)
+  let lib =
+    librarian.start(
+      dir,
+      cbr_dir,
+      dir <> "/facts",
+      dir <> "/artifacts",
+      dir <> "/planner",
+      0,
+      librarian.default_cbr_config(),
+    )
+
+  let c = make_case("case-ghost", "research", "property", ["market"], [])
+  let result = librarian.update_case(lib, "case-ghost", c)
   result |> should.be_error
 
   process.send(lib, librarian.Shutdown)

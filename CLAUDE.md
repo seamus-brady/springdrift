@@ -93,6 +93,12 @@ src/
 │   ├── types.gleam            ArtifactRecord, ArtifactMeta
 │   └── log.gleam              Daily-rotated JSON-L log (artifacts-YYYY-MM-DD.jsonl, 50KB truncation)
 │
+├── planner/                   Goal tracking — Tasks, Endeavours, Forecaster
+│   ├── types.gleam            PlannerTask, PlanStep, Endeavour, TaskOp, EndeavourOp
+│   ├── log.gleam              Daily-rotated JSON-L (YYYY-MM-DD-tasks.jsonl, -endeavours.jsonl)
+│   ├── features.gleam         Plan-health feature definitions for D' scoring
+│   └── forecaster.gleam       OTP actor: self-ticking plan health evaluator
+│
 ├── identity.gleam             Persona + session preamble templating with OMIT IF rules
 │
 ├── profile/                   Profile system — switchable agent team configurations
@@ -107,6 +113,7 @@ src/
 │
 ├── tools/builtin.gleam        Built-in tools: calculator, get_current_datetime,
 │                              request_human_input, read_skill
+├── tools/planner.gleam        Planner tools: task/endeavour CRUD, get_active_work, get_task_detail
 ├── tools/how_to_content.gleam Default HOW_TO content (builtin fallback)
 ├── tools/web.gleam            Web tools: fetch_url, web_search
 ├── tools/artifacts.gleam      Artifact tools: store_result, retrieve_result (researcher agent)
@@ -211,7 +218,7 @@ go through the centralised path functions.
 
 Current output directories:
 - `.springdrift/logs/` — system logs
-- `.springdrift/memory/` — narrative, CBR, facts, artifacts, cycle-log
+- `.springdrift/memory/` — narrative, CBR, facts, artifacts, planner, cycle-log
 - `.springdrift/schemas/` — compiled XSD schemas
 - `.springdrift/scheduler/outputs/` — scheduler report delivery
 
@@ -237,6 +244,24 @@ When adding a new configurable value:
 4. Apply the default at the usage site: `option.unwrap(cfg.field, default_value)`
 5. Update this guide's Config fields table if it's a user-facing setting
 
+### Plans must be audited against implementation
+
+**When implementing a multi-phase plan, every item must be verified against the
+actual code before the work is considered complete.** Plans drift during implementation
+— items get skipped, stubs get left in, wiring gets forgotten. After completing a
+plan (or at user request), systematically check each planned item:
+
+- Does the file exist? Does it contain the specified types/functions?
+- Are all call sites updated? (new parameters, new imports)
+- Is the new code actually *reachable* from the running system? (tools registered,
+  actors started, handlers wired, UI connected)
+- Are sensory/notification channels connected end-to-end? (producer → queue → consumer → render)
+- Do tests cover the new behaviour, not just the new types?
+
+The most common failure mode is building the internals correctly but forgetting to
+wire them into the running system — tools that exist but are never offered to the LLM,
+actors that compile but are never started, UI sections that render but are never called.
+
 ## Concurrency model
 
 Long-lived processes and per-turn workers:
@@ -252,6 +277,7 @@ Long-lived processes and per-turn workers:
 | Librarian | App | Owns ETS query cache over narrative + CBR + facts + artifacts JSONL |
 | Curator | App | Orchestrates system prompt assembly from identity + memory |
 | Scheduler | App | BEAM-native task scheduler with `send_after` tick loop |
+| Forecaster | App | Self-ticking plan health evaluator (when enabled) |
 
 All cross-process communication uses typed `Subject(T)` channels. No shared mutable
 state, no locks. The cognitive loop's notification channel uses pure data types
@@ -294,10 +320,14 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `cbr_embedding_enabled` | — | True | Enable Ollama embedding for CBR retrieval (fails on startup if Ollama unreachable) |
 | `cbr_embedding_model` | — | `nomic-embed-text` | Ollama embedding model name |
 | `cbr_embedding_base_url` | — | `http://localhost:11434` | Ollama API base URL |
+| `forecaster_enabled` | — | False | Enable plan-health Forecaster actor |
+| `forecaster_tick_ms` | — | 300000 | Forecaster evaluation interval (ms) |
+| `forecaster_replan_threshold` | — | 0.55 | D' score above which replan is suggested |
+| `forecaster_min_cycles` | — | 2 | Min cycles on a task before forecaster evaluates |
 
 ## Memory architecture
 
-The agent has six memory stores, all backed by append-only JSON-L files and
+The agent has eight memory stores, all backed by append-only JSON-L files and
 indexed in ETS by the Librarian actor for fast queries.
 
 | Store | Location | Unit | Purpose |
@@ -307,6 +337,8 @@ indexed in ETS by the Librarian actor for fast queries.
 | Facts | `.springdrift/memory/facts/YYYY-MM-DD-facts.jsonl` | `MemoryFact` | Explicit key-value working memory with scope (Session/Persistent/Ephemeral) and confidence |
 | CBR cases | `.springdrift/memory/cbr/cases.jsonl` | `CbrCase` | Problem-solution-outcome patterns for case-based reasoning |
 | Artifacts | `.springdrift/memory/artifacts/artifacts-YYYY-MM-DD.jsonl` | `ArtifactRecord` | Large content stored on disk (web pages, extractions) with 50KB truncation |
+| Tasks | `.springdrift/memory/planner/YYYY-MM-DD-tasks.jsonl` | `PlannerTask` | Planned work with steps, dependencies, risks, forecast scores |
+| Endeavours | `.springdrift/memory/planner/YYYY-MM-DD-endeavours.jsonl` | `Endeavour` | Self-directed initiatives grouping multiple independent tasks |
 | DAG nodes | (in-memory ETS, populated from cycle log) | `CycleNode` | Operational telemetry: token counts, tool calls, D' gates, agent output per cycle |
 
 **How they relate:** Narrative entries are the atomic record of each cycle. Threads
@@ -349,6 +381,14 @@ At startup, the Librarian replays artifact metadata from disk (configurable via
 | `query_tool_activity` | DAG | Per-tool usage stats for a date |
 | `introspect` | All | Perceive system state: identity, agent roster, D' config, cycle ID |
 | `how_to` | HOW_TO.md | Operator guide: tool selection heuristics, degradation paths |
+| `complete_task_step` | Tasks | Mark a step complete on a task |
+| `flag_risk` | Tasks | Record that a predicted risk has materialised |
+| `activate_task` | Tasks | Set a pending task as current focus |
+| `abandon_task` | Tasks | Stop tracking a task |
+| `create_endeavour` | Endeavours | Create a self-directed initiative grouping tasks |
+| `add_task_to_endeavour` | Endeavours | Associate a task with an endeavour |
+| `get_active_work` | Tasks+Endeavours | List active tasks and endeavours with progress |
+| `get_task_detail` | Tasks | Full task detail: steps, risks, forecast score, cycles |
 
 **Curator** (`narrative/curator.gleam`) assembles the system prompt from memory.
 On each `BuildSystemPrompt` message (with optional `CycleContext`) it loads identity
@@ -627,6 +667,29 @@ dispatches both tools. A `web-research` skill
 (`.springdrift/skills/web-research/SKILL.md`) teaches the agent the decision tree
 for tool selection: discovery (web_search) → extraction (fetch_url).
 
+**Tasks and Endeavours** — `planner/types.gleam`, `planner/log.gleam`, `tools/planner.gleam`.
+A Task is a unit of planned work with steps, dependencies, risks, and a forecast score.
+An Endeavour groups multiple independent Tasks toward a larger goal. Both persist as
+append-only JSONL operations in `.springdrift/memory/planner/`, with current state derived
+by replaying operations (`resolve_tasks`/`resolve_endeavours`). The Planner agent
+auto-creates Tasks via the output hook in `cognitive/agents.gleam`. Planner tools
+(`complete_task_step`, `flag_risk`, `activate_task`, etc.) are dispatched synchronously
+alongside memory tools — not routed through agents. The sensorium's `<tasks>` section
+shows active work to the LLM on every cycle without tool calls.
+
+**Sensory events** — `QueuedSensoryEvent` in `agent/types.gleam`. A new cognitive input
+channel for ambient perception. Events accumulate in `pending_sensory_events` on
+`CognitiveState` and are drained into the Curator's `CycleContext` at the start of
+each cycle, then rendered as `<events>` in the sensorium XML. Events never trigger a
+cycle — they're consumed passively when the next cycle runs. The Forecaster sends
+replan suggestions as sensory events.
+
+**Forecaster** — `planner/forecaster.gleam`. An OTP actor with `process.send_after`
+self-tick that evaluates active tasks using heuristic D' scoring (reuses
+`dprime/engine.compute_dprime`). When a task's D' score exceeds the replan threshold
+(default 0.55), it sends a `QueuedSensoryEvent` to the cognitive loop. Enabled via
+`forecaster_enabled` config. Does not use the Scheduler — ticks independently.
+
 ## Config file format
 
 `.springdrift/config.toml` (or `~/.config/springdrift/config.toml`). All fields are optional;
@@ -648,6 +711,7 @@ The config is organized into these TOML sections:
 | `[housekeeping]` | Dedup similarity, pruning confidence, fact threshold |
 | `[scheduler]` | Autonomous cycle resource limits (cycles/hour, token budget/hour) |
 | `[xstructor]` | XStructor XML validation settings (max_retries) |
+| `[forecaster]` | Plan-health Forecaster: enabled, tick_ms, threshold, min_cycles |
 | `[agents.planner]` | Planner agent: max_tokens, max_turns, max_errors |
 | `[agents.researcher]` | Researcher agent: max_tokens, max_turns, max_errors, max_context |
 | `[agents.coder]` | Coder agent: max_tokens, max_turns, max_errors |

@@ -13,6 +13,7 @@ pub type Profile {
     dprime_path: Option(String),
     schedule_path: Option(String),
     skills_dir: Option(String),
+    forecaster_config: Option(String),
   )
 }
 

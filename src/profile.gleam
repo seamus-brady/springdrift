@@ -129,6 +129,13 @@ fn parse_profile(name: String, dir: String) -> Result(Profile, String) {
             _ -> None
           }
 
+          let forecaster_config = case
+            simplifile.is_file(dir <> "/forecaster.json")
+          {
+            Ok(True) -> Some(dir <> "/forecaster.json")
+            _ -> None
+          }
+
           slog.info(
             "profile",
             "parse_profile",
@@ -149,6 +156,7 @@ fn parse_profile(name: String, dir: String) -> Result(Profile, String) {
             dprime_path:,
             schedule_path:,
             skills_dir:,
+            forecaster_config:,
           ))
         }
       }

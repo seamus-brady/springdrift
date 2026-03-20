@@ -1,7 +1,8 @@
 import agent/registry.{type Registry}
 import agent/types.{
   type AgentCompletionRecord, type CognitiveMessage, type CognitiveStatus,
-  type Notification, type PendingTask, type QueuedInput, type SupervisorMessage,
+  type Notification, type PendingTask, type QueuedInput, type SensoryEvent,
+  type SupervisorMessage,
 }
 import dag/types as dag_types
 import dprime/types as dprime_types
@@ -103,6 +104,11 @@ pub type CognitiveState {
     // --- Input queue ---
     input_queue: List(QueuedInput),
     input_queue_cap: Int,
+    // --- Sensory events (accumulated between cycles) ---
+    pending_sensory_events: List(SensoryEvent),
+    active_task_id: Option(String),
+    // --- Planner persistence ---
+    planner_dir: String,
     // --- Identity and profile (read-only after init) ---
     identity: IdentityContext,
     // --- Runtime config (read-only after init) ---

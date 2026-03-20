@@ -16,6 +16,7 @@ import llm/types.{type Message, Assistant, TextContent, User}
 import mist.{type Connection, type ResponseData}
 import narrative/librarian.{type LibrarianMessage}
 import narrative/log as narrative_log
+import planner/types as planner_types
 import scheduler/types as scheduler_types
 import slog
 import web/auth
@@ -398,6 +399,29 @@ fn ws_handler(
               }
               mist.continue(state)
             }
+            Ok(protocol.RequestPlannerData) -> {
+              case state.librarian {
+                Some(lib) -> {
+                  let tasks = librarian.get_active_tasks(lib)
+                  let endeavours = librarian.get_all_endeavours(lib)
+                  let tasks_json =
+                    json.to_string(json.array(tasks, encode_planner_task))
+                  let endeavours_json =
+                    json.to_string(json.array(endeavours, encode_endeavour))
+                  let _ =
+                    mist.send_text_frame(
+                      conn,
+                      protocol.encode_server_message(protocol.PlannerData(
+                        tasks_json:,
+                        endeavours_json:,
+                      )),
+                    )
+                  Nil
+                }
+                None -> Nil
+              }
+              mist.continue(state)
+            }
             Ok(protocol.RequestRewind(index:)) -> {
               let cycles = cycle_log.load_cycles()
               let messages = cycle_log.messages_for_rewind(cycles, index)
@@ -527,6 +551,10 @@ fn notification_to_server_message(
       protocol.ToolNotification(
         name: "scheduler:" <> name <> " failed: " <> reason,
       )
+    agent_types.PlannerNotification(task_id:, title:, action:) ->
+      protocol.ToolNotification(
+        name: "planner:" <> task_id <> " " <> action <> " — " <> title,
+      )
   }
 }
 
@@ -572,4 +600,76 @@ fn extract_text(msg: Message) -> String {
   |> list.first
   |> option.from_result
   |> option.unwrap("")
+}
+
+fn encode_planner_task(task: planner_types.PlannerTask) -> json.Json {
+  let completed_steps =
+    list.filter(task.plan_steps, fn(s) { s.status == planner_types.Complete })
+  let total_steps = list.length(task.plan_steps)
+  let completed_count = list.length(completed_steps)
+  json.object([
+    #("task_id", json.string(task.task_id)),
+    #("title", json.string(task.title)),
+    #("status", json.string(encode_task_status(task.status))),
+    #("complexity", json.string(task.complexity)),
+    #("steps_completed", json.int(completed_count)),
+    #("steps_total", json.int(total_steps)),
+    #("forecast_score", case task.forecast_score {
+      Some(s) -> json.float(s)
+      None -> json.null()
+    }),
+    #("endeavour_id", case task.endeavour_id {
+      Some(id) -> json.string(id)
+      None -> json.null()
+    }),
+    #("cycle_count", json.int(list.length(task.cycle_ids))),
+    #(
+      "steps",
+      json.array(task.plan_steps, fn(s) {
+        json.object([
+          #("index", json.int(s.index)),
+          #("description", json.string(s.description)),
+          #("status", json.string(encode_task_status(s.status))),
+          #("completed_at", case s.completed_at {
+            Some(at) -> json.string(at)
+            None -> json.null()
+          }),
+        ])
+      }),
+    ),
+    #("description", json.string(task.description)),
+    #("created_at", json.string(task.created_at)),
+    #("risks", json.array(task.risks, json.string)),
+    #("materialised_risks", json.array(task.materialised_risks, json.string)),
+  ])
+}
+
+fn encode_task_status(status: planner_types.TaskStatus) -> String {
+  case status {
+    planner_types.Pending -> "pending"
+    planner_types.Active -> "active"
+    planner_types.Complete -> "complete"
+    planner_types.Failed -> "failed"
+    planner_types.Abandoned -> "abandoned"
+  }
+}
+
+fn encode_endeavour(endeavour: planner_types.Endeavour) -> json.Json {
+  json.object([
+    #("endeavour_id", json.string(endeavour.endeavour_id)),
+    #("title", json.string(endeavour.title)),
+    #("description", json.string(endeavour.description)),
+    #(
+      "status",
+      json.string(case endeavour.status {
+        planner_types.Open -> "open"
+        planner_types.EndeavourComplete -> "complete"
+        planner_types.EndeavourAbandoned -> "abandoned"
+      }),
+    ),
+    #("task_ids", json.array(endeavour.task_ids, json.string)),
+    #("task_count", json.int(list.length(endeavour.task_ids))),
+    #("created_at", json.string(endeavour.created_at)),
+    #("updated_at", json.string(endeavour.updated_at)),
+  ])
 }

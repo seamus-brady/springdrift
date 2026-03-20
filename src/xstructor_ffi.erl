@@ -31,6 +31,7 @@ compile_schema(FilePath) when is_binary(FilePath) ->
 %% Validate an XML binary against a compiled schema state.
 %% Returns {ok, XmlBinary} | {error, ReasonBinary}.
 validate_xml(XmlBin, SchemaState) when is_binary(XmlBin) ->
+    PrevLevel = suppress_xmerl_logging(),
     try
         {Doc, _Rest} = xmerl_scan:string(binary_to_list(XmlBin)),
         case xmerl_xsd:validate(Doc, SchemaState) of
@@ -42,6 +43,8 @@ validate_xml(XmlBin, SchemaState) when is_binary(XmlBin) ->
     catch
         _Class:Ex ->
             {error, iolist_to_binary(io_lib:format("XML parse/validation error: ~p", [Ex]))}
+    after
+        restore_xmerl_logging(PrevLevel)
     end.
 
 format_validation_error(Reason) when is_list(Reason) ->
@@ -53,12 +56,15 @@ format_validation_error(Reason) ->
 %% Returns a list of {PathBinary, ValueBinary} tuples.
 %% Lists use parent.0, parent.1, etc. indexing.
 extract_elements(XmlBin) when is_binary(XmlBin) ->
+    PrevLevel = suppress_xmerl_logging(),
     try
         {Doc, _Rest} = xmerl_scan:string(binary_to_list(XmlBin)),
         Pairs = walk_element(Doc, <<>>),
         [{ensure_bin(K), ensure_bin(V)} || {K, V} <- Pairs]
     catch
         _:_ -> []
+    after
+        restore_xmerl_logging(PrevLevel)
     end.
 
 %% Recursive walk of the xmerl element tree.

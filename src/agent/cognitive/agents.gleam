@@ -25,8 +25,11 @@ import narrative/curator
 import narrative/librarian
 import narrative/log as narrative_log
 import paths
+import planner/log as planner_log
+import planner/types as planner_types
 import slog
 import tools/memory
+import tools/planner as planner_tools
 
 @external(erlang, "springdrift_ffi", "get_datetime")
 fn get_datetime() -> String
@@ -54,10 +57,15 @@ pub fn dispatch_tool_calls(
     Ok(hi_call) ->
       handle_own_human_input(state, task_id, resp, hi_call, reply_to)
     Error(_) -> {
-      // Check for memory tools — execute synchronously, then re-think
-      let #(memory_calls, remaining_calls) =
+      // Check for memory and planner tools — execute synchronously, then re-think
+      let #(memory_calls, after_memory) =
         list.partition(calls, fn(c) { memory.is_memory_tool(c.name) })
-      case memory_calls {
+      let #(planner_calls, remaining_calls) =
+        list.partition(after_memory, fn(c) {
+          planner_tools.is_planner_tool(c.name)
+        })
+      let sync_calls = list.append(memory_calls, planner_calls)
+      case sync_calls {
         [] ->
           dispatch_agent_calls(state, task_id, resp, remaining_calls, reply_to)
         _ ->
@@ -65,7 +73,7 @@ pub fn dispatch_tool_calls(
             state,
             task_id,
             resp,
-            memory_calls,
+            sync_calls,
             remaining_calls,
             reply_to,
           )
@@ -170,16 +178,27 @@ fn handle_memory_tools(
           thread_uuid_named:,
           thread_multi_cycle: thread_total - thread_single_cycle,
         ))
-      let result =
-        memory.execute_with_how_to(
-          call,
-          state.memory.narrative_dir,
-          state.memory.librarian,
-          facts_ctx,
-          introspect_ctx,
-          state.config.memory_limits,
-          state.config.how_to_content,
-        )
+      let result = case planner_tools.is_planner_tool(call.name) {
+        True ->
+          case state.memory.librarian {
+            Some(lib) -> planner_tools.execute(call, state.planner_dir, lib)
+            None ->
+              llm_types.ToolFailure(
+                tool_use_id: call.id,
+                error: "Planner tools unavailable (no librarian)",
+              )
+          }
+        False ->
+          memory.execute_with_how_to(
+            call,
+            state.memory.narrative_dir,
+            state.memory.librarian,
+            facts_ctx,
+            introspect_ctx,
+            state.config.memory_limits,
+            state.config.how_to_content,
+          )
+      }
       // Log tool result to cycle log
       cycle_log.log_tool_result(cycle_id, result, state.redact_secrets)
       case result {
@@ -712,6 +731,13 @@ pub fn handle_agent_complete(
     None -> Nil
   }
 
+  // --- Planner output hook: auto-create task from planner findings ---
+  let state = case outcome {
+    AgentSuccess(agent: "planner", structured_result: Some(sr), ..) ->
+      handle_planner_output(state, sr.findings, outcome_task_id)
+    _ -> state
+  }
+
   case dict.get(state.pending, outcome_task_id) {
     Error(_) -> state
     Ok(pending_agent) -> {
@@ -1067,7 +1093,13 @@ fn findings_to_dag_output(
               False -> 0.0
             },
           )
-        types.PlannerFindings(plan_steps:, dependencies:, complexity:, risks:) ->
+        types.PlannerFindings(
+          plan_steps:,
+          dependencies:,
+          complexity:,
+          risks:,
+          ..,
+        ) ->
           dag_types.PlanOutput(
             steps: plan_steps,
             dependencies:,
@@ -1085,5 +1117,69 @@ fn findings_to_dag_output(
         "agent=" <> completion.agent_id,
         "instruction=" <> completion.instruction,
       ])
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Planner output hook — auto-create/update tasks from planner findings
+// ---------------------------------------------------------------------------
+
+fn handle_planner_output(
+  state: CognitiveState,
+  findings: types.AgentFindings,
+  cycle_id: String,
+) -> CognitiveState {
+  case findings {
+    types.PlannerFindings(
+      plan_steps:,
+      dependencies:,
+      complexity:,
+      risks:,
+      task_id: existing_task_id,
+      endeavour_id:,
+    ) -> {
+      case state.memory.librarian {
+        Some(lib) -> {
+          let actual_cycle_id = option.unwrap(state.cycle_id, cycle_id)
+          case existing_task_id {
+            // Update existing task — add cycle_id
+            Some(tid) -> {
+              let op =
+                planner_types.AddCycleId(
+                  task_id: tid,
+                  cycle_id: actual_cycle_id,
+                )
+              planner_log.append_task_op(state.planner_dir, op)
+              librarian.notify_task_op(lib, op)
+              CognitiveState(..state, active_task_id: Some(tid))
+            }
+            // Create new task
+            None -> {
+              let new_task_id =
+                planner_tools.create_task(
+                  state.planner_dir,
+                  lib,
+                  // Use first step as title fallback if no other info
+                  case plan_steps {
+                    [first, ..] -> first
+                    [] -> "Planned task"
+                  },
+                  string.join(plan_steps, "; "),
+                  plan_steps,
+                  dependencies,
+                  complexity,
+                  risks,
+                  planner_types.SystemTask,
+                  endeavour_id,
+                  actual_cycle_id,
+                )
+              CognitiveState(..state, active_task_id: Some(new_task_id))
+            }
+          }
+        }
+        None -> state
+      }
+    }
+    _ -> state
   }
 }

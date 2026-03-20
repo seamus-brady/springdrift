@@ -8,18 +8,20 @@ import agent/cognitive_state.{
   type CognitiveState, CognitiveState, IdentityContext, MemoryContext,
   RuntimeConfig,
 }
+import agent/registry as agent_registry
 import agent/types.{
   type CognitiveMessage, type CognitiveReply, AgentComplete, AgentEvent,
   Classifying, CognitiveReply, Idle, InputQueueFull, InputQueued, PendingThink,
-  QueuedInput, QueuedSchedulerInput, RestoreMessages, SaveResult,
-  SchedulerJobStarted, SetModel, ThinkComplete, ThinkError, ThinkWorkerDown,
-  Thinking, UserAnswer, UserInput,
+  QueuedInput, QueuedSchedulerInput, QueuedSensoryInput, RestoreMessages,
+  SaveResult, SchedulerJobStarted, SetModel, ThinkComplete, ThinkError,
+  ThinkWorkerDown, Thinking, UserAnswer, UserInput,
 }
 import agent/worker
 import cycle_log
 import dag/types as dag_types
 import gleam/dict
 import gleam/erlang/process.{type Subject}
+import gleam/float
 import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
@@ -28,17 +30,23 @@ import llm/response
 import llm/types as llm_types
 import narrative/curator as narrative_curator
 import narrative/librarian
+import planner/log as planner_log
+import planner/types as planner_types
 import query_complexity
 import scheduler/types as scheduler_types
 import slog
 import tools/builtin
 import tools/memory
+import tools/planner as planner_tools
 
 @external(erlang, "springdrift_ffi", "rescue")
 fn rescue(body: fn() -> a) -> Result(a, String)
 
 @external(erlang, "springdrift_ffi", "monotonic_now_ms")
 fn monotonic_now_ms() -> Int
+
+@external(erlang, "springdrift_ffi", "get_datetime")
+fn get_datetime() -> String
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -48,11 +56,12 @@ fn monotonic_now_ms() -> Int
 pub fn start(
   cfg: cognitive_config.CognitiveConfig,
 ) -> Result(Subject(CognitiveMessage), Nil) {
-  // The cognitive loop gets agent tools + request_human_input + memory tools
+  // The cognitive loop gets agent tools + request_human_input + memory + planner tools
   let tools =
     list.flatten([
       [builtin.human_input_tool()],
       memory.all(),
+      planner_tools.all(),
       cfg.agent_tools,
     ])
   let setup = process.new_subject()
@@ -112,6 +121,9 @@ pub fn start(
           how_to_content: cfg.how_to_content,
         ),
         redact_secrets: cfg.redact_secrets,
+        pending_sensory_events: [],
+        active_task_id: None,
+        planner_dir: cfg.planner_dir,
       )
     process.send(setup, self)
     cognitive_loop(state)
@@ -175,6 +187,8 @@ fn handle_message(
       types.SetSupervisor(..) -> "SetSupervisor"
       types.SchedulerInput(..) -> "SchedulerInput"
       types.OutputGateComplete(..) -> "OutputGateComplete"
+      types.QueuedSensoryEvent(..) -> "QueuedSensoryEvent"
+      types.ForecasterSuggestion(..) -> "ForecasterSuggestion"
     },
     state.cycle_id,
   )
@@ -266,6 +280,58 @@ fn handle_message(
         modification_count,
         reply_to,
       )
+    types.QueuedSensoryEvent(event:) -> {
+      slog.debug(
+        "cognitive",
+        "handle_message",
+        "Sensory event accumulated: " <> event.name,
+        state.cycle_id,
+      )
+      CognitiveState(
+        ..state,
+        pending_sensory_events: list.append(state.pending_sensory_events, [
+          event,
+        ]),
+      )
+    }
+    types.ForecasterSuggestion(
+      task_id:,
+      task_title:,
+      plan_dprime:,
+      explanation:,
+    ) ->
+      handle_forecaster_suggestion(
+        state,
+        task_id,
+        task_title,
+        plan_dprime,
+        explanation,
+      )
+  }
+  // If a cycle just completed (transition to Idle) and there's an active task,
+  // append the cycle_id to that task so the forecaster can track progress.
+  let next = case
+    next.status,
+    state.status,
+    next.active_task_id,
+    next.cycle_id
+  {
+    Idle, prev_status, Some(task_id), Some(cycle_id) if prev_status != Idle -> {
+      planner_log.append_task_op(
+        next.planner_dir,
+        planner_types.AddCycleId(task_id:, cycle_id:),
+      )
+      case next.memory.librarian {
+        Some(lib) ->
+          librarian.notify_task_op(
+            lib,
+            planner_types.AddCycleId(task_id:, cycle_id:),
+          )
+        None -> Nil
+      }
+      next
+    }
+    _, _, _, _ -> next
   }
   maybe_drain_queue(next)
 }
@@ -323,6 +389,24 @@ fn maybe_drain_queue(state: CognitiveState) -> CognitiveState {
         tags,
         reply_to,
       )
+    }
+    Idle, [QueuedSensoryInput(event:), ..rest] -> {
+      slog.debug(
+        "cognitive",
+        "maybe_drain_queue",
+        "Draining queued sensory event: " <> event.name,
+        state.cycle_id,
+      )
+      let next_state =
+        CognitiveState(
+          ..state,
+          input_queue: rest,
+          pending_sensory_events: list.append(state.pending_sensory_events, [
+            event,
+          ]),
+        )
+      // Sensory events don't trigger cycles, so continue draining
+      maybe_drain_queue(next_state)
     }
     _, _ -> state
   }
@@ -539,6 +623,20 @@ fn handle_scheduler_input(
           )
         scheduler_types.ForAgent -> Nil
       }
+
+      // Inject scheduler trigger as a sensory event so it appears in <events>
+      let state =
+        CognitiveState(
+          ..state,
+          pending_sensory_events: list.append(state.pending_sensory_events, [
+            types.SensoryEvent(
+              name: "scheduler:" <> job_name,
+              title:,
+              body: input_text,
+              fired_at: get_datetime(),
+            ),
+          ]),
+        )
 
       // Skip classification — always use task_model, go straight to LLM
       cognitive_llm.proceed_with_model(
@@ -889,6 +987,156 @@ fn handle_think_complete(
     }
     // dict.get only returns what's stored, but guard against non-PendingThink
     Ok(_) -> state
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ForecasterSuggestion — typed replan trigger from the Forecaster
+// ---------------------------------------------------------------------------
+
+fn handle_forecaster_suggestion(
+  state: CognitiveState,
+  task_id: String,
+  task_title: String,
+  plan_dprime: Float,
+  explanation: String,
+) -> CognitiveState {
+  case state.status {
+    Idle -> {
+      slog.info(
+        "cognitive",
+        "handle_forecaster_suggestion",
+        "Dispatching planner replan for task "
+          <> task_id
+          <> " (D'="
+          <> float.to_string(plan_dprime)
+          <> ")",
+        state.cycle_id,
+      )
+      // Build forecast context for the planner
+      let forecast_context =
+        "Task: "
+        <> task_title
+        <> " (id: "
+        <> task_id
+        <> ")\nD' health score: "
+        <> float.to_string(plan_dprime)
+        <> "\nExplanation: "
+        <> explanation
+
+      // Dispatch to the existing planner agent with forecast context
+      case agent_registry.get_task_subject(state.registry, "planner") {
+        Some(task_subject) -> {
+          let cycle_id = cycle_log.generate_uuid()
+          let agent_task_id = cycle_log.generate_uuid()
+          let instruction =
+            "Replan task '"
+            <> task_title
+            <> "': the Forecaster detected health deterioration (D'="
+            <> float.to_string(plan_dprime)
+            <> "). "
+            <> explanation
+            <> "\nProduce a revised plan."
+
+          let agent_task =
+            types.AgentTask(
+              task_id: agent_task_id,
+              tool_use_id: "forecaster_replan_" <> task_id,
+              instruction:,
+              context: forecast_context,
+              parent_cycle_id: cycle_id,
+              reply_to: state.self,
+            )
+          process.send(task_subject, agent_task)
+          process.send(
+            state.notify,
+            types.PlannerNotification(
+              task_id:,
+              title: task_title,
+              action: "replan",
+            ),
+          )
+
+          // Create a synthetic reply_to for the cycle
+          let cycle_reply = process.new_subject()
+
+          CognitiveState(
+            ..state,
+            cycle_id: Some(cycle_id),
+            cycle_started_ms: monotonic_now_ms(),
+            cycle_node_type: dag_types.CognitiveCycle,
+            status: types.WaitingForAgents(
+              pending_ids: [agent_task_id],
+              accumulated_results: [],
+              reply_to: cycle_reply,
+            ),
+            pending: dict.insert(
+              state.pending,
+              agent_task_id,
+              types.PendingAgent(
+                task_id: agent_task_id,
+                tool_use_id: "forecaster_replan_" <> task_id,
+                agent: "planner",
+                reply_to: cycle_reply,
+              ),
+            ),
+          )
+        }
+        None -> {
+          slog.warn(
+            "cognitive",
+            "handle_forecaster_suggestion",
+            "Planner agent not available, deferring as sensory event",
+            state.cycle_id,
+          )
+          let event =
+            types.SensoryEvent(
+              name: "forecaster_replan",
+              title: "Replan suggested: " <> task_title,
+              body: "Task "
+                <> task_id
+                <> " (D'="
+                <> float.to_string(plan_dprime)
+                <> "): "
+                <> explanation,
+              fired_at: get_datetime(),
+            )
+          CognitiveState(
+            ..state,
+            pending_sensory_events: list.append(state.pending_sensory_events, [
+              event,
+            ]),
+          )
+        }
+      }
+    }
+    _ -> {
+      // Not idle — defer as sensory event for next cycle
+      slog.debug(
+        "cognitive",
+        "handle_forecaster_suggestion",
+        "Not idle, deferring forecaster suggestion as sensory event",
+        state.cycle_id,
+      )
+      let event =
+        types.SensoryEvent(
+          name: "forecaster_replan",
+          title: "Replan suggested: " <> task_title,
+          body: "Task "
+            <> task_id
+            <> " (D'="
+            <> float.to_string(plan_dprime)
+            <> "): "
+            <> explanation,
+          fired_at: get_datetime(),
+        )
+      CognitiveState(
+        ..state,
+        pending_sensory_events: list.append(state.pending_sensory_events, [
+          event,
+        ]),
+      )
+    }
   }
 }
 

@@ -35,6 +35,8 @@ import narrative/housekeeper
 import narrative/librarian
 import narrative/threading as narrative_threading
 import paths
+import planner/forecaster
+import planner/types as planner_types
 import profile
 import profile/types as profile_types
 import scheduler/log as schedule_log
@@ -335,6 +337,7 @@ fn run(cfg: AppConfig) -> Nil {
       paths.cbr_dir(),
       paths.facts_dir(),
       paths.artifacts_dir(),
+      paths.planner_dir(),
       librarian_max_days,
       5,
       cbr_config,
@@ -667,6 +670,7 @@ fn run(cfg: AppConfig) -> Nil {
       input_queue_cap: option.unwrap(cfg.input_queue_cap, 10),
       how_to_content: option.Some(how_to_content),
       redact_secrets:,
+      planner_dir: paths.planner_dir(),
     ))
   {
     Ok(subj) -> subj
@@ -797,6 +801,65 @@ fn run(cfg: AppConfig) -> Nil {
   // Set preamble budget from config
   let preamble_budget = option.unwrap(cfg.preamble_budget_chars, 8000)
   curator.set_preamble_budget(curator_subj, preamble_budget)
+
+  // Start Forecaster if enabled (needs cognitive_subj + librarian)
+  case option.unwrap(cfg.forecaster_enabled, False) {
+    True -> {
+      let forecaster_config =
+        forecaster.ForecasterConfig(
+          tick_ms: option.unwrap(cfg.forecaster_tick_ms, 300_000),
+          replan_threshold: option.unwrap(cfg.forecaster_replan_threshold, 0.55),
+          min_cycles: option.unwrap(cfg.forecaster_min_cycles, 2),
+          planner_dir: paths.planner_dir(),
+        )
+      let _forecaster_subj =
+        forecaster.start(forecaster_config, librarian_subj, cognitive_subj)
+      io.println("Forecaster: started")
+    }
+    False -> Nil
+  }
+
+  // Inject active tasks as sensory events on resume
+  case list.contains(get_startup_args(), "--resume") {
+    True -> {
+      let active_tasks = librarian.get_active_tasks(librarian_subj)
+      let now = get_date_ffi()
+      list.each(active_tasks, fn(task) {
+        let status_str = case task.status {
+          planner_types.Pending -> "pending"
+          planner_types.Active -> "active"
+          planner_types.Complete -> "complete"
+          planner_types.Failed -> "failed"
+          planner_types.Abandoned -> "abandoned"
+        }
+        let steps_str = int.to_string(list.length(task.plan_steps)) <> " steps"
+        process.send(
+          cognitive_subj,
+          agent_types.QueuedSensoryEvent(event: agent_types.SensoryEvent(
+            name: "task_resume",
+            title: "Active task: " <> task.title,
+            body: "Task "
+              <> task.task_id
+              <> " ["
+              <> status_str
+              <> "] with "
+              <> steps_str,
+            fired_at: now,
+          )),
+        )
+      })
+      case active_tasks {
+        [] -> Nil
+        tasks ->
+          io.println(
+            "Tasks    : "
+            <> int.to_string(list.length(tasks))
+            <> " active task(s) resumed",
+          )
+      }
+    }
+    False -> Nil
+  }
 
   // Start GUI
   let tui_input_limit = option.unwrap(cfg.tui_input_limit, 102_400)

@@ -38,6 +38,7 @@ fn start_lib(suffix: String) {
       cbr_dir,
       facts_dir,
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )

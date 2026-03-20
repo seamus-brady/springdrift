@@ -146,6 +146,8 @@ pub type AgentFindings {
     dependencies: List(#(String, String)),
     complexity: String,
     risks: List(String),
+    task_id: Option(String),
+    endeavour_id: Option(String),
   )
   CoderFindings(
     files_touched: List(String),
@@ -287,6 +289,13 @@ pub type CognitiveMessage {
     modification_count: Int,
     reply_to: Subject(CognitiveReply),
   )
+  QueuedSensoryEvent(event: SensoryEvent)
+  ForecasterSuggestion(
+    task_id: String,
+    task_title: String,
+    plan_dprime: Float,
+    explanation: String,
+  )
 }
 
 pub type CognitiveReply {
@@ -379,6 +388,15 @@ pub type Notification {
   SchedulerJobStarted(name: String, kind: String)
   SchedulerJobCompleted(name: String, result_preview: String)
   SchedulerJobFailed(name: String, reason: String)
+  PlannerNotification(task_id: String, title: String, action: String)
+}
+
+// ---------------------------------------------------------------------------
+// Sensory event — ambient input accumulated between cycles
+// ---------------------------------------------------------------------------
+
+pub type SensoryEvent {
+  SensoryEvent(name: String, title: String, body: String, fired_at: String)
 }
 
 // ---------------------------------------------------------------------------
@@ -397,4 +415,5 @@ pub type QueuedInput {
     tags: List(String),
     reply_to: Subject(CognitiveReply),
   )
+  QueuedSensoryInput(event: SensoryEvent)
 }

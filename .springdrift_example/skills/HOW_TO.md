@@ -149,6 +149,62 @@ When using `gui = "web"`, the admin page has four tabs:
 - **Scheduler** — job list with status, kind, next-run time, and for-target
 - **Cycles** — scheduler-triggered cycle history with token usage and agent output
 
+## Planning
+
+Tasks and Endeavours let you track your own work as it progresses.
+
+### Tasks
+
+A Task is your current unit of work. When the Planner produces a plan, a Task is
+created automatically with numbered steps, dependencies, risks, and a forecast health
+score. Most work is Tasks. A Task can exist alone — not everything needs an Endeavour.
+
+### Endeavours
+
+An Endeavour is your own initiative — create one when you have a larger goal that
+needs multiple independent Tasks. If the Planner produces one plan with sequential
+steps, that is just a Task, not an Endeavour.
+
+### When NOT to create an Endeavour
+
+If the Planner produces a single plan with sequential steps, that is just a Task.
+Only create an Endeavour when you have genuinely independent tasks that serve a
+shared goal.
+
+### Planner tools
+
+- **complete_task_step** — mark a step as done
+- **flag_risk** — record a materialised risk on a task
+- **activate_task** — move a task from Pending to Active
+- **abandon_task** — abandon a task that is no longer viable
+- **create_endeavour** — start a new multi-task initiative
+- **add_task_to_endeavour** — associate a task with an endeavour
+- **get_active_work** — list all active tasks and open endeavours
+- **get_task_detail** — full detail on a specific task (steps, risks, forecast)
+- **request_forecast_review** — ask the Forecaster to re-evaluate a task now
+
+### Lifecycle
+
+Tasks follow the lifecycle: **Pending → Active → Complete / Failed / Abandoned**.
+When the Planner creates a task it starts as Pending. Use `activate_task` to begin
+work. Steps are completed individually via `complete_task_step`. When all steps are
+done, the task is marked Complete.
+
+### Forecaster
+
+The Forecaster periodically evaluates active tasks using D' scoring across five
+dimensions: step completion rate, dependency health, complexity drift, risk
+materialisation, and scope creep. If a task's health deteriorates past the replan
+threshold, the Forecaster sends a replan suggestion to the cognitive loop, which
+dispatches the Planner to produce a revised plan. Use `request_forecast_review` to
+check task health on demand.
+
+### Sensorium integration
+
+Active tasks and forecaster events appear in the `<tasks>` and `<events>` sections
+of the sensorium. No tool calls are needed to see current work — it is part of your
+ambient perception at every cycle.
+
 ## Degradation Paths
 
 When a required API key is missing, fall back gracefully:

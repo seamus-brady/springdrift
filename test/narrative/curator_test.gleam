@@ -45,6 +45,7 @@ fn start_both(suffix: String) {
       cbr_dir,
       facts_dir,
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )
@@ -385,6 +386,7 @@ pub fn build_system_prompt_fallback_when_no_identity_test() {
       cbr_dir,
       facts_dir,
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )
@@ -422,6 +424,7 @@ pub fn build_system_prompt_with_persona_test() {
       cbr_dir,
       facts_dir,
       dir <> "/artifacts",
+      dir <> "/planner",
       0,
       librarian.default_cbr_config(),
     )

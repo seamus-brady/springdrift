@@ -75,6 +75,7 @@ fn start_librarian(
     cbr_dir,
     facts_dir,
     artifacts_dir,
+    narrative_dir <> "/planner",
     0,
     librarian.default_cbr_config(),
   )

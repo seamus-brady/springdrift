@@ -163,9 +163,6 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 # WebSocket message size limit in bytes (default: 1048576 = 1MB)
 # websocket_max_bytes = 1048576
 
-# Mailbox warning threshold — log a warning when actor mailbox exceeds this (default: 50)
-# mailbox_warn_threshold = 50
-
 # Max entries returned by recall_recent/recall_search (default: 20, max: 50)
 # recall_max_entries = 20
 
@@ -347,3 +344,22 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 [xstructor]
 # Max validation+retry attempts for XStructor XML generation (default: 3)
 # max_retries = 3
+
+# ── Forecaster ───────────────────────────────────────────────────────────────
+# Plan-health forecaster using D' engine to detect when replanning is needed.
+
+[forecaster]
+# Enable the plan-health forecaster (default: false)
+# enabled = false
+
+# Tick interval for forecaster evaluation in ms (default: 300000 = 5 min)
+# tick_ms = 300000
+
+# D' score threshold above which a replan is suggested (default: 0.55)
+# replan_threshold = 0.55
+
+# Minimum completed cycles before forecaster begins evaluating (default: 2)
+# min_cycles = 2
+
+# Staleness threshold in ms — tasks idle longer than this are flagged (default: 1800000 = 30 min)
+# stale_threshold_ms = 1800000

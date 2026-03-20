@@ -44,6 +44,8 @@ import narrative/log as narrative_log
 import narrative/types.{
   type NarrativeEntry, type ThreadIndex, type ThreadState, ThreadIndex,
 }
+import planner/log as planner_log
+import planner/types as planner_types
 import simplifile
 import slog
 
@@ -86,6 +88,8 @@ pub type DagTable
 
 pub type ArtifactTable
 
+pub type PlannerTable
+
 @external(erlang, "springdrift_ffi", "days_between")
 fn days_between(date_a: String, date_b: String) -> Int
 
@@ -113,6 +117,9 @@ fn new_dag_table(name: String, table_type: String) -> DagTable
 
 @external(erlang, "store_ffi", "new_unique_table")
 fn new_artifact_table(name: String, table_type: String) -> ArtifactTable
+
+@external(erlang, "store_ffi", "new_unique_table")
+fn new_planner_table(name: String, table_type: String) -> PlannerTable
 
 // Narrative-typed operations
 @external(erlang, "store_ffi", "insert")
@@ -272,6 +279,53 @@ fn artifact_lookup_bag(
   table: ArtifactTable,
   key: String,
 ) -> List(artifacts_types.ArtifactMeta)
+
+// Planner-typed operations
+@external(erlang, "store_ffi", "insert")
+fn planner_insert(
+  table: PlannerTable,
+  key: String,
+  value: planner_types.PlannerTask,
+) -> Nil
+
+@external(erlang, "store_ffi", "lookup")
+fn planner_lookup(
+  table: PlannerTable,
+  key: String,
+) -> Result(planner_types.PlannerTask, Nil)
+
+@external(erlang, "store_ffi", "all_values")
+fn planner_all_values(table: PlannerTable) -> List(planner_types.PlannerTask)
+
+// Reserved for future use (trim/housekeeping)
+// @external(erlang, "store_ffi", "delete_key")
+// fn planner_delete_key(table: PlannerTable, key: String) -> Nil
+
+@external(erlang, "store_ffi", "delete_table")
+fn planner_delete_table(table: PlannerTable) -> Nil
+
+@external(erlang, "store_ffi", "table_size")
+fn planner_table_size(table: PlannerTable) -> Int
+
+// Endeavour-typed operations (reuse PlannerTable type)
+@external(erlang, "store_ffi", "insert")
+fn endeavour_insert(
+  table: PlannerTable,
+  key: String,
+  value: planner_types.Endeavour,
+) -> Nil
+
+@external(erlang, "store_ffi", "lookup")
+fn endeavour_lookup(
+  table: PlannerTable,
+  key: String,
+) -> Result(planner_types.Endeavour, Nil)
+
+@external(erlang, "store_ffi", "all_values")
+fn endeavour_all_values(table: PlannerTable) -> List(planner_types.Endeavour)
+
+@external(erlang, "store_ffi", "delete_table")
+fn endeavour_delete_table(table: PlannerTable) -> Nil
 
 // ---------------------------------------------------------------------------
 // Messages
@@ -455,6 +509,31 @@ pub type LibrarianMessage {
     reply_to: Subject(List(dag_types.CycleNode)),
   )
 
+  // --- Planner operations ---
+  /// Notify of a new task operation (after writing to JSONL).
+  NotifyTaskOp(op: planner_types.TaskOp)
+  /// Notify of a new endeavour operation (after writing to JSONL).
+  NotifyEndeavourOp(op: planner_types.EndeavourOp)
+  /// Query active tasks (Pending + Active).
+  QueryActiveTasks(reply_to: Subject(List(planner_types.PlannerTask)))
+  /// Query a single task by ID.
+  QueryTaskById(
+    task_id: String,
+    reply_to: Subject(Result(planner_types.PlannerTask, Nil)),
+  )
+  /// Query a single endeavour by ID.
+  QueryEndeavourById(
+    endeavour_id: String,
+    reply_to: Subject(Result(planner_types.Endeavour, Nil)),
+  )
+  /// Query all endeavours.
+  QueryAllEndeavours(reply_to: Subject(List(planner_types.Endeavour)))
+  /// Load narrative entries by cycle_ids (for Forecaster).
+  LoadByCycleIds(
+    cycle_ids: List(String),
+    reply_to: Subject(List(NarrativeEntry)),
+  )
+
   // --- Trim operations (Housekeeper) ---
   /// Evict narrative entries older than cutoff_date from all narrative ETS tables.
   TrimNarrativeWindow(cutoff_date: String, reply_to: Subject(Int))
@@ -501,6 +580,10 @@ type LibrarianState {
     artifacts_dir: String,
     artifacts: ArtifactTable,
     artifacts_by_cycle: ArtifactTable,
+    // Planner ETS tables
+    planner_dir: String,
+    planner_tasks: PlannerTable,
+    planner_endeavours: PlannerTable,
   )
 }
 
@@ -516,6 +599,7 @@ pub fn start(
   cbr_dir: String,
   facts_dir: String,
   artifacts_dir: String,
+  planner_dir: String,
   max_files: Int,
   cbr_config: CbrConfig,
 ) -> Subject(LibrarianMessage) {
@@ -525,6 +609,7 @@ pub fn start(
       cbr_dir,
       facts_dir,
       artifacts_dir,
+      planner_dir,
       max_files,
       cbr_config,
     )
@@ -538,6 +623,7 @@ fn start_with_pid(
   cbr_dir: String,
   facts_dir: String,
   artifacts_dir: String,
+  planner_dir: String,
   max_files: Int,
   cbr_config: CbrConfig,
 ) -> #(Subject(LibrarianMessage), Pid) {
@@ -579,6 +665,11 @@ fn start_with_pid(
       let artifacts_cycle_table =
         new_artifact_table("artifacts_by_cycle", "bag")
 
+      // Create Planner ETS tables
+      let planner_tasks_table = new_planner_table("planner_tasks", "set")
+      let planner_endeavours_table =
+        new_planner_table("planner_endeavours", "set")
+
       let state =
         LibrarianState(
           self:,
@@ -603,6 +694,9 @@ fn start_with_pid(
           artifacts_dir:,
           artifacts: artifacts_table,
           artifacts_by_cycle: artifacts_cycle_table,
+          planner_dir:,
+          planner_tasks: planner_tasks_table,
+          planner_endeavours: planner_endeavours_table,
         )
 
       // Replay narrative JSONL files
@@ -624,9 +718,13 @@ fn start_with_pid(
       // Replay artifacts from disk
       replay_artifacts_from_disk(state, max_files)
 
+      // Replay planner from disk
+      replay_planner_from_disk(state, max_files)
+
       let narrative_count = ets_table_size(entries_table)
       let cbr_count = cbr_table_size(cbr_cases_table)
       let facts_count = fact_table_size(facts_key_table)
+      let tasks_count = planner_table_size(planner_tasks_table)
       slog.info(
         "narrative/librarian",
         "start",
@@ -636,7 +734,9 @@ fn start_with_pid(
           <> string.inspect(cbr_count)
           <> " CBR cases, "
           <> string.inspect(facts_count)
-          <> " facts",
+          <> " facts, "
+          <> string.inspect(tasks_count)
+          <> " tasks",
         None,
       )
 
@@ -667,6 +767,7 @@ pub fn start_supervised(
   cbr_dir: String,
   facts_dir: String,
   artifacts_dir: String,
+  planner_dir: String,
   max_files: Int,
   max_restarts: Int,
   cbr_config: CbrConfig,
@@ -682,6 +783,7 @@ pub fn start_supervised(
       cbr_dir,
       facts_dir,
       artifacts_dir,
+      planner_dir,
       max_files,
       max_restarts,
       0,
@@ -714,6 +816,7 @@ fn librarian_supervisor_loop(
   cbr_dir: String,
   facts_dir: String,
   artifacts_dir: String,
+  planner_dir: String,
   max_files: Int,
   max_restarts: Int,
   restart_count: Int,
@@ -727,6 +830,7 @@ fn librarian_supervisor_loop(
       cbr_dir,
       facts_dir,
       artifacts_dir,
+      planner_dir,
       max_files,
       cbr_config,
     )
@@ -748,6 +852,7 @@ fn librarian_supervisor_loop(
     cbr_dir,
     facts_dir,
     artifacts_dir,
+    planner_dir,
     max_files,
     max_restarts,
     restart_count,
@@ -763,6 +868,7 @@ fn forward_loop(
   cbr_dir: String,
   facts_dir: String,
   artifacts_dir: String,
+  planner_dir: String,
   max_files: Int,
   max_restarts: Int,
   restart_count: Int,
@@ -779,6 +885,7 @@ fn forward_loop(
         cbr_dir,
         facts_dir,
         artifacts_dir,
+        planner_dir,
         max_files,
         max_restarts,
         restart_count,
@@ -802,6 +909,7 @@ fn forward_loop(
             cbr_dir,
             facts_dir,
             artifacts_dir,
+            planner_dir,
             max_files,
             max_restarts,
             restart_count + 1,
@@ -1435,6 +1543,9 @@ fn loop(state: LibrarianState) -> Nil {
           // Delete Artifact tables
           artifact_delete_table(state.artifacts)
           artifact_delete_table(state.artifacts_by_cycle)
+          // Delete Planner tables
+          planner_delete_table(state.planner_tasks)
+          endeavour_delete_table(state.planner_endeavours)
           slog.info(
             "narrative/librarian",
             "shutdown",
@@ -1865,6 +1976,55 @@ fn loop(state: LibrarianState) -> Nil {
         TrimArtifactWindow(cutoff_date:, reply_to:) -> {
           let count = do_trim_artifact(state, cutoff_date)
           process.send(reply_to, count)
+          loop(state)
+        }
+
+        // --- Planner messages ---
+        NotifyTaskOp(op:) -> {
+          apply_task_op(state, op)
+          loop(state)
+        }
+
+        NotifyEndeavourOp(op:) -> {
+          apply_endeavour_op(state, op)
+          loop(state)
+        }
+
+        QueryActiveTasks(reply_to:) -> {
+          let all = planner_all_values(state.planner_tasks)
+          let active =
+            list.filter(all, fn(t) {
+              t.status == planner_types.Pending
+              || t.status == planner_types.Active
+            })
+          process.send(reply_to, active)
+          loop(state)
+        }
+
+        QueryTaskById(task_id:, reply_to:) -> {
+          let result = planner_lookup(state.planner_tasks, task_id)
+          process.send(reply_to, result)
+          loop(state)
+        }
+
+        QueryEndeavourById(endeavour_id:, reply_to:) -> {
+          let result = endeavour_lookup(state.planner_endeavours, endeavour_id)
+          process.send(reply_to, result)
+          loop(state)
+        }
+
+        QueryAllEndeavours(reply_to:) -> {
+          let all = endeavour_all_values(state.planner_endeavours)
+          process.send(reply_to, all)
+          loop(state)
+        }
+
+        LoadByCycleIds(cycle_ids:, reply_to:) -> {
+          let entries =
+            list.filter_map(cycle_ids, fn(cid) {
+              ets_lookup(state.entries, cid)
+            })
+          process.send(reply_to, entries)
           loop(state)
         }
       }
@@ -2485,6 +2645,312 @@ fn build_tool_summaries(
         dag_types.ToolSummary(name:, success:, error: None),
         ..acc
       ])
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Planner — apply ops, replay, queries
+// ---------------------------------------------------------------------------
+
+fn apply_task_op(state: LibrarianState, op: planner_types.TaskOp) -> Nil {
+  case op {
+    planner_types.CreateTask(task:) ->
+      planner_insert(state.planner_tasks, task.task_id, task)
+
+    planner_types.UpdateTaskStatus(task_id:, status:, at:) ->
+      case planner_lookup(state.planner_tasks, task_id) {
+        Ok(t) ->
+          planner_insert(
+            state.planner_tasks,
+            task_id,
+            planner_types.PlannerTask(..t, status:, updated_at: at),
+          )
+        Error(_) -> Nil
+      }
+
+    planner_types.CompleteStep(task_id:, step_index:, at:) ->
+      case planner_lookup(state.planner_tasks, task_id) {
+        Ok(t) -> {
+          let steps =
+            list.map(t.plan_steps, fn(s) {
+              case s.index == step_index {
+                True ->
+                  planner_types.PlanStep(
+                    ..s,
+                    status: planner_types.Complete,
+                    completed_at: Some(at),
+                  )
+                False -> s
+              }
+            })
+          let all_complete =
+            list.all(steps, fn(s) { s.status == planner_types.Complete })
+          let new_status = case all_complete {
+            True -> planner_types.Complete
+            False -> t.status
+          }
+          planner_insert(
+            state.planner_tasks,
+            task_id,
+            planner_types.PlannerTask(
+              ..t,
+              plan_steps: steps,
+              status: new_status,
+              updated_at: at,
+            ),
+          )
+        }
+        Error(_) -> Nil
+      }
+
+    planner_types.FlagRisk(task_id:, text:, at:) ->
+      case planner_lookup(state.planner_tasks, task_id) {
+        Ok(t) ->
+          planner_insert(
+            state.planner_tasks,
+            task_id,
+            planner_types.PlannerTask(
+              ..t,
+              materialised_risks: list.append(t.materialised_risks, [text]),
+              updated_at: at,
+            ),
+          )
+        Error(_) -> Nil
+      }
+
+    planner_types.AddCycleId(task_id:, cycle_id:) ->
+      case planner_lookup(state.planner_tasks, task_id) {
+        Ok(t) ->
+          case list.contains(t.cycle_ids, cycle_id) {
+            True -> Nil
+            False ->
+              planner_insert(
+                state.planner_tasks,
+                task_id,
+                planner_types.PlannerTask(
+                  ..t,
+                  cycle_ids: list.append(t.cycle_ids, [cycle_id]),
+                ),
+              )
+          }
+        Error(_) -> Nil
+      }
+
+    planner_types.UpdateForecastScore(task_id:, score:) ->
+      case planner_lookup(state.planner_tasks, task_id) {
+        Ok(t) ->
+          planner_insert(
+            state.planner_tasks,
+            task_id,
+            planner_types.PlannerTask(..t, forecast_score: Some(score)),
+          )
+        Error(_) -> Nil
+      }
+  }
+}
+
+fn apply_endeavour_op(
+  state: LibrarianState,
+  op: planner_types.EndeavourOp,
+) -> Nil {
+  case op {
+    planner_types.CreateEndeavour(endeavour:) ->
+      endeavour_insert(
+        state.planner_endeavours,
+        endeavour.endeavour_id,
+        endeavour,
+      )
+
+    planner_types.AddTaskToEndeavour(endeavour_id:, task_id:) ->
+      case endeavour_lookup(state.planner_endeavours, endeavour_id) {
+        Ok(e) ->
+          case list.contains(e.task_ids, task_id) {
+            True -> Nil
+            False ->
+              endeavour_insert(
+                state.planner_endeavours,
+                endeavour_id,
+                planner_types.Endeavour(
+                  ..e,
+                  task_ids: list.append(e.task_ids, [task_id]),
+                ),
+              )
+          }
+        Error(_) -> Nil
+      }
+
+    planner_types.UpdateEndeavourStatus(endeavour_id:, status:) ->
+      case endeavour_lookup(state.planner_endeavours, endeavour_id) {
+        Ok(e) ->
+          endeavour_insert(
+            state.planner_endeavours,
+            endeavour_id,
+            planner_types.Endeavour(..e, status:),
+          )
+        Error(_) -> Nil
+      }
+  }
+}
+
+fn replay_planner_from_disk(state: LibrarianState, max_files: Int) -> Nil {
+  // Load and resolve tasks
+  case simplifile.read_directory(state.planner_dir) {
+    Error(_) -> Nil
+    Ok(files) -> {
+      let task_files =
+        files
+        |> list.filter(fn(f) { string.ends_with(f, "-tasks.jsonl") })
+        |> list.sort(string.compare)
+      let limited_tasks = limit_files(task_files, max_files)
+      let task_ops =
+        list.flat_map(limited_tasks, fn(f) {
+          let date = string.drop_end(f, 12)
+          planner_log.load_task_ops_date(state.planner_dir, date)
+        })
+      let tasks = planner_log.resolve_tasks(task_ops)
+      list.each(tasks, fn(t) {
+        planner_insert(state.planner_tasks, t.task_id, t)
+      })
+
+      // Load and resolve endeavours
+      let endeavour_files =
+        files
+        |> list.filter(fn(f) { string.ends_with(f, "-endeavours.jsonl") })
+        |> list.sort(string.compare)
+      let limited_endeavours = limit_files(endeavour_files, max_files)
+      let endeavour_ops =
+        list.flat_map(limited_endeavours, fn(f) {
+          let date = string.drop_end(f, 17)
+          planner_log.load_endeavour_ops_date(state.planner_dir, date)
+        })
+      let endeavours = planner_log.resolve_endeavours(endeavour_ops)
+      list.each(endeavours, fn(e) {
+        endeavour_insert(state.planner_endeavours, e.endeavour_id, e)
+      })
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Synchronous query helpers — Planner
+// ---------------------------------------------------------------------------
+
+/// Query active tasks (Pending + Active). Blocks until reply.
+pub fn get_active_tasks(
+  librarian: Subject(LibrarianMessage),
+) -> List(planner_types.PlannerTask) {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryActiveTasks(reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(tasks) -> tasks
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "get_active_tasks",
+        "Timeout waiting for reply",
+        None,
+      )
+      []
+    }
+  }
+}
+
+/// Query a single task by ID. Blocks until reply.
+pub fn get_task_by_id(
+  librarian: Subject(LibrarianMessage),
+  task_id: String,
+) -> Result(planner_types.PlannerTask, Nil) {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryTaskById(task_id:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(result) -> result
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "get_task_by_id",
+        "Timeout waiting for reply",
+        None,
+      )
+      Error(Nil)
+    }
+  }
+}
+
+/// Query a single endeavour by ID. Blocks until reply.
+pub fn get_endeavour_by_id(
+  librarian: Subject(LibrarianMessage),
+  endeavour_id: String,
+) -> Result(planner_types.Endeavour, Nil) {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryEndeavourById(endeavour_id:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(result) -> result
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "get_endeavour_by_id",
+        "Timeout waiting for reply",
+        None,
+      )
+      Error(Nil)
+    }
+  }
+}
+
+/// Query all endeavours. Blocks until reply.
+pub fn get_all_endeavours(
+  librarian: Subject(LibrarianMessage),
+) -> List(planner_types.Endeavour) {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryAllEndeavours(reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(endeavours) -> endeavours
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "get_all_endeavours",
+        "Timeout waiting for reply",
+        None,
+      )
+      []
+    }
+  }
+}
+
+/// Notify the Librarian of a task operation (fire-and-forget).
+pub fn notify_task_op(
+  librarian: Subject(LibrarianMessage),
+  op: planner_types.TaskOp,
+) -> Nil {
+  process.send(librarian, NotifyTaskOp(op:))
+}
+
+/// Notify the Librarian of an endeavour operation (fire-and-forget).
+pub fn notify_endeavour_op(
+  librarian: Subject(LibrarianMessage),
+  op: planner_types.EndeavourOp,
+) -> Nil {
+  process.send(librarian, NotifyEndeavourOp(op:))
+}
+
+/// Load narrative entries by cycle IDs. Blocks until reply.
+pub fn load_by_cycle_ids(
+  librarian: Subject(LibrarianMessage),
+  cycle_ids: List(String),
+) -> List(NarrativeEntry) {
+  let reply_to = process.new_subject()
+  process.send(librarian, LoadByCycleIds(cycle_ids:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(entries) -> entries
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "load_by_cycle_ids",
+        "Timeout waiting for reply",
+        None,
+      )
+      []
     }
   }
 }

@@ -50,6 +50,7 @@ pub type CognitiveConfig {
     input_queue_cap: Int,
     how_to_content: Option(String),
     redact_secrets: Bool,
+    planner_dir: String,
   )
 }
 
@@ -96,5 +97,6 @@ pub fn default_test_config(
     input_queue_cap: 10,
     how_to_content: None,
     redact_secrets: False,
+    planner_dir: base <> "/planner",
   )
 }

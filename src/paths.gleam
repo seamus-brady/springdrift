@@ -107,6 +107,11 @@ pub fn artifacts_dir() -> String {
   project_dir() <> "/memory/artifacts"
 }
 
+/// Planner directory: .springdrift/memory/planner/
+pub fn planner_dir() -> String {
+  project_dir() <> "/memory/planner"
+}
+
 /// Schedule directory: .springdrift/memory/schedule/
 pub fn schedule_dir() -> String {
   project_dir() <> "/memory/schedule"

@@ -97,7 +97,6 @@ pub type AppConfig {
     max_fetch_chars: Option(Int),
     tui_input_limit: Option(Int),
     websocket_max_bytes: Option(Int),
-    mailbox_warn_threshold: Option(Int),
     recall_max_entries: Option(Int),
     cbr_max_results: Option(Int),
     web_search_max_results: Option(Int),
@@ -164,6 +163,12 @@ pub type AppConfig {
     xstructor_max_retries: Option(Int),
     // ── Preamble budget ──
     preamble_budget_chars: Option(Int),
+    // ── Forecaster ──
+    forecaster_enabled: Option(Bool),
+    forecaster_tick_ms: Option(Int),
+    forecaster_replan_threshold: Option(Float),
+    forecaster_min_cycles: Option(Int),
+    forecaster_stale_threshold_ms: Option(Int),
   )
 }
 
@@ -233,7 +238,6 @@ pub fn default() -> AppConfig {
     max_fetch_chars: None,
     tui_input_limit: None,
     websocket_max_bytes: None,
-    mailbox_warn_threshold: None,
     recall_max_entries: None,
     cbr_max_results: None,
     web_search_max_results: None,
@@ -286,6 +290,11 @@ pub fn default() -> AppConfig {
     autonomous_token_budget_per_hour: None,
     xstructor_max_retries: None,
     preamble_budget_chars: None,
+    forecaster_enabled: None,
+    forecaster_tick_ms: None,
+    forecaster_replan_threshold: None,
+    forecaster_min_cycles: None,
+    forecaster_stale_threshold_ms: None,
   )
 }
 
@@ -454,10 +463,6 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     websocket_max_bytes: option.or(
       override_cfg.websocket_max_bytes,
       base.websocket_max_bytes,
-    ),
-    mailbox_warn_threshold: option.or(
-      override_cfg.mailbox_warn_threshold,
-      base.mailbox_warn_threshold,
     ),
     recall_max_entries: option.or(
       override_cfg.recall_max_entries,
@@ -662,6 +667,26 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       override_cfg.preamble_budget_chars,
       base.preamble_budget_chars,
     ),
+    forecaster_enabled: option.or(
+      override_cfg.forecaster_enabled,
+      base.forecaster_enabled,
+    ),
+    forecaster_tick_ms: option.or(
+      override_cfg.forecaster_tick_ms,
+      base.forecaster_tick_ms,
+    ),
+    forecaster_replan_threshold: option.or(
+      override_cfg.forecaster_replan_threshold,
+      base.forecaster_replan_threshold,
+    ),
+    forecaster_min_cycles: option.or(
+      override_cfg.forecaster_min_cycles,
+      base.forecaster_min_cycles,
+    ),
+    forecaster_stale_threshold_ms: option.or(
+      override_cfg.forecaster_stale_threshold_ms,
+      base.forecaster_stale_threshold_ms,
+    ),
   )
 }
 
@@ -794,15 +819,28 @@ pub fn to_string(cfg: AppConfig) -> String {
     option.map(cfg.max_fetch_chars, fn(v) {
       "max_fetch_chars: " <> int.to_string(v)
     }),
-    option.map(cfg.mailbox_warn_threshold, fn(v) {
-      "mailbox_warn_threshold: " <> int.to_string(v)
-    }),
     // CBR
     option.map(cfg.cbr_min_score, fn(v) {
       "cbr.min_score: " <> float.to_string(v)
     }),
     // Web
     option.map(cfg.web_port, fn(v) { "web.port: " <> int.to_string(v) }),
+    // Forecaster
+    option.map(cfg.forecaster_enabled, fn(v) {
+      "forecaster.enabled: " <> bool_str(v)
+    }),
+    option.map(cfg.forecaster_tick_ms, fn(v) {
+      "forecaster.tick_ms: " <> int.to_string(v)
+    }),
+    option.map(cfg.forecaster_replan_threshold, fn(v) {
+      "forecaster.replan_threshold: " <> float.to_string(v)
+    }),
+    option.map(cfg.forecaster_min_cycles, fn(v) {
+      "forecaster.min_cycles: " <> int.to_string(v)
+    }),
+    option.map(cfg.forecaster_stale_threshold_ms, fn(v) {
+      "forecaster.stale_threshold_ms: " <> int.to_string(v)
+    }),
   ]
   |> list.filter_map(fn(x) { option.to_result(x, Nil) })
   |> string.join("\n")
@@ -1051,9 +1089,6 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     max_fetch_chars: get_toml_int(table, ["limits", "max_fetch_chars"]),
     tui_input_limit: get_toml_int(table, ["limits", "tui_input_limit"]),
     websocket_max_bytes: get_toml_int(table, ["limits", "websocket_max_bytes"]),
-    mailbox_warn_threshold: get_toml_int(table, [
-      "limits", "mailbox_warn_threshold",
-    ]),
     recall_max_entries: get_toml_int(table, ["limits", "recall_max_entries"]),
     cbr_max_results: get_toml_int(table, ["limits", "cbr_max_results"]),
     web_search_max_results: get_toml_int(table, [
@@ -1161,6 +1196,16 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     preamble_budget_chars: get_toml_int(table, [
       "narrative", "preamble_budget_chars",
     ]),
+    // ── [forecaster] ──
+    forecaster_enabled: get_toml_bool(table, ["forecaster", "enabled"]),
+    forecaster_tick_ms: get_toml_int(table, ["forecaster", "tick_ms"]),
+    forecaster_replan_threshold: get_toml_float(table, [
+      "forecaster", "replan_threshold",
+    ]),
+    forecaster_min_cycles: get_toml_int(table, ["forecaster", "min_cycles"]),
+    forecaster_stale_threshold_ms: get_toml_int(table, [
+      "forecaster", "stale_threshold_ms",
+    ]),
   )
 }
 
@@ -1194,6 +1239,7 @@ const known_keys = [
   "narrative", "profile", "profiles_dirs", "agent", "log_retention_days",
   "log_max_file_bytes", "timeouts", "retry", "limits", "scoring", "housekeeping",
   "housekeeper", "cbr", "agents", "web", "services", "scheduler", "xstructor",
+  "forecaster",
 ]
 
 const known_narrative_keys = [

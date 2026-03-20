@@ -28,6 +28,7 @@ import narrative/virtual_memory.{
   type CbrSlotEntry, type VirtualMemory, ScratchEntry,
 }
 import paths
+import planner/types as planner_types
 import scheduler/types as scheduler_types
 import slog
 
@@ -49,6 +50,8 @@ pub type CycleContext {
     agents_active: Int,
     /// Total messages in conversation history (conversation depth signal)
     message_count: Int,
+    /// Sensory events accumulated since last cycle
+    sensory_events: List(agent_types.SensoryEvent),
   )
 }
 
@@ -866,6 +869,11 @@ fn build_sensorium(
   // Find last failure from recent entries for vitals
   let last_failure = find_last_failure(recent_entries)
 
+  let sensory_events = case context {
+    Some(ctx) -> ctx.sensory_events
+    None -> []
+  }
+
   let clock = render_sensorium_clock(now, session_since, recent_entries)
   let situation =
     render_sensorium_situation(
@@ -883,9 +891,15 @@ fn build_sensorium(
       last_failure,
       state.scheduler,
     )
+  let events = render_sensorium_events(sensory_events)
+
+  // Query active tasks and endeavours for the <tasks> section
+  let active_tasks = librarian.get_active_tasks(state.librarian)
+  let endeavours = librarian.get_all_endeavours(state.librarian)
+  let tasks_section = render_sensorium_tasks(active_tasks, endeavours)
 
   let sections =
-    [clock, situation, schedule, vitals]
+    [clock, situation, schedule, vitals, events, tasks_section]
     |> list.filter(fn(s) { s != "" })
     |> string.join("\n")
 
@@ -1028,6 +1042,124 @@ pub fn render_sensorium_vitals(
   <> failure_attr
   <> budget_attrs
   <> "/>"
+}
+
+/// Render the <events> element — sensory events accumulated between cycles.
+/// Returns "" if events is empty.
+pub fn render_sensorium_events(events: List(agent_types.SensoryEvent)) -> String {
+  case events {
+    [] -> ""
+    _ -> {
+      let count = list.length(events)
+      let event_lines =
+        events
+        |> list.map(fn(e) {
+          "    <event name=\""
+          <> e.name
+          <> "\" title=\""
+          <> e.title
+          <> "\" at=\""
+          <> e.fired_at
+          <> "\">"
+          <> e.body
+          <> "</event>"
+        })
+        |> string.join("\n")
+      "  <events count=\""
+      <> int.to_string(count)
+      <> "\">\n"
+      <> event_lines
+      <> "\n  </events>"
+    }
+  }
+}
+
+/// Render the <tasks> element — active planner tasks and endeavours.
+/// Returns "" if no active tasks.
+pub fn render_sensorium_tasks(
+  tasks: List(planner_types.PlannerTask),
+  endeavours: List(planner_types.Endeavour),
+) -> String {
+  let active_tasks =
+    list.filter(tasks, fn(t) {
+      t.status == planner_types.Active || t.status == planner_types.Pending
+    })
+  let active_endeavours =
+    list.filter(endeavours, fn(e) { e.status == planner_types.Open })
+  case active_tasks, active_endeavours {
+    [], [] -> ""
+    _, _ -> {
+      let endeavour_lines =
+        active_endeavours
+        |> list.map(fn(e) {
+          let total = list.length(e.task_ids)
+          let complete =
+            list.count(tasks, fn(t) {
+              case t.endeavour_id {
+                option.Some(eid) ->
+                  eid == e.endeavour_id && t.status == planner_types.Complete
+                option.None -> False
+              }
+            })
+          "    <endeavour id=\""
+          <> e.endeavour_id
+          <> "\" title=\""
+          <> e.title
+          <> "\" tasks=\""
+          <> int.to_string(total)
+          <> "\" complete=\""
+          <> int.to_string(complete)
+          <> "\"/>"
+        })
+        |> string.join("\n")
+      let task_lines =
+        active_tasks
+        |> list.map(fn(t) {
+          let total_steps = list.length(t.plan_steps)
+          let complete_steps =
+            list.count(t.plan_steps, fn(s) {
+              s.status == planner_types.Complete
+            })
+          let progress =
+            int.to_string(complete_steps) <> "/" <> int.to_string(total_steps)
+          let status_str = case t.status {
+            planner_types.Active -> "active"
+            planner_types.Pending -> "pending"
+            _ -> "other"
+          }
+          let endeavour_attr = case t.endeavour_id {
+            option.Some(eid) -> " endeavour=\"" <> eid <> "\""
+            option.None -> ""
+          }
+          let updated_attr =
+            " updated=\"" <> format_elapsed_since(t.updated_at) <> "\""
+          "    <task id=\""
+          <> t.task_id
+          <> "\" title=\""
+          <> t.title
+          <> "\" status=\""
+          <> status_str
+          <> "\" progress=\""
+          <> progress
+          <> "\""
+          <> endeavour_attr
+          <> updated_attr
+          <> "/>"
+        })
+        |> string.join("\n")
+      let all_lines =
+        [endeavour_lines, task_lines]
+        |> list.filter(fn(s) { s != "" })
+        |> string.join("\n")
+      "  <tasks active=\""
+      <> int.to_string(list.length(active_tasks))
+      <> "\" endeavours=\""
+      <> int.to_string(list.length(active_endeavours))
+      <> "\">\n"
+      <> all_lines
+      <> "\n  </tasks>"
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
