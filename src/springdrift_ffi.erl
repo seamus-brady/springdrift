@@ -15,7 +15,8 @@
          mailbox_size/0, add_days/2,
          ms_until_datetime/1, advance_datetime_ms/2,
          re_replace_all/3,
-         set_env/2]).
+         set_env/2,
+         run_cmd/3, which/1]).
 
 %% Read one line from stdin.
 %% Returns {ok, Binary} (including trailing newline) or {error, nil} on EOF.
@@ -534,3 +535,56 @@ re_replace_all(Text, Pattern, Replacement) when is_binary(Text), is_binary(Patte
 set_env(Name, Value) when is_binary(Name), is_binary(Value) ->
     os:putenv(binary_to_list(Name), binary_to_list(Value)),
     nil.
+
+%% Run a command with arguments and a timeout.
+%% Returns {ok, {ExitCode, Stdout, Stderr}} or {error, Reason}.
+%% Uses /bin/sh -c to get proper stderr separation via redirect.
+run_cmd(Cmd, Args, TimeoutMs) when is_binary(Cmd), is_list(Args), is_integer(TimeoutMs) ->
+    CmdStr = binary_to_list(Cmd),
+    ArgsStr = [binary_to_list(A) || A <- Args],
+    %% Build a shell command that captures stderr separately
+    FullCmd = string:join([CmdStr | ArgsStr], " "),
+    StderrFile = "/tmp/springdrift_stderr_" ++ integer_to_list(erlang:unique_integer([positive])),
+    ShellCmd = FullCmd ++ " 2>" ++ StderrFile,
+    try
+        Port = open_port({spawn, ShellCmd},
+                         [binary, exit_status, use_stdio, stderr_to_stdout, {line, 65536}]),
+        Result = collect_port_output(Port, <<>>, TimeoutMs),
+        Stderr = case file:read_file(StderrFile) of
+            {ok, SE} -> SE;
+            {error, _} -> <<>>
+        end,
+        file:delete(StderrFile),
+        case Result of
+            {ok, {ExitCode, Stdout}} ->
+                {ok, {ExitCode, Stdout, Stderr}};
+            {error, timeout} ->
+                {error, <<"Command timed out after ", (integer_to_binary(TimeoutMs))/binary, "ms">>}
+        end
+    catch
+        _:Reason ->
+            file:delete(StderrFile),
+            {error, iolist_to_binary(io_lib:format("Command failed: ~p", [Reason]))}
+    end.
+
+collect_port_output(Port, Acc, TimeoutMs) ->
+    receive
+        {Port, {data, {eol, Line}}} ->
+            collect_port_output(Port, <<Acc/binary, Line/binary, "\n">>, TimeoutMs);
+        {Port, {data, {noeol, Line}}} ->
+            collect_port_output(Port, <<Acc/binary, Line/binary>>, TimeoutMs);
+        {Port, {exit_status, ExitCode}} ->
+            {ok, {ExitCode, Acc}}
+    after TimeoutMs ->
+        catch port_close(Port),
+        %% Try to kill the OS process
+        catch os:cmd("kill -9 $(lsof -ti :" ++ integer_to_list(erlang:port_info(Port, id)) ++ ") 2>/dev/null"),
+        {error, timeout}
+    end.
+
+%% Check if a binary exists on PATH. Returns {ok, Path} or {error, nil}.
+which(Name) when is_binary(Name) ->
+    case os:find_executable(binary_to_list(Name)) of
+        false -> {error, nil};
+        Path -> {ok, list_to_binary(Path)}
+    end.

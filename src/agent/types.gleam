@@ -389,6 +389,9 @@ pub type Notification {
   SchedulerJobCompleted(name: String, result_preview: String)
   SchedulerJobFailed(name: String, reason: String)
   PlannerNotification(task_id: String, title: String, action: String)
+  SandboxStarted(pool_size: Int, port_range: String)
+  SandboxContainerFailed(slot: Int, reason: String)
+  SandboxUnavailable(reason: String)
 }
 
 // ---------------------------------------------------------------------------

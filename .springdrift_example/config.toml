@@ -111,9 +111,6 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 # Supervisor restart window — sliding window for counting restart events (default: 60000 = 60s)
 # restart_window_ms = 60000
 
-# E2B sandbox execution timeout in seconds (default: 600 = 10 min)
-# sandbox_timeout_s = 600
-
 # Scheduler stuck-job timeout — mark job as failed if still running (default: 600000 = 10 min)
 # scheduler_stuck_ms = 600000
 
@@ -335,8 +332,40 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 # Jina Reader API
 # jina_reader_base_url = "https://r.jina.ai/"
 
-# E2B sandbox API
-# e2b_base_url = "https://api.e2b.app"
+# ── Sandbox ──────────────────────────────────────────────────────────────────
+# Local Podman sandbox for coder agent code execution and serving.
+
+[sandbox]
+# Enable Podman sandbox for coder agent (default: false)
+# Requires podman installed. On macOS, requires podman machine running.
+# enabled = false
+
+# Max containers in the pool (default: 1, max: 3)
+# pool_size = 1
+
+# Memory limit per container in MB (default: 512)
+# memory_mb = 512
+
+# CPU limit per container (default: "1")
+# cpus = "1"
+
+# Container image (default: "python:3.12-slim")
+# image = "python:3.12-slim"
+
+# Per-execution timeout in ms (default: 60000 = 1 min)
+# exec_timeout_ms = 60000
+
+# Host port base for serve mode (default: 10000)
+# port_base = 10000
+
+# Host port stride per slot — slot N maps to port_base + N*stride (default: 100)
+# port_stride = 100
+
+# Number of ports forwarded per slot (default: 5)
+# ports_per_slot = 5
+
+# Auto-start podman machine on macOS if not running (default: true)
+# auto_machine = true
 
 # ── XStructor ────────────────────────────────────────────────────────────────
 # XML-schema-validated structured LLM output.

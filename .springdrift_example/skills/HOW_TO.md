@@ -35,8 +35,8 @@ tools: `reflect`, `inspect_cycle`, `list_recent_cycles`, `query_tool_activity`.
 
 1. Call `recall_cases(intent: "code")` for relevant past patterns
 2. Use `agent_coder` for the actual work
-3. If `run_code` (E2B sandbox) is unavailable (no `E2B_API_KEY`), inform the user
-   rather than attempting local execution
+3. If sandbox is enabled, coder has `run_code` (execute scripts) and `serve` (start servers)
+4. If sandbox is unavailable, coder uses `request_human_input` to ask the user to run code
 
 ## Multi-Agent Tasks
 
@@ -211,7 +211,7 @@ When a required API key is missing, fall back gracefully:
 
 - **Brave tools unavailable** (no `BRAVE_API_KEY`) → use `web_search` (DuckDuckGo, no key required)
 - **jina_reader unavailable** (no `JINA_API_KEY`) → use `fetch_url` as fallback
-- **run_code unavailable** (no `E2B_API_KEY`) → do not attempt code execution; inform the user
+- **Sandbox unavailable** (no podman) → coder uses `request_human_input` to ask user to run code
 
 ## What to Avoid
 

@@ -117,6 +117,14 @@ src/
 ├── tools/how_to_content.gleam Default HOW_TO content (builtin fallback)
 ├── tools/web.gleam            Web tools: fetch_url, web_search
 ├── tools/artifacts.gleam      Artifact tools: store_result, retrieve_result (researcher agent)
+├── tools/sandbox.gleam        Sandbox tools: run_code, serve, stop_serve (coder agent)
+│
+├── sandbox/                   Local Podman sandbox
+│   ├── types.gleam            SandboxConfig, SandboxSlot, SandboxMessage, SandboxManager
+│   ├── manager.gleam          OTP actor managing container pool with port forwarding
+│   ├── podman_ffi.gleam       FFI declarations for subprocess execution (run_cmd, which)
+│   └── diagnostics.gleam      Startup checks: podman version, machine status, image pull
+│
 ├── tui.gleam                  Alternate-screen TUI; Chat + Log + Narrative tabs
 │
 ├── web/                       Web chat GUI + admin dashboard
@@ -324,6 +332,16 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `forecaster_tick_ms` | — | 300000 | Forecaster evaluation interval (ms) |
 | `forecaster_replan_threshold` | — | 0.55 | D' score above which replan is suggested |
 | `forecaster_min_cycles` | — | 2 | Min cycles on a task before forecaster evaluates |
+| `sandbox_enabled` | — | False | Enable local Podman sandbox for coder agent |
+| `sandbox_pool_size` | — | 1 | Max containers in the pool (max: 3) |
+| `sandbox_memory_mb` | — | 512 | Memory limit per container in MB |
+| `sandbox_cpus` | — | "1" | CPU limit per container |
+| `sandbox_image` | — | "python:3.12-slim" | Container image |
+| `sandbox_exec_timeout_ms` | — | 60000 | Per-execution timeout (ms) |
+| `sandbox_port_base` | — | 10000 | Host port base for serve mode |
+| `sandbox_port_stride` | — | 100 | Host port stride per slot |
+| `sandbox_ports_per_slot` | — | 5 | Ports forwarded per slot |
+| `sandbox_auto_machine` | — | True | Auto-start podman machine on macOS |
 
 ## Memory architecture
 
@@ -638,6 +656,17 @@ LLM call → clean response → validate against schema → retry on error loop.
 (`root.child.grandchild`). Repeated elements use indexed paths
 (`root.items.item.0`, `root.items.item.1`).
 
+**Local Podman sandbox** — `sandbox/manager.gleam` is an OTP actor managing a pool of
+Podman containers for the coder agent. Two execution modes: `run_code` (synchronous
+script execution) and `serve` (long-lived process with port forwarding). Port allocation
+is deterministic: `host_port = port_base + slot * port_stride + index`, with container-
+internal ports fixed at 47200-47204. All ports are mapped at container creation time.
+The manager runs health checks every 30s and restarts failed containers. Startup
+verifies `podman` binary, optionally starts podman machine on macOS, pulls the image
+if missing, and sweeps stale `springdrift-sandbox-*` containers. When `sandbox_enabled`
+is False (default), the coder agent falls back to `request_human_input` — no sandbox
+code runs. Workspace dirs live at `.springdrift/sandbox/workspaces/N/`.
+
 **Config validation** — `parse_config_toml` validates unknown TOML keys and warns via
 `slog`. Numeric values are range-checked (must be positive). Provider and GUI mode
 values are validated against known options. Parse failures are logged instead of silent.
@@ -717,7 +746,8 @@ The config is organized into these TOML sections:
 | `[agents.coder]` | Coder agent: max_tokens, max_turns, max_errors |
 | `[agents.writer]` | Writer agent: max_tokens, max_turns, max_errors |
 | `[web]` | Web GUI port |
-| `[services]` | External API base URLs (DuckDuckGo, E2B) |
+| `[services]` | External API base URLs (DuckDuckGo, Brave, Jina) |
+| `[sandbox]` | Local Podman sandbox: enabled, pool_size, memory, ports, image |
 
 Quick example (top-level fields only):
 

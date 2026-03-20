@@ -77,7 +77,17 @@ pub type AppConfig {
     librarian_startup_timeout_ms: Option(Int),
     scheduler_job_timeout_ms: Option(Int),
     restart_window_ms: Option(Int),
-    sandbox_timeout_s: Option(Int),
+    // ── Sandbox ──
+    sandbox_enabled: Option(Bool),
+    sandbox_pool_size: Option(Int),
+    sandbox_memory_mb: Option(Int),
+    sandbox_cpus: Option(String),
+    sandbox_image: Option(String),
+    sandbox_exec_timeout_ms: Option(Int),
+    sandbox_port_base: Option(Int),
+    sandbox_port_stride: Option(Int),
+    sandbox_ports_per_slot: Option(Int),
+    sandbox_auto_machine: Option(Bool),
     // ── Housekeeper GenServer ──
     housekeeper_short_tick_ms: Option(Int),
     housekeeper_medium_tick_ms: Option(Int),
@@ -141,7 +151,6 @@ pub type AppConfig {
     web_port: Option(Int),
     // ── External services ──
     duckduckgo_url: Option(String),
-    e2b_base_url: Option(String),
     brave_search_base_url: Option(String),
     brave_answers_base_url: Option(String),
     jina_reader_base_url: Option(String),
@@ -221,7 +230,16 @@ pub fn default() -> AppConfig {
     librarian_startup_timeout_ms: None,
     scheduler_job_timeout_ms: None,
     restart_window_ms: None,
-    sandbox_timeout_s: None,
+    sandbox_enabled: None,
+    sandbox_pool_size: None,
+    sandbox_memory_mb: None,
+    sandbox_cpus: None,
+    sandbox_image: None,
+    sandbox_exec_timeout_ms: None,
+    sandbox_port_base: None,
+    sandbox_port_stride: None,
+    sandbox_ports_per_slot: None,
+    sandbox_auto_machine: None,
     housekeeper_short_tick_ms: None,
     housekeeper_medium_tick_ms: None,
     housekeeper_long_tick_ms: None,
@@ -275,7 +293,6 @@ pub fn default() -> AppConfig {
     writer_max_errors: None,
     web_port: None,
     duckduckgo_url: None,
-    e2b_base_url: None,
     brave_search_base_url: None,
     brave_answers_base_url: None,
     jina_reader_base_url: None,
@@ -394,9 +411,39 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       override_cfg.restart_window_ms,
       base.restart_window_ms,
     ),
-    sandbox_timeout_s: option.or(
-      override_cfg.sandbox_timeout_s,
-      base.sandbox_timeout_s,
+    sandbox_enabled: option.or(
+      override_cfg.sandbox_enabled,
+      base.sandbox_enabled,
+    ),
+    sandbox_pool_size: option.or(
+      override_cfg.sandbox_pool_size,
+      base.sandbox_pool_size,
+    ),
+    sandbox_memory_mb: option.or(
+      override_cfg.sandbox_memory_mb,
+      base.sandbox_memory_mb,
+    ),
+    sandbox_cpus: option.or(override_cfg.sandbox_cpus, base.sandbox_cpus),
+    sandbox_image: option.or(override_cfg.sandbox_image, base.sandbox_image),
+    sandbox_exec_timeout_ms: option.or(
+      override_cfg.sandbox_exec_timeout_ms,
+      base.sandbox_exec_timeout_ms,
+    ),
+    sandbox_port_base: option.or(
+      override_cfg.sandbox_port_base,
+      base.sandbox_port_base,
+    ),
+    sandbox_port_stride: option.or(
+      override_cfg.sandbox_port_stride,
+      base.sandbox_port_stride,
+    ),
+    sandbox_ports_per_slot: option.or(
+      override_cfg.sandbox_ports_per_slot,
+      base.sandbox_ports_per_slot,
+    ),
+    sandbox_auto_machine: option.or(
+      override_cfg.sandbox_auto_machine,
+      base.sandbox_auto_machine,
     ),
     housekeeper_short_tick_ms: option.or(
       override_cfg.housekeeper_short_tick_ms,
@@ -610,7 +657,6 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     web_port: option.or(override_cfg.web_port, base.web_port),
     // External services
     duckduckgo_url: option.or(override_cfg.duckduckgo_url, base.duckduckgo_url),
-    e2b_base_url: option.or(override_cfg.e2b_base_url, base.e2b_base_url),
     brave_search_base_url: option.or(
       override_cfg.brave_search_base_url,
       base.brave_search_base_url,
@@ -1057,7 +1103,17 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
       "timeouts", "scheduler_job_ms",
     ]),
     restart_window_ms: get_toml_int(table, ["timeouts", "restart_window_ms"]),
-    sandbox_timeout_s: get_toml_int(table, ["timeouts", "sandbox_timeout_s"]),
+    // ── [sandbox] ──
+    sandbox_enabled: get_toml_bool(table, ["sandbox", "enabled"]),
+    sandbox_pool_size: get_toml_int(table, ["sandbox", "pool_size"]),
+    sandbox_memory_mb: get_toml_int(table, ["sandbox", "memory_mb"]),
+    sandbox_cpus: get_toml_str(table, ["sandbox", "cpus"]),
+    sandbox_image: get_toml_str(table, ["sandbox", "image"]),
+    sandbox_exec_timeout_ms: get_toml_int(table, ["sandbox", "exec_timeout_ms"]),
+    sandbox_port_base: get_toml_int(table, ["sandbox", "port_base"]),
+    sandbox_port_stride: get_toml_int(table, ["sandbox", "port_stride"]),
+    sandbox_ports_per_slot: get_toml_int(table, ["sandbox", "ports_per_slot"]),
+    sandbox_auto_machine: get_toml_bool(table, ["sandbox", "auto_machine"]),
     // ── [housekeeper] ──
     housekeeper_short_tick_ms: get_toml_int(table, [
       "housekeeper", "short_tick_ms",
@@ -1156,7 +1212,6 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     web_port: get_toml_int(table, ["web", "port"]),
     // ── [services] ──
     duckduckgo_url: get_toml_str(table, ["services", "duckduckgo_url"]),
-    e2b_base_url: get_toml_str(table, ["services", "e2b_base_url"]),
     brave_search_base_url: get_toml_str(table, [
       "services", "brave_search_base_url",
     ]),
@@ -1239,7 +1294,7 @@ const known_keys = [
   "narrative", "profile", "profiles_dirs", "agent", "log_retention_days",
   "log_max_file_bytes", "timeouts", "retry", "limits", "scoring", "housekeeping",
   "housekeeper", "cbr", "agents", "web", "services", "scheduler", "xstructor",
-  "forecaster",
+  "forecaster", "sandbox",
 ]
 
 const known_narrative_keys = [

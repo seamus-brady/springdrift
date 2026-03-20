@@ -1,25 +1,32 @@
 import agent/types.{type AgentSpec, AgentSpec, Permanent}
-import gleam/list
-import gleam/option.{None}
+import gleam/option.{type Option, None, Some}
 import llm/provider.{type Provider}
 import llm/types as llm_types
+import sandbox/types as sandbox_types
 import tools/builtin
-import tools/e2b
+import tools/sandbox
 
-const system_prompt_with_e2b = "You are a coding agent. Your job is to write, modify, and reason about code.
+const system_prompt_with_sandbox = "You are a coding agent. Your job is to write, modify, and reason about code.
 
 ## Tools
 
 ### Code execution
-You have **run_code** — a secure cloud sandbox (E2B) for executing code. It supports Python (default), JavaScript, R, Java, and Bash. Each call creates a fresh sandbox, so combine related operations into a single code block when possible.
+You have **run_code** — a local Podman sandbox for executing code. It supports Python (default), JavaScript, and Bash. Each call runs in an isolated container with its own workspace.
 
 Use run_code to:
 - Test code snippets before presenting them
 - Run data transformations or calculations
 - Verify logic, parse files, or prototype solutions
-- Install packages with pip/npm within the code block
+- Install packages with pip within the code block
 
-The sandbox has no persistent state between calls. If you need results from a previous execution, capture the output and feed it into the next call.
+### Serving
+You have **serve** — start a long-lived process (Flask app, API server, etc.) in the sandbox with port forwarding to the host. The response tells you the host URL where the app is accessible.
+
+Use serve to:
+- Start web servers, APIs, or interactive apps
+- Make services accessible to the user on localhost
+
+Use **stop_serve** to stop a running server and free the slot.
 
 ### Other tools
 - **request_human_input**: Ask the human for file contents, directory listings, or clarification
@@ -35,7 +42,7 @@ The sandbox has no persistent state between calls. If you need results from a pr
 
 When you complete your task, respond with a concise summary of what was built or changed, including test results. Omit raw file contents and verbose output."
 
-const system_prompt_no_e2b = "You are a coding agent. Your job is to write, modify, and reason about code.
+const system_prompt_no_sandbox = "You are a coding agent. Your job is to write, modify, and reason about code.
 
 ## Tools
 - **request_human_input**: Ask the human for file contents, directory listings, or clarification. You can also ask the human to run code on your behalf and report the results.
@@ -56,19 +63,19 @@ When you complete your task, respond with a concise summary of what was built or
 pub fn spec(
   provider: Provider,
   model: String,
-  sandbox_timeout: Int,
+  sandbox_manager: Option(sandbox_types.SandboxManager),
 ) -> AgentSpec {
-  let has_e2b = e2b.is_available()
-  let tools = list.flatten([e2b.all(), builtin.all()])
-  let system_prompt = case has_e2b {
-    True -> system_prompt_with_e2b
-    False -> system_prompt_no_e2b
-  }
-  let description = case has_e2b {
-    True ->
-      "Write, test, and debug code. Has run_code for executing Python/JS/Bash in a secure E2B cloud sandbox, plus request_human_input for file access and clarification."
-    False ->
-      "Write, modify, and reason about code. Uses request_human_input to ask the human to run code and share results. No sandbox available."
+  let #(tools, system_prompt, description) = case sandbox_manager {
+    Some(manager) -> #(
+      sandbox.tools(manager),
+      system_prompt_with_sandbox,
+      "Write, test, and debug code. Has run_code for executing Python/JS/Bash in a local Podman sandbox, plus serve for starting web servers with port forwarding.",
+    )
+    None -> #(
+      builtin.all(),
+      system_prompt_no_sandbox,
+      "Write, modify, and reason about code. Uses request_human_input to ask the human to run code and share results. No sandbox available.",
+    )
   }
 
   AgentSpec(
@@ -84,19 +91,23 @@ pub fn spec(
     max_context_messages: None,
     tools:,
     restart: Permanent,
-    tool_executor: coder_executor(sandbox_timeout),
+    tool_executor: coder_executor(sandbox_manager),
     inter_turn_delay_ms: 200,
     redact_secrets: True,
   )
 }
 
 fn coder_executor(
-  sandbox_timeout: Int,
+  sandbox_manager: Option(sandbox_types.SandboxManager),
 ) -> fn(llm_types.ToolCall) -> llm_types.ToolResult {
   fn(call: llm_types.ToolCall) -> llm_types.ToolResult {
-    case call.name {
-      "run_code" -> e2b.execute(call, sandbox_timeout)
-      _ -> builtin.execute(call)
+    case sandbox_manager {
+      Some(manager) ->
+        case sandbox.is_sandbox_tool(call.name) {
+          True -> sandbox.execute(call, manager)
+          False -> builtin.execute(call)
+        }
+      None -> builtin.execute(call)
     }
   }
 }

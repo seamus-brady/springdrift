@@ -555,6 +555,19 @@ fn notification_to_server_message(
       protocol.ToolNotification(
         name: "planner:" <> task_id <> " " <> action <> " — " <> title,
       )
+    agent_types.SandboxStarted(pool_size:, port_range:) ->
+      protocol.ToolNotification(
+        name: "sandbox:started pool="
+        <> int.to_string(pool_size)
+        <> " ports="
+        <> port_range,
+      )
+    agent_types.SandboxContainerFailed(slot:, reason:) ->
+      protocol.ToolNotification(
+        name: "sandbox:slot " <> int.to_string(slot) <> " failed: " <> reason,
+      )
+    agent_types.SandboxUnavailable(reason:) ->
+      protocol.ToolNotification(name: "sandbox:unavailable " <> reason)
   }
 }
 

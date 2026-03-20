@@ -127,6 +127,16 @@ pub fn scheduler_outputs_dir() -> String {
   project_dir() <> "/scheduler/outputs"
 }
 
+/// Sandbox directory: .springdrift/sandbox/
+pub fn sandbox_dir() -> String {
+  project_dir() <> "/sandbox"
+}
+
+/// Sandbox workspaces directory: .springdrift/sandbox/workspaces/
+pub fn sandbox_workspaces_dir() -> String {
+  sandbox_dir() <> "/workspaces"
+}
+
 /// Legacy scheduler checkpoint (one-time migration source only).
 pub fn scheduler_checkpoint() -> String {
   project_dir() <> "/scheduler-checkpoint.json"

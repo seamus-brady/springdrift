@@ -39,6 +39,8 @@ import planner/forecaster
 import planner/types as planner_types
 import profile
 import profile/types as profile_types
+import sandbox/manager as sandbox_manager_mod
+import sandbox/types as sandbox_types
 import scheduler/log as schedule_log
 import scheduler/runner as scheduler_runner
 import simplifile
@@ -435,6 +437,43 @@ fn run(cfg: AppConfig) -> Nil {
   }
   let brave_cache_ttl_ms = option.unwrap(cfg.brave_cache_ttl_ms, 300_000)
 
+  // Create notification channel (early, needed by sandbox startup)
+  let notify: process.Subject(agent_types.Notification) = process.new_subject()
+
+  // Sandbox
+  let sandbox_mgr = case option.unwrap(cfg.sandbox_enabled, False) {
+    True -> {
+      let sandbox_cfg =
+        sandbox_types.SandboxConfig(
+          pool_size: option.unwrap(cfg.sandbox_pool_size, 1),
+          memory_mb: option.unwrap(cfg.sandbox_memory_mb, 512),
+          cpus: option.unwrap(cfg.sandbox_cpus, "1"),
+          image: option.unwrap(cfg.sandbox_image, "python:3.12-slim"),
+          exec_timeout_ms: option.unwrap(cfg.sandbox_exec_timeout_ms, 60_000),
+          port_base: option.unwrap(cfg.sandbox_port_base, 10_000),
+          port_stride: option.unwrap(cfg.sandbox_port_stride, 100),
+          ports_per_slot: option.unwrap(cfg.sandbox_ports_per_slot, 5),
+          auto_machine: option.unwrap(cfg.sandbox_auto_machine, True),
+          workspace_dir: paths.sandbox_workspaces_dir(),
+        )
+      case sandbox_manager_mod.start(sandbox_cfg, notify) {
+        Ok(mgr) -> {
+          io.println(
+            "Sandbox  : started (pool="
+            <> int.to_string(sandbox_cfg.pool_size)
+            <> ")",
+          )
+          option.Some(mgr)
+        }
+        Error(reason) -> {
+          io.println("Sandbox  : unavailable (" <> reason <> ")")
+          option.None
+        }
+      }
+    }
+    False -> option.None
+  }
+
   // Profile system
   let profile_dirs =
     option.unwrap(cfg.profiles_dirs, profile.default_profile_dirs())
@@ -473,6 +512,7 @@ fn run(cfg: AppConfig) -> Nil {
               brave_search_limiter,
               brave_answers_limiter,
               brave_cache_ttl_ms,
+              sandbox_mgr,
             ),
             option.None,
           )
@@ -488,6 +528,7 @@ fn run(cfg: AppConfig) -> Nil {
         brave_search_limiter,
         brave_answers_limiter,
         brave_cache_ttl_ms,
+        sandbox_mgr,
       ),
       option.None,
     )
@@ -520,9 +561,6 @@ fn run(cfg: AppConfig) -> Nil {
     ))
   let agent_tools =
     list.append(list.map(agent_specs, cognitive.agent_to_tool), [scheduler_tool])
-
-  // Create notification channel
-  let notify: process.Subject(agent_types.Notification) = process.new_subject()
 
   // Load D' config if enabled (dual-gate: tool_gate + optional output_gate)
   let #(dprime_state, output_dprime_state) = case
@@ -898,6 +936,13 @@ fn run(cfg: AppConfig) -> Nil {
         tui_input_limit,
       )
   }
+
+  // Shutdown sandbox containers on exit
+  case sandbox_mgr {
+    option.Some(mgr) -> sandbox_manager_mod.shutdown(mgr)
+    option.None -> Nil
+  }
+
   Nil
 }
 
@@ -1012,11 +1057,11 @@ fn default_agent_specs(
     process.Subject(rate_limiter.RateLimiterMessage),
   ),
   brave_cache_ttl_ms: Int,
+  sandbox_manager: option.Option(sandbox_types.SandboxManager),
 ) -> List(agent_types.AgentSpec) {
   let delay = option.unwrap(cfg.inter_turn_delay_ms, 200)
   let p_spec = planner.spec(provider, task_model)
   let max_artifact_chars = option.unwrap(cfg.max_artifact_chars, 50_000)
-  let sandbox_timeout = option.unwrap(cfg.sandbox_timeout_s, 600)
   let r_spec =
     researcher.spec(
       provider,
@@ -1029,7 +1074,7 @@ fn default_agent_specs(
       brave_answers_limiter,
       brave_cache_ttl_ms,
     )
-  let c_spec = coder.spec(provider, task_model, sandbox_timeout)
+  let c_spec = coder.spec(provider, task_model, sandbox_manager)
   let recall_max_entries = option.unwrap(cfg.recall_max_entries, 50)
   let cbr_max_results = option.unwrap(cfg.cbr_max_results, 20)
   let o_spec =

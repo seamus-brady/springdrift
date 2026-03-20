@@ -331,6 +331,35 @@ fn handle_notification(
           notice: style.dim("  Planner: " <> action <> " — " <> title),
         ),
       )
+    agent_types.SandboxStarted(pool_size:, port_range:) ->
+      continue_loop(
+        TuiState(
+          ..state,
+          notice: style.dim(
+            "  Sandbox started (pool="
+            <> int.to_string(pool_size)
+            <> ", ports="
+            <> port_range
+            <> ")",
+          ),
+        ),
+      )
+    agent_types.SandboxContainerFailed(slot:, reason:) ->
+      continue_loop(
+        TuiState(
+          ..state,
+          notice: style.yellow(
+            "  Sandbox slot " <> int.to_string(slot) <> " failed: " <> reason,
+          ),
+        ),
+      )
+    agent_types.SandboxUnavailable(reason:) ->
+      continue_loop(
+        TuiState(
+          ..state,
+          notice: style.yellow("  Sandbox unavailable: " <> reason),
+        ),
+      )
   }
 }
 
