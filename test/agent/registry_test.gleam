@@ -21,7 +21,7 @@ pub fn register_and_lookup_test() {
   let subj = process.new_subject()
   let reg =
     registry.new()
-    |> registry.register("planner", subj)
+    |> registry.register("planner", subj, [])
 
   registry.size(reg) |> should.equal(1)
   registry.get_task_subject(reg, "planner") |> should.equal(Some(subj))
@@ -43,8 +43,8 @@ pub fn register_multiple_agents_test() {
   let subj2 = process.new_subject()
   let reg =
     registry.new()
-    |> registry.register("planner", subj1)
-    |> registry.register("coder", subj2)
+    |> registry.register("planner", subj1, ["plan"])
+    |> registry.register("coder", subj2, ["run_code"])
 
   registry.size(reg) |> should.equal(2)
   registry.get_task_subject(reg, "planner") |> should.equal(Some(subj1))
@@ -59,7 +59,7 @@ pub fn unregister_removes_agent_test() {
   let subj = process.new_subject()
   let reg =
     registry.new()
-    |> registry.register("planner", subj)
+    |> registry.register("planner", subj, [])
     |> registry.unregister("planner")
 
   registry.size(reg) |> should.equal(0)
@@ -80,7 +80,7 @@ pub fn mark_restarting_test() {
   let subj = process.new_subject()
   let reg =
     registry.new()
-    |> registry.register("planner", subj)
+    |> registry.register("planner", subj, [])
     |> registry.mark_restarting("planner")
 
   registry.get_status(reg, "planner")
@@ -91,7 +91,7 @@ pub fn mark_stopped_test() {
   let subj = process.new_subject()
   let reg =
     registry.new()
-    |> registry.register("planner", subj)
+    |> registry.register("planner", subj, [])
     |> registry.mark_stopped("planner")
 
   registry.get_status(reg, "planner")
@@ -107,8 +107,8 @@ pub fn register_duplicate_updates_instead_of_appending_test() {
   let subj2 = process.new_subject()
   let reg =
     registry.new()
-    |> registry.register("planner", subj1)
-    |> registry.register("planner", subj2)
+    |> registry.register("planner", subj1, ["plan"])
+    |> registry.register("planner", subj2, ["plan"])
 
   // Should still be size 1, not 2
   registry.size(reg) |> should.equal(1)
@@ -125,7 +125,7 @@ pub fn update_task_subject_test() {
   let subj2 = process.new_subject()
   let reg =
     registry.new()
-    |> registry.register("planner", subj1)
+    |> registry.register("planner", subj1, ["plan"])
     |> registry.mark_restarting("planner")
     |> registry.update_task_subject("planner", subj2)
 
@@ -138,7 +138,7 @@ pub fn mark_running_after_restarting_test() {
   let subj = process.new_subject()
   let reg =
     registry.new()
-    |> registry.register("planner", subj)
+    |> registry.register("planner", subj, [])
     |> registry.mark_restarting("planner")
     |> registry.mark_running("planner")
 

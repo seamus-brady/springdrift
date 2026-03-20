@@ -343,7 +343,7 @@ pub type FactsContext {
 
 /// Registry entry for agent roster (avoids depending on registry module's opaque type).
 pub type AgentStatusEntry {
-  AgentStatusEntry(name: String, status: String)
+  AgentStatusEntry(name: String, status: String, tool_names: List(String))
 }
 
 /// Context for the `introspect` tool — carries system state from CognitiveState.
@@ -1533,7 +1533,11 @@ fn run_introspect(call: ToolCall, ctx: Option(IntrospectContext)) -> ToolResult 
         agents -> {
           let lines =
             list.map(agents, fn(e: AgentStatusEntry) {
-              "- " <> e.name <> ": " <> e.status
+              let tools_str = case e.tool_names {
+                [] -> " (no tools)"
+                names -> " [" <> string.join(names, ", ") <> "]"
+              }
+              "- " <> e.name <> ": " <> e.status <> tools_str
             })
           "## Agents ("
           <> int.to_string(list.length(agents))

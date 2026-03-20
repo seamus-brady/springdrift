@@ -332,7 +332,7 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `forecaster_tick_ms` | — | 300000 | Forecaster evaluation interval (ms) |
 | `forecaster_replan_threshold` | — | 0.55 | D' score above which replan is suggested |
 | `forecaster_min_cycles` | — | 2 | Min cycles on a task before forecaster evaluates |
-| `sandbox_enabled` | — | False | Enable local Podman sandbox for coder agent |
+| `sandbox_enabled` | — | True | Enable local Podman sandbox for coder agent |
 | `sandbox_pool_size` | — | 1 | Max containers in the pool (max: 3) |
 | `sandbox_memory_mb` | — | 512 | Memory limit per container in MB |
 | `sandbox_cpus` | — | "1" | CPU limit per container |

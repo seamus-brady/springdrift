@@ -582,8 +582,16 @@ pub fn introspect_with_context_test() {
       session_since: "2026-03-10T09:00:00Z",
       active_profile: Some("analyst"),
       agents: [
-        memory.AgentStatusEntry(name: "researcher", status: "Running"),
-        memory.AgentStatusEntry(name: "writer", status: "Stopped"),
+        memory.AgentStatusEntry(
+          name: "researcher",
+          status: "Running",
+          tool_names: ["web_search", "fetch_url"],
+        ),
+        memory.AgentStatusEntry(
+          name: "writer",
+          status: "Stopped",
+          tool_names: [],
+        ),
       ],
       dprime_enabled: True,
       dprime_modify_threshold: 0.3,

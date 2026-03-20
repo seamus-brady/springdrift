@@ -130,7 +130,11 @@ fn handle_external(state: SupervisorState, msg: SupervisorMessage) -> Nil {
               ..state,
               children: list.append(state.children, [entry]),
             )
-          notify(state.cognitive, AgentStarted(name: spec.name, task_subject:))
+          let tool_names = list.map(spec.tools, fn(t) { t.name })
+          notify(
+            state.cognitive,
+            AgentStarted(name: spec.name, task_subject:, tool_names:),
+          )
           process.send(reply_to, Ok(task_subject))
           supervisor_loop(new_state)
         }
@@ -230,12 +234,15 @@ fn handle_child_exit(state: SupervisorState, exit_msg: ExitMessage) -> Nil {
             False -> {
               case framework.start_agent(child.spec) {
                 Ok(#(pid, task_subject)) -> {
+                  let restart_tool_names =
+                    list.map(child.spec.tools, fn(t) { t.name })
                   notify(
                     state.cognitive,
                     AgentRestarted(
                       name: child.spec.name,
                       attempt: recent_count + 1,
                       task_subject:,
+                      tool_names: restart_tool_names,
                     ),
                   )
                   let new_entry =

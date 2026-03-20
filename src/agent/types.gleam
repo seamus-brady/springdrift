@@ -208,9 +208,18 @@ pub type AgentCompletionRecord {
 // ---------------------------------------------------------------------------
 
 pub type AgentLifecycleEvent {
-  AgentStarted(name: String, task_subject: Subject(AgentTask))
+  AgentStarted(
+    name: String,
+    task_subject: Subject(AgentTask),
+    tool_names: List(String),
+  )
   AgentCrashed(name: String, reason: String)
-  AgentRestarted(name: String, attempt: Int, task_subject: Subject(AgentTask))
+  AgentRestarted(
+    name: String,
+    attempt: Int,
+    task_subject: Subject(AgentTask),
+    tool_names: List(String),
+  )
   AgentRestartFailed(name: String, reason: String)
   AgentStopped(name: String)
 }

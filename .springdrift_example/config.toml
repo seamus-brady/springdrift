@@ -336,9 +336,10 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 # Local Podman sandbox for coder agent code execution and serving.
 
 [sandbox]
-# Enable Podman sandbox for coder agent (default: false)
+# Enable Podman sandbox for coder agent (default: true)
 # Requires podman installed. On macOS, requires podman machine running.
-# enabled = false
+# Falls back gracefully if podman is unavailable.
+# enabled = true
 
 # Max containers in the pool (default: 1, max: 3)
 # pool_size = 1

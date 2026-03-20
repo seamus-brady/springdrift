@@ -143,7 +143,11 @@ fn handle_memory_tools(
             registry.Restarting -> "Restarting"
             registry.Stopped -> "Stopped"
           }
-          memory.AgentStatusEntry(name: e.name, status: status_str)
+          memory.AgentStatusEntry(
+            name: e.name,
+            status: status_str,
+            tool_names: e.tool_names,
+          )
         })
       // Compute thread health stats for introspect
       let thread_index = case state.memory.librarian {
@@ -1022,10 +1026,15 @@ pub fn handle_agent_event(
   }
 
   case event {
-    types.AgentStarted(name:, task_subject:) ->
+    types.AgentStarted(name:, task_subject:, tool_names:) ->
       CognitiveState(
         ..state,
-        registry: registry.register(state.registry, name, task_subject),
+        registry: registry.register(
+          state.registry,
+          name,
+          task_subject,
+          tool_names,
+        ),
       )
     types.AgentCrashed(name:, ..) ->
       CognitiveState(

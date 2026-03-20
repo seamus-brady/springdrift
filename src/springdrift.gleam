@@ -441,7 +441,7 @@ fn run(cfg: AppConfig) -> Nil {
   let notify: process.Subject(agent_types.Notification) = process.new_subject()
 
   // Sandbox
-  let sandbox_mgr = case option.unwrap(cfg.sandbox_enabled, False) {
+  let sandbox_mgr = case option.unwrap(cfg.sandbox_enabled, True) {
     True -> {
       let sandbox_cfg =
         sandbox_types.SandboxConfig(
@@ -471,7 +471,10 @@ fn run(cfg: AppConfig) -> Nil {
         }
       }
     }
-    False -> option.None
+    False -> {
+      io.println("Sandbox  : disabled (set [sandbox] enabled = true to re-enable)")
+      option.None
+    }
   }
 
   // Profile system
@@ -491,6 +494,7 @@ fn run(cfg: AppConfig) -> Nil {
               p,
               task_model,
               write_anywhere,
+              sandbox_mgr,
             )
           #(specs, option.Some(profile_name))
         }
@@ -1134,33 +1138,44 @@ fn build_profile_agent_specs(
   provider: Provider,
   task_model: String,
   write_anywhere: Bool,
+  sandbox_manager: option.Option(sandbox_types.SandboxManager),
 ) -> List(agent_types.AgentSpec) {
   list.map(loaded_profile.agents, fn(agent_def) {
-    let tools_list = resolve_profile_tools(agent_def.tools)
-    let system_prompt = case agent_def.system_prompt {
-      option.Some(sp) -> sp
-      option.None ->
-        "You are a " <> agent_def.name <> " agent. " <> agent_def.description
+    // If this is the coder agent and sandbox is available, use coder.spec
+    // to get proper sandbox tool wiring
+    case agent_def.name == "coder" && option.is_some(sandbox_manager) {
+      True -> coder.spec(provider, task_model, sandbox_manager)
+      False -> {
+        let tools_list = resolve_profile_tools(agent_def.tools)
+        let system_prompt = case agent_def.system_prompt {
+          option.Some(sp) -> sp
+          option.None ->
+            "You are a "
+            <> agent_def.name
+            <> " agent. "
+            <> agent_def.description
+        }
+        let tool_executor =
+          build_profile_tool_executor(agent_def.tools, write_anywhere)
+        agent_types.AgentSpec(
+          name: agent_def.name,
+          human_name: string.capitalise(agent_def.name),
+          description: agent_def.description,
+          system_prompt:,
+          provider:,
+          model: task_model,
+          max_tokens: 4096,
+          max_turns: agent_def.max_turns,
+          max_consecutive_errors: 3,
+          max_context_messages: option.None,
+          tools: tools_list,
+          restart: agent_types.Permanent,
+          tool_executor:,
+          inter_turn_delay_ms: 200,
+          redact_secrets: True,
+        )
+      }
     }
-    let tool_executor =
-      build_profile_tool_executor(agent_def.tools, write_anywhere)
-    agent_types.AgentSpec(
-      name: agent_def.name,
-      human_name: string.capitalise(agent_def.name),
-      description: agent_def.description,
-      system_prompt:,
-      provider:,
-      model: task_model,
-      max_tokens: 4096,
-      max_turns: agent_def.max_turns,
-      max_consecutive_errors: 3,
-      max_context_messages: option.None,
-      tools: tools_list,
-      restart: agent_types.Permanent,
-      tool_executor:,
-      inter_turn_delay_ms: 200,
-      redact_secrets: True,
-    )
   })
 }
 
