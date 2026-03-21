@@ -1,7 +1,6 @@
 import gleam/list
 import gleam/option.{None, Some}
 import gleeunit/should
-import profile/types as profile_types
 import scheduler/persist
 import scheduler/types.{
   type ScheduledJob, Completed, ForAgent, Pending, ProfileJob, RecurringTask,
@@ -14,7 +13,7 @@ fn test_job(name: String) -> ScheduledJob {
     name:,
     query: "test query for " <> name,
     interval_ms: 3_600_000,
-    delivery: profile_types.FileDelivery(
+    delivery: types.FileDelivery(
       directory: ".springdrift/scheduler/outputs",
       format: "markdown",
     ),

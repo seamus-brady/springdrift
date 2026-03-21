@@ -10,7 +10,6 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
 import paths
-import profile/types as profile_types
 import scheduler/types.{
   type JobStatus, type ScheduledJob, AgentJob, Appointment, Cancelled, Completed,
   Failed, ForAgent, ForUser, Pending, ProfileJob, RecurringTask, Reminder,
@@ -330,8 +329,8 @@ fn int_to_string(n: Int) -> String {
   int.to_string(n)
 }
 
-fn default_delivery() -> profile_types.DeliveryConfig {
-  profile_types.FileDelivery(
+fn default_delivery() -> types.DeliveryConfig {
+  types.FileDelivery(
     directory: paths.scheduler_outputs_dir(),
     format: "markdown",
   )

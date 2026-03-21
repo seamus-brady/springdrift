@@ -1,7 +1,6 @@
 import agent/cognitive/agents as cognitive_agents
 import agent/cognitive/llm as cognitive_llm
 import agent/cognitive/memory as cognitive_memory
-import agent/cognitive/profile as cognitive_profile
 import agent/cognitive/safety as cognitive_safety
 import agent/cognitive_config
 import agent/cognitive_state.{
@@ -110,8 +109,6 @@ pub fn start(
         identity: IdentityContext(
           agent_uuid: cfg.agent_uuid,
           session_since: cfg.session_since,
-          active_profile: None,
-          profile_dirs: cfg.profile_dirs,
           write_anywhere: cfg.write_anywhere,
         ),
         config: RuntimeConfig(
@@ -186,7 +183,6 @@ fn handle_message(
       types.SafetyGateComplete(..) -> "SafetyGateComplete"
       types.InputSafetyGateComplete(..) -> "InputSafetyGateComplete"
       types.PostExecutionGateComplete(..) -> "PostExecutionGateComplete"
-      types.LoadProfile(..) -> "LoadProfile"
       types.SetSupervisor(..) -> "SetSupervisor"
       types.SchedulerInput(..) -> "SchedulerInput"
       types.OutputGateComplete(..) -> "OutputGateComplete"
@@ -246,8 +242,6 @@ fn handle_message(
         pre_score,
         reply_to,
       )
-    types.LoadProfile(name, reply_to) ->
-      cognitive_profile.handle_load_profile(state, name, reply_to)
     types.SetSupervisor(supervisor:) ->
       CognitiveState(..state, supervisor: Some(supervisor))
     types.SchedulerInput(

@@ -169,7 +169,6 @@ fn handle_memory_tools(
         Some(memory.IntrospectContext(
           agent_uuid: state.identity.agent_uuid,
           session_since: state.identity.session_since,
-          active_profile: state.identity.active_profile,
           agents: agent_entries,
           dprime_enabled: option.is_some(state.dprime_state),
           dprime_modify_threshold: case state.dprime_state {

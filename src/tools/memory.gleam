@@ -354,7 +354,6 @@ pub type IntrospectContext {
   IntrospectContext(
     agent_uuid: String,
     session_since: String,
-    active_profile: Option(String),
     agents: List(AgentStatusEntry),
     dprime_enabled: Bool,
     dprime_modify_threshold: Float,
@@ -1527,19 +1526,13 @@ fn run_introspect(call: ToolCall, ctx: Option(IntrospectContext)) -> ToolResult 
         <> "\n- session_since: "
         <> c.session_since
 
-      // Profile
-      let profile = case c.active_profile {
-        Some(p) -> "\n- profile: " <> p
-        None -> "\n- profile: (none)"
-      }
-
       // Cycle
       let cycle = case c.current_cycle_id {
         Some(cid) -> "\n- current_cycle: " <> cid
         None -> ""
       }
 
-      let sections = [identity <> profile <> cycle, ..sections]
+      let sections = [identity <> cycle, ..sections]
 
       // Agent roster
       let agent_section = case c.agents {

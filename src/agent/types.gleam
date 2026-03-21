@@ -281,7 +281,6 @@ pub type CognitiveMessage {
     pre_score: Float,
     reply_to: Subject(CognitiveReply),
   )
-  LoadProfile(name: String, reply_to: Subject(CognitiveReply))
   SetSupervisor(supervisor: Subject(SupervisorMessage))
   SchedulerInput(
     job_name: String,
@@ -391,7 +390,6 @@ pub type Notification {
   SaveWarning(message: String)
   ToolCalling(name: String)
   SafetyGateNotice(decision: String, score: Float, explanation: String)
-  ProfileNotification(name: String)
   AgentLifecycleNotice(event_type: String, agent_name: String)
   InputQueued(position: Int, queue_size: Int)
   InputQueueFull(queue_cap: Int)

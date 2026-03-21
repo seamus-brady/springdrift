@@ -580,7 +580,6 @@ pub fn introspect_with_context_test() {
     Some(memory.IntrospectContext(
       agent_uuid: "test-uuid-1234",
       session_since: "2026-03-10T09:00:00Z",
-      active_profile: Some("analyst"),
       agents: [
         memory.AgentStatusEntry(
           name: "researcher",
@@ -609,7 +608,6 @@ pub fn introspect_with_context_test() {
     ToolSuccess(content: c, ..) -> {
       should.be_true(string.contains(c, "test-uuid-1234"))
       should.be_true(string.contains(c, "2026-03-10"))
-      should.be_true(string.contains(c, "analyst"))
       should.be_true(string.contains(c, "researcher: Running"))
       should.be_true(string.contains(c, "writer: Stopped"))
       should.be_true(string.contains(c, "enabled: true"))
@@ -624,7 +622,6 @@ pub fn introspect_no_agents_test() {
     Some(memory.IntrospectContext(
       agent_uuid: "uuid-empty",
       session_since: "2026-03-10",
-      active_profile: None,
       agents: [],
       dprime_enabled: False,
       dprime_modify_threshold: 0.0,
@@ -642,7 +639,6 @@ pub fn introspect_no_agents_test() {
     ToolSuccess(content: c, ..) -> {
       should.be_true(string.contains(c, "No agents registered"))
       should.be_true(string.contains(c, "enabled: false"))
-      should.be_true(string.contains(c, "(none)"))
     }
     _ -> should.fail()
   }

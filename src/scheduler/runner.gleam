@@ -10,13 +10,13 @@ import gleam/erlang/process.{type Subject}
 import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
-import profile/types as profile_types
 import scheduler/delivery
 import scheduler/log as schedule_log
 import scheduler/types.{
-  type ScheduledJob, type SchedulerMessage, Cancelled, Completed, Failed,
-  ForAgent, GetStatus, JobComplete, JobFailed, Pending, ProfileJob,
-  RecurringTask, Running, ScheduledJob, StopAll, StuckJobCheck, Tick,
+  type ScheduleTaskConfig, type ScheduledJob, type SchedulerMessage, Cancelled,
+  Completed, Failed, ForAgent, GetStatus, JobComplete, JobFailed, Pending,
+  ProfileJob, RecurringTask, Running, ScheduledJob, StopAll, StuckJobCheck, Tick,
+  WebhookDelivery,
 }
 import slog
 
@@ -30,7 +30,7 @@ fn get_datetime() -> String
 /// Optionally loads checkpoint state and adjusts initial delays based on elapsed time.
 /// Returns a Subject for sending scheduler messages.
 pub fn start(
-  tasks: List(profile_types.ScheduleTaskConfig),
+  tasks: List(ScheduleTaskConfig),
   cognitive: Subject(agent_types.CognitiveMessage),
   schedule_dir: String,
   stuck_timeout_ms: Int,
@@ -368,7 +368,7 @@ fn scheduler_loop(
           case should_deliver {
             True -> {
               let content = case job.delivery {
-                profile_types.WebhookDelivery(..) ->
+                WebhookDelivery(..) ->
                   build_webhook_payload(name, result, get_datetime())
                 _ -> result
               }
@@ -714,7 +714,7 @@ fn spawn_job(
   Nil
 }
 
-fn initial_delay(task: profile_types.ScheduleTaskConfig) -> Int {
+fn initial_delay(task: ScheduleTaskConfig) -> Int {
   // For now, start immediately (delay = 0).
   // Future: parse start_at to compute delay from current time.
   let _ = task.start_at

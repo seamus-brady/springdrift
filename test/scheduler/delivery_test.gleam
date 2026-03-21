@@ -2,8 +2,8 @@ import gleam/http/request
 import gleam/http/response as http_response
 import gleam/string
 import gleeunit/should
-import profile/types.{FileDelivery, WebhookDelivery}
 import scheduler/delivery
+import scheduler/types.{FileDelivery, WebhookDelivery}
 import simplifile
 
 // ---------------------------------------------------------------------------

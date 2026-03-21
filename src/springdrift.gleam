@@ -37,8 +37,6 @@ import narrative/threading as narrative_threading
 import paths
 import planner/forecaster
 import planner/types as planner_types
-import profile
-import profile/types as profile_types
 import sandbox/manager as sandbox_manager_mod
 import sandbox/types as sandbox_types
 import scheduler/log as schedule_log
@@ -47,14 +45,10 @@ import simplifile
 import skills
 import slog
 import storage
-import tools/brave as tools_brave
-import tools/builtin as tools_builtin
 import tools/cache
 import tools/how_to_content
-import tools/jina as tools_jina
 import tools/memory as tools_memory
 import tools/rate_limiter
-import tools/web as tools_web
 import tui
 import web/gui as web_gui
 
@@ -479,66 +473,19 @@ fn run(cfg: AppConfig) -> Nil {
     }
   }
 
-  // Profile system
-  let profile_dirs =
-    option.unwrap(cfg.profiles_dirs, profile.default_profile_dirs())
-  let available_profiles = profile.discover(profile_dirs)
-
-  // Build agent specs (default or from profile)
-  let #(agent_specs, active_profile) = case cfg.default_profile {
-    option.Some(profile_name) ->
-      case profile.load(profile_name, profile_dirs) {
-        Ok(loaded_profile) -> {
-          io.println("Profile  : " <> profile_name)
-          let specs =
-            build_profile_agent_specs(
-              loaded_profile,
-              p,
-              task_model,
-              write_anywhere,
-              sandbox_mgr,
-            )
-          #(specs, option.Some(profile_name))
-        }
-        Error(msg) -> {
-          io.println(
-            "Profile  : '"
-            <> profile_name
-            <> "' failed ("
-            <> msg
-            <> ") — using defaults",
-          )
-          #(
-            default_agent_specs(
-              cfg,
-              p,
-              task_model,
-              librarian_subj,
-              brave_cache,
-              brave_search_limiter,
-              brave_answers_limiter,
-              brave_cache_ttl_ms,
-              sandbox_mgr,
-            ),
-            option.None,
-          )
-        }
-      }
-    option.None -> #(
-      default_agent_specs(
-        cfg,
-        p,
-        task_model,
-        librarian_subj,
-        brave_cache,
-        brave_search_limiter,
-        brave_answers_limiter,
-        brave_cache_ttl_ms,
-        sandbox_mgr,
-      ),
-      option.None,
+  // Build agent specs
+  let agent_specs =
+    default_agent_specs(
+      cfg,
+      p,
+      task_model,
+      librarian_subj,
+      brave_cache,
+      brave_search_limiter,
+      brave_answers_limiter,
+      brave_cache_ttl_ms,
+      sandbox_mgr,
     )
-  }
 
   // Build agent tools for the cognitive loop (includes scheduler)
   let scheduler_tool =
@@ -596,7 +543,6 @@ fn run(cfg: AppConfig) -> Nil {
       paths.facts_dir(),
       paths.default_identity_dirs(),
       "memory",
-      active_profile,
       agent_name,
       agent_version,
     )
@@ -699,7 +645,6 @@ fn run(cfg: AppConfig) -> Nil {
       archivist_model:,
       archivist_max_tokens:,
       librarian: lib,
-      profile_dirs:,
       write_anywhere:,
       curator: option.Some(curator_subj),
       agent_uuid: stable_identity.agent_uuid,
@@ -752,7 +697,7 @@ fn run(cfg: AppConfig) -> Nil {
     }
   })
 
-  // Wire supervisor into cognitive loop so profile switching can manage agents
+  // Wire supervisor into cognitive loop
   cognitive.set_supervisor(cognitive_subj, sup)
 
   case dprime_state {
@@ -770,34 +715,11 @@ fn run(cfg: AppConfig) -> Nil {
     list.map(agent_specs, fn(s) { s.name })
     |> string.join(", ")
   io.println("Mode     : cognitive (agents: " <> agent_names <> ")")
-  case available_profiles {
-    [] -> Nil
-    _ -> io.println("Profiles : " <> string.join(available_profiles, ", "))
-  }
-
   // Migrate old scheduler checkpoint to JSONL (no-op if already done)
   let schedule_dir = paths.schedule_dir()
   schedule_log.migrate_checkpoint(schedule_dir, paths.scheduler_checkpoint())
 
-  // Load profile schedule tasks if applicable
-  let profile_schedule_tasks = case cfg.default_profile {
-    option.Some(profile_name) ->
-      case profile.load(profile_name, profile_dirs) {
-        Ok(loaded_profile) ->
-          case loaded_profile.schedule_path {
-            option.Some(schedule_path) ->
-              case profile.parse_schedule(schedule_path) {
-                Ok(tasks) -> tasks
-                Error(_) -> []
-              }
-            option.None -> []
-          }
-        Error(_) -> []
-      }
-    option.None -> []
-  }
-
-  // Always start the scheduler runner
+  // Start the scheduler runner
   let stuck_timeout_ms = option.unwrap(cfg.scheduler_stuck_timeout_ms, 600_000)
   let max_cycles_per_hour =
     option.unwrap(cfg.max_autonomous_cycles_per_hour, 20)
@@ -805,7 +727,7 @@ fn run(cfg: AppConfig) -> Nil {
     option.unwrap(cfg.autonomous_token_budget_per_hour, 500_000)
   let runner_result =
     scheduler_runner.start(
-      profile_schedule_tasks,
+      [],
       cognitive_subj,
       paths.schedule_dir(),
       stuck_timeout_ms,
@@ -814,15 +736,7 @@ fn run(cfg: AppConfig) -> Nil {
     )
   let scheduler_subj = case runner_result {
     Ok(runner_subj) -> {
-      case profile_schedule_tasks {
-        [] -> io.println("Scheduler: started (no profile tasks)")
-        tasks ->
-          io.println(
-            "Scheduler: "
-            <> int.to_string(list.length(tasks))
-            <> " task(s) scheduled",
-          )
-      }
+      io.println("Scheduler: started")
       // Register scheduler agent with the supervisor
       let sched_spec = scheduler_agent.spec(p, task_model, runner_subj)
       let reply_subj = process.new_subject()
@@ -1141,88 +1055,4 @@ fn default_agent_specs(
     ),
     agent_types.AgentSpec(..o_spec, redact_secrets: redact),
   ]
-}
-
-fn build_profile_agent_specs(
-  loaded_profile: profile_types.Profile,
-  provider: Provider,
-  task_model: String,
-  write_anywhere: Bool,
-  sandbox_manager: option.Option(sandbox_types.SandboxManager),
-) -> List(agent_types.AgentSpec) {
-  list.map(loaded_profile.agents, fn(agent_def) {
-    // If this is the coder agent and sandbox is available, use coder.spec
-    // to get proper sandbox tool wiring
-    case agent_def.name == "coder" && option.is_some(sandbox_manager) {
-      True -> coder.spec(provider, task_model, sandbox_manager)
-      False -> {
-        let tools_list = resolve_profile_tools(agent_def.tools)
-        let system_prompt = case agent_def.system_prompt {
-          option.Some(sp) -> sp
-          option.None ->
-            "You are a "
-            <> agent_def.name
-            <> " agent. "
-            <> agent_def.description
-        }
-        let tool_executor =
-          build_profile_tool_executor(agent_def.tools, write_anywhere)
-        agent_types.AgentSpec(
-          name: agent_def.name,
-          human_name: string.capitalise(agent_def.name),
-          description: agent_def.description,
-          system_prompt:,
-          provider:,
-          model: task_model,
-          max_tokens: 4096,
-          max_turns: agent_def.max_turns,
-          max_consecutive_errors: 3,
-          max_context_messages: option.None,
-          tools: tools_list,
-          restart: agent_types.Permanent,
-          tool_executor:,
-          inter_turn_delay_ms: 200,
-          redact_secrets: True,
-        )
-      }
-    }
-  })
-}
-
-fn resolve_profile_tools(tool_groups: List(String)) -> List(llm_types.Tool) {
-  list.flat_map(tool_groups, fn(group) {
-    case group {
-      "web" ->
-        list.flatten([
-          tools_brave.all(),
-          tools_jina.all(),
-          tools_web.all(),
-        ])
-      "builtin" -> tools_builtin.all()
-      _ -> []
-    }
-  })
-}
-
-fn build_profile_tool_executor(
-  tool_groups: List(String),
-  _write_anywhere: Bool,
-) -> fn(llm_types.ToolCall) -> llm_types.ToolResult {
-  let has_web = list.contains(tool_groups, "web")
-  fn(call: llm_types.ToolCall) -> llm_types.ToolResult {
-    case has_web {
-      True ->
-        case call.name {
-          "brave_web_search"
-          | "brave_news_search"
-          | "brave_llm_context"
-          | "brave_summarizer"
-          | "brave_answer" -> tools_brave.execute(call)
-          "jina_reader" -> tools_jina.execute(call)
-          "fetch_url" | "web_search" -> tools_web.execute(call)
-          _ -> tools_builtin.execute(call)
-        }
-      False -> tools_builtin.execute(call)
-    }
-  }
 }

@@ -9,7 +9,7 @@ import gleam/list
 import gleam/option.{None}
 import gleam/result
 import gleam/string
-import profile/types.{type DeliveryConfig, FileDelivery, WebhookDelivery}
+import scheduler/types.{type DeliveryConfig, FileDelivery, WebhookDelivery}
 import simplifile
 import slog
 

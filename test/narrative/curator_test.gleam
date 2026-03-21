@@ -400,7 +400,6 @@ pub fn build_system_prompt_fallback_when_no_identity_test() {
       facts_dir,
       [],
       "memory",
-      option.None,
       "Springdrift",
       "",
     )
@@ -437,7 +436,6 @@ pub fn build_system_prompt_with_persona_test() {
       facts_dir,
       [identity_dir],
       "memory",
-      option.None,
       "Springdrift",
       "",
     )

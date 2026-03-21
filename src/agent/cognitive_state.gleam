@@ -44,8 +44,6 @@ pub type IdentityContext {
   IdentityContext(
     agent_uuid: String,
     session_since: String,
-    active_profile: Option(String),
-    profile_dirs: List(String),
     write_anywhere: Bool,
   )
 }

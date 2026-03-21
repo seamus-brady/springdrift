@@ -18,7 +18,6 @@ import llm/types.{
   type Tool, type ToolCall, type ToolResult, ToolFailure, ToolSuccess,
 }
 import paths
-import profile/types as profile_types
 import scheduler/types as sched_types
 
 @external(erlang, "springdrift_ffi", "generate_uuid")
@@ -963,7 +962,7 @@ fn make_job(
     name:,
     query:,
     interval_ms:,
-    delivery: profile_types.FileDelivery(
+    delivery: sched_types.FileDelivery(
       directory: paths.scheduler_outputs_dir(),
       format: "markdown",
     ),

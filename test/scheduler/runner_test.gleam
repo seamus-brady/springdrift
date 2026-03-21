@@ -4,7 +4,6 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleeunit
 import gleeunit/should
-import profile/types as profile_types
 import scheduler/runner
 import scheduler/types.{
   type ScheduledJob, GetStatus, JobComplete, JobFailed, Running, StopAll,
@@ -19,13 +18,13 @@ pub fn main() -> Nil {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn make_task(name: String, interval_ms: Int) -> profile_types.ScheduleTaskConfig {
-  profile_types.ScheduleTaskConfig(
+fn make_task(name: String, interval_ms: Int) -> types.ScheduleTaskConfig {
+  types.ScheduleTaskConfig(
     name:,
     query: "test query for " <> name,
     interval_ms:,
     start_at: None,
-    delivery: profile_types.FileDelivery(
+    delivery: types.FileDelivery(
       directory: "/tmp/springdrift-test-scheduler",
       format: "markdown",
     ),

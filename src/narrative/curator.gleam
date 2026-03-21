@@ -133,7 +133,6 @@ type CuratorState {
     vm: VirtualMemory,
     identity_dirs: List(String),
     memory_tag: String,
-    active_profile: Option(String),
     agent_name: String,
     agent_version: String,
     scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
@@ -159,7 +158,6 @@ pub fn start(
     facts_dir,
     paths.default_identity_dirs(),
     "memory",
-    None,
     "Springdrift",
     "",
   )
@@ -173,7 +171,6 @@ pub fn start_with_identity(
   facts_dir: String,
   identity_dirs: List(String),
   memory_tag: String,
-  active_profile: Option(String),
   agent_name: String,
   agent_version: String,
 ) -> Result(Subject(CuratorMessage), Nil) {
@@ -193,7 +190,6 @@ pub fn start_with_identity(
         vm: virtual_memory.empty(),
         identity_dirs:,
         memory_tag:,
-        active_profile:,
         agent_name:,
         agent_version:,
         scheduler: None,
@@ -773,11 +769,6 @@ fn build_preamble_slots(
     identity.SlotValue(key: "cbr_case_count", value: int.to_string(case_count)),
     identity.SlotValue(key: "recent_narrative", value: recent_narrative_text),
     identity.SlotValue(key: "memory_health", value: ""),
-    identity.SlotValue(key: "active_profile", value: case state.active_profile {
-      Some(name) -> name
-      None -> ""
-    }),
-    identity.SlotValue(key: "profile_agents", value: ""),
     identity.SlotValue(key: "agent_name", value: state.agent_name),
     identity.SlotValue(key: "agent_version", value: state.agent_version),
   ]

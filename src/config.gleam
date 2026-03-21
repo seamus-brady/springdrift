@@ -61,9 +61,6 @@ pub type AppConfig {
     narrative_summaries: Option(Bool),
     narrative_summary_schedule: Option(String),
     redact_secrets: Option(Bool),
-    // ── Profiles ──
-    profiles_dirs: Option(List(String)),
-    default_profile: Option(String),
     // ── Agent identity ──
     agent_name: Option(String),
     agent_version: Option(String),
@@ -220,8 +217,6 @@ pub fn default() -> AppConfig {
     narrative_summaries: None,
     narrative_summary_schedule: None,
     redact_secrets: None,
-    profiles_dirs: None,
-    default_profile: None,
     agent_name: None,
     agent_version: None,
     librarian_max_days: None,
@@ -374,11 +369,6 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       base.narrative_summary_schedule,
     ),
     redact_secrets: option.or(override_cfg.redact_secrets, base.redact_secrets),
-    profiles_dirs: option.or(override_cfg.profiles_dirs, base.profiles_dirs),
-    default_profile: option.or(
-      override_cfg.default_profile,
-      base.default_profile,
-    ),
     agent_name: option.or(override_cfg.agent_name, base.agent_name),
     agent_version: option.or(override_cfg.agent_version, base.agent_version),
     librarian_max_days: option.or(
@@ -833,11 +823,6 @@ pub fn to_string(cfg: AppConfig) -> String {
     }),
     // Redaction
     option.map(cfg.redact_secrets, fn(v) { "redact_secrets: " <> bool_str(v) }),
-    // Profile
-    option.map(cfg.default_profile, fn(v) { "profile: " <> v }),
-    option.map(cfg.profiles_dirs, fn(dirs) {
-      "profiles_dirs: " <> string.join(dirs, ", ")
-    }),
     // Agent identity
     option.map(cfg.agent_name, fn(v) { "agent_name: " <> v }),
     option.map(cfg.agent_version, fn(v) { "agent_version: " <> v }),
@@ -972,24 +957,11 @@ fn do_parse_args(args: List(String), acc: AppConfig) -> AppConfig {
       do_parse_args(rest, AppConfig(..acc, redact_secrets: Some(False)))
     ["--narrative-dir", path, ..rest] ->
       do_parse_args(rest, AppConfig(..acc, narrative_dir: Some(path)))
-    // Profiles
-    ["--profile", name, ..rest] ->
-      do_parse_args(rest, AppConfig(..acc, default_profile: Some(name)))
     ["--narrative-max-days", value, ..rest] ->
       case int.parse(value) {
         Ok(n) ->
           do_parse_args(rest, AppConfig(..acc, librarian_max_days: Some(n)))
         Error(_) -> do_parse_args(rest, acc)
-      }
-    ["--profiles-dir", path, ..rest] ->
-      case acc.profiles_dirs {
-        None ->
-          do_parse_args(rest, AppConfig(..acc, profiles_dirs: Some([path])))
-        Some(existing) ->
-          do_parse_args(
-            rest,
-            AppConfig(..acc, profiles_dirs: Some(list.append(existing, [path]))),
-          )
       }
     [_, ..rest] -> do_parse_args(rest, acc)
   }
@@ -1080,8 +1052,6 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     gui: get_str("gui"),
     dprime_enabled: get_bool("dprime_enabled"),
     dprime_config: get_str("dprime_config"),
-    default_profile: get_str("profile"),
-    profiles_dirs: get_toml_string_array(table, ["profiles_dirs"]),
     // ── [agent] ──
     agent_name: get_toml_str(table, ["agent", "name"]),
     agent_version: get_toml_str(table, ["agent", "version"]),
@@ -1300,10 +1270,10 @@ const known_keys = [
   "provider", "task_model", "reasoning_model", "max_tokens", "max_turns",
   "max_consecutive_errors", "max_context_messages", "log_verbose",
   "write_anywhere", "skills_dirs", "gui", "dprime_enabled", "dprime_config",
-  "narrative", "profile", "profiles_dirs", "agent", "log_retention_days",
-  "log_max_file_bytes", "timeouts", "retry", "limits", "scoring", "housekeeping",
-  "housekeeper", "cbr", "agents", "web", "services", "scheduler", "xstructor",
-  "forecaster", "sandbox", "delegation",
+  "narrative", "agent", "log_retention_days", "log_max_file_bytes", "timeouts",
+  "retry", "limits", "scoring", "housekeeping", "housekeeper", "cbr", "agents",
+  "web", "services", "scheduler", "xstructor", "forecaster", "sandbox",
+  "delegation",
 ]
 
 const known_narrative_keys = [

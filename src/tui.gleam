@@ -274,7 +274,6 @@ fn handle_notification(
       }
       continue_loop(TuiState(..state, notice: "  " <> badge))
     }
-    agent_types.ProfileNotification(_) -> event_loop(state)
     agent_types.AgentLifecycleNotice(event_type:, agent_name:) -> {
       let label = agent_name <> " " <> event_type
       continue_loop(TuiState(..state, spinner_label: label))

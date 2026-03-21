@@ -19,7 +19,6 @@
 ////   │   ├── cbr/              CBR case JSONL (procedural memory)
 ////   │   └── facts/            MemoryFact JSONL (semantic memory)
 ////   ├── skills/               Local skill definitions
-////   └── profiles/             Local agent profiles
 
 @external(erlang, "springdrift_ffi", "get_env")
 fn get_env(name: String) -> Result(String, Nil)
@@ -214,18 +213,4 @@ pub fn how_to_paths() -> List(String) {
     ]
   }
 }
-
 // ---------------------------------------------------------------------------
-// Profiles
-// ---------------------------------------------------------------------------
-
-/// Default profile directories to scan (local + user-level).
-pub fn default_profiles_dirs() -> List(String) {
-  case get_env("HOME") {
-    Ok(home) -> [
-      home <> "/.config/springdrift/profiles",
-      project_dir() <> "/profiles",
-    ]
-    Error(_) -> [project_dir() <> "/profiles"]
-  }
-}
