@@ -19,6 +19,9 @@ import sandbox/types.{
 import simplifile
 import slog
 
+@external(erlang, "springdrift_ffi", "get_datetime")
+fn get_datetime() -> String
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -29,6 +32,7 @@ type ManagerState {
     slots: Dict(Int, SandboxSlot),
     self: Subject(SandboxMessage),
     notify: Subject(agent_types.Notification),
+    cognitive: Option(Subject(agent_types.CognitiveMessage)),
   )
 }
 
@@ -40,6 +44,7 @@ type ManagerState {
 pub fn start(
   config: SandboxConfig,
   notify: Subject(agent_types.Notification),
+  cognitive: Option(Subject(agent_types.CognitiveMessage)),
 ) -> Result(SandboxManager, String) {
   // Pre-flight checks
   case diagnostics.check_podman() {
@@ -153,7 +158,14 @@ pub fn start(
             let self: Subject(SandboxMessage) = process.new_subject()
             process.send(setup, self)
 
-            let state = ManagerState(config: abs_config, slots:, self:, notify:)
+            let state =
+              ManagerState(
+                config: abs_config,
+                slots:,
+                self:,
+                notify:,
+                cognitive:,
+              )
 
             // Schedule first health check
             let _ = process.send_after(self, 30_000, types.HealthCheck)
@@ -205,6 +217,15 @@ pub fn shutdown(manager: SandboxManager) -> Nil {
   process.send(manager.subject, types.Shutdown)
 }
 
+/// Wire the cognitive loop subject into the manager for sensory events.
+/// Called after the cognitive loop starts.
+pub fn set_cognitive(
+  manager: SandboxManager,
+  cognitive: Subject(agent_types.CognitiveMessage),
+) -> Nil {
+  process.send(manager.subject, types.SetCognitive(cognitive:))
+}
+
 // ---------------------------------------------------------------------------
 // Message loop
 // ---------------------------------------------------------------------------
@@ -233,7 +254,35 @@ fn handle_message(state: ManagerState, msg: SandboxMessage) -> Nil {
           message_loop(ManagerState(..state, slots: new_slots))
         }
         None -> {
-          process.send(reply_to, Error("No available sandbox slots"))
+          let serving_count =
+            dict.values(state.slots)
+            |> list.count(fn(s) {
+              case s.status {
+                types.Serving(_) -> True
+                _ -> False
+              }
+            })
+          let busy_count =
+            dict.values(state.slots)
+            |> list.count(fn(s) {
+              case s.status {
+                types.Busy -> True
+                _ -> False
+              }
+            })
+          let hint = case serving_count > 0 {
+            True ->
+              " ("
+              <> int.to_string(serving_count)
+              <> " serving, "
+              <> int.to_string(busy_count)
+              <> " busy — use stop_serve to free a slot)"
+            False ->
+              " ("
+              <> int.to_string(busy_count)
+              <> " busy — wait for current execution to finish)"
+          }
+          process.send(reply_to, Error("No available sandbox slots" <> hint))
           message_loop(state)
         }
       }
@@ -342,6 +391,10 @@ fn handle_message(state: ManagerState, msg: SandboxMessage) -> Nil {
     types.GetStatus(reply_to) -> {
       process.send(reply_to, dict.values(state.slots))
       message_loop(state)
+    }
+
+    types.SetCognitive(cognitive:) -> {
+      message_loop(ManagerState(..state, cognitive: Some(cognitive)))
     }
 
     types.Shutdown -> {
@@ -630,14 +683,38 @@ fn health_check_slots(state: ManagerState) -> Dict(Int, SandboxSlot) {
                 case string.contains(result.stdout, "true") {
                   True -> acc
                   False -> {
+                    // Capture container logs before restarting
+                    let container_logs = case
+                      podman_ffi.run_cmd(
+                        "podman",
+                        ["logs", "--tail", "50", cid],
+                        5000,
+                      )
+                    {
+                      Ok(log_result) -> {
+                        let combined =
+                          string.trim(log_result.stdout)
+                          <> case string.trim(log_result.stderr) {
+                            "" -> ""
+                            err -> "\nSTDERR:\n" <> err
+                          }
+                        case combined {
+                          "" -> "(no output)"
+                          c -> c
+                        }
+                      }
+                      Error(_) -> "(failed to capture logs)"
+                    }
+
+                    let slot_label = "Sandbox slot " <> int.to_string(slot_id)
                     slog.warn(
                       "sandbox",
                       "health_check",
-                      "Container "
-                        <> int.to_string(slot_id)
-                        <> " not running, restarting",
+                      slot_label <> " not running, restarting",
                       None,
                     )
+
+                    // Notify UI
                     process.send(
                       state.notify,
                       agent_types.SandboxContainerFailed(
@@ -645,6 +722,24 @@ fn health_check_slots(state: ManagerState) -> Dict(Int, SandboxSlot) {
                         reason: "container stopped",
                       ),
                     )
+
+                    // Send sensory event to cognitive loop with crash logs
+                    case state.cognitive {
+                      Some(cog) ->
+                        process.send(
+                          cog,
+                          agent_types.QueuedSensoryEvent(
+                            event: agent_types.SensoryEvent(
+                              name: "sandbox_crash",
+                              title: slot_label <> " crashed",
+                              body: string.slice(container_logs, 0, 2000),
+                              fired_at: get_datetime(),
+                            ),
+                          ),
+                        )
+                      None -> Nil
+                    }
+
                     let new_slot = create_container(state.config, slot_id)
                     dict.insert(acc, slot_id, new_slot)
                   }

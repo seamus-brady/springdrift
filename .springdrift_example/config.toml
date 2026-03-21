@@ -341,8 +341,9 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 # Falls back gracefully if podman is unavailable.
 # enabled = true
 
-# Max containers in the pool (default: 1, max: 3)
-# pool_size = 1
+# Max containers in the pool (default: 2, max: 3)
+# One for serve, one for run_code — avoids slot exhaustion
+# pool_size = 2
 
 # Memory limit per container in MB (default: 512)
 # memory_mb = 512

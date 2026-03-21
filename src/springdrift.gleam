@@ -445,7 +445,7 @@ fn run(cfg: AppConfig) -> Nil {
     True -> {
       let sandbox_cfg =
         sandbox_types.SandboxConfig(
-          pool_size: option.unwrap(cfg.sandbox_pool_size, 1),
+          pool_size: option.unwrap(cfg.sandbox_pool_size, 2),
           memory_mb: option.unwrap(cfg.sandbox_memory_mb, 512),
           cpus: option.unwrap(cfg.sandbox_cpus, "1"),
           image: option.unwrap(cfg.sandbox_image, "python:3.12-slim"),
@@ -456,7 +456,7 @@ fn run(cfg: AppConfig) -> Nil {
           auto_machine: option.unwrap(cfg.sandbox_auto_machine, True),
           workspace_dir: paths.sandbox_workspaces_dir(),
         )
-      case sandbox_manager_mod.start(sandbox_cfg, notify) {
+      case sandbox_manager_mod.start(sandbox_cfg, notify, option.None) {
         Ok(mgr) -> {
           io.println(
             "Sandbox  : started (pool="
@@ -723,6 +723,12 @@ fn run(cfg: AppConfig) -> Nil {
       io.println("Fatal: Cognitive loop failed to start")
       panic as "Cognitive loop startup failed"
     }
+  }
+
+  // Wire sandbox manager to cognitive loop for crash log sensory events
+  case sandbox_mgr {
+    option.Some(mgr) -> sandbox_manager_mod.set_cognitive(mgr, cognitive_subj)
+    option.None -> Nil
   }
 
   // Start supervisor and register agents via StartChild

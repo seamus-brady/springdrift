@@ -334,7 +334,7 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `forecaster_min_cycles` | — | 2 | Min cycles on a task before forecaster evaluates |
 | `max_delegation_depth` | — | 3 | Max depth for agent delegation chains |
 | `sandbox_enabled` | — | True | Enable local Podman sandbox for coder agent |
-| `sandbox_pool_size` | — | 1 | Max containers in the pool (max: 3) |
+| `sandbox_pool_size` | — | 2 | Max containers in the pool (max: 3) |
 | `sandbox_memory_mb` | — | 512 | Memory limit per container in MB |
 | `sandbox_cpus` | — | "1" | CPU limit per container |
 | `sandbox_image` | — | "python:3.12-slim" | Container image |

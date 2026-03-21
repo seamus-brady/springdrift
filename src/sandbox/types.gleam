@@ -4,6 +4,7 @@
 //// - run_code: execute a script, return stdout/stderr
 //// - serve: start a long-lived process with port forwarding
 
+import agent/types as agent_types
 import gleam/erlang/process.{type Subject}
 
 // ---------------------------------------------------------------------------
@@ -82,6 +83,7 @@ pub type SandboxMessage {
   StopServe(slot_id: Int, reply_to: Subject(Result(Nil, String)))
   HealthCheck
   GetStatus(reply_to: Subject(List(SandboxSlot)))
+  SetCognitive(cognitive: Subject(agent_types.CognitiveMessage))
   Shutdown
 }
 
