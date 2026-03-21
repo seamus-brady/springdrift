@@ -121,6 +121,7 @@ pub fn start(
           memory_limits: cfg.memory_limits,
           how_to_content: cfg.how_to_content,
           max_delegation_depth: cfg.max_delegation_depth,
+          sandbox_enabled: cfg.sandbox_enabled,
         ),
         redact_secrets: cfg.redact_secrets,
         pending_sensory_events: [],

@@ -716,6 +716,7 @@ fn run(cfg: AppConfig) -> Nil {
       redact_secrets:,
       planner_dir: paths.planner_dir(),
       max_delegation_depth: option.unwrap(cfg.max_delegation_depth, 3),
+      sandbox_enabled: option.is_some(sandbox_mgr),
     ))
   {
     Ok(subj) -> subj

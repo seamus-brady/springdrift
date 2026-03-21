@@ -59,6 +59,7 @@ pub type RuntimeConfig {
     memory_limits: memory.MemoryLimits,
     how_to_content: Option(String),
     max_delegation_depth: Int,
+    sandbox_enabled: Bool,
   )
 }
 

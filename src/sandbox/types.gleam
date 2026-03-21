@@ -81,6 +81,12 @@ pub type SandboxMessage {
     reply_to: Subject(Result(ServeResult, String)),
   )
   StopServe(slot_id: Int, reply_to: Subject(Result(Nil, String)))
+  ShellExec(
+    slot_id: Int,
+    command: String,
+    timeout_ms: Int,
+    reply_to: Subject(Result(ExecResult, String)),
+  )
   HealthCheck
   GetStatus(reply_to: Subject(List(SandboxSlot)))
   SetCognitive(cognitive: Subject(agent_types.CognitiveMessage))

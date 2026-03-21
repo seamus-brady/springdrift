@@ -185,6 +185,7 @@ fn handle_memory_tools(
           thread_single_cycle:,
           thread_uuid_named:,
           thread_multi_cycle: thread_total - thread_single_cycle,
+          sandbox_enabled: state.config.sandbox_enabled,
         ))
       let result = case planner_tools.is_planner_tool(call.name) {
         True ->

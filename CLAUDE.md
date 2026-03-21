@@ -117,7 +117,7 @@ src/
 ├── tools/how_to_content.gleam Default HOW_TO content (builtin fallback)
 ├── tools/web.gleam            Web tools: fetch_url, web_search
 ├── tools/artifacts.gleam      Artifact tools: store_result, retrieve_result (researcher agent)
-├── tools/sandbox.gleam        Sandbox tools: run_code, serve, stop_serve (coder agent)
+├── tools/sandbox.gleam        Sandbox tools: run_code, serve, stop_serve, sandbox_status, workspace_ls, sandbox_exec
 │
 ├── sandbox/                   Local Podman sandbox
 │   ├── types.gleam            SandboxConfig, SandboxSlot, SandboxMessage, SandboxManager
@@ -667,7 +667,10 @@ The manager runs health checks every 30s and restarts failed containers. Startup
 verifies `podman` binary, optionally starts podman machine on macOS, pulls the image
 if missing, and sweeps stale `springdrift-sandbox-*` containers. When `sandbox_enabled`
 is False (default), the coder agent falls back to `request_human_input` — no sandbox
-code runs. Workspace dirs live at `.springdrift/sandbox/workspaces/N/`.
+code runs. Workspace dirs live at `/tmp/springdrift-sandbox/workspaces/N/`
+(deliberately outside `.springdrift/` to isolate ephemeral container state
+from persistent agent memory).
+The coder agent has six sandbox tools: run_code (execute scripts), serve/stop_serve (long-lived processes), sandbox_status (slot states and ports), workspace_ls (list workspace files), and sandbox_exec (direct shell commands for git, pip, curl, etc.).
 
 **Delegation management** — the cognitive loop tracks active agent delegations via
 `active_delegations: Dict(String, DelegationInfo)` on `CognitiveState`. The agent

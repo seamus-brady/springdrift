@@ -601,6 +601,7 @@ pub fn introspect_with_context_test() {
       thread_single_cycle: 80,
       thread_uuid_named: 70,
       thread_multi_cycle: 20,
+      sandbox_enabled: True,
     ))
   let call = ToolCall(id: "i2", name: "introspect", input_json: "{}")
   let result = memory.execute(call, "/tmp", None, None, ctx, test_limits)
@@ -633,6 +634,7 @@ pub fn introspect_no_agents_test() {
       thread_single_cycle: 0,
       thread_uuid_named: 0,
       thread_multi_cycle: 0,
+      sandbox_enabled: False,
     ))
   let call = ToolCall(id: "i3", name: "introspect", input_json: "{}")
   let result = memory.execute(call, "/tmp", None, None, ctx, test_limits)

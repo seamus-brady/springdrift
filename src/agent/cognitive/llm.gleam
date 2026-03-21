@@ -50,6 +50,8 @@ pub fn proceed_with_model(
           message_count: list.length(state.messages),
           sensory_events: state.pending_sensory_events,
           active_delegations: dict.values(state.active_delegations),
+          sandbox_enabled: state.config.sandbox_enabled,
+          sandbox_slots: [],
         )
       let prompt =
         curator.build_system_prompt(cur, state.system, Some(cycle_context))

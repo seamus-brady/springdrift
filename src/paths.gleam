@@ -127,14 +127,11 @@ pub fn scheduler_outputs_dir() -> String {
   project_dir() <> "/scheduler/outputs"
 }
 
-/// Sandbox directory: .springdrift/sandbox/
-pub fn sandbox_dir() -> String {
-  project_dir() <> "/sandbox"
-}
-
-/// Sandbox workspaces directory: .springdrift/sandbox/workspaces/
+/// Sandbox workspaces directory: /tmp/springdrift-sandbox/workspaces/
+/// Deliberately outside .springdrift/ to isolate ephemeral container
+/// workspaces from persistent agent memory.
 pub fn sandbox_workspaces_dir() -> String {
-  sandbox_dir() <> "/workspaces"
+  "/tmp/springdrift-sandbox/workspaces"
 }
 
 /// Legacy scheduler checkpoint (one-time migration source only).

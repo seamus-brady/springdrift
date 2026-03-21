@@ -54,7 +54,16 @@ pub type CycleContext {
     sensory_events: List(agent_types.SensoryEvent),
     /// Active agent delegations for sensorium display
     active_delegations: List(agent_types.DelegationInfo),
+    /// Sandbox enabled flag
+    sandbox_enabled: Bool,
+    /// Sandbox slot summary for sensorium display
+    sandbox_slots: List(SandboxSlotSummary),
   )
+}
+
+/// Simplified sandbox slot info for sensorium rendering.
+pub type SandboxSlotSummary {
+  SandboxSlotSummary(slot_id: Int, status: String, host_port: Int)
 }
 
 // ---------------------------------------------------------------------------
@@ -905,13 +914,26 @@ fn build_sensorium(
   }
   let delegations = render_sensorium_delegations(delegations_list)
 
+  // Sandbox status
+  let sandbox_section = case context {
+    Some(ctx) ->
+      case ctx.sandbox_enabled {
+        True -> "  <sandbox enabled=\"true\"/>"
+        False -> ""
+      }
+    None -> ""
+  }
+
   // Query active tasks and endeavours for the <tasks> section
   let active_tasks = librarian.get_active_tasks(state.librarian)
   let endeavours = librarian.get_all_endeavours(state.librarian)
   let tasks_section = render_sensorium_tasks(active_tasks, endeavours)
 
   let sections =
-    [clock, situation, schedule, vitals, delegations, events, tasks_section]
+    [
+      clock, situation, schedule, vitals, sandbox_section, delegations, events,
+      tasks_section,
+    ]
     |> list.filter(fn(s) { s != "" })
     |> string.join("\n")
 

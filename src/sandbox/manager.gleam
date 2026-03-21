@@ -289,15 +289,16 @@ fn handle_message(state: ManagerState, msg: SandboxMessage) -> Nil {
     }
 
     types.Release(slot_id) -> {
+      // Don't clean workspace on release — allow iterative builds across
+      // multiple run_code calls. Workspace is cleaned on stop_serve,
+      // container restart, or shutdown.
       let new_slots = case dict.get(state.slots, slot_id) {
-        Ok(slot) -> {
-          clean_workspace(slot.workspace)
+        Ok(slot) ->
           dict.insert(
             state.slots,
             slot_id,
             SandboxSlot(..slot, status: types.Ready),
           )
-        }
         Error(_) -> state.slots
       }
       message_loop(ManagerState(..state, slots: new_slots))
@@ -380,6 +381,21 @@ fn handle_message(state: ManagerState, msg: SandboxMessage) -> Nil {
           message_loop(state)
         }
       }
+    }
+
+    types.ShellExec(slot_id, command, timeout_ms, reply_to) -> {
+      case dict.get(state.slots, slot_id) {
+        Ok(slot) -> {
+          let result = shell_exec_in_slot(slot, command, timeout_ms)
+          process.send(reply_to, result)
+        }
+        Error(_) ->
+          process.send(
+            reply_to,
+            Error("Invalid slot: " <> int.to_string(slot_id)),
+          )
+      }
+      message_loop(state)
     }
 
     types.HealthCheck -> {
@@ -536,6 +552,21 @@ fn create_container(config: SandboxConfig, slot_id: Int) -> SandboxSlot {
 // ---------------------------------------------------------------------------
 // Execution
 // ---------------------------------------------------------------------------
+
+fn shell_exec_in_slot(
+  slot: SandboxSlot,
+  command: String,
+  timeout_ms: Int,
+) -> Result(types.ExecResult, String) {
+  let args = [
+    "exec", "--workdir", "/workspace", slot.container_id, "/bin/sh", "-c",
+    command,
+  ]
+  case podman_ffi.run_cmd("podman", args, timeout_ms) {
+    Ok(result) -> Ok(result)
+    Error(msg) -> Error("Shell exec failed: " <> msg)
+  }
+}
 
 fn execute_in_slot(
   slot: SandboxSlot,

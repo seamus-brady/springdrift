@@ -66,9 +66,44 @@ pub fn stop_serve_tool() -> Tool {
   |> tool.build()
 }
 
+pub fn sandbox_status_tool() -> Tool {
+  tool.new("sandbox_status")
+  |> tool.with_description(
+    "Check sandbox status: which slots are available, busy, serving, or failed. Shows port mappings and workspace paths. Call this to understand your environment before starting work.",
+  )
+  |> tool.build()
+}
+
+pub fn workspace_ls_tool() -> Tool {
+  tool.new("workspace_ls")
+  |> tool.with_description(
+    "List files in the sandbox workspace. Shows what's been created by previous run_code calls. Optionally provide a subdirectory path.",
+  )
+  |> tool.add_string_param(
+    "path",
+    "Subdirectory to list (default: workspace root)",
+    False,
+  )
+  |> tool.build()
+}
+
+pub fn sandbox_exec_tool() -> Tool {
+  tool.new("sandbox_exec")
+  |> tool.with_description(
+    "Run a shell command directly in the sandbox container. Lighter than run_code — no file written. Use for git operations, pip install, file management, curl, etc. Runs in /workspace as working directory.",
+  )
+  |> tool.add_string_param("command", "Shell command to execute", True)
+  |> tool.build()
+}
+
 /// Check if a tool name is a sandbox tool.
 pub fn is_sandbox_tool(name: String) -> Bool {
-  name == "run_code" || name == "serve" || name == "stop_serve"
+  name == "run_code"
+  || name == "serve"
+  || name == "stop_serve"
+  || name == "sandbox_status"
+  || name == "workspace_ls"
+  || name == "sandbox_exec"
 }
 
 // ---------------------------------------------------------------------------
@@ -85,6 +120,9 @@ pub fn execute(
     "run_code" -> execute_run_code(call, manager)
     "serve" -> execute_serve(call, manager)
     "stop_serve" -> execute_stop_serve(call, manager)
+    "sandbox_status" -> execute_sandbox_status(call, manager)
+    "workspace_ls" -> execute_workspace_ls(call, manager)
+    "sandbox_exec" -> execute_sandbox_exec(call, manager)
     _ ->
       ToolFailure(
         tool_use_id: call.id,
@@ -254,6 +292,151 @@ fn execute_stop_serve(
               <> int.to_string(slot_id)
               <> " released.",
           )
+      }
+    }
+  }
+}
+
+fn execute_sandbox_status(
+  call: ToolCall,
+  manager: sandbox_types.SandboxManager,
+) -> ToolResult {
+  let status_subj = process.new_subject()
+  process.send(manager.subject, sandbox_types.GetStatus(reply_to: status_subj))
+  case process.receive(status_subj, 5000) {
+    Error(_) ->
+      ToolFailure(tool_use_id: call.id, error: "Sandbox status timeout")
+    Ok(slots) -> {
+      let lines =
+        list.map(slots, fn(slot) {
+          let status_str = case slot.status {
+            sandbox_types.Ready -> "ready"
+            sandbox_types.Busy -> "busy"
+            sandbox_types.Failed(reason:) -> "failed: " <> reason
+            sandbox_types.Serving(port:) ->
+              "serving on localhost:" <> int.to_string(port)
+          }
+          let ports_str =
+            slot.host_ports
+            |> list.map(int.to_string)
+            |> string.join(", ")
+          "Slot "
+          <> int.to_string(slot.slot_id)
+          <> ": "
+          <> status_str
+          <> "\n  Workspace: "
+          <> slot.workspace
+          <> "\n  Host ports: "
+          <> ports_str
+        })
+      let summary =
+        "Sandbox: "
+        <> int.to_string(list.length(slots))
+        <> " slots\n\n"
+        <> string.join(lines, "\n\n")
+      ToolSuccess(tool_use_id: call.id, content: summary)
+    }
+  }
+}
+
+fn execute_workspace_ls(
+  call: ToolCall,
+  manager: sandbox_types.SandboxManager,
+) -> ToolResult {
+  let decoder = {
+    use path <- decode.optional_field("path", ".", decode.string)
+    decode.success(path)
+  }
+  let subdir = case json.parse(call.input_json, decoder) {
+    Ok(p) -> p
+    Error(_) -> "."
+  }
+  // Acquire a slot to find its workspace, then shell exec ls
+  let acquire_subj = process.new_subject()
+  process.send(manager.subject, sandbox_types.Acquire(reply_to: acquire_subj))
+  case process.receive(acquire_subj, 5000) {
+    Error(_) ->
+      ToolFailure(tool_use_id: call.id, error: "Sandbox acquire timeout")
+    Ok(Error(msg)) ->
+      ToolFailure(tool_use_id: call.id, error: "Sandbox: " <> msg)
+    Ok(Ok(slot_id)) -> {
+      let ls_subj = process.new_subject()
+      let ls_path = case subdir {
+        "." | "" -> "/workspace"
+        p -> "/workspace/" <> p
+      }
+      process.send(
+        manager.subject,
+        sandbox_types.ShellExec(
+          slot_id:,
+          command: "ls -la " <> ls_path <> " 2>&1",
+          timeout_ms: 5000,
+          reply_to: ls_subj,
+        ),
+      )
+      let result = case process.receive(ls_subj, 10_000) {
+        Error(_) ->
+          ToolFailure(tool_use_id: call.id, error: "workspace_ls timeout")
+        Ok(Error(msg)) -> ToolFailure(tool_use_id: call.id, error: msg)
+        Ok(Ok(exec_result)) ->
+          ToolSuccess(
+            tool_use_id: call.id,
+            content: string.trim(exec_result.stdout <> exec_result.stderr),
+          )
+      }
+      process.send(manager.subject, sandbox_types.Release(slot_id:))
+      result
+    }
+  }
+}
+
+fn execute_sandbox_exec(
+  call: ToolCall,
+  manager: sandbox_types.SandboxManager,
+) -> ToolResult {
+  let decoder = {
+    use command <- decode.field("command", decode.string)
+    decode.success(command)
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "Invalid sandbox_exec input: missing command",
+      )
+    Ok(command) -> {
+      let acquire_subj = process.new_subject()
+      process.send(
+        manager.subject,
+        sandbox_types.Acquire(reply_to: acquire_subj),
+      )
+      case process.receive(acquire_subj, 5000) {
+        Error(_) ->
+          ToolFailure(tool_use_id: call.id, error: "Sandbox acquire timeout")
+        Ok(Error(msg)) ->
+          ToolFailure(tool_use_id: call.id, error: "Sandbox: " <> msg)
+        Ok(Ok(slot_id)) -> {
+          let exec_subj = process.new_subject()
+          process.send(
+            manager.subject,
+            sandbox_types.ShellExec(
+              slot_id:,
+              command:,
+              timeout_ms: manager.exec_timeout_ms,
+              reply_to: exec_subj,
+            ),
+          )
+          let result = case
+            process.receive(exec_subj, manager.exec_timeout_ms + 5000)
+          {
+            Error(_) ->
+              ToolFailure(tool_use_id: call.id, error: "Sandbox exec timeout")
+            Ok(Error(msg)) -> ToolFailure(tool_use_id: call.id, error: msg)
+            Ok(Ok(exec_result)) -> format_exec_result(call.id, exec_result)
+          }
+          process.send(manager.subject, sandbox_types.Release(slot_id:))
+          result
+        }
       }
     }
   }

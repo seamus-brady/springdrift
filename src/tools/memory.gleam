@@ -364,6 +364,7 @@ pub type IntrospectContext {
     thread_single_cycle: Int,
     thread_uuid_named: Int,
     thread_multi_cycle: Int,
+    sandbox_enabled: Bool,
   )
 }
 
@@ -1584,6 +1585,14 @@ fn run_introspect(call: ToolCall, ctx: Option(IntrospectContext)) -> ToolResult 
         <> " | multi-cycle: "
         <> int.to_string(c.thread_multi_cycle)
       let sections = [thread_section, ..sections]
+
+      // Sandbox
+      let sandbox_section = case c.sandbox_enabled {
+        True ->
+          "## Sandbox\n- enabled: true\n- Use sandbox_status tool for slot details"
+        False -> "## Sandbox\n- enabled: false (coder has no execution tools)"
+      }
+      let sections = [sandbox_section, ..sections]
 
       ToolSuccess(
         tool_use_id: call.id,

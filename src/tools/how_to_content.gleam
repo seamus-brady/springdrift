@@ -44,6 +44,7 @@ tools: reflect, inspect_cycle, list_recent_cycles, query_tool_activity.
 2. Use agent_coder for the actual work
 3. If sandbox is enabled, coder has run_code (execute scripts) and serve (start servers)
 4. If sandbox is unavailable, coder uses request_human_input to ask the user to run code
+5. Coder also has sandbox_exec (shell commands like git/pip), workspace_ls (list files), and sandbox_status (check slots)
 
 ## Multi-Agent Tasks
 
@@ -70,6 +71,22 @@ Use **cancel_agent**(agent_name) to stop a running agent. Cancelled agents with 
 
 ### Depth limit
 Delegation depth is capped at the configured maximum (default: 3). This prevents runaway agent chains.
+
+### Verifying agent results
+When a sub-agent returns, check before acting on the result:
+
+1. **Warnings** — does the result contain `[WARNING: agent X had tool failures]`? If so, the agent continued despite errors. Treat the result with suspicion.
+2. **Evidence vs claims** — did the agent claim an outcome (\"deployed\", \"tested\", \"verified\") but no tool call actually confirmed it? Look at the tools_used list.
+3. **Turn exhaustion** — did the agent hit its max_turns limit? That means it didn't finish cleanly. The result is partial.
+4. **Missing tools** — did the agent have the right tools for the job? Check introspect if unsure. A coder without sandbox tools will try workarounds instead of telling you.
+5. **Environment assumptions** — did the agent assume something about its environment (packages installed, ports available, file paths) without checking? First-time tasks in new environments need tight directives.
+
+When verification fails, use recall_cases to check if this is a known pattern. If not, the Archivist will capture it automatically. Use correct_case or annotate_case to improve low-quality cases.
+
+### Delegation style
+- **First time** with a new task type or environment: be specific. Name the tools, the approach, the expected output format.
+- **Repeated tasks** where CBR shows prior success: give more latitude.
+- **After a failure**: tighten up. Review what went wrong, adjust the instruction, try again.
 
 ## Agents
 

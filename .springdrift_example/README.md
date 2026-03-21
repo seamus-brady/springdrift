@@ -36,8 +36,6 @@ simple — copy one directory and you have everything.
 │   ├── artifacts/           Large content storage (auto-generated)
 │   └── schedule/            Scheduler state persistence (auto-generated)
 ├── schemas/                 XStructor XSD schemas (auto-generated, compiled at runtime)
-├── sandbox/
-│   └── workspaces/          Podman sandbox workspaces (auto-generated when sandbox enabled)
 ├── scheduler/
 │   └── outputs/             Scheduler report delivery (auto-generated)
 └── dprime.example.json      Example D' safety gate configuration

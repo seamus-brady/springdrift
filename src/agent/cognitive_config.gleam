@@ -52,6 +52,7 @@ pub type CognitiveConfig {
     redact_secrets: Bool,
     planner_dir: String,
     max_delegation_depth: Int,
+    sandbox_enabled: Bool,
   )
 }
 
@@ -100,5 +101,6 @@ pub fn default_test_config(
     redact_secrets: False,
     planner_dir: base <> "/planner",
     max_delegation_depth: 3,
+    sandbox_enabled: False,
   )
 }
