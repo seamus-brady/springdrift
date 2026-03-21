@@ -62,6 +62,7 @@ fn make_task(cycle_id: String, context: String) -> AgentTask {
     context:,
     parent_cycle_id: cycle_id,
     reply_to:,
+    depth: 1,
   )
 }
 

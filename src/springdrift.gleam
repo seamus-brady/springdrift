@@ -472,7 +472,9 @@ fn run(cfg: AppConfig) -> Nil {
       }
     }
     False -> {
-      io.println("Sandbox  : disabled (set [sandbox] enabled = true to re-enable)")
+      io.println(
+        "Sandbox  : disabled (set [sandbox] enabled = true to re-enable)",
+      )
       option.None
     }
   }
@@ -713,6 +715,7 @@ fn run(cfg: AppConfig) -> Nil {
       how_to_content: option.Some(how_to_content),
       redact_secrets:,
       planner_dir: paths.planner_dir(),
+      max_delegation_depth: option.unwrap(cfg.max_delegation_depth, 3),
     ))
   {
     Ok(subj) -> subj

@@ -15,13 +15,12 @@ import llm/types.{
 }
 import sandbox/types as sandbox_types
 import slog
-import tools/builtin
 
 // ---------------------------------------------------------------------------
 // Tool definitions
 // ---------------------------------------------------------------------------
 
-fn run_code_tool() -> Tool {
+pub fn run_code_tool() -> Tool {
   tool.new("run_code")
   |> tool.with_description(
     "Execute code in a local Podman sandbox. Returns stdout, stderr, and exit code. The sandbox is isolated — combine operations into a single code block when possible.",
@@ -39,7 +38,7 @@ fn run_code_tool() -> Tool {
   |> tool.build()
 }
 
-fn serve_tool() -> Tool {
+pub fn serve_tool() -> Tool {
   tool.new("serve")
   |> tool.with_description(
     "Start a long-lived process (web server, API, etc.) in the sandbox with port forwarding. Returns the host URL where the app is accessible. Use stop_serve to stop it.",
@@ -58,22 +57,13 @@ fn serve_tool() -> Tool {
   |> tool.build()
 }
 
-fn stop_serve_tool() -> Tool {
+pub fn stop_serve_tool() -> Tool {
   tool.new("stop_serve")
   |> tool.with_description(
     "Stop a running server in the sandbox and free the slot.",
   )
   |> tool.add_integer_param("slot_id", "The slot ID returned by serve", True)
   |> tool.build()
-}
-
-/// Return all sandbox tools plus builtin tools.
-pub fn tools(manager: sandbox_types.SandboxManager) -> List(Tool) {
-  let _ = manager
-  list.flatten([
-    [run_code_tool(), serve_tool(), stop_serve_tool()],
-    builtin.all(),
-  ])
 }
 
 /// Check if a tool name is a sandbox tool.

@@ -3,10 +3,11 @@ import agent/cognitive_state.{type CognitiveState, CognitiveState}
 import agent/framework
 import agent/registry
 import agent/types.{
-  type AgentOutcome, type CognitiveReply, AgentFailure, AgentQuestionSource,
-  AgentSuccess, AgentTask, AgentWaiting, CognitiveQuestion, CognitiveReply, Idle,
-  OwnToolWaiting, PendingAgent, PendingThink, QuestionForHuman, Thinking,
-  ToolCalling, WaitingForAgents, WaitingForUser,
+  type AgentOutcome, type CognitiveReply, type DelegationProgress, AgentFailure,
+  AgentQuestionSource, AgentSuccess, AgentTask, AgentWaiting, CognitiveQuestion,
+  CognitiveReply, DelegationInfo, Idle, OwnToolWaiting, PendingAgent,
+  PendingThink, QuestionForHuman, Thinking, ToolCalling, WaitingForAgents,
+  WaitingForUser,
 }
 import agent/worker
 import cycle_log
@@ -33,6 +34,9 @@ import tools/planner as planner_tools
 
 @external(erlang, "springdrift_ffi", "get_datetime")
 fn get_datetime() -> String
+
+@external(erlang, "springdrift_ffi", "monotonic_now_ms")
+fn monotonic_now_ms() -> Int
 
 /// Extract node_type from the PendingThink for a task_id, defaulting to CognitiveCycle.
 fn pending_node_type(
@@ -201,6 +205,9 @@ fn handle_memory_tools(
             introspect_ctx,
             state.config.memory_limits,
             state.config.how_to_content,
+            option.Some(memory.AgentManagementContext(
+              supervisor: state.supervisor,
+            )),
           )
       }
       // Log tool result to cycle log
@@ -456,6 +463,7 @@ fn do_dispatch_agents(
               context: ctx,
               parent_cycle_id: cycle_id,
               reply_to: state.self,
+              depth: 1,
             )
           // Enrich task with prior agent results via Curator
           let enriched_task = case state.memory.curator {
@@ -560,10 +568,46 @@ fn do_dispatch_agents(
           dag_types.ToolSummary(name: call.name, success: True, error: None)
         })
 
+      // Build initial delegation tracking entries
+      let now_ms = monotonic_now_ms()
+      let new_delegations =
+        list.fold(agent_calls, state.active_delegations, fn(d, call) {
+          let agent_name = string.drop_start(call.name, 6)
+          let #(instr, _ctx) = parse_agent_params(call.input_json)
+          let task_id_for_call =
+            list.find_map(new_pending_agents, fn(p) {
+              case p {
+                PendingAgent(task_id: tid, agent: a, ..) if a == agent_name ->
+                  Ok(tid)
+                _ -> Error(Nil)
+              }
+            })
+          case task_id_for_call {
+            Ok(tid) ->
+              dict.insert(
+                d,
+                tid,
+                DelegationInfo(
+                  agent: agent_name,
+                  instruction: string.slice(instr, 0, 200),
+                  turn: 0,
+                  max_turns: 0,
+                  input_tokens: 0,
+                  output_tokens: 0,
+                  last_tool: "",
+                  started_at_ms: now_ms,
+                  depth: 1,
+                ),
+              )
+            Error(_) -> d
+          }
+        })
+
       CognitiveState(
         ..state,
         messages:,
         cycle_tool_calls: list.append(state.cycle_tool_calls, agent_summaries),
+        active_delegations: new_delegations,
         status: WaitingForAgents(
           pending_ids:,
           accumulated_results: initial_results,
@@ -573,6 +617,44 @@ fn do_dispatch_agents(
       )
     }
   }
+}
+
+/// Handle mid-flight progress update from an agent's react loop.
+/// Updates the active_delegations dict so the sensorium can display it.
+pub fn handle_agent_progress(
+  state: CognitiveState,
+  progress: DelegationProgress,
+) -> CognitiveState {
+  let info = case dict.get(state.active_delegations, progress.task_id) {
+    Ok(existing) ->
+      DelegationInfo(
+        ..existing,
+        turn: progress.turn,
+        input_tokens: progress.input_tokens,
+        output_tokens: progress.output_tokens,
+        last_tool: progress.last_tool,
+      )
+    Error(_) ->
+      DelegationInfo(
+        agent: progress.agent,
+        instruction: "",
+        turn: progress.turn,
+        max_turns: progress.max_turns,
+        input_tokens: progress.input_tokens,
+        output_tokens: progress.output_tokens,
+        last_tool: progress.last_tool,
+        started_at_ms: monotonic_now_ms(),
+        depth: progress.depth,
+      )
+  }
+  CognitiveState(
+    ..state,
+    active_delegations: dict.insert(
+      state.active_delegations,
+      progress.task_id,
+      info,
+    ),
+  )
 }
 
 pub fn handle_agent_complete(
@@ -763,6 +845,8 @@ pub fn handle_agent_complete(
         )
 
       let remaining = dict.delete(state.pending, outcome_task_id)
+      let updated_delegations =
+        dict.delete(state.active_delegations, outcome_task_id)
 
       // Check if all agents are done
       let still_waiting =
@@ -789,9 +873,15 @@ pub fn handle_agent_complete(
                   reply_to:,
                 ),
                 pending: remaining,
+                active_delegations: updated_delegations,
               )
             }
-            _ -> CognitiveState(..state, pending: remaining)
+            _ ->
+              CognitiveState(
+                ..state,
+                pending: remaining,
+                active_delegations: updated_delegations,
+              )
           }
         }
         False -> {
@@ -826,7 +916,12 @@ pub fn handle_agent_complete(
             })
             |> string.join("\n")
           let new_state_with_messages =
-            CognitiveState(..state, messages:, pending: remaining)
+            CognitiveState(
+              ..state,
+              messages:,
+              pending: remaining,
+              active_delegations: updated_delegations,
+            )
           case state.dprime_state {
             Some(dprime_st) -> {
               let cycle_id = option.unwrap(state.cycle_id, "post-exec")

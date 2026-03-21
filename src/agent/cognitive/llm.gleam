@@ -49,6 +49,7 @@ pub fn proceed_with_model(
           agents_active: registry.count_running(state.registry),
           message_count: list.length(state.messages),
           sensory_events: state.pending_sensory_events,
+          active_delegations: dict.values(state.active_delegations),
         )
       let prompt =
         curator.build_system_prompt(cur, state.system, Some(cycle_context))

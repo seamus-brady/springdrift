@@ -332,6 +332,7 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `forecaster_tick_ms` | — | 300000 | Forecaster evaluation interval (ms) |
 | `forecaster_replan_threshold` | — | 0.55 | D' score above which replan is suggested |
 | `forecaster_min_cycles` | — | 2 | Min cycles on a task before forecaster evaluates |
+| `max_delegation_depth` | — | 3 | Max depth for agent delegation chains |
 | `sandbox_enabled` | — | True | Enable local Podman sandbox for coder agent |
 | `sandbox_pool_size` | — | 1 | Max containers in the pool (max: 3) |
 | `sandbox_memory_mb` | — | 512 | Memory limit per container in MB |
@@ -399,6 +400,7 @@ At startup, the Librarian replays artifact metadata from disk (configurable via
 | `query_tool_activity` | DAG | Per-tool usage stats for a date |
 | `introspect` | All | Perceive system state: identity, agent roster, D' config, cycle ID |
 | `how_to` | HOW_TO.md | Operator guide: tool selection heuristics, degradation paths |
+| `cancel_agent` | Registry | Stop a running agent delegation by name |
 | `complete_task_step` | Tasks | Mark a step complete on a task |
 | `flag_risk` | Tasks | Record that a predicted risk has materialised |
 | `activate_task` | Tasks | Set a pending task as current focus |
@@ -667,6 +669,20 @@ if missing, and sweeps stale `springdrift-sandbox-*` containers. When `sandbox_e
 is False (default), the coder agent falls back to `request_human_input` — no sandbox
 code runs. Workspace dirs live at `.springdrift/sandbox/workspaces/N/`.
 
+**Delegation management** — the cognitive loop tracks active agent delegations via
+`active_delegations: Dict(String, DelegationInfo)` on `CognitiveState`. The agent
+framework sends `AgentProgress` messages after each react-loop turn with turn count,
+token usage, and last tool called. The Curator renders a `<delegations>` section in
+the sensorium XML showing live agent state (name, turn N/M, tokens, elapsed time,
+instruction summary). The `cancel_agent` tool sends `StopChild` to the supervisor to
+kill a misbehaving agent. `DelegationInfo` tracks agent name, instruction, turn,
+max_turns, tokens, last tool, started_at_ms, and depth. Delegation depth is capped
+by `max_delegation_depth` config (default: 3). `AgentTask` carries a `depth: Int`
+field set to 1 for cognitive-loop dispatches. Sub-agents (`request_human_input`
+removed from all agents) report only through their return value — they cannot hijack
+the user interaction channel. `builtin.agent_tools()` provides the safe tool subset
+for sub-agents, excluding `request_human_input`.
+
 **Config validation** — `parse_config_toml` validates unknown TOML keys and warns via
 `slog`. Numeric values are range-checked (must be positive). Provider and GUI mode
 values are validated against known options. Parse failures are logged instead of silent.
@@ -748,6 +764,7 @@ The config is organized into these TOML sections:
 | `[web]` | Web GUI port |
 | `[services]` | External API base URLs (DuckDuckGo, Brave, Jina) |
 | `[sandbox]` | Local Podman sandbox: enabled, pool_size, memory, ports, image |
+| `[delegation]` | Agent delegation depth limits |
 
 Quick example (top-level fields only):
 

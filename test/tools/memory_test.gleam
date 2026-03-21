@@ -22,7 +22,7 @@ pub fn main() -> Nil {
 
 pub fn memory_tools_defined_test() {
   let tools = memory.all()
-  tools |> list.length |> should.equal(19)
+  tools |> list.length |> should.equal(20)
 }
 
 pub fn recall_recent_tool_exists_test() {
@@ -704,6 +704,7 @@ pub fn how_to_returns_full_guide_test() {
       None,
       test_limits,
       Some(guide),
+      None,
     )
   case result {
     ToolSuccess(content: c, ..) -> c |> should.equal(guide)
@@ -725,6 +726,7 @@ pub fn how_to_filters_by_topic_test() {
       None,
       test_limits,
       Some(guide),
+      None,
     )
   case result {
     ToolSuccess(content: c, ..) -> {
@@ -750,6 +752,7 @@ pub fn how_to_unknown_topic_returns_full_guide_test() {
       None,
       test_limits,
       Some(guide),
+      None,
     )
   case result {
     ToolSuccess(content: c, ..) -> c |> should.equal(guide)

@@ -68,7 +68,7 @@ pub fn spec(
       jina.all(),
       web.all(),
       artifacts.all(),
-      builtin.all(),
+      builtin.agent_tools(),
     ])
 
   AgentSpec(

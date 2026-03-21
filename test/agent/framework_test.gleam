@@ -55,6 +55,7 @@ pub fn agent_success_test() {
       context: "",
       parent_cycle_id: "cycle-1",
       reply_to: cognitive_subj,
+      depth: 1,
     )
   process.send(task_subj, task)
 
@@ -92,6 +93,7 @@ pub fn agent_failure_on_error_test() {
       context: "",
       parent_cycle_id: "cycle-2",
       reply_to: cognitive_subj,
+      depth: 1,
     )
   process.send(task_subj, task)
 
@@ -130,6 +132,7 @@ pub fn agent_handles_multiple_tasks_test() {
       context: "",
       parent_cycle_id: "cycle-a",
       reply_to: cognitive_subj,
+      depth: 1,
     ),
   )
   process.send(
@@ -141,6 +144,7 @@ pub fn agent_handles_multiple_tasks_test() {
       context: "",
       parent_cycle_id: "cycle-b",
       reply_to: cognitive_subj,
+      depth: 1,
     ),
   )
 

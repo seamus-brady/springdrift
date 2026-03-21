@@ -1,7 +1,7 @@
 import agent/types.{
   type AgentIdentity, type AgentOutcome, type AgentSpec, type AgentTask,
   type CognitiveMessage, AgentComplete, AgentFailure, AgentIdentity,
-  AgentQuestion, AgentSuccess,
+  AgentProgress, AgentQuestion, AgentSuccess, DelegationProgress,
 }
 import context
 import cycle_log
@@ -226,6 +226,7 @@ fn do_react_loop(
       agent_cycle_id,
       task.reply_to,
       initial_stats,
+      task.depth,
     )
   let duration_ms = monotonic_now_ms() - start_ms
   #(agent_cycle_id, react_result, duration_ms)
@@ -239,11 +240,13 @@ fn do_react(
   cycle_id: String,
   cognitive: Subject(CognitiveMessage),
   stats: ReactStats,
+  task_depth: Int,
 ) -> ReactResult {
+  let current_turn = spec.max_turns - remaining + 1
   slog.debug(
     "framework",
     "do_react",
-    spec.name <> " turn " <> int.to_string(spec.max_turns - remaining + 1),
+    spec.name <> " turn " <> int.to_string(current_turn),
     Some(cycle_id),
   )
   case remaining {
@@ -314,6 +317,25 @@ fn do_react(
                 True -> consecutive_errors + 1
                 False -> 0
               }
+              // Report progress to cognitive loop
+              let last_tool_name = case tool_names {
+                [name, ..] -> name
+                [] -> ""
+              }
+              process.send(
+                cognitive,
+                AgentProgress(progress: DelegationProgress(
+                  task_id: cycle_id,
+                  agent: spec.name,
+                  turn: current_turn,
+                  max_turns: spec.max_turns,
+                  input_tokens: stats_with_tools.input_tokens,
+                  output_tokens: stats_with_tools.output_tokens,
+                  last_tool: last_tool_name,
+                  depth: task_depth,
+                )),
+              )
+
               case new_consecutive >= spec.max_consecutive_errors {
                 True ->
                   ReactResult(
@@ -346,6 +368,7 @@ fn do_react(
                     cycle_id,
                     cognitive,
                     stats_with_tools,
+                    task_depth,
                   )
                 }
               }

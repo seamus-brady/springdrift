@@ -52,6 +52,8 @@ pub type CycleContext {
     message_count: Int,
     /// Sensory events accumulated since last cycle
     sensory_events: List(agent_types.SensoryEvent),
+    /// Active agent delegations for sensorium display
+    active_delegations: List(agent_types.DelegationInfo),
   )
 }
 
@@ -607,6 +609,9 @@ fn make_memory_fact(
 @external(erlang, "springdrift_ffi", "generate_uuid")
 fn generate_id() -> String
 
+@external(erlang, "springdrift_ffi", "monotonic_now_ms")
+fn monotonic_now_ms() -> Int
+
 @external(erlang, "springdrift_ffi", "get_datetime")
 fn get_timestamp() -> String
 
@@ -893,13 +898,20 @@ fn build_sensorium(
     )
   let events = render_sensorium_events(sensory_events)
 
+  // Active delegations from cognitive loop
+  let delegations_list = case context {
+    Some(ctx) -> ctx.active_delegations
+    None -> []
+  }
+  let delegations = render_sensorium_delegations(delegations_list)
+
   // Query active tasks and endeavours for the <tasks> section
   let active_tasks = librarian.get_active_tasks(state.librarian)
   let endeavours = librarian.get_all_endeavours(state.librarian)
   let tasks_section = render_sensorium_tasks(active_tasks, endeavours)
 
   let sections =
-    [clock, situation, schedule, vitals, events, tasks_section]
+    [clock, situation, schedule, vitals, delegations, events, tasks_section]
     |> list.filter(fn(s) { s != "" })
     |> string.join("\n")
 
@@ -1046,6 +1058,57 @@ pub fn render_sensorium_vitals(
 
 /// Render the <events> element — sensory events accumulated between cycles.
 /// Returns "" if events is empty.
+/// Render the <delegations> element — active agent work in progress.
+/// Returns "" when no agents are executing.
+pub fn render_sensorium_delegations(
+  delegations: List(agent_types.DelegationInfo),
+) -> String {
+  case delegations {
+    [] -> ""
+    _ -> {
+      let now_ms = monotonic_now_ms()
+      let lines =
+        delegations
+        |> list.map(fn(d) {
+          let elapsed_s = { now_ms - d.started_at_ms } / 1000
+          let tokens = d.input_tokens + d.output_tokens
+          let turn_str = case d.max_turns > 0 {
+            True -> int.to_string(d.turn) <> "/" <> int.to_string(d.max_turns)
+            False -> int.to_string(d.turn)
+          }
+          let tool_attr = case d.last_tool {
+            "" -> ""
+            t -> " last_tool=\"" <> t <> "\""
+          }
+          let instr_attr = case d.instruction {
+            "" -> ""
+            i -> " instruction=\"" <> string.slice(i, 0, 100) <> "\""
+          }
+          "    <agent name=\""
+          <> d.agent
+          <> "\" turn=\""
+          <> turn_str
+          <> "\" tokens=\""
+          <> int.to_string(tokens)
+          <> "\" elapsed_s=\""
+          <> int.to_string(elapsed_s)
+          <> "\" depth=\""
+          <> int.to_string(d.depth)
+          <> "\""
+          <> tool_attr
+          <> instr_attr
+          <> "/>"
+        })
+        |> string.join("\n")
+      "  <delegations count=\""
+      <> int.to_string(list.length(delegations))
+      <> "\">\n"
+      <> lines
+      <> "\n  </delegations>"
+    }
+  }
+}
+
 pub fn render_sensorium_events(events: List(agent_types.SensoryEvent)) -> String {
   case events {
     [] -> ""

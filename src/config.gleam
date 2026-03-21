@@ -172,6 +172,8 @@ pub type AppConfig {
     xstructor_max_retries: Option(Int),
     // ── Preamble budget ──
     preamble_budget_chars: Option(Int),
+    // ── Delegation ──
+    max_delegation_depth: Option(Int),
     // ── Forecaster ──
     forecaster_enabled: Option(Bool),
     forecaster_tick_ms: Option(Int),
@@ -307,6 +309,7 @@ pub fn default() -> AppConfig {
     autonomous_token_budget_per_hour: None,
     xstructor_max_retries: None,
     preamble_budget_chars: None,
+    max_delegation_depth: None,
     forecaster_enabled: None,
     forecaster_tick_ms: None,
     forecaster_replan_threshold: None,
@@ -712,6 +715,10 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     preamble_budget_chars: option.or(
       override_cfg.preamble_budget_chars,
       base.preamble_budget_chars,
+    ),
+    max_delegation_depth: option.or(
+      override_cfg.max_delegation_depth,
+      base.max_delegation_depth,
     ),
     forecaster_enabled: option.or(
       override_cfg.forecaster_enabled,
@@ -1251,6 +1258,8 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     preamble_budget_chars: get_toml_int(table, [
       "narrative", "preamble_budget_chars",
     ]),
+    // ── [delegation] ──
+    max_delegation_depth: get_toml_int(table, ["delegation", "max_depth"]),
     // ── [forecaster] ──
     forecaster_enabled: get_toml_bool(table, ["forecaster", "enabled"]),
     forecaster_tick_ms: get_toml_int(table, ["forecaster", "tick_ms"]),
@@ -1294,7 +1303,7 @@ const known_keys = [
   "narrative", "profile", "profiles_dirs", "agent", "log_retention_days",
   "log_max_file_bytes", "timeouts", "retry", "limits", "scoring", "housekeeping",
   "housekeeper", "cbr", "agents", "web", "services", "scheduler", "xstructor",
-  "forecaster", "sandbox",
+  "forecaster", "sandbox", "delegation",
 ]
 
 const known_narrative_keys = [

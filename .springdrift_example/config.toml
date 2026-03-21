@@ -368,6 +368,13 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 # Auto-start podman machine on macOS if not running (default: true)
 # auto_machine = true
 
+# ── Delegation ───────────────────────────────────────────────────────────────
+# Agent delegation depth and control limits.
+
+[delegation]
+# Maximum delegation depth — how many levels deep agent chains can go (default: 3)
+# max_depth = 3
+
 # ── XStructor ────────────────────────────────────────────────────────────────
 # XML-schema-validated structured LLM output.
 

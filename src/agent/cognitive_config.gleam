@@ -51,6 +51,7 @@ pub type CognitiveConfig {
     how_to_content: Option(String),
     redact_secrets: Bool,
     planner_dir: String,
+    max_delegation_depth: Int,
   )
 }
 
@@ -98,5 +99,6 @@ pub fn default_test_config(
     how_to_content: None,
     redact_secrets: False,
     planner_dir: base <> "/planner",
+    max_delegation_depth: 3,
   )
 }

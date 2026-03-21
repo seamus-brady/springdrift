@@ -56,6 +56,21 @@ tools: reflect, inspect_cycle, list_recent_cycles, query_tool_activity.
 5. When an agent result contains [WARNING: agent X had tool failures], treat the
    result with suspicion — the agent continued despite tool errors
 
+## Delegation Management
+
+The sensorium shows a `<delegations>` section with live agent status when agents are executing. Each entry shows agent name, current turn, token usage, elapsed time, and last tool called.
+
+### When to cancel an agent
+- Agent is past 80% of its max turns with no useful progress
+- Token usage exceeds what the task warrants (e.g. >200K tokens for a simple lookup)
+- The agent is calling the same tool repeatedly (loop detection)
+- The user has changed their mind or the task is no longer needed
+
+Use **cancel_agent**(agent_name) to stop a running agent. Cancelled agents with Permanent restart strategy will be restarted by the supervisor, but the current task is abandoned.
+
+### Depth limit
+Delegation depth is capped at the configured maximum (default: 3). This prevents runaway agent chains.
+
 ## Agents
 
 - **agent_researcher** — web research and fact gathering (web + artifact + builtin tools)

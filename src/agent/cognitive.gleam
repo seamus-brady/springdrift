@@ -102,6 +102,7 @@ pub fn start(
           curator: cfg.curator,
         ),
         agent_completions: [],
+        active_delegations: dict.new(),
         last_user_input: "",
         input_queue: [],
         input_queue_cap: cfg.input_queue_cap,
@@ -119,6 +120,7 @@ pub fn start(
           threading_config: cfg.threading_config,
           memory_limits: cfg.memory_limits,
           how_to_content: cfg.how_to_content,
+          max_delegation_depth: cfg.max_delegation_depth,
         ),
         redact_secrets: cfg.redact_secrets,
         pending_sensory_events: [],
@@ -189,6 +191,7 @@ fn handle_message(
       types.OutputGateComplete(..) -> "OutputGateComplete"
       types.QueuedSensoryEvent(..) -> "QueuedSensoryEvent"
       types.ForecasterSuggestion(..) -> "ForecasterSuggestion"
+      types.AgentProgress(..) -> "AgentProgress"
     },
     state.cycle_id,
   )
@@ -202,6 +205,8 @@ fn handle_message(
       cognitive_llm.handle_think_down(state, task_id, reason)
     AgentComplete(outcome) ->
       cognitive_agents.handle_agent_complete(state, outcome)
+    types.AgentProgress(progress) ->
+      cognitive_agents.handle_agent_progress(state, progress)
     types.AgentQuestion(question, agent, reply_to) ->
       cognitive_agents.handle_agent_question(state, question, agent, reply_to)
     AgentEvent(event) -> cognitive_agents.handle_agent_event(state, event)
@@ -1046,6 +1051,7 @@ fn handle_forecaster_suggestion(
               context: forecast_context,
               parent_cycle_id: cycle_id,
               reply_to: state.self,
+              depth: 1,
             )
           process.send(task_subject, agent_task)
           process.send(

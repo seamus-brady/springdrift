@@ -78,6 +78,7 @@ pub type AgentTask {
     context: String,
     parent_cycle_id: String,
     reply_to: Subject(CognitiveMessage),
+    depth: Int,
   )
 }
 
@@ -248,6 +249,7 @@ pub type CognitiveMessage {
   ThinkError(task_id: String, error: String, retryable: Bool)
   ThinkWorkerDown(task_id: String, reason: String)
   AgentComplete(outcome: AgentOutcome)
+  AgentProgress(progress: DelegationProgress)
   AgentQuestion(question: String, agent: String, reply_to: Subject(String))
   AgentEvent(event: AgentLifecycleEvent)
   SaveResult(error: Option(String))
@@ -428,4 +430,37 @@ pub type QueuedInput {
     reply_to: Subject(CognitiveReply),
   )
   QueuedSensoryInput(event: SensoryEvent)
+}
+
+// ---------------------------------------------------------------------------
+// Delegation progress — mid-flight updates from agent framework
+// ---------------------------------------------------------------------------
+
+/// Progress report sent by the framework during an agent's react loop.
+pub type DelegationProgress {
+  DelegationProgress(
+    task_id: String,
+    agent: String,
+    turn: Int,
+    max_turns: Int,
+    input_tokens: Int,
+    output_tokens: Int,
+    last_tool: String,
+    depth: Int,
+  )
+}
+
+/// Live delegation state tracked by the cognitive loop.
+pub type DelegationInfo {
+  DelegationInfo(
+    agent: String,
+    instruction: String,
+    turn: Int,
+    max_turns: Int,
+    input_tokens: Int,
+    output_tokens: Int,
+    last_tool: String,
+    started_at_ms: Int,
+    depth: Int,
+  )
 }

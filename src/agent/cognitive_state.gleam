@@ -1,8 +1,8 @@
 import agent/registry.{type Registry}
 import agent/types.{
   type AgentCompletionRecord, type CognitiveMessage, type CognitiveStatus,
-  type Notification, type PendingTask, type QueuedInput, type SensoryEvent,
-  type SupervisorMessage,
+  type DelegationInfo, type Notification, type PendingTask, type QueuedInput,
+  type SensoryEvent, type SupervisorMessage,
 }
 import dag/types as dag_types
 import dprime/types as dprime_types
@@ -58,6 +58,7 @@ pub type RuntimeConfig {
     threading_config: threading.ThreadingConfig,
     memory_limits: memory.MemoryLimits,
     how_to_content: Option(String),
+    max_delegation_depth: Int,
   )
 }
 
@@ -91,6 +92,7 @@ pub type CognitiveState {
     // --- Agent subsystem ---
     registry: Registry,
     agent_completions: List(AgentCompletionRecord),
+    active_delegations: Dict(String, DelegationInfo),
     last_user_input: String,
     supervisor: Option(Subject(SupervisorMessage)),
     // --- Cycle telemetry ---
