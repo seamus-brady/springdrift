@@ -667,9 +667,10 @@ The manager runs health checks every 30s and restarts failed containers. Startup
 verifies `podman` binary, optionally starts podman machine on macOS, pulls the image
 if missing, and sweeps stale `springdrift-sandbox-*` containers. When `sandbox_enabled`
 is False (default), the coder agent falls back to `request_human_input` — no sandbox
-code runs. Workspace dirs live at `/tmp/springdrift-sandbox/workspaces/N/`
-(deliberately outside `.springdrift/` to isolate ephemeral container state
-from persistent agent memory).
+code runs. Workspace dirs live at `.sandbox-workspaces/N/` in the project root
+(a sibling of `.springdrift/`, deliberately separate to isolate ephemeral
+container state from persistent agent memory). Add `.sandbox-workspaces/`
+to `.gitignore`.
 The coder agent has six sandbox tools: run_code (execute scripts), serve/stop_serve (long-lived processes), sandbox_status (slot states and ports), workspace_ls (list workspace files), and sandbox_exec (direct shell commands for git, pip, curl, etc.).
 
 **Delegation management** — the cognitive loop tracks active agent delegations via

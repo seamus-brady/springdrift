@@ -4,6 +4,7 @@ build/
 *.ez
 erl_crash.dump
 .springdrift/
+.sandbox-workspaces/
 .env
 *.local.json
 _impl_docs/

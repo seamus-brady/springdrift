@@ -127,11 +127,12 @@ pub fn scheduler_outputs_dir() -> String {
   project_dir() <> "/scheduler/outputs"
 }
 
-/// Sandbox workspaces directory: /tmp/springdrift-sandbox/workspaces/
-/// Deliberately outside .springdrift/ to isolate ephemeral container
-/// workspaces from persistent agent memory.
+/// Sandbox workspaces directory — a sibling of .springdrift/ in the project root.
+/// Kept separate from .springdrift/ to isolate ephemeral container workspaces
+/// from persistent agent memory. Uses a path under the project directory
+/// (not /tmp) because podman machine on macOS only shares /Users.
 pub fn sandbox_workspaces_dir() -> String {
-  "/tmp/springdrift-sandbox/workspaces"
+  ".sandbox-workspaces"
 }
 
 /// Legacy scheduler checkpoint (one-time migration source only).
