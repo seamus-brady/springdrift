@@ -99,11 +99,24 @@ pub fn start(
         False -> Nil
       }
 
-      // Create workspace directories
-      let _ = simplifile.create_directory_all(config.workspace_dir)
+      // Create workspace directories — resolve to absolute path for podman bind mounts.
+      // Relative paths resolve inside the podman machine VM, not on the host.
+      let abs_workspace_dir = case
+        string.starts_with(config.workspace_dir, "/")
+      {
+        True -> config.workspace_dir
+        False ->
+          case simplifile.current_directory() {
+            Ok(cwd) -> cwd <> "/" <> config.workspace_dir
+            Error(_) -> config.workspace_dir
+          }
+      }
+      let abs_config =
+        types.SandboxConfig(..config, workspace_dir: abs_workspace_dir)
+      let _ = simplifile.create_directory_all(abs_workspace_dir)
 
       // Create containers (synchronous, before spawning the actor)
-      let slots = create_containers(config)
+      let slots = create_containers(abs_config)
 
       let running_count =
         dict.values(slots)
@@ -116,7 +129,23 @@ pub fn start(
         |> list.length
 
       case running_count {
-        0 -> Error("Failed to start any sandbox containers")
+        0 -> {
+          // Surface the first failure reason
+          let reason =
+            dict.values(slots)
+            |> list.find_map(fn(s) {
+              case s.status {
+                types.Failed(reason:) -> Ok(reason)
+                _ -> Error(Nil)
+              }
+            })
+            |> option.from_result
+            |> option.unwrap("unknown error")
+          Error(
+            "Failed to start any sandbox containers: "
+            <> string.slice(reason, 0, 200),
+          )
+        }
         _ -> {
           // Use setup pattern: spawn actor, receive the subject back
           let setup = process.new_subject()
@@ -124,7 +153,7 @@ pub fn start(
             let self: Subject(SandboxMessage) = process.new_subject()
             process.send(setup, self)
 
-            let state = ManagerState(config:, slots:, self:, notify:)
+            let state = ManagerState(config: abs_config, slots:, self:, notify:)
 
             // Schedule first health check
             let _ = process.send_after(self, 30_000, types.HealthCheck)
@@ -138,13 +167,13 @@ pub fn start(
             Ok(self) -> {
               // Send notification
               let port_range =
-                int.to_string(config.port_base)
+                int.to_string(abs_config.port_base)
                 <> "-"
                 <> int.to_string(
-                  config.port_base
-                  + { config.pool_size - 1 }
-                  * config.port_stride
-                  + config.ports_per_slot
+                  abs_config.port_base
+                  + { abs_config.pool_size - 1 }
+                  * abs_config.port_stride
+                  + abs_config.ports_per_slot
                   - 1,
                 )
               process.send(
@@ -157,10 +186,10 @@ pub fn start(
 
               Ok(SandboxManager(
                 subject: self,
-                exec_timeout_ms: config.exec_timeout_ms,
-                port_base: config.port_base,
-                port_stride: config.port_stride,
-                ports_per_slot: config.ports_per_slot,
+                exec_timeout_ms: abs_config.exec_timeout_ms,
+                port_base: abs_config.port_base,
+                port_stride: abs_config.port_stride,
+                ports_per_slot: abs_config.ports_per_slot,
                 internal_port_base: types.internal_port_base,
               ))
             }
@@ -385,15 +414,10 @@ fn create_container(config: SandboxConfig, slot_id: Int) -> SandboxSlot {
     int.to_string(config.memory_mb) <> "m",
     "--cpus",
     config.cpus,
-    "--read-only",
     "--security-opt",
     "no-new-privileges",
-    "--cap-drop",
-    "ALL",
-    "--mount",
-    "type=tmpfs,dst=/tmp",
     "-v",
-    workspace <> ":/workspace:Z",
+    workspace <> ":/workspace",
   ]
 
   let image_args = [config.image, "sleep", "infinity"]
