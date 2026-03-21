@@ -12,7 +12,7 @@ import gleam/list
 import gleam/option.{None, Some}
 import profile/types as profile_types
 import scheduler/delivery
-import scheduler/persist
+import scheduler/log as schedule_log
 import scheduler/types.{
   type ScheduledJob, type SchedulerMessage, Cancelled, Completed, Failed,
   ForAgent, GetStatus, JobComplete, JobFailed, Pending, ProfileJob,
@@ -32,7 +32,7 @@ fn get_datetime() -> String
 pub fn start(
   tasks: List(profile_types.ScheduleTaskConfig),
   cognitive: Subject(agent_types.CognitiveMessage),
-  checkpoint_path: String,
+  schedule_dir: String,
   stuck_timeout_ms: Int,
   max_cycles_per_hour: Int,
   token_budget_per_hour: Int,
@@ -42,21 +42,18 @@ pub fn start(
     let self: Subject(SchedulerMessage) = process.new_subject()
     process.send(setup, self)
 
-    // Try to load checkpoint for recovery
-    let checkpoint_jobs = case persist.load(checkpoint_path) {
-      Ok(checkpoint) -> {
-        let config_names = list.map(tasks, fn(t) { t.name })
-        persist.reconcile(checkpoint.jobs, config_names)
-      }
-      Error(_) -> []
-    }
+    // Load state from JSONL operation log (survives restarts)
+    let config_names = list.map(tasks, fn(t) { t.name })
+    let persisted_jobs =
+      schedule_log.resolve_current(schedule_dir)
+      |> list.filter(fn(j) { list.contains(config_names, j.name) })
 
     let now = monotonic_now_ms()
 
     // Build initial job state, restoring from checkpoint where available
     let jobs =
       list.fold(tasks, dict.new(), fn(acc, task) {
-        let restored = list.find(checkpoint_jobs, fn(j) { j.name == task.name })
+        let restored = list.find(persisted_jobs, fn(j) { j.name == task.name })
         let job = case restored {
           Ok(saved) ->
             ScheduledJob(
@@ -98,7 +95,7 @@ pub fn start(
     // Schedule initial ticks, accounting for elapsed time since last run
     list.each(tasks, fn(task) {
       let delay = case
-        list.find(checkpoint_jobs, fn(j) { j.name == task.name })
+        list.find(persisted_jobs, fn(j) { j.name == task.name })
       {
         Ok(saved) ->
           case saved.last_run_ms {
@@ -129,7 +126,7 @@ pub fn start(
       self,
       jobs,
       cognitive,
-      checkpoint_path,
+      schedule_dir,
       stuck_timeout_ms,
       max_cycles_per_hour,
       token_budget_per_hour,
@@ -156,7 +153,7 @@ fn scheduler_loop(
   self: Subject(SchedulerMessage),
   jobs: Dict(String, ScheduledJob),
   cognitive: Subject(agent_types.CognitiveMessage),
-  checkpoint_path: String,
+  schedule_dir: String,
   stuck_timeout_ms: Int,
   max_cycles_per_hour: Int,
   token_budget_per_hour: Int,
@@ -173,7 +170,7 @@ fn scheduler_loop(
       self,
       j,
       cognitive,
-      checkpoint_path,
+      schedule_dir,
       stuck_timeout_ms,
       max_cycles_per_hour,
       token_budget_per_hour,
@@ -186,7 +183,7 @@ fn scheduler_loop(
       self,
       j,
       cognitive,
-      checkpoint_path,
+      schedule_dir,
       stuck_timeout_ms,
       max_cycles_per_hour,
       token_budget_per_hour,
@@ -342,8 +339,7 @@ fn scheduler_loop(
                 False -> Nil
               }
 
-              // Save checkpoint
-              let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
+              schedule_log.append(schedule_dir, updated_job, types.Fire)
 
               loop(updated_jobs)
             }
@@ -438,8 +434,7 @@ fn scheduler_loop(
             False -> Nil
           }
 
-          // Save checkpoint after completion
-          let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
+          schedule_log.append(schedule_dir, updated_job, types.Complete)
 
           // Track token usage for rate limiting
           let hour_ago = now - 3_600_000
@@ -495,8 +490,7 @@ fn scheduler_loop(
             False -> Nil
           }
 
-          // Save checkpoint after failure
-          let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
+          schedule_log.append(schedule_dir, updated_job, types.Update)
 
           loop(updated_jobs)
         }
@@ -531,7 +525,7 @@ fn scheduler_loop(
               }
             types.Todo -> Nil
           }
-          let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
+          schedule_log.append(schedule_dir, job, types.Create)
           process.send(reply_to, Ok(job.name))
           slog.info("scheduler", "loop", "Added job '" <> job.name <> "'", None)
           loop(updated_jobs)
@@ -548,7 +542,7 @@ fn scheduler_loop(
         Ok(job) -> {
           let cancelled_job = ScheduledJob(..job, status: Cancelled)
           let updated_jobs = dict.insert(jobs, name, cancelled_job)
-          let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
+          schedule_log.append(schedule_dir, cancelled_job, types.Cancel)
           process.send(reply_to, Ok(Nil))
           slog.info("scheduler", "loop", "Removed job '" <> name <> "'", None)
           loop(updated_jobs)
@@ -590,7 +584,7 @@ fn scheduler_loop(
             None -> Nil
           }
           let updated_jobs = dict.insert(jobs, name, updated_job)
-          let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
+          schedule_log.append(schedule_dir, updated_job, types.Update)
           process.send(reply_to, Ok(Nil))
           loop(updated_jobs)
         }
@@ -657,7 +651,7 @@ fn scheduler_loop(
         Ok(job) -> {
           let completed_job = ScheduledJob(..job, status: Completed)
           let updated_jobs = dict.insert(jobs, name, completed_job)
-          let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
+          schedule_log.append(schedule_dir, completed_job, types.Complete)
           process.send(reply_to, Ok(Nil))
           slog.info("scheduler", "loop", "Completed job '" <> name <> "'", None)
           loop(updated_jobs)

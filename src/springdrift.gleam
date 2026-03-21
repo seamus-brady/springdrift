@@ -807,7 +807,7 @@ fn run(cfg: AppConfig) -> Nil {
     scheduler_runner.start(
       profile_schedule_tasks,
       cognitive_subj,
-      paths.scheduler_checkpoint(),
+      paths.schedule_dir(),
       stuck_timeout_ms,
       max_cycles_per_hour,
       token_budget_per_hour,
