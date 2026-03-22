@@ -108,6 +108,7 @@ pub fn start(
         supervisor: None,
         identity: IdentityContext(
           agent_uuid: cfg.agent_uuid,
+          agent_name: cfg.agent_name,
           session_since: cfg.session_since,
           write_anywhere: cfg.write_anywhere,
         ),
@@ -927,6 +928,12 @@ fn handle_think_complete(
                           tokens_out: resp.usage.output_tokens,
                           duration_ms:,
                           agent_output: None,
+                          instance_name: state.identity.agent_name,
+                          instance_id: string.slice(
+                            state.identity.agent_uuid,
+                            0,
+                            8,
+                          ),
                         )),
                       )
                     None -> Nil

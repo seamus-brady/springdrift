@@ -491,6 +491,8 @@ fn do_dispatch_agents(
                   tokens_out: 0,
                   duration_ms: 0,
                   agent_output: None,
+                  instance_name: "",
+                  instance_id: "",
                 )),
               )
             None -> Nil
@@ -811,6 +813,8 @@ pub fn handle_agent_complete(
           tokens_out: completion.output_tokens,
           duration_ms: completion.duration_ms,
           agent_output: Some(findings_to_dag_output(outcome, completion)),
+          instance_name: "",
+          instance_id: "",
         )),
       )
     }

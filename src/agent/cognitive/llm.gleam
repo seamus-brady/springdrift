@@ -9,6 +9,7 @@ import gleam/dict
 import gleam/erlang/process.{type Subject}
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/string
 import llm/request
 import llm/types as llm_types
 import narrative/curator
@@ -92,6 +93,8 @@ pub fn proceed_with_model(
           tokens_out: 0,
           duration_ms: 0,
           agent_output: None,
+          instance_name: state.identity.agent_name,
+          instance_id: string.slice(state.identity.agent_uuid, 0, 8),
         )),
       )
     None -> Nil

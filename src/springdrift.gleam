@@ -648,6 +648,7 @@ fn run(cfg: AppConfig) -> Nil {
       write_anywhere:,
       curator: option.Some(curator_subj),
       agent_uuid: stable_identity.agent_uuid,
+      agent_name:,
       session_since:,
       retry_config:,
       classify_timeout_ms:,

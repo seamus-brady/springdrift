@@ -207,7 +207,10 @@ fn do_react_loop(
   spec: AgentSpec,
   task: AgentTask,
 ) -> #(String, ReactResult, Int) {
-  let agent_cycle_id = cycle_log.generate_uuid()
+  // Use the task_id as the cycle_id for logging — this matches the DAG node
+  // indexed by the cognitive loop, so inspect_cycle(detail: "full") can find
+  // the tool call entries.
+  let agent_cycle_id = task.task_id
   let req = build_agent_request(spec, task)
   let start_ms = monotonic_now_ms()
   let initial_stats =

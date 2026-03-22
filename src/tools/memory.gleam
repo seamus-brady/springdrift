@@ -1215,8 +1215,27 @@ fn format_subtree(tree: dag_types.DagSubtree, depth: Int, full: Bool) -> String 
   let indent = string.repeat("  ", depth)
   let node = tree.root
   let type_str = case node.node_type {
-    dag_types.CognitiveCycle -> "cognitive"
-    dag_types.AgentCycle -> "agent"
+    dag_types.CognitiveCycle ->
+      case node.instance_name {
+        "" -> "cognitive"
+        name ->
+          name
+          <> " ("
+          <> case node.instance_id {
+            "" -> "cognitive"
+            id -> id
+          }
+          <> ")"
+      }
+    dag_types.AgentCycle ->
+      case node.agent_output {
+        Some(dag_types.CoderOutput(..)) -> "sub-agent:coder"
+        Some(dag_types.ResearchOutput(..)) -> "sub-agent:researcher"
+        Some(dag_types.PlanOutput(..)) -> "sub-agent:planner"
+        Some(dag_types.WriterOutput(..)) -> "sub-agent:writer"
+        Some(dag_types.GenericOutput(..)) -> "sub-agent"
+        None -> "sub-agent"
+      }
     dag_types.SchedulerCycle -> "scheduler"
   }
   let outcome_str = case node.outcome {
@@ -1695,8 +1714,33 @@ fn run_list_recent_cycles(
                     dag_types.NodePending -> "pending"
                   }
                   let type_label = case node.parent_id {
-                    None -> "[root]"
-                    Some(pid) -> "[agent of " <> string.slice(pid, 0, 8) <> "]"
+                    None ->
+                      case node.instance_name {
+                        "" -> "[cognitive]"
+                        name ->
+                          "["
+                          <> name
+                          <> " ("
+                          <> case node.instance_id {
+                            "" -> "cognitive"
+                            id -> id
+                          }
+                          <> ")]"
+                      }
+                    Some(pid) -> {
+                      let sub_name = case node.agent_output {
+                        Some(dag_types.CoderOutput(..)) -> "coder"
+                        Some(dag_types.ResearchOutput(..)) -> "researcher"
+                        Some(dag_types.PlanOutput(..)) -> "planner"
+                        Some(dag_types.WriterOutput(..)) -> "writer"
+                        _ -> "agent"
+                      }
+                      "["
+                      <> sub_name
+                      <> " of "
+                      <> string.slice(pid, 0, 8)
+                      <> "]"
+                    }
                   }
                   let indent = case node.parent_id {
                     None -> ""

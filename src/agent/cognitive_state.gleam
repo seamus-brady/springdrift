@@ -43,6 +43,7 @@ pub type MemoryContext {
 pub type IdentityContext {
   IdentityContext(
     agent_uuid: String,
+    agent_name: String,
     session_since: String,
     write_anywhere: Bool,
   )
