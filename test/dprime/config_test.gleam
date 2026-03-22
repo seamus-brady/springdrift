@@ -20,9 +20,9 @@ pub fn default_has_seven_features_test() {
 
 pub fn default_has_expected_thresholds_test() {
   let cfg = dprime_config.default()
-  cfg.modify_threshold |> should.equal(0.25)
-  cfg.reject_threshold |> should.equal(0.4)
-  cfg.reactive_reject_threshold |> should.equal(0.55)
+  cfg.modify_threshold |> should.equal(0.35)
+  cfg.reject_threshold |> should.equal(0.55)
+  cfg.reactive_reject_threshold |> should.equal(0.65)
 }
 
 pub fn default_tiers_is_one_test() {
@@ -49,8 +49,8 @@ pub fn default_has_agent_id_test() {
 
 pub fn default_has_threshold_floors_test() {
   let cfg = dprime_config.default()
-  cfg.min_modify_threshold |> should.equal(0.15)
-  cfg.min_reject_threshold |> should.equal(0.3)
+  cfg.min_modify_threshold |> should.equal(0.2)
+  cfg.min_reject_threshold |> should.equal(0.4)
 }
 
 pub fn default_adaptation_disabled_test() {
@@ -136,8 +136,8 @@ pub fn load_partial_json_uses_defaults_for_missing_fields_test() {
   let cfg = dprime_config.load(path)
   list.length(cfg.features) |> should.equal(1)
   cfg.tiers |> should.equal(1)
-  cfg.modify_threshold |> should.equal(0.25)
-  cfg.reject_threshold |> should.equal(0.4)
+  cfg.modify_threshold |> should.equal(0.35)
+  cfg.reject_threshold |> should.equal(0.55)
   cfg.canary_enabled |> should.be_true
   let _ = simplifile.delete(path)
 }

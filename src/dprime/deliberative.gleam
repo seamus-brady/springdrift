@@ -261,11 +261,30 @@ pub fn evaluate_candidates(
       state.current_reject_threshold,
     )
 
+  // Build feature breakdown for non-zero forecasts
+  let fired_features =
+    best_forecasts
+    |> list.filter(fn(f) { f.magnitude > 0 })
+    |> list.sort(fn(a, b) { int.compare(b.magnitude, a.magnitude) })
+    |> list.map(fn(f) {
+      f.feature_name <> "=" <> int.to_string(f.magnitude) <> "/3"
+    })
+    |> string.join(", ")
+
+  let breakdown = case fired_features {
+    "" -> ""
+    features -> " [" <> features <> "]"
+  }
+
   let explanation = case decision {
     Accept -> "Deliberative accept: D' score below modify threshold"
-    Modify ->
-      "Deliberative modify: D' score between thresholds — concerns identified"
-    Reject -> "Deliberative reject: D' score exceeds reject threshold"
+    Modify -> "Deliberative modify: concerns identified" <> breakdown
+    Reject ->
+      "Deliberative reject: score "
+      <> float.to_string(best_score)
+      <> " exceeds threshold "
+      <> float.to_string(state.current_reject_threshold)
+      <> breakdown
   }
 
   GateResult(
