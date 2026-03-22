@@ -9,6 +9,7 @@
 
 import agent/types as agent_types
 import cbr/types as cbr_types
+import cycle_log
 import dag/types as dag_types
 import facts/log as facts_log
 import facts/types as facts_types
@@ -246,9 +247,15 @@ fn inspect_cycle_tool() -> Tool {
   |> tool.with_description(
     "Inspect a specific cycle by its ID. Returns the full cycle tree: the root cognitive "
     <> "cycle and all agent sub-cycles, including tool calls, D' gate decisions, token "
-    <> "counts, and agent outputs. Use this to drill into a specific interaction.",
+    <> "counts, and agent outputs. Set detail to 'full' to include tool call inputs and "
+    <> "outputs — useful for debugging what a sub-agent actually did.",
   )
   |> tool.add_string_param("cycle_id", "The cycle ID to inspect", True)
+  |> tool.add_string_param(
+    "detail",
+    "Level of detail: 'summary' (default) or 'full' (includes tool inputs/outputs)",
+    False,
+  )
   |> tool.build()
 }
 
@@ -1165,7 +1172,8 @@ fn run_inspect_cycle(
     Some(l) -> {
       let decoder = {
         use cycle_id <- decode.field("cycle_id", decode.string)
-        decode.success(cycle_id)
+        use detail <- decode.optional_field("detail", "summary", decode.string)
+        decode.success(#(cycle_id, detail))
       }
       case json.parse(call.input_json, decoder) {
         Error(_) ->
@@ -1173,7 +1181,8 @@ fn run_inspect_cycle(
             tool_use_id: call.id,
             error: "Invalid inspect_cycle input: missing cycle_id",
           )
-        Ok(cycle_id) -> {
+        Ok(#(cycle_id, detail)) -> {
+          let full = detail == "full"
           let subj = process.new_subject()
           process.send(
             l,
@@ -1193,7 +1202,7 @@ fn run_inspect_cycle(
             Ok(Ok(subtree)) ->
               ToolSuccess(
                 tool_use_id: call.id,
-                content: format_subtree(subtree, 0),
+                content: format_subtree(subtree, 0, full),
               )
           }
         }
@@ -1202,7 +1211,7 @@ fn run_inspect_cycle(
   }
 }
 
-fn format_subtree(tree: dag_types.DagSubtree, depth: Int) -> String {
+fn format_subtree(tree: dag_types.DagSubtree, depth: Int, full: Bool) -> String {
   let indent = string.repeat("  ", depth)
   let node = tree.root
   let type_str = case node.node_type {
@@ -1295,16 +1304,48 @@ fn format_subtree(tree: dag_types.DagSubtree, depth: Int) -> String {
     <> tools_str
     <> gates_str
     <> agent_str
+  // When full detail requested, load tool call inputs/outputs from cycle log
+  let detail_str = case full {
+    False -> ""
+    True -> {
+      let details = cycle_log.load_tool_details_for_cycle(node.cycle_id)
+      case details {
+        [] -> ""
+        _ ->
+          "\n"
+          <> string.join(
+            list.map(details, fn(d) {
+              indent
+              <> "    "
+              <> d.name
+              <> case d.success {
+                True -> ""
+                False -> " FAILED"
+              }
+              <> "\n"
+              <> indent
+              <> "      IN: "
+              <> string.slice(d.input, 0, 500)
+              <> "\n"
+              <> indent
+              <> "      OUT: "
+              <> string.slice(d.output, 0, 500)
+            }),
+            "\n",
+          )
+      }
+    }
+  }
   let children_str = case tree.children {
     [] -> ""
     children ->
       "\n"
       <> string.join(
-        list.map(children, fn(child) { format_subtree(child, depth + 1) }),
+        list.map(children, fn(child) { format_subtree(child, depth + 1, full) }),
         "\n",
       )
   }
-  header <> children_str
+  header <> detail_str <> children_str
 }
 
 // ---------------------------------------------------------------------------
