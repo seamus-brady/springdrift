@@ -42,82 +42,111 @@ pub fn start(
     let self: Subject(SchedulerMessage) = process.new_subject()
     process.send(setup, self)
 
-    // Load state from JSONL operation log (survives restarts)
-    let config_names = list.map(tasks, fn(t) { t.name })
-    let persisted_jobs =
-      schedule_log.resolve_current(schedule_dir)
-      |> list.filter(fn(j) { list.contains(config_names, j.name) })
+    // Load persisted jobs from JSONL operation log (survives restarts)
+    let persisted_jobs = schedule_log.resolve_current(schedule_dir)
 
     let now = monotonic_now_ms()
 
-    // Build initial job state, restoring from checkpoint where available
-    let jobs =
-      list.fold(tasks, dict.new(), fn(acc, task) {
-        let restored = list.find(persisted_jobs, fn(j) { j.name == task.name })
-        let job = case restored {
-          Ok(saved) ->
-            ScheduledJob(
-              ..saved,
-              query: task.query,
-              interval_ms: task.interval_ms,
-              delivery: task.delivery,
-              only_if_changed: task.only_if_changed,
-            )
-          Error(_) ->
-            ScheduledJob(
-              name: task.name,
-              query: task.query,
-              interval_ms: task.interval_ms,
-              delivery: task.delivery,
-              only_if_changed: task.only_if_changed,
-              status: Pending,
-              last_run_ms: None,
-              last_result: None,
-              run_count: 0,
-              error_count: 0,
-              job_source: ProfileJob,
-              kind: RecurringTask,
-              due_at: None,
-              for_: ForAgent,
-              title: task.name,
-              body: "",
-              duration_minutes: 0,
-              tags: [],
-              created_at: get_datetime(),
-              fired_count: 0,
-              recurrence_end_at: None,
-              max_occurrences: None,
-            )
-        }
-        dict.insert(acc, task.name, job)
+    // Build job state: start with ALL persisted jobs, then overlay config tasks
+    let base_jobs =
+      list.fold(persisted_jobs, dict.new(), fn(acc, job) {
+        dict.insert(acc, job.name, job)
       })
 
-    // Schedule initial ticks, accounting for elapsed time since last run
-    list.each(tasks, fn(task) {
-      let delay = case
-        list.find(persisted_jobs, fn(j) { j.name == task.name })
-      {
-        Ok(saved) ->
-          case saved.last_run_ms {
-            Some(last_ms) -> {
-              let elapsed = now - last_ms
-              let remaining = task.interval_ms - elapsed
-              case remaining > 0 {
-                True -> remaining
-                False -> 0
-              }
-            }
-            None -> initial_delay(task)
-          }
-        Error(_) -> initial_delay(task)
-      }
-      schedule_tick(self, task.name, delay)
-    })
+    // Overlay config tasks (update query/interval/delivery if config changed)
+    let jobs =
+      list.fold(tasks, base_jobs, fn(acc, task) {
+        case dict.get(acc, task.name) {
+          Ok(saved) ->
+            dict.insert(
+              acc,
+              task.name,
+              ScheduledJob(
+                ..saved,
+                query: task.query,
+                interval_ms: task.interval_ms,
+                delivery: task.delivery,
+                only_if_changed: task.only_if_changed,
+              ),
+            )
+          Error(_) ->
+            dict.insert(
+              acc,
+              task.name,
+              ScheduledJob(
+                name: task.name,
+                query: task.query,
+                interval_ms: task.interval_ms,
+                delivery: task.delivery,
+                only_if_changed: task.only_if_changed,
+                status: Pending,
+                last_run_ms: None,
+                last_result: None,
+                run_count: 0,
+                error_count: 0,
+                job_source: ProfileJob,
+                kind: RecurringTask,
+                due_at: None,
+                for_: ForAgent,
+                title: task.name,
+                body: "",
+                duration_minutes: 0,
+                tags: [],
+                created_at: get_datetime(),
+                fired_count: 0,
+                recurrence_end_at: None,
+                max_occurrences: None,
+              ),
+            )
+        }
+      })
 
+    // Re-arm timers for all active jobs (persisted + config)
+    let _ =
+      dict.each(jobs, fn(name, job) {
+        case job.status {
+          Completed | Cancelled | Failed(_) -> Nil
+          _ ->
+            case job.kind {
+              RecurringTask ->
+                case job.interval_ms > 0 {
+                  True -> {
+                    let delay = case job.last_run_ms {
+                      Some(last_ms) -> {
+                        let elapsed = now - last_ms
+                        let remaining = job.interval_ms - elapsed
+                        case remaining > 0 {
+                          True -> remaining
+                          False -> 0
+                        }
+                      }
+                      None -> 0
+                    }
+                    schedule_tick(self, name, delay)
+                  }
+                  False -> Nil
+                }
+              types.Reminder | types.Appointment ->
+                case job.due_at {
+                  Some(due) -> {
+                    let delay = ms_until_datetime(due)
+                    schedule_tick(self, name, case delay < 1 {
+                      True -> 1
+                      False -> delay
+                    })
+                  }
+                  None -> Nil
+                }
+              types.Todo -> Nil
+            }
+        }
+      })
+
+    let job_count = dict.size(jobs)
     slog.info(
       "scheduler",
       "start",
-      "Scheduler started with " <> int_to_string(list.length(tasks)) <> " tasks",
+      "Scheduler started with " <> int_to_string(job_count) <> " jobs",
       None,
     )
 
@@ -712,13 +741,6 @@ fn spawn_job(
     }
   })
   Nil
-}
-
-fn initial_delay(task: ScheduleTaskConfig) -> Int {
-  // For now, start immediately (delay = 0).
-  // Future: parse start_at to compute delay from current time.
-  let _ = task.start_at
-  0
 }
 
 fn schedule_tick(

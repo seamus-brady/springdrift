@@ -46,9 +46,10 @@ fn auto_reply_cognitive() -> process.Subject(agent_types.CognitiveMessage) {
   subj
 }
 
-/// Remove a checkpoint file so stale state from prior runs doesn't affect timing.
-fn clean_checkpoint(path: String) -> Nil {
+/// Remove a schedule directory so stale state from prior runs doesn't affect timing.
+fn clean_schedule_dir(path: String) -> Nil {
   let _ = simplifile.delete(path)
+  let _ = simplifile.create_directory_all(path)
   Nil
 }
 
@@ -114,7 +115,7 @@ pub fn start_returns_subject_test() {
     runner.start(
       tasks,
       cognitive,
-      "/tmp/springdrift-test-no-cp.json",
+      "/tmp/springdrift-test-sched",
       600_000,
       20,
       500_000,
@@ -133,7 +134,7 @@ pub fn start_with_multiple_tasks_test() {
     runner.start(
       tasks,
       cognitive,
-      "/tmp/springdrift-test-no-cp2.json",
+      "/tmp/springdrift-test-sched2",
       600_000,
       20,
       500_000,
@@ -156,7 +157,7 @@ pub fn stop_all_terminates_test() {
     runner.start(
       tasks,
       cognitive,
-      "/tmp/springdrift-test-no-cp3.json",
+      "/tmp/springdrift-test-sched3",
       600_000,
       20,
       500_000,
@@ -171,8 +172,8 @@ pub fn stop_all_terminates_test() {
 // ---------------------------------------------------------------------------
 
 pub fn auto_execution_completes_job_test() {
-  let cp = "/tmp/springdrift-test-no-cp-auto.json"
-  clean_checkpoint(cp)
+  let cp = "/tmp/springdrift-test-sched-auto"
+  clean_schedule_dir(cp)
   let cognitive = auto_reply_cognitive()
   // initial_delay returns 0, so tick fires at 1ms
   let tasks = [make_task("auto-run", 600_000)]
@@ -210,7 +211,7 @@ pub fn unknown_job_complete_ignored_test() {
     runner.start(
       tasks,
       cognitive,
-      "/tmp/springdrift-test-no-cp7.json",
+      "/tmp/springdrift-test-sched7",
       600_000,
       20,
       500_000,
@@ -235,7 +236,7 @@ pub fn unknown_job_failed_ignored_test() {
     runner.start(
       tasks,
       cognitive,
-      "/tmp/springdrift-test-no-cp8.json",
+      "/tmp/springdrift-test-sched8",
       600_000,
       20,
       500_000,
@@ -260,7 +261,7 @@ pub fn start_with_no_tasks_test() {
     runner.start(
       [],
       cognitive,
-      "/tmp/springdrift-test-no-cp10.json",
+      "/tmp/springdrift-test-sched10",
       600_000,
       20,
       500_000,
@@ -277,8 +278,8 @@ pub fn start_with_no_tasks_test() {
 // ---------------------------------------------------------------------------
 
 pub fn job_transitions_through_running_test() {
-  let cp = "/tmp/springdrift-test-no-cp-trans.json"
-  clean_checkpoint(cp)
+  let cp = "/tmp/springdrift-test-sched-trans"
+  clean_schedule_dir(cp)
   let cognitive = auto_reply_cognitive()
   let tasks = [make_task("transitions", 600_000)]
   let assert Ok(sched) =
@@ -310,8 +311,8 @@ pub fn job_transitions_through_running_test() {
 // ---------------------------------------------------------------------------
 
 pub fn multiple_tasks_all_complete_test() {
-  let cp = "/tmp/springdrift-test-no-cp-multi.json"
-  clean_checkpoint(cp)
+  let cp = "/tmp/springdrift-test-sched-multi"
+  clean_schedule_dir(cp)
   let cognitive = auto_reply_cognitive()
   let tasks = [make_task("task-1", 600_000), make_task("task-2", 600_000)]
   let assert Ok(sched) =
