@@ -274,7 +274,6 @@ fn handle_notification(
       }
       continue_loop(TuiState(..state, notice: "  " <> badge))
     }
-    agent_types.ProfileNotification(_) -> event_loop(state)
     agent_types.AgentLifecycleNotice(event_type:, agent_name:) -> {
       let label = agent_name <> " " <> event_type
       continue_loop(TuiState(..state, spinner_label: label))
@@ -329,6 +328,35 @@ fn handle_notification(
         TuiState(
           ..state,
           notice: style.dim("  Planner: " <> action <> " — " <> title),
+        ),
+      )
+    agent_types.SandboxStarted(pool_size:, port_range:) ->
+      continue_loop(
+        TuiState(
+          ..state,
+          notice: style.dim(
+            "  Sandbox started (pool="
+            <> int.to_string(pool_size)
+            <> ", ports="
+            <> port_range
+            <> ")",
+          ),
+        ),
+      )
+    agent_types.SandboxContainerFailed(slot:, reason:) ->
+      continue_loop(
+        TuiState(
+          ..state,
+          notice: style.yellow(
+            "  Sandbox slot " <> int.to_string(slot) <> " failed: " <> reason,
+          ),
+        ),
+      )
+    agent_types.SandboxUnavailable(reason:) ->
+      continue_loop(
+        TuiState(
+          ..state,
+          notice: style.yellow("  Sandbox unavailable: " <> reason),
         ),
       )
   }

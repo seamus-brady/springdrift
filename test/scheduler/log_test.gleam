@@ -1,7 +1,6 @@
 import gleam/list
 import gleam/option.{None}
 import gleeunit/should
-import profile/types as profile_types
 import scheduler/log as schedule_log
 import scheduler/types.{
   type ScheduledJob, AgentJob, Appointment, Cancelled, Completed, ForAgent,
@@ -25,7 +24,7 @@ fn make_job(name: String, kind: types.JobKind) -> ScheduledJob {
     name:,
     query: "test query",
     interval_ms: 0,
-    delivery: profile_types.FileDelivery(
+    delivery: types.FileDelivery(
       directory: ".springdrift/scheduler/outputs",
       format: "markdown",
     ),

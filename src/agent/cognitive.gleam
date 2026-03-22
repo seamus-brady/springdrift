@@ -1,7 +1,6 @@
 import agent/cognitive/agents as cognitive_agents
 import agent/cognitive/llm as cognitive_llm
 import agent/cognitive/memory as cognitive_memory
-import agent/cognitive/profile as cognitive_profile
 import agent/cognitive/safety as cognitive_safety
 import agent/cognitive_config
 import agent/cognitive_state.{
@@ -102,6 +101,7 @@ pub fn start(
           curator: cfg.curator,
         ),
         agent_completions: [],
+        active_delegations: dict.new(),
         last_user_input: "",
         input_queue: [],
         input_queue_cap: cfg.input_queue_cap,
@@ -109,8 +109,6 @@ pub fn start(
         identity: IdentityContext(
           agent_uuid: cfg.agent_uuid,
           session_since: cfg.session_since,
-          active_profile: None,
-          profile_dirs: cfg.profile_dirs,
           write_anywhere: cfg.write_anywhere,
         ),
         config: RuntimeConfig(
@@ -119,6 +117,8 @@ pub fn start(
           threading_config: cfg.threading_config,
           memory_limits: cfg.memory_limits,
           how_to_content: cfg.how_to_content,
+          max_delegation_depth: cfg.max_delegation_depth,
+          sandbox_enabled: cfg.sandbox_enabled,
         ),
         redact_secrets: cfg.redact_secrets,
         pending_sensory_events: [],
@@ -183,12 +183,12 @@ fn handle_message(
       types.SafetyGateComplete(..) -> "SafetyGateComplete"
       types.InputSafetyGateComplete(..) -> "InputSafetyGateComplete"
       types.PostExecutionGateComplete(..) -> "PostExecutionGateComplete"
-      types.LoadProfile(..) -> "LoadProfile"
       types.SetSupervisor(..) -> "SetSupervisor"
       types.SchedulerInput(..) -> "SchedulerInput"
       types.OutputGateComplete(..) -> "OutputGateComplete"
       types.QueuedSensoryEvent(..) -> "QueuedSensoryEvent"
       types.ForecasterSuggestion(..) -> "ForecasterSuggestion"
+      types.AgentProgress(..) -> "AgentProgress"
     },
     state.cycle_id,
   )
@@ -202,6 +202,8 @@ fn handle_message(
       cognitive_llm.handle_think_down(state, task_id, reason)
     AgentComplete(outcome) ->
       cognitive_agents.handle_agent_complete(state, outcome)
+    types.AgentProgress(progress) ->
+      cognitive_agents.handle_agent_progress(state, progress)
     types.AgentQuestion(question, agent, reply_to) ->
       cognitive_agents.handle_agent_question(state, question, agent, reply_to)
     AgentEvent(event) -> cognitive_agents.handle_agent_event(state, event)
@@ -240,8 +242,6 @@ fn handle_message(
         pre_score,
         reply_to,
       )
-    types.LoadProfile(name, reply_to) ->
-      cognitive_profile.handle_load_profile(state, name, reply_to)
     types.SetSupervisor(supervisor:) ->
       CognitiveState(..state, supervisor: Some(supervisor))
     types.SchedulerInput(
@@ -1046,6 +1046,7 @@ fn handle_forecaster_suggestion(
               context: forecast_context,
               parent_cycle_id: cycle_id,
               reply_to: state.self,
+              depth: 1,
             )
           process.send(task_subject, agent_task)
           process.send(

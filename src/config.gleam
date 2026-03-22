@@ -61,9 +61,6 @@ pub type AppConfig {
     narrative_summaries: Option(Bool),
     narrative_summary_schedule: Option(String),
     redact_secrets: Option(Bool),
-    // ── Profiles ──
-    profiles_dirs: Option(List(String)),
-    default_profile: Option(String),
     // ── Agent identity ──
     agent_name: Option(String),
     agent_version: Option(String),
@@ -77,7 +74,17 @@ pub type AppConfig {
     librarian_startup_timeout_ms: Option(Int),
     scheduler_job_timeout_ms: Option(Int),
     restart_window_ms: Option(Int),
-    sandbox_timeout_s: Option(Int),
+    // ── Sandbox ──
+    sandbox_enabled: Option(Bool),
+    sandbox_pool_size: Option(Int),
+    sandbox_memory_mb: Option(Int),
+    sandbox_cpus: Option(String),
+    sandbox_image: Option(String),
+    sandbox_exec_timeout_ms: Option(Int),
+    sandbox_port_base: Option(Int),
+    sandbox_port_stride: Option(Int),
+    sandbox_ports_per_slot: Option(Int),
+    sandbox_auto_machine: Option(Bool),
     // ── Housekeeper GenServer ──
     housekeeper_short_tick_ms: Option(Int),
     housekeeper_medium_tick_ms: Option(Int),
@@ -141,7 +148,6 @@ pub type AppConfig {
     web_port: Option(Int),
     // ── External services ──
     duckduckgo_url: Option(String),
-    e2b_base_url: Option(String),
     brave_search_base_url: Option(String),
     brave_answers_base_url: Option(String),
     jina_reader_base_url: Option(String),
@@ -163,6 +169,8 @@ pub type AppConfig {
     xstructor_max_retries: Option(Int),
     // ── Preamble budget ──
     preamble_budget_chars: Option(Int),
+    // ── Delegation ──
+    max_delegation_depth: Option(Int),
     // ── Forecaster ──
     forecaster_enabled: Option(Bool),
     forecaster_tick_ms: Option(Int),
@@ -209,8 +217,6 @@ pub fn default() -> AppConfig {
     narrative_summaries: None,
     narrative_summary_schedule: None,
     redact_secrets: None,
-    profiles_dirs: None,
-    default_profile: None,
     agent_name: None,
     agent_version: None,
     librarian_max_days: None,
@@ -221,7 +227,16 @@ pub fn default() -> AppConfig {
     librarian_startup_timeout_ms: None,
     scheduler_job_timeout_ms: None,
     restart_window_ms: None,
-    sandbox_timeout_s: None,
+    sandbox_enabled: None,
+    sandbox_pool_size: None,
+    sandbox_memory_mb: None,
+    sandbox_cpus: None,
+    sandbox_image: None,
+    sandbox_exec_timeout_ms: None,
+    sandbox_port_base: None,
+    sandbox_port_stride: None,
+    sandbox_ports_per_slot: None,
+    sandbox_auto_machine: None,
     housekeeper_short_tick_ms: None,
     housekeeper_medium_tick_ms: None,
     housekeeper_long_tick_ms: None,
@@ -275,7 +290,6 @@ pub fn default() -> AppConfig {
     writer_max_errors: None,
     web_port: None,
     duckduckgo_url: None,
-    e2b_base_url: None,
     brave_search_base_url: None,
     brave_answers_base_url: None,
     jina_reader_base_url: None,
@@ -290,6 +304,7 @@ pub fn default() -> AppConfig {
     autonomous_token_budget_per_hour: None,
     xstructor_max_retries: None,
     preamble_budget_chars: None,
+    max_delegation_depth: None,
     forecaster_enabled: None,
     forecaster_tick_ms: None,
     forecaster_replan_threshold: None,
@@ -354,11 +369,6 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       base.narrative_summary_schedule,
     ),
     redact_secrets: option.or(override_cfg.redact_secrets, base.redact_secrets),
-    profiles_dirs: option.or(override_cfg.profiles_dirs, base.profiles_dirs),
-    default_profile: option.or(
-      override_cfg.default_profile,
-      base.default_profile,
-    ),
     agent_name: option.or(override_cfg.agent_name, base.agent_name),
     agent_version: option.or(override_cfg.agent_version, base.agent_version),
     librarian_max_days: option.or(
@@ -394,9 +404,39 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       override_cfg.restart_window_ms,
       base.restart_window_ms,
     ),
-    sandbox_timeout_s: option.or(
-      override_cfg.sandbox_timeout_s,
-      base.sandbox_timeout_s,
+    sandbox_enabled: option.or(
+      override_cfg.sandbox_enabled,
+      base.sandbox_enabled,
+    ),
+    sandbox_pool_size: option.or(
+      override_cfg.sandbox_pool_size,
+      base.sandbox_pool_size,
+    ),
+    sandbox_memory_mb: option.or(
+      override_cfg.sandbox_memory_mb,
+      base.sandbox_memory_mb,
+    ),
+    sandbox_cpus: option.or(override_cfg.sandbox_cpus, base.sandbox_cpus),
+    sandbox_image: option.or(override_cfg.sandbox_image, base.sandbox_image),
+    sandbox_exec_timeout_ms: option.or(
+      override_cfg.sandbox_exec_timeout_ms,
+      base.sandbox_exec_timeout_ms,
+    ),
+    sandbox_port_base: option.or(
+      override_cfg.sandbox_port_base,
+      base.sandbox_port_base,
+    ),
+    sandbox_port_stride: option.or(
+      override_cfg.sandbox_port_stride,
+      base.sandbox_port_stride,
+    ),
+    sandbox_ports_per_slot: option.or(
+      override_cfg.sandbox_ports_per_slot,
+      base.sandbox_ports_per_slot,
+    ),
+    sandbox_auto_machine: option.or(
+      override_cfg.sandbox_auto_machine,
+      base.sandbox_auto_machine,
     ),
     housekeeper_short_tick_ms: option.or(
       override_cfg.housekeeper_short_tick_ms,
@@ -610,7 +650,6 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     web_port: option.or(override_cfg.web_port, base.web_port),
     // External services
     duckduckgo_url: option.or(override_cfg.duckduckgo_url, base.duckduckgo_url),
-    e2b_base_url: option.or(override_cfg.e2b_base_url, base.e2b_base_url),
     brave_search_base_url: option.or(
       override_cfg.brave_search_base_url,
       base.brave_search_base_url,
@@ -666,6 +705,10 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     preamble_budget_chars: option.or(
       override_cfg.preamble_budget_chars,
       base.preamble_budget_chars,
+    ),
+    max_delegation_depth: option.or(
+      override_cfg.max_delegation_depth,
+      base.max_delegation_depth,
     ),
     forecaster_enabled: option.or(
       override_cfg.forecaster_enabled,
@@ -780,11 +823,6 @@ pub fn to_string(cfg: AppConfig) -> String {
     }),
     // Redaction
     option.map(cfg.redact_secrets, fn(v) { "redact_secrets: " <> bool_str(v) }),
-    // Profile
-    option.map(cfg.default_profile, fn(v) { "profile: " <> v }),
-    option.map(cfg.profiles_dirs, fn(dirs) {
-      "profiles_dirs: " <> string.join(dirs, ", ")
-    }),
     // Agent identity
     option.map(cfg.agent_name, fn(v) { "agent_name: " <> v }),
     option.map(cfg.agent_version, fn(v) { "agent_version: " <> v }),
@@ -919,24 +957,11 @@ fn do_parse_args(args: List(String), acc: AppConfig) -> AppConfig {
       do_parse_args(rest, AppConfig(..acc, redact_secrets: Some(False)))
     ["--narrative-dir", path, ..rest] ->
       do_parse_args(rest, AppConfig(..acc, narrative_dir: Some(path)))
-    // Profiles
-    ["--profile", name, ..rest] ->
-      do_parse_args(rest, AppConfig(..acc, default_profile: Some(name)))
     ["--narrative-max-days", value, ..rest] ->
       case int.parse(value) {
         Ok(n) ->
           do_parse_args(rest, AppConfig(..acc, librarian_max_days: Some(n)))
         Error(_) -> do_parse_args(rest, acc)
-      }
-    ["--profiles-dir", path, ..rest] ->
-      case acc.profiles_dirs {
-        None ->
-          do_parse_args(rest, AppConfig(..acc, profiles_dirs: Some([path])))
-        Some(existing) ->
-          do_parse_args(
-            rest,
-            AppConfig(..acc, profiles_dirs: Some(list.append(existing, [path]))),
-          )
       }
     [_, ..rest] -> do_parse_args(rest, acc)
   }
@@ -1027,8 +1052,6 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     gui: get_str("gui"),
     dprime_enabled: get_bool("dprime_enabled"),
     dprime_config: get_str("dprime_config"),
-    default_profile: get_str("profile"),
-    profiles_dirs: get_toml_string_array(table, ["profiles_dirs"]),
     // ── [agent] ──
     agent_name: get_toml_str(table, ["agent", "name"]),
     agent_version: get_toml_str(table, ["agent", "version"]),
@@ -1057,7 +1080,17 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
       "timeouts", "scheduler_job_ms",
     ]),
     restart_window_ms: get_toml_int(table, ["timeouts", "restart_window_ms"]),
-    sandbox_timeout_s: get_toml_int(table, ["timeouts", "sandbox_timeout_s"]),
+    // ── [sandbox] ──
+    sandbox_enabled: get_toml_bool(table, ["sandbox", "enabled"]),
+    sandbox_pool_size: get_toml_int(table, ["sandbox", "pool_size"]),
+    sandbox_memory_mb: get_toml_int(table, ["sandbox", "memory_mb"]),
+    sandbox_cpus: get_toml_str(table, ["sandbox", "cpus"]),
+    sandbox_image: get_toml_str(table, ["sandbox", "image"]),
+    sandbox_exec_timeout_ms: get_toml_int(table, ["sandbox", "exec_timeout_ms"]),
+    sandbox_port_base: get_toml_int(table, ["sandbox", "port_base"]),
+    sandbox_port_stride: get_toml_int(table, ["sandbox", "port_stride"]),
+    sandbox_ports_per_slot: get_toml_int(table, ["sandbox", "ports_per_slot"]),
+    sandbox_auto_machine: get_toml_bool(table, ["sandbox", "auto_machine"]),
     // ── [housekeeper] ──
     housekeeper_short_tick_ms: get_toml_int(table, [
       "housekeeper", "short_tick_ms",
@@ -1156,7 +1189,6 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     web_port: get_toml_int(table, ["web", "port"]),
     // ── [services] ──
     duckduckgo_url: get_toml_str(table, ["services", "duckduckgo_url"]),
-    e2b_base_url: get_toml_str(table, ["services", "e2b_base_url"]),
     brave_search_base_url: get_toml_str(table, [
       "services", "brave_search_base_url",
     ]),
@@ -1196,6 +1228,8 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     preamble_budget_chars: get_toml_int(table, [
       "narrative", "preamble_budget_chars",
     ]),
+    // ── [delegation] ──
+    max_delegation_depth: get_toml_int(table, ["delegation", "max_depth"]),
     // ── [forecaster] ──
     forecaster_enabled: get_toml_bool(table, ["forecaster", "enabled"]),
     forecaster_tick_ms: get_toml_int(table, ["forecaster", "tick_ms"]),
@@ -1236,10 +1270,10 @@ const known_keys = [
   "provider", "task_model", "reasoning_model", "max_tokens", "max_turns",
   "max_consecutive_errors", "max_context_messages", "log_verbose",
   "write_anywhere", "skills_dirs", "gui", "dprime_enabled", "dprime_config",
-  "narrative", "profile", "profiles_dirs", "agent", "log_retention_days",
-  "log_max_file_bytes", "timeouts", "retry", "limits", "scoring", "housekeeping",
-  "housekeeper", "cbr", "agents", "web", "services", "scheduler", "xstructor",
-  "forecaster",
+  "narrative", "agent", "log_retention_days", "log_max_file_bytes", "timeouts",
+  "retry", "limits", "scoring", "housekeeping", "housekeeper", "cbr", "agents",
+  "web", "services", "scheduler", "xstructor", "forecaster", "sandbox",
+  "delegation",
 ]
 
 const known_narrative_keys = [

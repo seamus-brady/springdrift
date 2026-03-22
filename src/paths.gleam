@@ -19,7 +19,6 @@
 ////   │   ├── cbr/              CBR case JSONL (procedural memory)
 ////   │   └── facts/            MemoryFact JSONL (semantic memory)
 ////   ├── skills/               Local skill definitions
-////   └── profiles/             Local agent profiles
 
 @external(erlang, "springdrift_ffi", "get_env")
 fn get_env(name: String) -> Result(String, Nil)
@@ -127,6 +126,14 @@ pub fn scheduler_outputs_dir() -> String {
   project_dir() <> "/scheduler/outputs"
 }
 
+/// Sandbox workspaces directory — a sibling of .springdrift/ in the project root.
+/// Kept separate from .springdrift/ to isolate ephemeral container workspaces
+/// from persistent agent memory. Uses a path under the project directory
+/// (not /tmp) because podman machine on macOS only shares /Users.
+pub fn sandbox_workspaces_dir() -> String {
+  ".sandbox-workspaces"
+}
+
 /// Legacy scheduler checkpoint (one-time migration source only).
 pub fn scheduler_checkpoint() -> String {
   project_dir() <> "/scheduler-checkpoint.json"
@@ -206,18 +213,4 @@ pub fn how_to_paths() -> List(String) {
     ]
   }
 }
-
 // ---------------------------------------------------------------------------
-// Profiles
-// ---------------------------------------------------------------------------
-
-/// Default profile directories to scan (local + user-level).
-pub fn default_profiles_dirs() -> List(String) {
-  case get_env("HOME") {
-    Ok(home) -> [
-      home <> "/.config/springdrift/profiles",
-      project_dir() <> "/profiles",
-    ]
-    Error(_) -> [project_dir() <> "/profiles"]
-  }
-}

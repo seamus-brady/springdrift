@@ -2,7 +2,6 @@ import gleam/json
 import gleam/option.{None, Some}
 import gleam/string
 import gleeunit/should
-import profile/types as profile_types
 import scheduler/types
 
 // ---------------------------------------------------------------------------
@@ -64,10 +63,7 @@ pub fn encode_job_has_required_fields_test() {
       name: "test-job",
       query: "test query",
       interval_ms: 60_000,
-      delivery: profile_types.FileDelivery(
-        directory: "/tmp",
-        format: "markdown",
-      ),
+      delivery: types.FileDelivery(directory: "/tmp", format: "markdown"),
       only_if_changed: False,
       status: types.Pending,
       last_run_ms: None,
@@ -105,7 +101,7 @@ pub fn encode_job_truncates_last_result_test() {
       name: "trunc-test",
       query: "",
       interval_ms: 0,
-      delivery: profile_types.FileDelivery(directory: "/tmp", format: "md"),
+      delivery: types.FileDelivery(directory: "/tmp", format: "md"),
       only_if_changed: False,
       status: types.Completed,
       last_run_ms: None,

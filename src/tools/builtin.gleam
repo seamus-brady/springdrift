@@ -19,6 +19,13 @@ pub fn all() -> List(Tool) {
   [calculator_tool(), datetime_tool(), human_input_tool(), read_skill_tool()]
 }
 
+/// Tools safe for sub-agents. Excludes request_human_input which is
+/// reserved for the cognitive loop — sub-agents report back through
+/// their return value, not by hijacking the user interaction channel.
+pub fn agent_tools() -> List(Tool) {
+  [calculator_tool(), datetime_tool(), read_skill_tool()]
+}
+
 pub fn human_input_tool() -> Tool {
   tool.new("request_human_input")
   |> tool.with_description(

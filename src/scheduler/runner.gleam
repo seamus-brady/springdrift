@@ -10,13 +10,13 @@ import gleam/erlang/process.{type Subject}
 import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
-import profile/types as profile_types
 import scheduler/delivery
-import scheduler/persist
+import scheduler/log as schedule_log
 import scheduler/types.{
-  type ScheduledJob, type SchedulerMessage, Cancelled, Completed, Failed,
-  ForAgent, GetStatus, JobComplete, JobFailed, Pending, ProfileJob,
-  RecurringTask, Running, ScheduledJob, StopAll, StuckJobCheck, Tick,
+  type ScheduleTaskConfig, type ScheduledJob, type SchedulerMessage, Cancelled,
+  Completed, Failed, ForAgent, GetStatus, JobComplete, JobFailed, Pending,
+  ProfileJob, RecurringTask, Running, ScheduledJob, StopAll, StuckJobCheck, Tick,
+  WebhookDelivery,
 }
 import slog
 
@@ -30,9 +30,9 @@ fn get_datetime() -> String
 /// Optionally loads checkpoint state and adjusts initial delays based on elapsed time.
 /// Returns a Subject for sending scheduler messages.
 pub fn start(
-  tasks: List(profile_types.ScheduleTaskConfig),
+  tasks: List(ScheduleTaskConfig),
   cognitive: Subject(agent_types.CognitiveMessage),
-  checkpoint_path: String,
+  schedule_dir: String,
   stuck_timeout_ms: Int,
   max_cycles_per_hour: Int,
   token_budget_per_hour: Int,
@@ -42,85 +42,111 @@ pub fn start(
     let self: Subject(SchedulerMessage) = process.new_subject()
     process.send(setup, self)
 
-    // Try to load checkpoint for recovery
-    let checkpoint_jobs = case persist.load(checkpoint_path) {
-      Ok(checkpoint) -> {
-        let config_names = list.map(tasks, fn(t) { t.name })
-        persist.reconcile(checkpoint.jobs, config_names)
-      }
-      Error(_) -> []
-    }
+    // Load persisted jobs from JSONL operation log (survives restarts)
+    let persisted_jobs = schedule_log.resolve_current(schedule_dir)
 
     let now = monotonic_now_ms()
 
-    // Build initial job state, restoring from checkpoint where available
-    let jobs =
-      list.fold(tasks, dict.new(), fn(acc, task) {
-        let restored = list.find(checkpoint_jobs, fn(j) { j.name == task.name })
-        let job = case restored {
-          Ok(saved) ->
-            ScheduledJob(
-              ..saved,
-              query: task.query,
-              interval_ms: task.interval_ms,
-              delivery: task.delivery,
-              only_if_changed: task.only_if_changed,
-            )
-          Error(_) ->
-            ScheduledJob(
-              name: task.name,
-              query: task.query,
-              interval_ms: task.interval_ms,
-              delivery: task.delivery,
-              only_if_changed: task.only_if_changed,
-              status: Pending,
-              last_run_ms: None,
-              last_result: None,
-              run_count: 0,
-              error_count: 0,
-              job_source: ProfileJob,
-              kind: RecurringTask,
-              due_at: None,
-              for_: ForAgent,
-              title: task.name,
-              body: "",
-              duration_minutes: 0,
-              tags: [],
-              created_at: get_datetime(),
-              fired_count: 0,
-              recurrence_end_at: None,
-              max_occurrences: None,
-            )
-        }
-        dict.insert(acc, task.name, job)
+    // Build job state: start with ALL persisted jobs, then overlay config tasks
+    let base_jobs =
+      list.fold(persisted_jobs, dict.new(), fn(acc, job) {
+        dict.insert(acc, job.name, job)
       })
 
-    // Schedule initial ticks, accounting for elapsed time since last run
-    list.each(tasks, fn(task) {
-      let delay = case
-        list.find(checkpoint_jobs, fn(j) { j.name == task.name })
-      {
-        Ok(saved) ->
-          case saved.last_run_ms {
-            Some(last_ms) -> {
-              let elapsed = now - last_ms
-              let remaining = task.interval_ms - elapsed
-              case remaining > 0 {
-                True -> remaining
-                False -> 0
-              }
-            }
-            None -> initial_delay(task)
-          }
-        Error(_) -> initial_delay(task)
-      }
-      schedule_tick(self, task.name, delay)
-    })
+    // Overlay config tasks (update query/interval/delivery if config changed)
+    let jobs =
+      list.fold(tasks, base_jobs, fn(acc, task) {
+        case dict.get(acc, task.name) {
+          Ok(saved) ->
+            dict.insert(
+              acc,
+              task.name,
+              ScheduledJob(
+                ..saved,
+                query: task.query,
+                interval_ms: task.interval_ms,
+                delivery: task.delivery,
+                only_if_changed: task.only_if_changed,
+              ),
+            )
+          Error(_) ->
+            dict.insert(
+              acc,
+              task.name,
+              ScheduledJob(
+                name: task.name,
+                query: task.query,
+                interval_ms: task.interval_ms,
+                delivery: task.delivery,
+                only_if_changed: task.only_if_changed,
+                status: Pending,
+                last_run_ms: None,
+                last_result: None,
+                run_count: 0,
+                error_count: 0,
+                job_source: ProfileJob,
+                kind: RecurringTask,
+                due_at: None,
+                for_: ForAgent,
+                title: task.name,
+                body: "",
+                duration_minutes: 0,
+                tags: [],
+                created_at: get_datetime(),
+                fired_count: 0,
+                recurrence_end_at: None,
+                max_occurrences: None,
+              ),
+            )
+        }
+      })
 
+    // Re-arm timers for all active jobs (persisted + config)
+    let _ =
+      dict.each(jobs, fn(name, job) {
+        case job.status {
+          Completed | Cancelled | Failed(_) -> Nil
+          _ ->
+            case job.kind {
+              RecurringTask ->
+                case job.interval_ms > 0 {
+                  True -> {
+                    let delay = case job.last_run_ms {
+                      Some(last_ms) -> {
+                        let elapsed = now - last_ms
+                        let remaining = job.interval_ms - elapsed
+                        case remaining > 0 {
+                          True -> remaining
+                          False -> 0
+                        }
+                      }
+                      None -> 0
+                    }
+                    schedule_tick(self, name, delay)
+                  }
+                  False -> Nil
+                }
+              types.Reminder | types.Appointment ->
+                case job.due_at {
+                  Some(due) -> {
+                    let delay = ms_until_datetime(due)
+                    schedule_tick(self, name, case delay < 1 {
+                      True -> 1
+                      False -> delay
+                    })
+                  }
+                  None -> Nil
+                }
+              types.Todo -> Nil
+            }
+        }
+      })
+
+    let job_count = dict.size(jobs)
     slog.info(
       "scheduler",
       "start",
-      "Scheduler started with " <> int_to_string(list.length(tasks)) <> " tasks",
+      "Scheduler started with " <> int_to_string(job_count) <> " jobs",
       None,
     )
 
@@ -129,7 +155,7 @@ pub fn start(
       self,
       jobs,
       cognitive,
-      checkpoint_path,
+      schedule_dir,
       stuck_timeout_ms,
       max_cycles_per_hour,
       token_budget_per_hour,
@@ -156,7 +182,7 @@ fn scheduler_loop(
   self: Subject(SchedulerMessage),
   jobs: Dict(String, ScheduledJob),
   cognitive: Subject(agent_types.CognitiveMessage),
-  checkpoint_path: String,
+  schedule_dir: String,
   stuck_timeout_ms: Int,
   max_cycles_per_hour: Int,
   token_budget_per_hour: Int,
@@ -173,7 +199,7 @@ fn scheduler_loop(
       self,
       j,
       cognitive,
-      checkpoint_path,
+      schedule_dir,
       stuck_timeout_ms,
       max_cycles_per_hour,
       token_budget_per_hour,
@@ -186,7 +212,7 @@ fn scheduler_loop(
       self,
       j,
       cognitive,
-      checkpoint_path,
+      schedule_dir,
       stuck_timeout_ms,
       max_cycles_per_hour,
       token_budget_per_hour,
@@ -342,8 +368,7 @@ fn scheduler_loop(
                 False -> Nil
               }
 
-              // Save checkpoint
-              let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
+              schedule_log.append(schedule_dir, updated_job, types.Fire)
 
               loop(updated_jobs)
             }
@@ -372,7 +397,7 @@ fn scheduler_loop(
           case should_deliver {
             True -> {
               let content = case job.delivery {
-                profile_types.WebhookDelivery(..) ->
+                WebhookDelivery(..) ->
                   build_webhook_payload(name, result, get_datetime())
                 _ -> result
               }
@@ -438,8 +463,7 @@ fn scheduler_loop(
             False -> Nil
           }
 
-          // Save checkpoint after completion
-          let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
+          schedule_log.append(schedule_dir, updated_job, types.Complete)
 
           // Track token usage for rate limiting
           let hour_ago = now - 3_600_000
@@ -495,8 +519,7 @@ fn scheduler_loop(
             False -> Nil
           }
 
-          // Save checkpoint after failure
-          let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
+          schedule_log.append(schedule_dir, updated_job, types.Update)
 
           loop(updated_jobs)
         }
@@ -531,7 +554,7 @@ fn scheduler_loop(
               }
             types.Todo -> Nil
           }
-          let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
+          schedule_log.append(schedule_dir, job, types.Create)
           process.send(reply_to, Ok(job.name))
           slog.info("scheduler", "loop", "Added job '" <> job.name <> "'", None)
           loop(updated_jobs)
@@ -548,7 +571,7 @@ fn scheduler_loop(
         Ok(job) -> {
           let cancelled_job = ScheduledJob(..job, status: Cancelled)
           let updated_jobs = dict.insert(jobs, name, cancelled_job)
-          let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
+          schedule_log.append(schedule_dir, cancelled_job, types.Cancel)
           process.send(reply_to, Ok(Nil))
           slog.info("scheduler", "loop", "Removed job '" <> name <> "'", None)
           loop(updated_jobs)
@@ -590,7 +613,7 @@ fn scheduler_loop(
             None -> Nil
           }
           let updated_jobs = dict.insert(jobs, name, updated_job)
-          let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
+          schedule_log.append(schedule_dir, updated_job, types.Update)
           process.send(reply_to, Ok(Nil))
           loop(updated_jobs)
         }
@@ -657,7 +680,7 @@ fn scheduler_loop(
         Ok(job) -> {
           let completed_job = ScheduledJob(..job, status: Completed)
           let updated_jobs = dict.insert(jobs, name, completed_job)
-          let _ = persist.save(checkpoint_path, dict.values(updated_jobs))
+          schedule_log.append(schedule_dir, completed_job, types.Complete)
           process.send(reply_to, Ok(Nil))
           slog.info("scheduler", "loop", "Completed job '" <> name <> "'", None)
           loop(updated_jobs)
@@ -718,13 +741,6 @@ fn spawn_job(
     }
   })
   Nil
-}
-
-fn initial_delay(task: profile_types.ScheduleTaskConfig) -> Int {
-  // For now, start immediately (delay = 0).
-  // Future: parse start_at to compute delay from current time.
-  let _ = task.start_at
-  0
 }
 
 fn schedule_tick(

@@ -4,7 +4,28 @@ import gleam/erlang/process.{type Subject}
 import gleam/json
 import gleam/option.{type Option, None, Some}
 import gleam/string
-import profile/types as profile_types
+
+// ---------------------------------------------------------------------------
+// Schedule task config (moved from profile/types)
+// ---------------------------------------------------------------------------
+
+/// Delivery configuration for scheduled tasks.
+pub type DeliveryConfig {
+  FileDelivery(directory: String, format: String)
+  WebhookDelivery(url: String, method: String, headers: List(#(String, String)))
+}
+
+/// A scheduled task definition.
+pub type ScheduleTaskConfig {
+  ScheduleTaskConfig(
+    name: String,
+    query: String,
+    interval_ms: Int,
+    start_at: Option(String),
+    delivery: DeliveryConfig,
+    only_if_changed: Bool,
+  )
+}
 
 // ---------------------------------------------------------------------------
 // Job enumerations
@@ -65,7 +86,7 @@ pub type ScheduledJob {
     name: String,
     query: String,
     interval_ms: Int,
-    delivery: profile_types.DeliveryConfig,
+    delivery: DeliveryConfig,
     only_if_changed: Bool,
     status: JobStatus,
     last_run_ms: Option(Int),

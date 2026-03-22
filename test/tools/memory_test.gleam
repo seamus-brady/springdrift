@@ -22,7 +22,7 @@ pub fn main() -> Nil {
 
 pub fn memory_tools_defined_test() {
   let tools = memory.all()
-  tools |> list.length |> should.equal(19)
+  tools |> list.length |> should.equal(20)
 }
 
 pub fn recall_recent_tool_exists_test() {
@@ -580,10 +580,17 @@ pub fn introspect_with_context_test() {
     Some(memory.IntrospectContext(
       agent_uuid: "test-uuid-1234",
       session_since: "2026-03-10T09:00:00Z",
-      active_profile: Some("analyst"),
       agents: [
-        memory.AgentStatusEntry(name: "researcher", status: "Running"),
-        memory.AgentStatusEntry(name: "writer", status: "Stopped"),
+        memory.AgentStatusEntry(
+          name: "researcher",
+          status: "Running",
+          tool_names: ["web_search", "fetch_url"],
+        ),
+        memory.AgentStatusEntry(
+          name: "writer",
+          status: "Stopped",
+          tool_names: [],
+        ),
       ],
       dprime_enabled: True,
       dprime_modify_threshold: 0.3,
@@ -593,6 +600,7 @@ pub fn introspect_with_context_test() {
       thread_single_cycle: 80,
       thread_uuid_named: 70,
       thread_multi_cycle: 20,
+      sandbox_enabled: True,
     ))
   let call = ToolCall(id: "i2", name: "introspect", input_json: "{}")
   let result = memory.execute(call, "/tmp", None, None, ctx, test_limits)
@@ -600,7 +608,6 @@ pub fn introspect_with_context_test() {
     ToolSuccess(content: c, ..) -> {
       should.be_true(string.contains(c, "test-uuid-1234"))
       should.be_true(string.contains(c, "2026-03-10"))
-      should.be_true(string.contains(c, "analyst"))
       should.be_true(string.contains(c, "researcher: Running"))
       should.be_true(string.contains(c, "writer: Stopped"))
       should.be_true(string.contains(c, "enabled: true"))
@@ -615,7 +622,6 @@ pub fn introspect_no_agents_test() {
     Some(memory.IntrospectContext(
       agent_uuid: "uuid-empty",
       session_since: "2026-03-10",
-      active_profile: None,
       agents: [],
       dprime_enabled: False,
       dprime_modify_threshold: 0.0,
@@ -625,6 +631,7 @@ pub fn introspect_no_agents_test() {
       thread_single_cycle: 0,
       thread_uuid_named: 0,
       thread_multi_cycle: 0,
+      sandbox_enabled: False,
     ))
   let call = ToolCall(id: "i3", name: "introspect", input_json: "{}")
   let result = memory.execute(call, "/tmp", None, None, ctx, test_limits)
@@ -632,7 +639,6 @@ pub fn introspect_no_agents_test() {
     ToolSuccess(content: c, ..) -> {
       should.be_true(string.contains(c, "No agents registered"))
       should.be_true(string.contains(c, "enabled: false"))
-      should.be_true(string.contains(c, "(none)"))
     }
     _ -> should.fail()
   }
@@ -696,6 +702,7 @@ pub fn how_to_returns_full_guide_test() {
       None,
       test_limits,
       Some(guide),
+      None,
     )
   case result {
     ToolSuccess(content: c, ..) -> c |> should.equal(guide)
@@ -717,6 +724,7 @@ pub fn how_to_filters_by_topic_test() {
       None,
       test_limits,
       Some(guide),
+      None,
     )
   case result {
     ToolSuccess(content: c, ..) -> {
@@ -742,6 +750,7 @@ pub fn how_to_unknown_topic_returns_full_guide_test() {
       None,
       test_limits,
       Some(guide),
+      None,
     )
   case result {
     ToolSuccess(content: c, ..) -> c |> should.equal(guide)

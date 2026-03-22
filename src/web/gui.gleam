@@ -532,7 +532,6 @@ fn notification_to_server_message(
     agent_types.SaveWarning(message:) -> protocol.SaveNotification(message:)
     agent_types.SafetyGateNotice(decision:, score:, explanation:) ->
       protocol.SafetyNotification(decision:, score:, explanation:)
-    agent_types.ProfileNotification(_) -> protocol.ToolNotification(name: "")
     agent_types.AgentLifecycleNotice(event_type:, agent_name:) ->
       protocol.ToolNotification(name: agent_name <> " " <> event_type)
     agent_types.InputQueued(position:, queue_size:) ->
@@ -555,6 +554,19 @@ fn notification_to_server_message(
       protocol.ToolNotification(
         name: "planner:" <> task_id <> " " <> action <> " — " <> title,
       )
+    agent_types.SandboxStarted(pool_size:, port_range:) ->
+      protocol.ToolNotification(
+        name: "sandbox:started pool="
+        <> int.to_string(pool_size)
+        <> " ports="
+        <> port_range,
+      )
+    agent_types.SandboxContainerFailed(slot:, reason:) ->
+      protocol.ToolNotification(
+        name: "sandbox:slot " <> int.to_string(slot) <> " failed: " <> reason,
+      )
+    agent_types.SandboxUnavailable(reason:) ->
+      protocol.ToolNotification(name: "sandbox:unavailable " <> reason)
   }
 }
 

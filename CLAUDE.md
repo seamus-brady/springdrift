@@ -117,6 +117,14 @@ src/
 ├── tools/how_to_content.gleam Default HOW_TO content (builtin fallback)
 ├── tools/web.gleam            Web tools: fetch_url, web_search
 ├── tools/artifacts.gleam      Artifact tools: store_result, retrieve_result (researcher agent)
+├── tools/sandbox.gleam        Sandbox tools: run_code, serve, stop_serve, sandbox_status, workspace_ls, sandbox_exec
+│
+├── sandbox/                   Local Podman sandbox
+│   ├── types.gleam            SandboxConfig, SandboxSlot, SandboxMessage, SandboxManager
+│   ├── manager.gleam          OTP actor managing container pool with port forwarding
+│   ├── podman_ffi.gleam       FFI declarations for subprocess execution (run_cmd, which)
+│   └── diagnostics.gleam      Startup checks: podman version, machine status, image pull
+│
 ├── tui.gleam                  Alternate-screen TUI; Chat + Log + Narrative tabs
 │
 ├── web/                       Web chat GUI + admin dashboard
@@ -324,6 +332,17 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `forecaster_tick_ms` | — | 300000 | Forecaster evaluation interval (ms) |
 | `forecaster_replan_threshold` | — | 0.55 | D' score above which replan is suggested |
 | `forecaster_min_cycles` | — | 2 | Min cycles on a task before forecaster evaluates |
+| `max_delegation_depth` | — | 3 | Max depth for agent delegation chains |
+| `sandbox_enabled` | — | True | Enable local Podman sandbox for coder agent |
+| `sandbox_pool_size` | — | 2 | Max containers in the pool (max: 3) |
+| `sandbox_memory_mb` | — | 512 | Memory limit per container in MB |
+| `sandbox_cpus` | — | "1" | CPU limit per container |
+| `sandbox_image` | — | "python:3.12-slim" | Container image |
+| `sandbox_exec_timeout_ms` | — | 60000 | Per-execution timeout (ms) |
+| `sandbox_port_base` | — | 10000 | Host port base for serve mode |
+| `sandbox_port_stride` | — | 100 | Host port stride per slot |
+| `sandbox_ports_per_slot` | — | 5 | Ports forwarded per slot |
+| `sandbox_auto_machine` | — | True | Auto-start podman machine on macOS |
 
 ## Memory architecture
 
@@ -381,6 +400,7 @@ At startup, the Librarian replays artifact metadata from disk (configurable via
 | `query_tool_activity` | DAG | Per-tool usage stats for a date |
 | `introspect` | All | Perceive system state: identity, agent roster, D' config, cycle ID |
 | `how_to` | HOW_TO.md | Operator guide: tool selection heuristics, degradation paths |
+| `cancel_agent` | Registry | Stop a running agent delegation by name |
 | `complete_task_step` | Tasks | Mark a step complete on a task |
 | `flag_risk` | Tasks | Record that a predicted risk has materialised |
 | `activate_task` | Tasks | Set a pending task as current focus |
@@ -638,6 +658,35 @@ LLM call → clean response → validate against schema → retry on error loop.
 (`root.child.grandchild`). Repeated elements use indexed paths
 (`root.items.item.0`, `root.items.item.1`).
 
+**Local Podman sandbox** — `sandbox/manager.gleam` is an OTP actor managing a pool of
+Podman containers for the coder agent. Two execution modes: `run_code` (synchronous
+script execution) and `serve` (long-lived process with port forwarding). Port allocation
+is deterministic: `host_port = port_base + slot * port_stride + index`, with container-
+internal ports fixed at 47200-47204. All ports are mapped at container creation time.
+The manager runs health checks every 30s and restarts failed containers. Startup
+verifies `podman` binary, optionally starts podman machine on macOS, pulls the image
+if missing, and sweeps stale `springdrift-sandbox-*` containers. When `sandbox_enabled`
+is False (default), the coder agent falls back to `request_human_input` — no sandbox
+code runs. Workspace dirs live at `.sandbox-workspaces/N/` in the project root
+(a sibling of `.springdrift/`, deliberately separate to isolate ephemeral
+container state from persistent agent memory). Add `.sandbox-workspaces/`
+to `.gitignore`.
+The coder agent has six sandbox tools: run_code (execute scripts), serve/stop_serve (long-lived processes), sandbox_status (slot states and ports), workspace_ls (list workspace files), and sandbox_exec (direct shell commands for git, pip, curl, etc.).
+
+**Delegation management** — the cognitive loop tracks active agent delegations via
+`active_delegations: Dict(String, DelegationInfo)` on `CognitiveState`. The agent
+framework sends `AgentProgress` messages after each react-loop turn with turn count,
+token usage, and last tool called. The Curator renders a `<delegations>` section in
+the sensorium XML showing live agent state (name, turn N/M, tokens, elapsed time,
+instruction summary). The `cancel_agent` tool sends `StopChild` to the supervisor to
+kill a misbehaving agent. `DelegationInfo` tracks agent name, instruction, turn,
+max_turns, tokens, last tool, started_at_ms, and depth. Delegation depth is capped
+by `max_delegation_depth` config (default: 3). `AgentTask` carries a `depth: Int`
+field set to 1 for cognitive-loop dispatches. Sub-agents (`request_human_input`
+removed from all agents) report only through their return value — they cannot hijack
+the user interaction channel. `builtin.agent_tools()` provides the safe tool subset
+for sub-agents, excluding `request_human_input`.
+
 **Config validation** — `parse_config_toml` validates unknown TOML keys and warns via
 `slog`. Numeric values are range-checked (must be positive). Provider and GUI mode
 values are validated against known options. Parse failures are logged instead of silent.
@@ -717,7 +766,9 @@ The config is organized into these TOML sections:
 | `[agents.coder]` | Coder agent: max_tokens, max_turns, max_errors |
 | `[agents.writer]` | Writer agent: max_tokens, max_turns, max_errors |
 | `[web]` | Web GUI port |
-| `[services]` | External API base URLs (DuckDuckGo, E2B) |
+| `[services]` | External API base URLs (DuckDuckGo, Brave, Jina) |
+| `[sandbox]` | Local Podman sandbox: enabled, pool_size, memory, ports, image |
+| `[delegation]` | Agent delegation depth limits |
 
 Quick example (top-level fields only):
 

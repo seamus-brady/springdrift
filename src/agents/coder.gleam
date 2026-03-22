@@ -1,74 +1,99 @@
 import agent/types.{type AgentSpec, AgentSpec, Permanent}
 import gleam/list
-import gleam/option.{None}
+import gleam/option.{type Option, None, Some}
 import llm/provider.{type Provider}
 import llm/types as llm_types
+import sandbox/types as sandbox_types
 import tools/builtin
-import tools/e2b
+import tools/sandbox
 
-const system_prompt_with_e2b = "You are a coding agent. Your job is to write, modify, and reason about code.
+const system_prompt_with_sandbox = "You are a coding agent within a multi-agent system. You receive instructions from the orchestrating agent, not directly from the user.
 
-## Tools
+## Sandbox Environment
 
-### Code execution
-You have **run_code** — a secure cloud sandbox (E2B) for executing code. It supports Python (default), JavaScript, R, Java, and Bash. Each call creates a fresh sandbox, so combine related operations into a single code block when possible.
-
-Use run_code to:
-- Test code snippets before presenting them
-- Run data transformations or calculations
-- Verify logic, parse files, or prototype solutions
-- Install packages with pip/npm within the code block
-
-The sandbox has no persistent state between calls. If you need results from a previous execution, capture the output and feed it into the next call.
-
-### Other tools
-- **request_human_input**: Ask the human for file contents, directory listings, or clarification
-- **read_skill**: Load skill documentation for patterns and conventions
-- **calculator**: Quick arithmetic
-- **get_current_datetime**: Current date and time
-
-## Workflow
-1. Understand the task — ask the human for context if needed
-2. Write and test code using run_code
-3. Iterate based on results
-4. Present the final solution with a clear summary
-
-When you complete your task, respond with a concise summary of what was built or changed, including test results. Omit raw file contents and verbose output."
-
-const system_prompt_no_e2b = "You are a coding agent. Your job is to write, modify, and reason about code.
+You have a local Podman sandbox with persistent workspace. Files you create persist across run_code calls within the same session. The container starts with a minimal image — install packages with sandbox_exec before using them.
 
 ## Tools
-- **request_human_input**: Ask the human for file contents, directory listings, or clarification. You can also ask the human to run code on your behalf and report the results.
-- **read_skill**: Load skill documentation for patterns and conventions
-- **calculator**: Quick arithmetic
-- **get_current_datetime**: Current date and time
 
-Note: You do NOT have a code execution sandbox. If you need to test code, use **request_human_input** to ask the human to run it and share the output.
+### Execution
+- **run_code** — execute Python/JavaScript/Bash code in the sandbox. Writes to a file and runs it.
+- **sandbox_exec** — run a shell command directly (git, pip, curl, ls, etc.). Faster than run_code for one-liners. Runs in /workspace.
 
-## Workflow
-1. Understand the task — ask the human for context if needed
-2. Write code and reason through its correctness
-3. If testing is needed, ask the human to run it via request_human_input
-4. Present the final solution with a clear summary
+### Environment management
+- **sandbox_status** — check slot availability, port mappings, container health. Call this first to understand your environment.
+- **workspace_ls** — list files in the workspace. See what exists before writing.
+- **sandbox_exec** with pip/git — install packages, clone repos, manage files.
 
-When you complete your task, respond with a concise summary of what was built or changed. Omit raw file contents and verbose output."
+### Serving
+- **serve** — start a long-lived process with port forwarding. Returns the host URL.
+- **stop_serve** — stop a server and free the slot.
+
+### Other
+- **read_skill** — load skill documentation
+- **calculator** — arithmetic
+- **get_current_datetime** — current timestamp
+
+## Approach
+1. Call sandbox_status to see available slots and ports
+2. Use sandbox_exec for environment setup (pip install, git clone)
+3. Use workspace_ls to verify files exist before running
+4. Use run_code for multi-line scripts, sandbox_exec for quick commands
+5. Iterate on failures — read error output, fix, re-run
+6. For servers, use serve and verify with sandbox_exec (curl localhost:PORT)
+7. Return a concise summary: what was built, what was tested, what the results were
+
+Do not include raw file dumps or verbose logs in your final response. Focus on outcomes."
+
+const system_prompt_no_sandbox = "You are a coding agent within a multi-agent system. You receive instructions from the orchestrating agent, not directly from the user.
+
+## Capabilities
+
+You do NOT have a code execution sandbox. You cannot run code. Work entirely through reasoning.
+
+### Tools
+- **read_skill** — load skill documentation
+- **calculator** — arithmetic
+- **get_current_datetime** — current timestamp
+
+## Approach
+1. Analyse the instruction
+2. Write code and reason through its correctness step by step
+3. Consider edge cases, error handling, and potential issues
+4. Return the code with a clear explanation of what it does and why it is correct
+
+Do not ask anyone to run code for you. Do not generate shell commands for others to execute. If you cannot verify something without execution, state your confidence level and what remains unverified."
+
+/// Builtin tools for the coder (no request_human_input — that's cognitive-loop only).
+fn coder_builtin_tools() -> List(llm_types.Tool) {
+  builtin.agent_tools()
+}
 
 pub fn spec(
   provider: Provider,
   model: String,
-  sandbox_timeout: Int,
+  sandbox_manager: Option(sandbox_types.SandboxManager),
 ) -> AgentSpec {
-  let has_e2b = e2b.is_available()
-  let tools = list.flatten([e2b.all(), builtin.all()])
-  let system_prompt = case has_e2b {
-    True -> system_prompt_with_e2b
-    False -> system_prompt_no_e2b
-  }
-  let description = case has_e2b {
-    True ->
-      "Write, test, and debug code. Has run_code for executing Python/JS/Bash in a secure E2B cloud sandbox, plus request_human_input for file access and clarification."
-    False ->
-      "Write, modify, and reason about code. Uses request_human_input to ask the human to run code and share results. No sandbox available."
+  let #(tools, system_prompt, description) = case sandbox_manager {
+    Some(_manager) -> {
+      let sandbox_tools = [
+        sandbox.run_code_tool(),
+        sandbox.serve_tool(),
+        sandbox.stop_serve_tool(),
+        sandbox.sandbox_status_tool(),
+        sandbox.workspace_ls_tool(),
+        sandbox.sandbox_exec_tool(),
+      ]
+      #(
+        list.flatten([sandbox_tools, coder_builtin_tools()]),
+        system_prompt_with_sandbox,
+        "Write, test, and debug code in a local Podman sandbox. Has run_code, serve, sandbox_exec, workspace_ls, and sandbox_status.",
+      )
+    }
+    None -> #(
+      coder_builtin_tools(),
+      system_prompt_no_sandbox,
+      "Write and reason about code. No execution sandbox available — works through analysis only.",
+    )
   }
 
   AgentSpec(
@@ -84,19 +109,23 @@ pub fn spec(
     max_context_messages: None,
     tools:,
     restart: Permanent,
-    tool_executor: coder_executor(sandbox_timeout),
+    tool_executor: coder_executor(sandbox_manager),
     inter_turn_delay_ms: 200,
     redact_secrets: True,
   )
 }
 
 fn coder_executor(
-  sandbox_timeout: Int,
+  sandbox_manager: Option(sandbox_types.SandboxManager),
 ) -> fn(llm_types.ToolCall) -> llm_types.ToolResult {
   fn(call: llm_types.ToolCall) -> llm_types.ToolResult {
-    case call.name {
-      "run_code" -> e2b.execute(call, sandbox_timeout)
-      _ -> builtin.execute(call)
+    case sandbox_manager {
+      Some(manager) ->
+        case sandbox.is_sandbox_tool(call.name) {
+          True -> sandbox.execute(call, manager)
+          False -> builtin.execute(call)
+        }
+      None -> builtin.execute(call)
     }
   }
 }

@@ -4,9 +4,11 @@ import llm/provider.{type Provider}
 import llm/types as llm_types
 import tools/builtin
 
-const system_prompt = "You are a writer agent. Your job is to synthesise research findings into structured, well-cited reports.
+const system_prompt = "You are a writer agent within a multi-agent system. You receive instructions from the orchestrating agent, not directly from the user.
 
-You have access to: calculator, get_current_datetime, request_human_input, read_skill.
+Your job is to synthesise research findings into structured, well-cited reports.
+
+You have access to: calculator, get_current_datetime, read_skill.
 
 When writing reports:
 - Structure content with clear sections and headings
@@ -18,7 +20,7 @@ When writing reports:
 When you complete your task, respond with the finished report text. Include all citations and confidence assessments."
 
 pub fn spec(provider: Provider, model: String) -> AgentSpec {
-  let tools = builtin.all()
+  let tools = builtin.agent_tools()
 
   AgentSpec(
     name: "writer",

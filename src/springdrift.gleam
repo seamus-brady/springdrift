@@ -37,22 +37,18 @@ import narrative/threading as narrative_threading
 import paths
 import planner/forecaster
 import planner/types as planner_types
-import profile
-import profile/types as profile_types
+import sandbox/manager as sandbox_manager_mod
+import sandbox/types as sandbox_types
 import scheduler/log as schedule_log
 import scheduler/runner as scheduler_runner
 import simplifile
 import skills
 import slog
 import storage
-import tools/brave as tools_brave
-import tools/builtin as tools_builtin
 import tools/cache
 import tools/how_to_content
-import tools/jina as tools_jina
 import tools/memory as tools_memory
 import tools/rate_limiter
-import tools/web as tools_web
 import tui
 import web/gui as web_gui
 
@@ -435,63 +431,61 @@ fn run(cfg: AppConfig) -> Nil {
   }
   let brave_cache_ttl_ms = option.unwrap(cfg.brave_cache_ttl_ms, 300_000)
 
-  // Profile system
-  let profile_dirs =
-    option.unwrap(cfg.profiles_dirs, profile.default_profile_dirs())
-  let available_profiles = profile.discover(profile_dirs)
+  // Create notification channel (early, needed by sandbox startup)
+  let notify: process.Subject(agent_types.Notification) = process.new_subject()
 
-  // Build agent specs (default or from profile)
-  let #(agent_specs, active_profile) = case cfg.default_profile {
-    option.Some(profile_name) ->
-      case profile.load(profile_name, profile_dirs) {
-        Ok(loaded_profile) -> {
-          io.println("Profile  : " <> profile_name)
-          let specs =
-            build_profile_agent_specs(
-              loaded_profile,
-              p,
-              task_model,
-              write_anywhere,
-            )
-          #(specs, option.Some(profile_name))
-        }
-        Error(msg) -> {
+  // Sandbox
+  let sandbox_mgr = case option.unwrap(cfg.sandbox_enabled, True) {
+    True -> {
+      let sandbox_cfg =
+        sandbox_types.SandboxConfig(
+          pool_size: option.unwrap(cfg.sandbox_pool_size, 2),
+          memory_mb: option.unwrap(cfg.sandbox_memory_mb, 512),
+          cpus: option.unwrap(cfg.sandbox_cpus, "1"),
+          image: option.unwrap(cfg.sandbox_image, "python:3.12-slim"),
+          exec_timeout_ms: option.unwrap(cfg.sandbox_exec_timeout_ms, 60_000),
+          port_base: option.unwrap(cfg.sandbox_port_base, 10_000),
+          port_stride: option.unwrap(cfg.sandbox_port_stride, 100),
+          ports_per_slot: option.unwrap(cfg.sandbox_ports_per_slot, 5),
+          auto_machine: option.unwrap(cfg.sandbox_auto_machine, True),
+          workspace_dir: paths.sandbox_workspaces_dir(),
+        )
+      case sandbox_manager_mod.start(sandbox_cfg, notify, option.None) {
+        Ok(mgr) -> {
           io.println(
-            "Profile  : '"
-            <> profile_name
-            <> "' failed ("
-            <> msg
-            <> ") — using defaults",
+            "Sandbox  : started (pool="
+            <> int.to_string(sandbox_cfg.pool_size)
+            <> ")",
           )
-          #(
-            default_agent_specs(
-              cfg,
-              p,
-              task_model,
-              librarian_subj,
-              brave_cache,
-              brave_search_limiter,
-              brave_answers_limiter,
-              brave_cache_ttl_ms,
-            ),
-            option.None,
-          )
+          option.Some(mgr)
+        }
+        Error(reason) -> {
+          io.println("Sandbox  : unavailable (" <> reason <> ")")
+          option.None
         }
       }
-    option.None -> #(
-      default_agent_specs(
-        cfg,
-        p,
-        task_model,
-        librarian_subj,
-        brave_cache,
-        brave_search_limiter,
-        brave_answers_limiter,
-        brave_cache_ttl_ms,
-      ),
-      option.None,
-    )
+    }
+    False -> {
+      io.println(
+        "Sandbox  : disabled (set [sandbox] enabled = true to re-enable)",
+      )
+      option.None
+    }
   }
+
+  // Build agent specs
+  let agent_specs =
+    default_agent_specs(
+      cfg,
+      p,
+      task_model,
+      librarian_subj,
+      brave_cache,
+      brave_search_limiter,
+      brave_answers_limiter,
+      brave_cache_ttl_ms,
+      sandbox_mgr,
+    )
 
   // Build agent tools for the cognitive loop (includes scheduler)
   let scheduler_tool =
@@ -521,9 +515,6 @@ fn run(cfg: AppConfig) -> Nil {
   let agent_tools =
     list.append(list.map(agent_specs, cognitive.agent_to_tool), [scheduler_tool])
 
-  // Create notification channel
-  let notify: process.Subject(agent_types.Notification) = process.new_subject()
-
   // Load D' config if enabled (dual-gate: tool_gate + optional output_gate)
   let #(dprime_state, output_dprime_state) = case
     option.unwrap(cfg.dprime_enabled, False)
@@ -552,7 +543,6 @@ fn run(cfg: AppConfig) -> Nil {
       paths.facts_dir(),
       paths.default_identity_dirs(),
       "memory",
-      active_profile,
       agent_name,
       agent_version,
     )
@@ -655,7 +645,6 @@ fn run(cfg: AppConfig) -> Nil {
       archivist_model:,
       archivist_max_tokens:,
       librarian: lib,
-      profile_dirs:,
       write_anywhere:,
       curator: option.Some(curator_subj),
       agent_uuid: stable_identity.agent_uuid,
@@ -671,6 +660,8 @@ fn run(cfg: AppConfig) -> Nil {
       how_to_content: option.Some(how_to_content),
       redact_secrets:,
       planner_dir: paths.planner_dir(),
+      max_delegation_depth: option.unwrap(cfg.max_delegation_depth, 3),
+      sandbox_enabled: option.is_some(sandbox_mgr),
     ))
   {
     Ok(subj) -> subj
@@ -678,6 +669,12 @@ fn run(cfg: AppConfig) -> Nil {
       io.println("Fatal: Cognitive loop failed to start")
       panic as "Cognitive loop startup failed"
     }
+  }
+
+  // Wire sandbox manager to cognitive loop for crash log sensory events
+  case sandbox_mgr {
+    option.Some(mgr) -> sandbox_manager_mod.set_cognitive(mgr, cognitive_subj)
+    option.None -> Nil
   }
 
   // Start supervisor and register agents via StartChild
@@ -700,7 +697,7 @@ fn run(cfg: AppConfig) -> Nil {
     }
   })
 
-  // Wire supervisor into cognitive loop so profile switching can manage agents
+  // Wire supervisor into cognitive loop
   cognitive.set_supervisor(cognitive_subj, sup)
 
   case dprime_state {
@@ -718,34 +715,11 @@ fn run(cfg: AppConfig) -> Nil {
     list.map(agent_specs, fn(s) { s.name })
     |> string.join(", ")
   io.println("Mode     : cognitive (agents: " <> agent_names <> ")")
-  case available_profiles {
-    [] -> Nil
-    _ -> io.println("Profiles : " <> string.join(available_profiles, ", "))
-  }
-
   // Migrate old scheduler checkpoint to JSONL (no-op if already done)
   let schedule_dir = paths.schedule_dir()
   schedule_log.migrate_checkpoint(schedule_dir, paths.scheduler_checkpoint())
 
-  // Load profile schedule tasks if applicable
-  let profile_schedule_tasks = case cfg.default_profile {
-    option.Some(profile_name) ->
-      case profile.load(profile_name, profile_dirs) {
-        Ok(loaded_profile) ->
-          case loaded_profile.schedule_path {
-            option.Some(schedule_path) ->
-              case profile.parse_schedule(schedule_path) {
-                Ok(tasks) -> tasks
-                Error(_) -> []
-              }
-            option.None -> []
-          }
-        Error(_) -> []
-      }
-    option.None -> []
-  }
-
-  // Always start the scheduler runner
+  // Start the scheduler runner
   let stuck_timeout_ms = option.unwrap(cfg.scheduler_stuck_timeout_ms, 600_000)
   let max_cycles_per_hour =
     option.unwrap(cfg.max_autonomous_cycles_per_hour, 20)
@@ -753,24 +727,16 @@ fn run(cfg: AppConfig) -> Nil {
     option.unwrap(cfg.autonomous_token_budget_per_hour, 500_000)
   let runner_result =
     scheduler_runner.start(
-      profile_schedule_tasks,
+      [],
       cognitive_subj,
-      paths.scheduler_checkpoint(),
+      paths.schedule_dir(),
       stuck_timeout_ms,
       max_cycles_per_hour,
       token_budget_per_hour,
     )
   let scheduler_subj = case runner_result {
     Ok(runner_subj) -> {
-      case profile_schedule_tasks {
-        [] -> io.println("Scheduler: started (no profile tasks)")
-        tasks ->
-          io.println(
-            "Scheduler: "
-            <> int.to_string(list.length(tasks))
-            <> " task(s) scheduled",
-          )
-      }
+      io.println("Scheduler: started")
       // Register scheduler agent with the supervisor
       let sched_spec = scheduler_agent.spec(p, task_model, runner_subj)
       let reply_subj = process.new_subject()
@@ -898,6 +864,13 @@ fn run(cfg: AppConfig) -> Nil {
         tui_input_limit,
       )
   }
+
+  // Shutdown sandbox containers on exit
+  case sandbox_mgr {
+    option.Some(mgr) -> sandbox_manager_mod.shutdown(mgr)
+    option.None -> Nil
+  }
+
   Nil
 }
 
@@ -1012,11 +985,11 @@ fn default_agent_specs(
     process.Subject(rate_limiter.RateLimiterMessage),
   ),
   brave_cache_ttl_ms: Int,
+  sandbox_manager: option.Option(sandbox_types.SandboxManager),
 ) -> List(agent_types.AgentSpec) {
   let delay = option.unwrap(cfg.inter_turn_delay_ms, 200)
   let p_spec = planner.spec(provider, task_model)
   let max_artifact_chars = option.unwrap(cfg.max_artifact_chars, 50_000)
-  let sandbox_timeout = option.unwrap(cfg.sandbox_timeout_s, 600)
   let r_spec =
     researcher.spec(
       provider,
@@ -1029,7 +1002,7 @@ fn default_agent_specs(
       brave_answers_limiter,
       brave_cache_ttl_ms,
     )
-  let c_spec = coder.spec(provider, task_model, sandbox_timeout)
+  let c_spec = coder.spec(provider, task_model, sandbox_manager)
   let recall_max_entries = option.unwrap(cfg.recall_max_entries, 50)
   let cbr_max_results = option.unwrap(cfg.cbr_max_results, 20)
   let o_spec =
@@ -1082,77 +1055,4 @@ fn default_agent_specs(
     ),
     agent_types.AgentSpec(..o_spec, redact_secrets: redact),
   ]
-}
-
-fn build_profile_agent_specs(
-  loaded_profile: profile_types.Profile,
-  provider: Provider,
-  task_model: String,
-  write_anywhere: Bool,
-) -> List(agent_types.AgentSpec) {
-  list.map(loaded_profile.agents, fn(agent_def) {
-    let tools_list = resolve_profile_tools(agent_def.tools)
-    let system_prompt = case agent_def.system_prompt {
-      option.Some(sp) -> sp
-      option.None ->
-        "You are a " <> agent_def.name <> " agent. " <> agent_def.description
-    }
-    let tool_executor =
-      build_profile_tool_executor(agent_def.tools, write_anywhere)
-    agent_types.AgentSpec(
-      name: agent_def.name,
-      human_name: string.capitalise(agent_def.name),
-      description: agent_def.description,
-      system_prompt:,
-      provider:,
-      model: task_model,
-      max_tokens: 4096,
-      max_turns: agent_def.max_turns,
-      max_consecutive_errors: 3,
-      max_context_messages: option.None,
-      tools: tools_list,
-      restart: agent_types.Permanent,
-      tool_executor:,
-      inter_turn_delay_ms: 200,
-      redact_secrets: True,
-    )
-  })
-}
-
-fn resolve_profile_tools(tool_groups: List(String)) -> List(llm_types.Tool) {
-  list.flat_map(tool_groups, fn(group) {
-    case group {
-      "web" ->
-        list.flatten([
-          tools_brave.all(),
-          tools_jina.all(),
-          tools_web.all(),
-        ])
-      "builtin" -> tools_builtin.all()
-      _ -> []
-    }
-  })
-}
-
-fn build_profile_tool_executor(
-  tool_groups: List(String),
-  _write_anywhere: Bool,
-) -> fn(llm_types.ToolCall) -> llm_types.ToolResult {
-  let has_web = list.contains(tool_groups, "web")
-  fn(call: llm_types.ToolCall) -> llm_types.ToolResult {
-    case has_web {
-      True ->
-        case call.name {
-          "brave_web_search"
-          | "brave_news_search"
-          | "brave_llm_context"
-          | "brave_summarizer"
-          | "brave_answer" -> tools_brave.execute(call)
-          "jina_reader" -> tools_jina.execute(call)
-          "fetch_url" | "web_search" -> tools_web.execute(call)
-          _ -> tools_builtin.execute(call)
-        }
-      False -> tools_builtin.execute(call)
-    }
-  }
 }

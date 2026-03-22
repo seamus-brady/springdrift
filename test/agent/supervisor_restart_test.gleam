@@ -187,6 +187,7 @@ pub fn agent_survives_task_completion_test() {
       context: "",
       parent_cycle_id: "c1",
       reply_to: reply1,
+      depth: 1,
     ),
   )
   let assert Ok(AgentComplete(outcome: AgentSuccess(task_id: "t1", ..))) =
@@ -203,6 +204,7 @@ pub fn agent_survives_task_completion_test() {
       context: "",
       parent_cycle_id: "c2",
       reply_to: reply2,
+      depth: 1,
     ),
   )
   let assert Ok(AgentComplete(outcome: AgentSuccess(task_id: "t2", ..))) =

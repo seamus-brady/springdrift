@@ -38,7 +38,6 @@ pub type CognitiveConfig {
     archivist_model: String,
     archivist_max_tokens: Int,
     librarian: Option(Subject(LibrarianMessage)),
-    profile_dirs: List(String),
     write_anywhere: Bool,
     curator: Option(Subject(CuratorMessage)),
     agent_uuid: String,
@@ -51,6 +50,8 @@ pub type CognitiveConfig {
     how_to_content: Option(String),
     redact_secrets: Bool,
     planner_dir: String,
+    max_delegation_depth: Int,
+    sandbox_enabled: Bool,
   )
 }
 
@@ -85,7 +86,6 @@ pub fn default_test_config(
     archivist_model: "mock-model",
     archivist_max_tokens: 8192,
     librarian: None,
-    profile_dirs: [],
     write_anywhere: False,
     curator: None,
     agent_uuid: "",
@@ -98,5 +98,7 @@ pub fn default_test_config(
     how_to_content: None,
     redact_secrets: False,
     planner_dir: base <> "/planner",
+    max_delegation_depth: 3,
+    sandbox_enabled: False,
   )
 }

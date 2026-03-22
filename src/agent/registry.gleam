@@ -18,6 +18,7 @@ pub type RegistryEntry {
     name: String,
     task_subject: Subject(AgentTask),
     status: AgentStatus,
+    tool_names: List(String),
   )
 }
 
@@ -37,11 +38,13 @@ pub fn register(
   registry: Registry,
   name: String,
   task_subject: Subject(AgentTask),
+  tool_names: List(String),
 ) -> Registry {
   case list.find(registry.entries, fn(e) { e.name == name }) {
     Ok(_) -> update_task_subject(registry, name, task_subject)
     Error(_) -> {
-      let entry = RegistryEntry(name:, task_subject:, status: Running)
+      let entry =
+        RegistryEntry(name:, task_subject:, status: Running, tool_names:)
       Registry(entries: list.append(registry.entries, [entry]))
     }
   }

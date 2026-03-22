@@ -4,8 +4,8 @@ import agent/framework
 import agent/supervisor
 import agent/types.{
   type AgentSpec, type CognitiveMessage, AgentComplete, AgentEvent, AgentFailure,
-  AgentSpec, AgentStarted, AgentStopped, AgentSuccess, AgentTask, ShutdownAll,
-  StartChild, StopChild, Temporary,
+  AgentProgress, AgentSpec, AgentStarted, AgentStopped, AgentSuccess, AgentTask,
+  ShutdownAll, StartChild, StopChild, Temporary,
 }
 import gleam/erlang/process
 import gleam/list
@@ -112,6 +112,7 @@ pub fn multiple_agents_complete_tasks_test() {
       context: "",
       parent_cycle_id: "cycle-1",
       reply_to: reply_subj,
+      depth: 1,
     ),
   )
   process.send(
@@ -123,6 +124,7 @@ pub fn multiple_agents_complete_tasks_test() {
       context: "",
       parent_cycle_id: "cycle-1",
       reply_to: reply_subj,
+      depth: 1,
     ),
   )
   process.send(
@@ -134,6 +136,7 @@ pub fn multiple_agents_complete_tasks_test() {
       context: "",
       parent_cycle_id: "cycle-1",
       reply_to: reply_subj,
+      depth: 1,
     ),
   )
 
@@ -192,6 +195,7 @@ pub fn mixed_success_and_failure_test() {
       context: "",
       parent_cycle_id: "cycle-2",
       reply_to: reply_subj,
+      depth: 1,
     ),
   )
   process.send(
@@ -203,6 +207,7 @@ pub fn mixed_success_and_failure_test() {
       context: "",
       parent_cycle_id: "cycle-2",
       reply_to: reply_subj,
+      depth: 1,
     ),
   )
 
@@ -328,16 +333,33 @@ pub fn agent_tool_execution_test() {
       context: "",
       parent_cycle_id: "cycle-3",
       reply_to: reply_subj,
+      depth: 1,
     ),
   )
 
-  let assert Ok(msg) = process.receive(reply_subj, 10_000)
-  case msg {
-    AgentComplete(outcome: AgentSuccess(result: r, tools_used: tools, ..)) -> {
+  // Drain AgentProgress messages, then expect AgentComplete
+  let result = drain_until_complete(reply_subj, 10_000)
+  case result {
+    Ok(AgentComplete(outcome: AgentSuccess(result: r, tools_used: tools, ..))) -> {
       r |> should.equal("The answer is 5")
       list.contains(tools, "calculator") |> should.be_true()
     }
     _ -> should.fail()
+  }
+}
+
+/// Drain AgentProgress messages until we get a non-progress message.
+fn drain_until_complete(
+  subj: process.Subject(CognitiveMessage),
+  timeout_ms: Int,
+) -> Result(CognitiveMessage, Nil) {
+  case process.receive(subj, timeout_ms) {
+    Error(_) -> Error(Nil)
+    Ok(msg) ->
+      case msg {
+        AgentProgress(..) -> drain_until_complete(subj, timeout_ms)
+        other -> Ok(other)
+      }
   }
 }
 
@@ -375,6 +397,7 @@ pub fn stop_one_agent_others_continue_test() {
       context: "",
       parent_cycle_id: "cycle-4",
       reply_to: reply_subj,
+      depth: 1,
     ),
   )
 

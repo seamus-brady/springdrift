@@ -7,6 +7,7 @@
 //// memory_query_facts, memory_trace_fact) let the loop explicitly
 //// manage its working memory.
 
+import agent/types as agent_types
 import cbr/types as cbr_types
 import dag/types as dag_types
 import facts/log as facts_log
@@ -64,6 +65,7 @@ pub fn all() -> List(Tool) {
     annotate_case_tool(),
     suppress_case_tool(),
     boost_case_tool(),
+    cancel_agent_tool(),
   ]
 }
 
@@ -334,6 +336,7 @@ pub fn is_memory_tool(name: String) -> Bool {
   || name == "annotate_case"
   || name == "suppress_case"
   || name == "boost_case"
+  || name == "cancel_agent"
 }
 
 /// Context for facts-based memory tools.
@@ -343,7 +346,7 @@ pub type FactsContext {
 
 /// Registry entry for agent roster (avoids depending on registry module's opaque type).
 pub type AgentStatusEntry {
-  AgentStatusEntry(name: String, status: String)
+  AgentStatusEntry(name: String, status: String, tool_names: List(String))
 }
 
 /// Context for the `introspect` tool — carries system state from CognitiveState.
@@ -351,7 +354,6 @@ pub type IntrospectContext {
   IntrospectContext(
     agent_uuid: String,
     session_since: String,
-    active_profile: Option(String),
     agents: List(AgentStatusEntry),
     dprime_enabled: Bool,
     dprime_modify_threshold: Float,
@@ -361,12 +363,20 @@ pub type IntrospectContext {
     thread_single_cycle: Int,
     thread_uuid_named: Int,
     thread_multi_cycle: Int,
+    sandbox_enabled: Bool,
   )
 }
 
 /// Limits for memory tool result sizes.
 pub type MemoryLimits {
   MemoryLimits(recall_max_entries: Int, cbr_max_results: Int)
+}
+
+/// Context for agent management tools (cancel_agent).
+pub type AgentManagementContext {
+  AgentManagementContext(
+    supervisor: Option(Subject(agent_types.SupervisorMessage)),
+  )
 }
 
 /// Default memory limits.
@@ -392,10 +402,11 @@ pub fn execute(
     introspect_ctx,
     limits,
     None,
+    None,
   )
 }
 
-/// Execute a memory tool call with optional how_to content.
+/// Execute a memory tool call with optional how_to content and agent management.
 pub fn execute_with_how_to(
   call: ToolCall,
   narrative_dir: String,
@@ -404,6 +415,7 @@ pub fn execute_with_how_to(
   introspect_ctx: Option(IntrospectContext),
   limits: MemoryLimits,
   how_to_content: Option(String),
+  agent_mgmt: Option(AgentManagementContext),
 ) -> ToolResult {
   slog.debug("memory", "execute", "tool=" <> call.name, None)
   case call.name {
@@ -428,6 +440,7 @@ pub fn execute_with_how_to(
     "annotate_case" -> run_annotate_case(call, lib)
     "suppress_case" -> run_suppress_case(call, lib)
     "boost_case" -> run_boost_case(call, lib)
+    "cancel_agent" -> run_cancel_agent(call, agent_mgmt)
     _ -> ToolFailure(tool_use_id: call.id, error: "Unknown tool: " <> call.name)
   }
 }
@@ -1513,19 +1526,13 @@ fn run_introspect(call: ToolCall, ctx: Option(IntrospectContext)) -> ToolResult 
         <> "\n- session_since: "
         <> c.session_since
 
-      // Profile
-      let profile = case c.active_profile {
-        Some(p) -> "\n- profile: " <> p
-        None -> "\n- profile: (none)"
-      }
-
       // Cycle
       let cycle = case c.current_cycle_id {
         Some(cid) -> "\n- current_cycle: " <> cid
         None -> ""
       }
 
-      let sections = [identity <> profile <> cycle, ..sections]
+      let sections = [identity <> cycle, ..sections]
 
       // Agent roster
       let agent_section = case c.agents {
@@ -1533,7 +1540,11 @@ fn run_introspect(call: ToolCall, ctx: Option(IntrospectContext)) -> ToolResult 
         agents -> {
           let lines =
             list.map(agents, fn(e: AgentStatusEntry) {
-              "- " <> e.name <> ": " <> e.status
+              let tools_str = case e.tool_names {
+                [] -> " (no tools)"
+                names -> " [" <> string.join(names, ", ") <> "]"
+              }
+              "- " <> e.name <> ": " <> e.status <> tools_str
             })
           "## Agents ("
           <> int.to_string(list.length(agents))
@@ -1567,6 +1578,14 @@ fn run_introspect(call: ToolCall, ctx: Option(IntrospectContext)) -> ToolResult 
         <> " | multi-cycle: "
         <> int.to_string(c.thread_multi_cycle)
       let sections = [thread_section, ..sections]
+
+      // Sandbox
+      let sandbox_section = case c.sandbox_enabled {
+        True ->
+          "## Sandbox\n- enabled: true\n- Use sandbox_status tool for slot details"
+        False -> "## Sandbox\n- enabled: false (coder has no execution tools)"
+      }
+      let sections = [sandbox_section, ..sections]
 
       ToolSuccess(
         tool_use_id: call.id,
@@ -1841,6 +1860,69 @@ fn boost_case_tool() -> Tool {
     True,
   )
   |> tool.build()
+}
+
+fn cancel_agent_tool() -> Tool {
+  tool.new("cancel_agent")
+  |> tool.with_description(
+    "Cancel a running agent delegation. Use when an agent is consuming too many "
+    <> "tokens, taking too long, or going off-track. Check <delegations> in the "
+    <> "sensorium to see active agents before cancelling.",
+  )
+  |> tool.add_string_param(
+    "agent_name",
+    "Name of the agent to cancel (e.g. 'researcher', 'coder', 'writer')",
+    True,
+  )
+  |> tool.build()
+}
+
+fn run_cancel_agent(
+  call: ToolCall,
+  agent_mgmt: Option(AgentManagementContext),
+) -> ToolResult {
+  let decoder = {
+    use agent_name <- decode.field("agent_name", decode.string)
+    decode.success(agent_name)
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "Invalid cancel_agent input: missing agent_name",
+      )
+    Ok(agent_name) ->
+      case agent_mgmt {
+        None ->
+          ToolFailure(
+            tool_use_id: call.id,
+            error: "Agent management not available",
+          )
+        Some(ctx) ->
+          case ctx.supervisor {
+            None ->
+              ToolFailure(
+                tool_use_id: call.id,
+                error: "No supervisor available to cancel agents",
+              )
+            Some(supervisor) -> {
+              process.send(supervisor, agent_types.StopChild(name: agent_name))
+              slog.info(
+                "memory",
+                "cancel_agent",
+                "Cancelled agent: " <> agent_name,
+                None,
+              )
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: "Agent '"
+                  <> agent_name
+                  <> "' has been cancelled. It will be restarted by the supervisor if configured as Permanent.",
+              )
+            }
+          }
+      }
+  }
 }
 
 fn run_correct_case(

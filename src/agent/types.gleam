@@ -78,6 +78,7 @@ pub type AgentTask {
     context: String,
     parent_cycle_id: String,
     reply_to: Subject(CognitiveMessage),
+    depth: Int,
   )
 }
 
@@ -208,9 +209,18 @@ pub type AgentCompletionRecord {
 // ---------------------------------------------------------------------------
 
 pub type AgentLifecycleEvent {
-  AgentStarted(name: String, task_subject: Subject(AgentTask))
+  AgentStarted(
+    name: String,
+    task_subject: Subject(AgentTask),
+    tool_names: List(String),
+  )
   AgentCrashed(name: String, reason: String)
-  AgentRestarted(name: String, attempt: Int, task_subject: Subject(AgentTask))
+  AgentRestarted(
+    name: String,
+    attempt: Int,
+    task_subject: Subject(AgentTask),
+    tool_names: List(String),
+  )
   AgentRestartFailed(name: String, reason: String)
   AgentStopped(name: String)
 }
@@ -239,6 +249,7 @@ pub type CognitiveMessage {
   ThinkError(task_id: String, error: String, retryable: Bool)
   ThinkWorkerDown(task_id: String, reason: String)
   AgentComplete(outcome: AgentOutcome)
+  AgentProgress(progress: DelegationProgress)
   AgentQuestion(question: String, agent: String, reply_to: Subject(String))
   AgentEvent(event: AgentLifecycleEvent)
   SaveResult(error: Option(String))
@@ -270,7 +281,6 @@ pub type CognitiveMessage {
     pre_score: Float,
     reply_to: Subject(CognitiveReply),
   )
-  LoadProfile(name: String, reply_to: Subject(CognitiveReply))
   SetSupervisor(supervisor: Subject(SupervisorMessage))
   SchedulerInput(
     job_name: String,
@@ -380,7 +390,6 @@ pub type Notification {
   SaveWarning(message: String)
   ToolCalling(name: String)
   SafetyGateNotice(decision: String, score: Float, explanation: String)
-  ProfileNotification(name: String)
   AgentLifecycleNotice(event_type: String, agent_name: String)
   InputQueued(position: Int, queue_size: Int)
   InputQueueFull(queue_cap: Int)
@@ -389,6 +398,9 @@ pub type Notification {
   SchedulerJobCompleted(name: String, result_preview: String)
   SchedulerJobFailed(name: String, reason: String)
   PlannerNotification(task_id: String, title: String, action: String)
+  SandboxStarted(pool_size: Int, port_range: String)
+  SandboxContainerFailed(slot: Int, reason: String)
+  SandboxUnavailable(reason: String)
 }
 
 // ---------------------------------------------------------------------------
@@ -416,4 +428,37 @@ pub type QueuedInput {
     reply_to: Subject(CognitiveReply),
   )
   QueuedSensoryInput(event: SensoryEvent)
+}
+
+// ---------------------------------------------------------------------------
+// Delegation progress — mid-flight updates from agent framework
+// ---------------------------------------------------------------------------
+
+/// Progress report sent by the framework during an agent's react loop.
+pub type DelegationProgress {
+  DelegationProgress(
+    task_id: String,
+    agent: String,
+    turn: Int,
+    max_turns: Int,
+    input_tokens: Int,
+    output_tokens: Int,
+    last_tool: String,
+    depth: Int,
+  )
+}
+
+/// Live delegation state tracked by the cognitive loop.
+pub type DelegationInfo {
+  DelegationInfo(
+    agent: String,
+    instruction: String,
+    turn: Int,
+    max_turns: Int,
+    input_tokens: Int,
+    output_tokens: Int,
+    last_tool: String,
+    started_at_ms: Int,
+    depth: Int,
+  )
 }
