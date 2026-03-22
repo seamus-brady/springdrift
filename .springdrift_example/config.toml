@@ -59,8 +59,8 @@ write_anywhere = false
 
 # ── D' safety system ────────────────────────────────────────────────────────
 
-# Enable D' safety evaluation before tool dispatch (default: false)
-dprime_enabled = false
+# Enable D' safety evaluation (default: true)
+# dprime_enabled = true
 
 # Path to D' config JSON (default: built-in)
 # dprime_config = "dprime.json"

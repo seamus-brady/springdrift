@@ -8,10 +8,13 @@ import dag/types as dag_types
 import dprime/types as dprime_types
 import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Subject}
-import gleam/option.{type Option}
+import gleam/list
+import gleam/option.{type Option, None, Some}
 import llm/provider.{type Provider}
 import llm/retry
 import llm/types as llm_types
+import meta/observer as meta_observer
+import meta/types as meta_types
 import narrative/curator.{type CuratorMessage}
 import narrative/librarian.{type LibrarianMessage}
 import narrative/threading
@@ -99,8 +102,9 @@ pub type CognitiveState {
     cycle_tool_calls: List(dag_types.ToolSummary),
     cycle_started_ms: Int,
     cycle_node_type: dag_types.CycleNodeType,
-    // --- D' safety ---
-    dprime_state: Option(dprime_types.DprimeState),
+    // --- D' safety (isolated per gate type to prevent history contamination) ---
+    input_dprime_state: Option(dprime_types.DprimeState),
+    tool_dprime_state: Option(dprime_types.DprimeState),
     output_dprime_state: Option(dprime_types.DprimeState),
     dprime_decisions: List(dag_types.DprimeDecisionRecord),
     // --- Input queue ---
@@ -117,6 +121,8 @@ pub type CognitiveState {
     config: RuntimeConfig,
     // --- Secret redaction ---
     redact_secrets: Bool,
+    // --- Layer 3b meta observer ---
+    meta_state: Option(meta_types.MetaState),
   )
 }
 
@@ -135,4 +141,38 @@ pub fn model_config(state: CognitiveState) -> ModelConfig {
 /// Extract memory context from state.
 pub fn memory_context(state: CognitiveState) -> MemoryContext {
   state.memory
+}
+
+/// Run the Layer 3b meta observer post-cycle and update state.
+/// Called after CognitiveReply is sent but before transitioning to Idle.
+/// `tokens_used` is the total tokens (input + output) for this cycle.
+pub fn apply_meta_observation(
+  state: CognitiveState,
+  tokens_used: Int,
+) -> CognitiveState {
+  case state.meta_state {
+    None -> state
+    Some(ms) -> {
+      let cycle_id = option.unwrap(state.cycle_id, "unknown")
+      let gate_summaries =
+        list.map(state.dprime_decisions, fn(d) {
+          meta_types.GateDecisionSummary(
+            gate: d.gate,
+            decision: d.decision,
+            score: d.score,
+          )
+        })
+      let obs =
+        meta_types.MetaObservation(
+          cycle_id:,
+          timestamp: "",
+          gate_decisions: gate_summaries,
+          tokens_used:,
+          tool_call_count: list.length(state.cycle_tool_calls),
+          had_delegations: !dict.is_empty(state.active_delegations),
+        )
+      let new_ms = meta_observer.observe(ms, obs)
+      CognitiveState(..state, meta_state: Some(new_ms))
+    }
+  }
 }

@@ -63,8 +63,11 @@ pub fn build_situation_model_fallback_on_error_test() {
       False,
       False,
     )
-  // Falls back to instruction
-  result |> should.equal("test instruction")
+  // Falls back to structured fallback
+  result
+  |> should.equal(
+    "Instruction: test instruction\nContext: No additional situation context available.",
+  )
 }
 
 // ---------------------------------------------------------------------------

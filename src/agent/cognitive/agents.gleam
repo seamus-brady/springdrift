@@ -170,12 +170,12 @@ fn handle_memory_tools(
           agent_uuid: state.identity.agent_uuid,
           session_since: state.identity.session_since,
           agents: agent_entries,
-          dprime_enabled: option.is_some(state.dprime_state),
-          dprime_modify_threshold: case state.dprime_state {
+          dprime_enabled: option.is_some(state.tool_dprime_state),
+          dprime_modify_threshold: case state.tool_dprime_state {
             Some(ds) -> ds.current_modify_threshold
             None -> 0.0
           },
-          dprime_reject_threshold: case state.dprime_state {
+          dprime_reject_threshold: case state.tool_dprime_state {
             Some(ds) -> ds.current_reject_threshold
             None -> 0.0
           },
@@ -926,7 +926,7 @@ pub fn handle_agent_complete(
               pending: remaining,
               active_delegations: updated_delegations,
             )
-          case state.dprime_state {
+          case state.tool_dprime_state {
             Some(dprime_st) -> {
               let cycle_id = option.unwrap(state.cycle_id, "post-exec")
               let self = state.self

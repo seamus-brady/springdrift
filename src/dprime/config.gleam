@@ -106,6 +106,7 @@ pub fn default() -> DprimeConfig {
     canary_enabled: True,
     max_iterations: 3,
     max_candidates: 3,
+    max_output_modifications: 2,
   )
 }
 
@@ -302,6 +303,11 @@ fn config_decoder() -> decode.Decoder(DprimeConfig) {
     defaults.max_candidates,
     decode.int,
   )
+  use max_output_modifications <- decode.optional_field(
+    "max_output_modifications",
+    defaults.max_output_modifications,
+    decode.int,
+  )
   decode.success(DprimeConfig(
     agent_id:,
     features:,
@@ -318,6 +324,7 @@ fn config_decoder() -> decode.Decoder(DprimeConfig) {
     canary_enabled:,
     max_iterations:,
     max_candidates:,
+    max_output_modifications:,
   ))
 }
 

@@ -1,17 +1,23 @@
 import agent/cognitive_state.{type CognitiveState, CognitiveState}
 import agent/registry
-import agent/types.{type CognitiveReply, CognitiveReply, PendingThink, Thinking}
+import agent/types.{
+  type CognitiveReply, CognitiveReply, PendingThink, SensoryEvent, Thinking,
+}
 import agent/worker
 import context
 import cycle_log
 import dag/types as dag_types
+import dprime/types as dprime_types
 import gleam/dict
 import gleam/erlang/process.{type Subject}
+import gleam/float
+import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
 import llm/request
 import llm/types as llm_types
+import meta/types as meta_types
 import narrative/curator
 import narrative/librarian
 import slog
@@ -61,6 +67,9 @@ pub fn proceed_with_model(
     }
     None -> state
   }
+
+  // Consume pending Layer 3b meta intervention if any
+  let state = consume_meta_intervention(state, cycle_id)
 
   let msg =
     llm_types.Message(role: llm_types.User, content: [
@@ -281,5 +290,107 @@ pub fn build_request_with_model(
   case state.tools {
     [] -> base
     tools -> request.with_tools(base, tools)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Layer 3b meta intervention
+// ---------------------------------------------------------------------------
+
+/// Consume any pending Layer 3b meta intervention and apply it.
+fn consume_meta_intervention(
+  state: CognitiveState,
+  cycle_id: String,
+) -> CognitiveState {
+  case state.meta_state {
+    None -> state
+    Some(ms) -> {
+      let #(intervention, new_ms) = meta_types.consume_intervention(ms)
+      let state = CognitiveState(..state, meta_state: Some(new_ms))
+      case intervention {
+        meta_types.NoIntervention -> state
+
+        meta_types.EscalateToUser(title:, body:) -> {
+          slog.warn(
+            "cognitive",
+            "consume_meta_intervention",
+            "Meta escalation: " <> title,
+            Some(cycle_id),
+          )
+          let event =
+            SensoryEvent(name: "meta_escalation", title:, body:, fired_at: "")
+          CognitiveState(
+            ..state,
+            pending_sensory_events: list.append(state.pending_sensory_events, [
+              event,
+            ]),
+          )
+        }
+
+        meta_types.InjectCaution(message:) -> {
+          slog.info(
+            "cognitive",
+            "consume_meta_intervention",
+            "Meta caution injected",
+            Some(cycle_id),
+          )
+          CognitiveState(
+            ..state,
+            system: state.system <> "\n\n[META CAUTION: " <> message <> "]",
+          )
+        }
+
+        meta_types.TightenAllGates(factor:) -> {
+          slog.warn(
+            "cognitive",
+            "consume_meta_intervention",
+            "Meta tightening all gates by factor " <> float.to_string(factor),
+            Some(cycle_id),
+          )
+          let tighten = fn(ds: dprime_types.DprimeState) -> dprime_types.DprimeState {
+            let cfg = ds.config
+            dprime_types.DprimeState(
+              ..ds,
+              current_modify_threshold: ds.current_modify_threshold *. factor,
+              current_reject_threshold: ds.current_reject_threshold *. factor,
+              config: dprime_types.DprimeConfig(
+                ..cfg,
+                modify_threshold: cfg.modify_threshold *. factor,
+                reject_threshold: cfg.reject_threshold *. factor,
+              ),
+            )
+          }
+          let input_ds = case state.input_dprime_state {
+            Some(ds) -> Some(tighten(ds))
+            None -> None
+          }
+          let tool_ds = case state.tool_dprime_state {
+            Some(ds) -> Some(tighten(ds))
+            None -> None
+          }
+          let output_ds = case state.output_dprime_state {
+            Some(ds) -> Some(tighten(ds))
+            None -> None
+          }
+          CognitiveState(
+            ..state,
+            input_dprime_state: input_ds,
+            tool_dprime_state: tool_ds,
+            output_dprime_state: output_ds,
+          )
+        }
+
+        meta_types.ForceCooldown(delay_ms:) -> {
+          slog.warn(
+            "cognitive",
+            "consume_meta_intervention",
+            "Meta cooldown: sleeping " <> int.to_string(delay_ms) <> "ms",
+            Some(cycle_id),
+          )
+          process.sleep(delay_ms)
+          state
+        }
+      }
+    }
   }
 }

@@ -69,10 +69,12 @@ pub fn build_situation_model(
       slog.warn(
         "dprime/deliberative",
         "build_situation_model",
-        "LLM error building situation model, using instruction as fallback",
+        "LLM error building situation model, using structured fallback",
         Some(cycle_id),
       )
-      instruction
+      "Instruction: "
+      <> instruction
+      <> "\nContext: No additional situation context available."
     }
   }
 }
@@ -85,7 +87,7 @@ pub fn generate_candidates(
   provider: Provider,
   model: String,
   cycle_id: String,
-  _verbose: Bool,
+  verbose: Bool,
 ) -> List(Candidate) {
   slog.debug(
     "dprime/deliberative",
@@ -93,6 +95,16 @@ pub fn generate_candidates(
     "Generating " <> int.to_string(n) <> " candidates",
     Some(cycle_id),
   )
+  case verbose {
+    True ->
+      slog.debug(
+        "dprime/deliberative",
+        "generate_candidates",
+        "Situation model: " <> string.slice(situation_model, 0, 500),
+        Some(cycle_id),
+      )
+    False -> Nil
+  }
 
   let base_prompt =
     "Given this situation, propose "

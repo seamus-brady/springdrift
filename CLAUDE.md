@@ -68,6 +68,11 @@ src/
 │   ├── output_gate.gleam      Output quality gate — evaluates finished reports before delivery
 │   └── meta.gleam             History ring buffer, stall detection, threshold tightening
 │
+├── meta/                      Layer 3b meta observer — post-cycle safety evaluation
+│   ├── types.gleam            MetaSignal, MetaIntervention, MetaObservation, MetaState
+│   ├── detectors.gleam        Rate limit, cumulative risk, rejection patterns, Layer 3a persistence
+│   └── observer.gleam         Post-cycle evaluation, intervention determination
+│
 ├── narrative/                 Prime Narrative — immutable first-person agent memory
 │   ├── types.gleam            NarrativeEntry, Intent, Outcome, DelegationStep, Thread, Metrics
 │   ├── log.gleam              Append-only JSON-L log, full encode/decode, query functions
@@ -311,8 +316,9 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `skills_dirs` | `--skills-dir` (repeatable) | `[~/.config/springdrift/skills, .springdrift/skills]` | Skill directories |
 | `write_anywhere` | `--allow-write-anywhere` | False | Allow `write_file` outside CWD |
 | `gui` | `--gui` | tui | GUI mode: `tui` (terminal) or `web` (browser on port 8080) |
-| `dprime_enabled` | `--dprime` / `--no-dprime` | False | Enable D' safety evaluation before tool dispatch |
+| `dprime_enabled` | `--dprime` / `--no-dprime` | True | Enable D' safety evaluation before tool dispatch |
 | `dprime_config` | `--dprime-config` | built-in defaults | Path to D' config JSON file |
+| `max_output_modifications` | — | 2 | Max iterations for output gate MODIFY loop |
 | `narrative_dir` | `--narrative-dir` | `.springdrift/memory/narrative` | Directory for narrative JSON-L files (narrative is always enabled) |
 | `archivist_model` | — | task_model | Model used by the Archivist for narrative generation |
 | `narrative_threading` | — | True | Enable automatic thread assignment |
@@ -617,7 +623,21 @@ Per-profile D' uses dual-gate format: `tool_gate` + `output_gate` sections in `d
 **Output gate** — second D' evaluation point in `dprime/output_gate.gleam`. Evaluates
 finished reports for quality (unsourced claims, causal overreach, stale data) before
 delivery. Uses the same scoring infrastructure but with output-focused prompts. Bounded
-modification loop (max 2 iterations).
+modification loop (max `max_output_modifications` iterations, default 2). The tool gate
+and output gate maintain separate `DprimeState` instances (gate state isolation) to
+prevent cross-contamination of history and thresholds.
+
+**D' normalization** — BF-03 fix ensures all D' scores are normalized to [0,1] via
+min-max scaling before gate decisions. Raw importance-weighted sums are no longer
+compared directly against thresholds.
+
+**Meta observer** — Layer 3b post-cycle safety evaluation in `src/meta/`. Runs after
+each cognitive cycle completes, analyzing patterns across gate decisions. Detectors
+(`meta/detectors.gleam`) check for: rate limit violations (too many gates in a window),
+cumulative risk drift, rejection pattern anomalies, and Layer 3a persistence (repeated
+threshold tightening). The observer (`meta/observer.gleam`) aggregates detector signals
+into `MetaIntervention` actions. Integrated into the cognitive loop as a post-cycle
+hook — interventions are logged but do not block the current cycle.
 
 **Scheduler** — BEAM-native task scheduling in `scheduler/runner.gleam`. Uses OTP
 `process.send_after` for recurring tick-based execution. `scheduler/delivery.gleam`

@@ -27,6 +27,7 @@ import gleam/option.{None, Some}
 import gleam/string
 import llm/response
 import llm/types as llm_types
+import meta/types as meta_types
 import narrative/curator as narrative_curator
 import narrative/librarian
 import planner/log as planner_log
@@ -88,7 +89,8 @@ pub fn start(
         archivist_max_tokens: cfg.archivist_max_tokens,
         save_in_progress: False,
         save_pending: None,
-        dprime_state: cfg.dprime_state,
+        input_dprime_state: cfg.dprime_state,
+        tool_dprime_state: cfg.dprime_state,
         output_dprime_state: cfg.output_dprime_state,
         cycle_tool_calls: [],
         cycle_started_ms: 0,
@@ -125,6 +127,10 @@ pub fn start(
         pending_sensory_events: [],
         active_task_id: None,
         planner_dir: cfg.planner_dir,
+        meta_state: case cfg.dprime_state {
+          Some(_) -> Some(meta_types.initial_state(meta_types.default_config()))
+          None -> None
+        },
       )
     process.send(setup, self)
     cognitive_loop(state)
@@ -753,7 +759,7 @@ fn handle_classify_complete(
           state.task_model
         }
       }
-      case state.dprime_state {
+      case state.input_dprime_state {
         None ->
           cognitive_llm.proceed_with_model(
             state,
@@ -953,6 +959,12 @@ fn handle_think_complete(
                     reply_model,
                     Some(resp.usage),
                   )
+                  // Post-cycle meta observation (Layer 3b)
+                  let state =
+                    cognitive_state.apply_meta_observation(
+                      state,
+                      resp.usage.input_tokens + resp.usage.output_tokens,
+                    )
                   // Fire-and-forget save
                   let new_state =
                     CognitiveState(
@@ -970,7 +982,7 @@ fn handle_think_complete(
         True -> {
           let calls = response.tool_calls(resp)
           // D' gate intercept: if enabled, evaluate before dispatch
-          case state.dprime_state {
+          case state.tool_dprime_state {
             None ->
               cognitive_agents.dispatch_tool_calls(
                 state,

@@ -168,7 +168,10 @@ pub fn cautious_forecasts_all_one_test() {
   let features = [feature("safety", High, True), feature("scope", Low, False)]
   let forecasts = scorer.cautious_forecasts(features)
   list.length(forecasts) |> should.equal(2)
-  list.all(forecasts, fn(f) { f.magnitude == 1 }) |> should.be_true
+  // Critical features get magnitude 2, non-critical get 1 (BF-08)
+  let assert [safety_f, scope_f] = forecasts
+  safety_f.magnitude |> should.equal(2)
+  scope_f.magnitude |> should.equal(1)
 }
 
 // ---------------------------------------------------------------------------
@@ -191,11 +194,12 @@ pub fn score_features_with_mock_provider_test() {
       False,
     )
   // XStructor compile_schema requires filesystem; if it fails, falls back to cautious
-  // Either we get the parsed result or cautious fallback (magnitude 1)
+  // Either we get the parsed result or cautious fallback (magnitude 2 for critical)
   list.length(forecasts) |> should.equal(1)
   let assert [f] = forecasts
   f.feature_name |> should.equal("safety")
-  f.magnitude |> should.equal(1)
+  // safety is critical: True, so cautious fallback = 2; parsed result = 1
+  { f.magnitude == 1 || f.magnitude == 2 } |> should.be_true
 }
 
 pub fn score_features_falls_back_to_cautious_on_error_test() {
@@ -213,8 +217,8 @@ pub fn score_features_falls_back_to_cautious_on_error_test() {
     )
   list.length(forecasts) |> should.equal(1)
   let assert [f] = forecasts
-  // Falls back to magnitude 1 (cautious)
-  f.magnitude |> should.equal(1)
+  // Falls back to magnitude 2 (cautious, critical feature) (BF-08)
+  f.magnitude |> should.equal(2)
 }
 
 pub fn score_features_falls_back_to_cautious_on_invalid_response_test() {
@@ -231,6 +235,6 @@ pub fn score_features_falls_back_to_cautious_on_invalid_response_test() {
       False,
     )
   list.length(forecasts) |> should.equal(1)
-  // Falls back to magnitude 1 (cautious)
-  list.all(forecasts, fn(f) { f.magnitude == 1 }) |> should.be_true
+  // Falls back to magnitude 2 (cautious, critical feature) (BF-08)
+  list.all(forecasts, fn(f) { f.magnitude == 2 }) |> should.be_true
 }

@@ -517,7 +517,7 @@ fn run(cfg: AppConfig) -> Nil {
 
   // Load D' config if enabled (dual-gate: tool_gate + optional output_gate)
   let #(dprime_state, output_dprime_state) = case
-    option.unwrap(cfg.dprime_enabled, False)
+    option.unwrap(cfg.dprime_enabled, True)
   {
     False -> #(option.None, option.None)
     True -> {
