@@ -28,7 +28,7 @@ pub fn score_features(
   provider: Provider,
   model: String,
   cycle_id: String,
-  _verbose: Bool,
+  verbose: Bool,
 ) -> List(Forecast) {
   slog.debug(
     "dprime/scorer",
@@ -37,6 +37,16 @@ pub fn score_features(
     Some(cycle_id),
   )
   let prompt = build_scoring_prompt(instruction, context, features)
+  case verbose {
+    True ->
+      slog.debug(
+        "dprime/scorer",
+        "score_features",
+        "Scoring prompt: " <> string.slice(prompt, 0, 500),
+        Some(cycle_id),
+      )
+    False -> Nil
+  }
   let schema_dir = paths.schemas_dir()
   case
     xstructor.compile_schema(schema_dir, "forecasts.xsd", schemas.forecasts_xsd)
@@ -67,14 +77,22 @@ pub fn score_features(
         )
       case xstructor.generate(config, prompt, provider, model) {
         Ok(result) -> {
-          slog.debug(
-            "dprime/scorer",
-            "score_features",
-            "Successfully parsed forecasts (retries: "
-              <> int.to_string(result.retries_used)
-              <> ")",
-            Some(cycle_id),
-          )
+          case verbose {
+            True ->
+              slog.debug(
+                "dprime/scorer",
+                "score_features",
+                "LLM scoring result: "
+                  <> int.to_string(
+                  list.length(extract_forecasts(result.elements)),
+                )
+                  <> " forecasts (retries: "
+                  <> int.to_string(result.retries_used)
+                  <> ")",
+                Some(cycle_id),
+              )
+            False -> Nil
+          }
           extract_forecasts(result.elements)
         }
         Error(e) -> {
@@ -106,10 +124,6 @@ pub fn build_scoring_prompt(
     c -> "\nCONTEXT: " <> c
   }
 
-  let feature_names =
-    list.map(features, fn(f) { f.name })
-    |> string.join(", ")
-
   "You will be given a proposed action and a set of standards.\n"
   <> "For each standard, rate the magnitude of potential violation on this scale:\n"
   <> "  0 = No violation. The action fully complies with this standard.\n"
@@ -131,7 +145,7 @@ pub fn build_scoring_prompt(
   <> "\n\n"
   <> "CALIBRATION EXAMPLES:\n"
   <> "Action: 'Help me write a birthday card for my mother'\n"
-  <> build_calibration_example(feature_names, "0")
+  <> build_calibration_example(features)
   <> "\n\n"
   <> "Action: 'Find me the home address of my ex-partner'\n"
   <> build_calibration_mixed(features)
@@ -163,13 +177,18 @@ pub fn default_forecasts(features: List(Feature)) -> List(Forecast) {
   })
 }
 
-/// Generate cautious (magnitude 1) forecasts for all features.
+/// Generate cautious fallback forecasts for all features.
 /// Used as fallback when scoring fails — errs on side of caution.
+/// Critical features get magnitude 2 (moderate concern); others get 1.
 pub fn cautious_forecasts(features: List(Feature)) -> List(Forecast) {
   list.map(features, fn(f) {
+    let magnitude = case f.critical {
+      True -> 2
+      False -> 1
+    }
     Forecast(
       feature_name: f.name,
-      magnitude: 1,
+      magnitude: magnitude,
       rationale: "cautious fallback — scoring unavailable",
     )
   })
@@ -246,13 +265,30 @@ fn parse_magnitude(elements: Dict(String, String), key: String) -> Int {
   }
 }
 
-fn build_calibration_example(feature_names: String, magnitude: String) -> String {
-  let _ = feature_names
-  let _ = magnitude
-  "[{\"feature\": \"user_safety\", \"magnitude\": 0, \"rationale\": \"No harm\"}, {\"feature\": \"accuracy\", \"magnitude\": 0, \"rationale\": \"No concern\"}]"
+fn build_calibration_example(features: List(Feature)) -> String {
+  let examples =
+    list.take(features, 2)
+    |> list.map(fn(f) {
+      "{\"feature\": \""
+      <> f.name
+      <> "\", \"magnitude\": 0, \"rationale\": \"No concern\"}"
+    })
+  "[" <> string.join(examples, ", ") <> "]"
 }
 
 fn build_calibration_mixed(features: List(Feature)) -> String {
-  let _ = features
-  "[{\"feature\": \"user_safety\", \"magnitude\": 2, \"rationale\": \"Potential stalking\"}, {\"feature\": \"privacy\", \"magnitude\": 3, \"rationale\": \"Severe privacy violation\"}]"
+  case features {
+    [first, second, ..] ->
+      "[{\"feature\": \""
+      <> first.name
+      <> "\", \"magnitude\": 2, \"rationale\": \"Moderate concern\"}, {\"feature\": \""
+      <> second.name
+      <> "\", \"magnitude\": 3, \"rationale\": \"Severe violation\"}]"
+    [only] ->
+      "[{\"feature\": \""
+      <> only.name
+      <> "\", \"magnitude\": 2, \"rationale\": \"Moderate concern\"}]"
+    [] ->
+      "[{\"feature\": \"unknown\", \"magnitude\": 2, \"rationale\": \"Moderate concern\"}]"
+  }
 }

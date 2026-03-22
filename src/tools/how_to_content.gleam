@@ -38,6 +38,18 @@ intent and domain. Past cases reveal which tools worked and what pitfalls to avo
 For diagnostic questions (what failed, why, patterns over time) use the diagnostic
 tools: reflect, inspect_cycle, list_recent_cycles, query_tool_activity.
 
+### D' Rejection Format
+
+When D' blocks something, you receive a technical notice in your message history:
+
+[D' <gate> gate: REJECTED (score: <0.0-1.0>). <explanation> Feature triggers: [<feature>=<magnitude>/3, ...]. Content type: <type>. Original text redacted from logs.]
+
+Fields: gate (input/tool/output), score (0.0-1.0), feature triggers sorted by severity (feature_name=magnitude/3, where 3=high), content type (user query/tool dispatch/agent response). The DAG (via inspect_cycle) has a structured record: gate, decision, score, explanation. The user sees a separate human-friendly message with no technical detail.
+
+### D' Safety Feedback
+
+When D' rejects a request you believe was legitimate, use **report_false_positive**(cycle_id, reason) to flag it. This persists to meta JSONL, excludes the cycle from the repeated rejection detector, and triggers a threshold review escalation if many rejections are flagged as false positives. Use inspect_cycle or list_recent_cycles to find the cycle_id.
+
 ## Code Tasks
 
 1. Call recall_cases(intent: \"code\") for relevant past patterns

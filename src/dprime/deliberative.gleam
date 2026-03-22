@@ -69,10 +69,12 @@ pub fn build_situation_model(
       slog.warn(
         "dprime/deliberative",
         "build_situation_model",
-        "LLM error building situation model, using instruction as fallback",
+        "LLM error building situation model, using structured fallback",
         Some(cycle_id),
       )
-      instruction
+      "Instruction: "
+      <> instruction
+      <> "\nContext: No additional situation context available."
     }
   }
 }
@@ -85,7 +87,7 @@ pub fn generate_candidates(
   provider: Provider,
   model: String,
   cycle_id: String,
-  _verbose: Bool,
+  verbose: Bool,
 ) -> List(Candidate) {
   slog.debug(
     "dprime/deliberative",
@@ -93,6 +95,16 @@ pub fn generate_candidates(
     "Generating " <> int.to_string(n) <> " candidates",
     Some(cycle_id),
   )
+  case verbose {
+    True ->
+      slog.debug(
+        "dprime/deliberative",
+        "generate_candidates",
+        "Situation model: " <> string.slice(situation_model, 0, 500),
+        Some(cycle_id),
+      )
+    False -> Nil
+  }
 
   let base_prompt =
     "Given this situation, propose "
@@ -249,11 +261,30 @@ pub fn evaluate_candidates(
       state.current_reject_threshold,
     )
 
+  // Build feature breakdown for non-zero forecasts
+  let fired_features =
+    best_forecasts
+    |> list.filter(fn(f) { f.magnitude > 0 })
+    |> list.sort(fn(a, b) { int.compare(b.magnitude, a.magnitude) })
+    |> list.map(fn(f) {
+      f.feature_name <> "=" <> int.to_string(f.magnitude) <> "/3"
+    })
+    |> string.join(", ")
+
+  let breakdown = case fired_features {
+    "" -> ""
+    features -> " [" <> features <> "]"
+  }
+
   let explanation = case decision {
     Accept -> "Deliberative accept: D' score below modify threshold"
-    Modify ->
-      "Deliberative modify: D' score between thresholds — concerns identified"
-    Reject -> "Deliberative reject: D' score exceeds reject threshold"
+    Modify -> "Deliberative modify: concerns identified" <> breakdown
+    Reject ->
+      "Deliberative reject: score "
+      <> float.to_string(best_score)
+      <> " exceeds threshold "
+      <> float.to_string(state.current_reject_threshold)
+      <> breakdown
   }
 
   GateResult(

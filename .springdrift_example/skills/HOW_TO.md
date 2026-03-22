@@ -31,6 +31,32 @@ intent and domain. Past cases reveal which tools worked and what pitfalls to avo
 For diagnostic questions (what failed, why, patterns over time) use the diagnostic
 tools: `reflect`, `inspect_cycle`, `list_recent_cycles`, `query_tool_activity`.
 
+### D' Rejection Format
+
+When D' blocks something, you receive two layers of information:
+
+**In your message history** — a technical notice for pattern learning:
+```
+[D' <gate> gate: REJECTED (score: <0.0-1.0>). <explanation> Feature triggers: [<feature>=<magnitude>/3, ...]. Content type: <type>. Original text redacted from logs.]
+```
+- **gate** — `input`, `tool`, or `output`
+- **score** — normalized 0.0-1.0
+- **Feature triggers** — sorted by severity, each `feature_name=magnitude/3` (0=none, 1=low, 2=medium, 3=high)
+- **Content type** — `user query`, `tool dispatch`, or `agent response`
+
+**In the DAG** (via `inspect_cycle`) — structured record: gate, decision, score, explanation.
+
+The user sees a separate human-friendly message with no technical detail.
+
+### D' Safety Feedback
+
+When D' rejects a request you believe was legitimate, use **report_false_positive**(cycle_id, reason) to flag it. This:
+- Persists to meta JSONL so it survives restarts
+- Excludes the cycle from the repeated rejection detector (prevents false escalation)
+- If many rejections are flagged (>=50% in the window), the meta observer escalates to the user suggesting threshold review
+
+Use `inspect_cycle` or `list_recent_cycles` to find the cycle_id of the rejected request.
+
 ## Code Tasks
 
 1. Call `recall_cases(intent: "code")` for relevant past patterns

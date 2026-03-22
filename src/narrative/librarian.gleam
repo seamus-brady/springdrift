@@ -2551,6 +2551,8 @@ fn cycle_data_to_node(c: cycle_log.CycleData) -> dag_types.CycleNode {
     tokens_out: c.output_tokens,
     duration_ms: 0,
     agent_output: None,
+    instance_name: "",
+    instance_id: "",
   )
 }
 

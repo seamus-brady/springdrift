@@ -4,6 +4,7 @@ import etch/stdout
 import etch/style
 import etch/terminal
 import gleam/erlang/process.{type Selector, type Subject}
+import gleam/float
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -265,12 +266,18 @@ fn handle_notification(
       )
     agent_types.ToolCalling(name:) ->
       continue_loop(TuiState(..state, spinner_label: name))
-    agent_types.SafetyGateNotice(decision:, score: _, explanation: _) -> {
+    agent_types.SafetyGateNotice(decision:, score:, explanation:) -> {
+      let score_str = float.to_string(score)
+      let truncated_explanation = case string.length(explanation) > 60 {
+        True -> string.slice(explanation, 0, 57) <> "..."
+        False -> explanation
+      }
+      let detail = " (" <> score_str <> "): " <> truncated_explanation
       let badge = case decision {
-        "ACCEPT" -> style.green("[D' ACCEPT]")
-        "MODIFY" -> style.yellow("[D' MODIFY]")
-        "REJECT" -> style.red("[D' REJECT]")
-        _ -> style.dim("[D' " <> decision <> "]")
+        "ACCEPT" -> style.green("[D' ACCEPT" <> detail <> "]")
+        "MODIFY" -> style.yellow("[D' MODIFY" <> detail <> "]")
+        "REJECT" -> style.red("[D' REJECT" <> detail <> "]")
+        _ -> style.dim("[D' " <> decision <> detail <> "]")
       }
       continue_loop(TuiState(..state, notice: "  " <> badge))
     }

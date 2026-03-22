@@ -15,6 +15,7 @@ import dprime/types as dprime_types
 import gleam/dict
 import gleam/erlang/process.{type Subject}
 import gleam/float
+import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
@@ -29,6 +30,104 @@ fn with_assistant_error(state: CognitiveState, text: String) -> CognitiveState {
       llm_types.TextContent(text:),
     ])
   CognitiveState(..state, messages: list.append(state.messages, [msg]))
+}
+
+/// Technical rejection notice for the agent — goes to notification channel,
+/// DAG audit, and message history as a system note. Contains full feature
+/// breakdown for pattern learning.
+fn build_rejection_notice(
+  gate_name: String,
+  result: dprime_types.GateResult,
+  content_type: String,
+) -> String {
+  let feature_triggers = case result.forecasts {
+    [] -> ""
+    forecasts -> {
+      let fired =
+        forecasts
+        |> list.filter(fn(f) { f.magnitude > 0 })
+        |> list.sort(fn(a, b) { int.compare(b.magnitude, a.magnitude) })
+        |> list.map(fn(f) {
+          f.feature_name <> "=" <> int.to_string(f.magnitude) <> "/3"
+        })
+        |> string.join(", ")
+      case fired {
+        "" -> ""
+        triggers -> " Feature triggers: [" <> triggers <> "]."
+      }
+    }
+  }
+  "[D' "
+  <> gate_name
+  <> " gate: "
+  <> case result.decision {
+    dprime_types.Reject -> "REJECTED"
+    dprime_types.Modify -> "MODIFIED"
+    dprime_types.Accept -> "ACCEPTED"
+  }
+  <> " (score: "
+  <> float.to_string(result.dprime_score)
+  <> "). "
+  <> result.explanation
+  <> feature_triggers
+  <> " Content type: "
+  <> content_type
+  <> ". Original text redacted from logs.]"
+}
+
+/// Human-friendly response for the user. Maps the highest-scoring feature
+/// to a contextual, actionable message. No jargon, no scores, no thresholds.
+fn build_user_response(result: dprime_types.GateResult) -> String {
+  // Find the highest-magnitude fired feature
+  let top_feature = case result.forecasts {
+    [] -> ""
+    forecasts ->
+      forecasts
+      |> list.filter(fn(f) { f.magnitude > 0 })
+      |> list.sort(fn(a, b) { int.compare(b.magnitude, a.magnitude) })
+      |> list.first
+      |> option.from_result
+      |> option.map(fn(f) { f.feature_name })
+      |> option.unwrap("")
+  }
+  case top_feature {
+    "harmful_request" -> "I can't help with that — it involves potential harm."
+    "prompt_injection" ->
+      "That looks like it's trying to override my instructions. I can't process it."
+    "scope_violation" -> "That's outside what I'm set up to help with."
+    "data_exfiltration" ->
+      "I can't execute that — it could expose sensitive data."
+    "unauthorized_write" ->
+      "I can't execute that — it would modify files outside the permitted scope."
+    "sandbox_escape" ->
+      "I can't run that code — it could break container isolation."
+    "unsourced_claim" ->
+      "I need to revise my response — it contained unsupported claims."
+    "accuracy" ->
+      "I need to revise my response — it may contain inaccurate information."
+    "privacy_leak" | "privacy" ->
+      "I've held back my response — it could expose private information."
+    "harmful_content" ->
+      "I've held back my response — it may contain harmful material."
+    "certainty_overstatement" ->
+      "I need to revise my response — it overstated certainty on uncertain data."
+    "user_safety" -> "I can't help with that — it could put someone at risk."
+    "legal_compliance" ->
+      "I can't help with that — it may involve legal or compliance issues."
+    "resource_abuse" ->
+      "That request would consume excessive resources. Please refine it."
+    "network_access" ->
+      "I can't run that code — it attempts to access the network."
+    "resource_consumption" ->
+      "I can't run that code — it would use excessive resources."
+    "credential_exposure" ->
+      "I can't do that search — it could expose credentials."
+    "excessive_crawling" ->
+      "I'm rate-limiting my web requests to avoid overloading the source."
+    "sensitive_domain" ->
+      "I can't access that source — it may contain sensitive content."
+    _ -> "I've flagged a concern with that request and can't proceed as asked."
+  }
 }
 
 /// Spawn a D' safety evaluation for tool calls (pre-dispatch gate).
@@ -57,17 +156,13 @@ pub fn spawn_safety_gate(
     list.map(calls, fn(c) { c.name <> ": " <> c.input_json })
     |> string.join("; ")
 
-  // Build context from recent messages
-  let ctx =
-    list.filter_map(state.messages, fn(m) {
-      case m.content {
-        [llm_types.TextContent(text:), ..] -> Ok(text)
-        _ -> Error(Nil)
-      }
-    })
-    |> list.take(3)
-    |> string.join("\n")
+  // Build context from recent messages (character-budget walker, all content types)
+  let ctx = build_context_string(state.messages, 2000)
 
+  // TODO(BF-12): Gate processes have no timeout. If the LLM call inside
+  // gate.evaluate hangs, the cognitive loop waits forever. A timeout
+  // mechanism (e.g. process.send_after with a new message type) should be
+  // added to cancel stalled gate evaluations.
   process.spawn_unlinked(fn() {
     let result =
       gate.evaluate(
@@ -145,7 +240,7 @@ pub fn handle_safety_gate_complete(
       cycle_id,
       instruction,
       result,
-      case state.dprime_state {
+      case state.tool_dprime_state {
         Some(ds) -> ds.config.features
         None -> []
       },
@@ -165,7 +260,7 @@ pub fn handle_safety_gate_complete(
   )
 
   // Update D' state history
-  let new_dprime_state = case state.dprime_state {
+  let new_dprime_state = case state.tool_dprime_state {
     None -> None
     Some(ds) -> {
       let updated = meta.record(ds, cycle_id, result, "")
@@ -188,10 +283,11 @@ pub fn handle_safety_gate_complete(
       explanation: result.explanation,
     )
   let state =
-    CognitiveState(..state, dprime_state: new_dprime_state, dprime_decisions: [
-      record,
-      ..state.dprime_decisions
-    ])
+    CognitiveState(
+      ..state,
+      tool_dprime_state: new_dprime_state,
+      dprime_decisions: [record, ..state.dprime_decisions],
+    )
 
   // Extract node_type from existing PendingThink
   let pending_node_type = case dict.get(state.pending, task_id) {
@@ -206,53 +302,125 @@ pub fn handle_safety_gate_complete(
     }
 
     dprime_types.Modify -> {
-      // Append modification instruction and continue thinking
-      let assistant_msg =
-        llm_types.Message(role: llm_types.Assistant, content: resp.content)
-      let modify_msg =
-        llm_types.Message(role: llm_types.User, content: [
-          llm_types.TextContent(
-            text: "[Safety system: D' evaluation flagged potential concerns (score: "
-            <> float.to_string(result.dprime_score)
-            <> "). "
-            <> result.explanation
-            <> ". Please reconsider your approach and proceed with additional caution.]",
-          ),
-        ])
-      let messages = list.append(state.messages, [assistant_msg, modify_msg])
-
-      let new_task_id = cycle_log.generate_uuid()
-      let req = cognitive_llm.build_request(state, messages)
-      case state.verbose {
-        True -> cycle_log.log_llm_request(cycle_id, req)
-        False -> Nil
+      // Check meta-management before allowing re-evaluation
+      let intervention = case new_dprime_state {
+        Some(ds) -> meta.should_intervene(ds)
+        None -> dprime_types.NoIntervention
       }
-      worker.spawn_think(
-        new_task_id,
-        req,
-        state.provider,
-        state.self,
-        state.config.retry_config,
-      )
-
-      CognitiveState(
-        ..state,
-        messages:,
-        status: Thinking(task_id: new_task_id),
-        pending: dict.insert(
-          dict.delete(state.pending, task_id),
-          new_task_id,
-          PendingThink(
-            task_id: new_task_id,
-            model: state.model,
-            fallback_from: None,
-            reply_to:,
-            output_gate_count: 0,
-            empty_retried: False,
-            node_type: pending_node_type,
-          ),
-        ),
-      )
+      case intervention {
+        dprime_types.AbortMaxIterations -> {
+          // Too many MODIFY iterations — escalate to reject
+          slog.warn(
+            "cognitive",
+            "handle_safety_gate_complete",
+            "D' MODIFY aborted after max iterations — escalating to reject",
+            Some(cycle_id),
+          )
+          let error_results =
+            list.map(calls, fn(call) {
+              llm_types.ToolFailure(
+                tool_use_id: call.id,
+                error: "[D' REJECT: exceeded maximum modification attempts. "
+                  <> result.explanation
+                  <> "]",
+              )
+            })
+          let assistant_msg =
+            llm_types.Message(role: llm_types.Assistant, content: resp.content)
+          let result_blocks =
+            list.map(error_results, fn(r) {
+              case r {
+                llm_types.ToolSuccess(tool_use_id:, content:) ->
+                  llm_types.ToolResultContent(
+                    tool_use_id:,
+                    content:,
+                    is_error: False,
+                  )
+                llm_types.ToolFailure(tool_use_id:, error: err) ->
+                  llm_types.ToolResultContent(
+                    tool_use_id:,
+                    content: err,
+                    is_error: True,
+                  )
+              }
+            })
+          let user_msg =
+            llm_types.Message(role: llm_types.User, content: result_blocks)
+          let messages = list.append(state.messages, [assistant_msg, user_msg])
+          let new_task_id = cycle_log.generate_uuid()
+          let req = cognitive_llm.build_request(state, messages)
+          worker.spawn_think(
+            new_task_id,
+            req,
+            state.provider,
+            state.self,
+            state.config.retry_config,
+          )
+          CognitiveState(
+            ..state,
+            messages:,
+            status: Thinking(task_id: new_task_id),
+            pending: dict.insert(
+              dict.delete(state.pending, task_id),
+              new_task_id,
+              PendingThink(
+                task_id: new_task_id,
+                model: state.model,
+                fallback_from: None,
+                reply_to:,
+                output_gate_count: 0,
+                empty_retried: False,
+                node_type: pending_node_type,
+              ),
+            ),
+          )
+        }
+        _ -> {
+          // Normal MODIFY — append caution instruction and re-think
+          let assistant_msg =
+            llm_types.Message(role: llm_types.Assistant, content: resp.content)
+          let modify_msg =
+            llm_types.Message(role: llm_types.User, content: [
+              llm_types.TextContent(
+                text: build_rejection_notice("tool", result, "tool dispatch")
+                <> " Please reconsider your approach and proceed with additional caution.",
+              ),
+            ])
+          let messages =
+            list.append(state.messages, [assistant_msg, modify_msg])
+          let new_task_id = cycle_log.generate_uuid()
+          let req = cognitive_llm.build_request(state, messages)
+          case state.verbose {
+            True -> cycle_log.log_llm_request(cycle_id, req)
+            False -> Nil
+          }
+          worker.spawn_think(
+            new_task_id,
+            req,
+            state.provider,
+            state.self,
+            state.config.retry_config,
+          )
+          CognitiveState(
+            ..state,
+            messages:,
+            status: Thinking(task_id: new_task_id),
+            pending: dict.insert(
+              dict.delete(state.pending, task_id),
+              new_task_id,
+              PendingThink(
+                task_id: new_task_id,
+                model: state.model,
+                fallback_from: None,
+                reply_to:,
+                output_gate_count: 0,
+                empty_retried: False,
+                node_type: pending_node_type,
+              ),
+            ),
+          )
+        }
+      }
     }
 
     dprime_types.Reject -> {
@@ -263,11 +431,11 @@ pub fn handle_safety_gate_complete(
         list.map(calls, fn(call) {
           llm_types.ToolResultContent(
             tool_use_id: call.id,
-            content: "[Safety system rejected: "
-              <> result.explanation
-              <> " (D' score: "
-              <> float.to_string(result.dprime_score)
-              <> ")]",
+            content: build_rejection_notice(
+              "tool",
+              result,
+              "tool call: " <> call.name,
+            ),
             is_error: True,
           )
         })
@@ -334,17 +502,13 @@ pub fn spawn_input_safety_gate(
   // Instruction is the user's raw input
   let instruction = text
 
-  // Build context from recent text messages
-  let ctx =
-    list.filter_map(state.messages, fn(m) {
-      case m.content {
-        [llm_types.TextContent(text: t), ..] -> Ok(t)
-        _ -> Error(Nil)
-      }
-    })
-    |> list.take(3)
-    |> string.join("\n")
+  // Build context from recent messages (character-budget walker, all content types)
+  let ctx = build_context_string(state.messages, 2000)
 
+  // TODO(BF-12): Gate processes have no timeout. If the LLM call inside
+  // gate.evaluate hangs, the cognitive loop waits forever. A timeout
+  // mechanism (e.g. process.send_after with a new message type) should be
+  // added to cancel stalled gate evaluations.
   process.spawn_unlinked(fn() {
     let result =
       gate.evaluate(
@@ -404,6 +568,21 @@ pub fn handle_input_safety_gate_complete(
   // Log the input-level D' evaluation
   cycle_log.log_dprime_input_evaluation(cycle_id, result)
 
+  // Emit audit record (BF-07)
+  let input_audit_record =
+    dprime_audit.build_record(
+      cycle_id,
+      text,
+      result,
+      case state.input_dprime_state {
+        Some(ds) -> ds.config.features
+        None -> []
+      },
+      None,
+      None,
+    )
+  dprime_audit.log_record(input_audit_record, cycle_id)
+
   // Send notification
   process.send(
     state.notify,
@@ -415,7 +594,7 @@ pub fn handle_input_safety_gate_complete(
   )
 
   // Update D' state history
-  let new_dprime_state = case state.dprime_state {
+  let new_dprime_state = case state.input_dprime_state {
     None -> None
     Some(ds) -> {
       let updated = meta.record(ds, cycle_id, result, "")
@@ -438,10 +617,11 @@ pub fn handle_input_safety_gate_complete(
       explanation: result.explanation,
     )
   let state =
-    CognitiveState(..state, dprime_state: new_dprime_state, dprime_decisions: [
-      record,
-      ..state.dprime_decisions
-    ])
+    CognitiveState(
+      ..state,
+      input_dprime_state: new_dprime_state,
+      dprime_decisions: [record, ..state.dprime_decisions],
+    )
 
   case result.decision {
     dprime_types.Accept -> {
@@ -461,11 +641,8 @@ pub fn handle_input_safety_gate_complete(
       let caution_msg =
         llm_types.Message(role: llm_types.User, content: [
           llm_types.TextContent(
-            text: "[Safety system: D' input evaluation flagged potential concerns (score: "
-            <> float.to_string(result.dprime_score)
-            <> "). "
-            <> result.explanation
-            <> ". Please proceed with additional caution.]",
+            text: build_rejection_notice("input", result, "user query")
+            <> " Please proceed with additional caution.",
           ),
         ])
       let messages = list.append(state.messages, [caution_msg])
@@ -480,18 +657,16 @@ pub fn handle_input_safety_gate_complete(
     }
 
     dprime_types.Reject -> {
-      // Reply directly with refusal — no LLM call
-      let reject_text =
-        "[Safety system: query rejected (D' score: "
-        <> float.to_string(result.dprime_score)
-        <> "). "
-        <> result.explanation
-        <> "]"
+      // User sees a clean, contextual message
+      let user_text = build_user_response(result)
+      // Agent's history gets the technical details for pattern learning
+      let agent_text = build_rejection_notice("input", result, "user query")
       process.send(
         reply_to,
-        CognitiveReply(response: reject_text, model:, usage: None),
+        CognitiveReply(response: user_text, model:, usage: None),
       )
-      let state = with_assistant_error(state, reject_text)
+      let state = cognitive_state.apply_meta_observation(state, 0)
+      let state = with_assistant_error(state, agent_text)
       CognitiveState(..state, status: Idle)
     }
   }
@@ -526,8 +701,23 @@ pub fn handle_post_execution_gate_complete(
   // Log the post-execution evaluation
   cycle_log.log_dprime_evaluation(cycle_id, result)
 
+  // Emit audit record (BF-07)
+  let post_exec_audit_record =
+    dprime_audit.build_record(
+      cycle_id,
+      "post-execution re-check",
+      result,
+      case state.tool_dprime_state {
+        Some(ds) -> ds.config.features
+        None -> []
+      },
+      Some(pre_score),
+      None,
+    )
+  dprime_audit.log_record(post_exec_audit_record, cycle_id)
+
   // Update D' state history
-  let new_dprime_state = case state.dprime_state {
+  let new_dprime_state = case state.tool_dprime_state {
     None -> None
     Some(ds) -> {
       let updated = meta.record(ds, cycle_id, result, "")
@@ -546,10 +736,11 @@ pub fn handle_post_execution_gate_complete(
       explanation: result.explanation,
     )
   let state =
-    CognitiveState(..state, dprime_state: new_dprime_state, dprime_decisions: [
-      record,
-      ..state.dprime_decisions
-    ])
+    CognitiveState(
+      ..state,
+      tool_dprime_state: new_dprime_state,
+      dprime_decisions: [record, ..state.dprime_decisions],
+    )
 
   // Check if D' improved (decreased) or worsened
   case result.dprime_score <=. pre_score {
@@ -563,7 +754,7 @@ pub fn handle_post_execution_gate_complete(
       state
     }
     False -> {
-      let intervention = case state.dprime_state {
+      let intervention = case state.tool_dprime_state {
         Some(ds) -> meta.should_intervene(ds)
         None -> dprime_types.NoIntervention
       }
@@ -592,7 +783,7 @@ pub fn handle_post_execution_gate_complete(
             "D' stalled after execution, tightening thresholds",
             Some(cycle_id),
           )
-          let new_ds = case state.dprime_state {
+          let new_ds = case state.tool_dprime_state {
             Some(ds) -> Some(meta.tighten_thresholds(ds))
             None -> None
           }
@@ -604,7 +795,7 @@ pub fn handle_post_execution_gate_complete(
               explanation: "Post-execution check: D' worsened, thresholds tightened",
             ),
           )
-          CognitiveState(..state, dprime_state: new_ds)
+          CognitiveState(..state, tool_dprime_state: new_ds)
         }
         dprime_types.NoIntervention -> {
           slog.info(
@@ -633,9 +824,28 @@ pub fn spawn_output_gate(
   let cycle_id = option.unwrap(state.cycle_id, task_id)
   let self = state.self
   let provider = state.provider
-  let model = state.model
+  let model = state.task_model
   let verbose = state.verbose
-  let query = state.last_user_input
+  // Use the most recent user message as query context, not the potentially
+  // stale last_user_input which may predate multiple tool turns (BF-05).
+  let query =
+    list.reverse(state.messages)
+    |> list.find_map(fn(m) {
+      case m.role {
+        llm_types.User ->
+          case m.content {
+            [llm_types.TextContent(text: t), ..] -> Ok(t)
+            _ -> Error(Nil)
+          }
+        _ -> Error(Nil)
+      }
+    })
+    |> option.from_result
+    |> option.unwrap(state.last_user_input)
+  // TODO(BF-12): Gate processes have no timeout. If the LLM call inside
+  // output_gate.evaluate hangs, the cognitive loop waits forever. A timeout
+  // mechanism (e.g. process.send_after with a new message type) should be
+  // added to cancel stalled gate evaluations.
   process.spawn_unlinked(fn() {
     let result =
       output_gate.evaluate(
@@ -676,7 +886,7 @@ pub fn spawn_output_gate(
 /// Handle completion of the output quality gate.
 pub fn handle_output_gate_complete(
   state: CognitiveState,
-  _cycle_id: String,
+  cycle_id: String,
   result: dprime_types.GateResult,
   report_text: String,
   modification_count: Int,
@@ -695,7 +905,26 @@ pub fn handle_output_gate_complete(
     )
   let state =
     CognitiveState(..state, dprime_decisions: [record, ..state.dprime_decisions])
-  let max_modifications = 2
+
+  // Emit audit record (BF-07)
+  let output_audit_record =
+    dprime_audit.build_record(
+      cycle_id,
+      report_text,
+      result,
+      case state.output_dprime_state {
+        Some(ds) -> ds.config.features
+        None -> []
+      },
+      None,
+      None,
+    )
+  dprime_audit.log_record(output_audit_record, cycle_id)
+
+  let max_modifications = case state.output_dprime_state {
+    Some(ds) -> ds.config.max_output_modifications
+    None -> 2
+  }
   let explanation = result.explanation
   case result.decision {
     dprime_types.Accept -> {
@@ -709,6 +938,7 @@ pub fn handle_output_gate_complete(
         reply_to,
         CognitiveReply(response: report_text, model: state.model, usage: None),
       )
+      let state = cognitive_state.apply_meta_observation(state, 0)
       let state = with_assistant_error(state, report_text)
       CognitiveState(..state, status: Idle)
     }
@@ -729,6 +959,7 @@ pub fn handle_output_gate_complete(
             reply_to,
             CognitiveReply(response: full_text, model: state.model, usage: None),
           )
+          let state = cognitive_state.apply_meta_observation(state, 0)
           let state = with_assistant_error(state, full_text)
           CognitiveState(..state, status: Idle)
         }
@@ -785,14 +1016,74 @@ pub fn handle_output_gate_complete(
         "Output gate: REJECT (" <> explanation <> ")",
         state.cycle_id,
       )
-      let reject_text =
-        "[Report rejected by quality gate: " <> explanation <> "]"
+      // User sees a clean, contextual message
+      let user_text = build_user_response(result)
+      // Agent's history gets the technical details for pattern learning
+      let agent_text =
+        build_rejection_notice("output", result, "agent response")
       process.send(
         reply_to,
-        CognitiveReply(response: reject_text, model: state.model, usage: None),
+        CognitiveReply(response: user_text, model: state.model, usage: None),
       )
-      let state = with_assistant_error(state, reject_text)
+      let state = cognitive_state.apply_meta_observation(state, 0)
+      let state = with_assistant_error(state, agent_text)
       CognitiveState(..state, status: Idle)
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+/// Build a context string from messages using a character budget (BF-04).
+/// Walks messages most-recent-first, includes all content types (text,
+/// tool use summaries, tool results), stops when budget is exhausted.
+fn build_context_string(
+  messages: List(llm_types.Message),
+  budget: Int,
+) -> String {
+  let reversed = list.reverse(messages)
+  build_context_loop(reversed, budget, [])
+  |> string.join("\n")
+}
+
+fn build_context_loop(
+  messages: List(llm_types.Message),
+  remaining: Int,
+  acc: List(String),
+) -> List(String) {
+  case remaining <= 0 || messages == [] {
+    True -> list.reverse(acc)
+    False ->
+      case messages {
+        [] -> list.reverse(acc)
+        [msg, ..rest] -> {
+          let text = extract_message_content(msg)
+          let len = string.length(text)
+          case len > remaining {
+            True -> {
+              let truncated = string.slice(text, 0, remaining)
+              list.reverse([truncated, ..acc])
+            }
+            False -> build_context_loop(rest, remaining - len, [text, ..acc])
+          }
+        }
+      }
+  }
+}
+
+/// Extract a text summary from all content blocks in a message.
+fn extract_message_content(msg: llm_types.Message) -> String {
+  list.filter_map(msg.content, fn(block) {
+    case block {
+      llm_types.TextContent(text: t) -> Ok(t)
+      llm_types.ToolUseContent(id: _, name: n, input_json: input) ->
+        Ok("[tool_use: " <> n <> " " <> string.slice(input, 0, 200) <> "]")
+      llm_types.ToolResultContent(tool_use_id: _, content: c, is_error: _) ->
+        Ok("[tool_result: " <> string.slice(c, 0, 200) <> "]")
+      llm_types.ImageContent(media_type: _, data: _) -> Error(Nil)
+    }
+  })
+  |> string.join(" ")
 }

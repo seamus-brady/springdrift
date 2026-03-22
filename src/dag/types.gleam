@@ -19,6 +19,10 @@ pub type CycleNode {
     tokens_out: Int,
     duration_ms: Int,
     agent_output: Option(AgentOutput),
+    /// Instance name for cognitive cycles (e.g. "Curragh"), empty for sub-agents.
+    instance_name: String,
+    /// Stable UUID for cognitive cycles, empty for sub-agents.
+    instance_id: String,
   )
 }
 

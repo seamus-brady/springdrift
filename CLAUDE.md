@@ -64,9 +64,14 @@ src/
 │   ├── scorer.gleam           LLM magnitude scoring with prompt building + JSON parsing
 │   ├── canary.gleam           Hijack + leakage probes (fail-closed, fresh tokens per request)
 │   ├── gate.gleam             Three-layer H-CogAff orchestrator (reactive → deliberative → meta)
-│   ├── config.gleam           D' config loading from JSON, dual-gate support (tool + output)
+│   ├── config.gleam           D' config loading from JSON, unified format (gates + agent overrides + meta + shared)
 │   ├── output_gate.gleam      Output quality gate — evaluates finished reports before delivery
 │   └── meta.gleam             History ring buffer, stall detection, threshold tightening
+│
+├── meta/                      Layer 3b meta observer — post-cycle safety evaluation
+│   ├── types.gleam            MetaSignal, MetaIntervention, MetaObservation, MetaState
+│   ├── detectors.gleam        Rate limit, cumulative risk, rejection patterns, Layer 3a persistence
+│   └── observer.gleam         Post-cycle evaluation, intervention determination
 │
 ├── narrative/                 Prime Narrative — immutable first-person agent memory
 │   ├── types.gleam            NarrativeEntry, Intent, Outcome, DelegationStep, Thread, Metrics
@@ -311,8 +316,9 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `skills_dirs` | `--skills-dir` (repeatable) | `[~/.config/springdrift/skills, .springdrift/skills]` | Skill directories |
 | `write_anywhere` | `--allow-write-anywhere` | False | Allow `write_file` outside CWD |
 | `gui` | `--gui` | tui | GUI mode: `tui` (terminal) or `web` (browser on port 8080) |
-| `dprime_enabled` | `--dprime` / `--no-dprime` | False | Enable D' safety evaluation before tool dispatch |
+| `dprime_enabled` | `--dprime` / `--no-dprime` | True | Enable D' safety evaluation before tool dispatch |
 | `dprime_config` | `--dprime-config` | built-in defaults | Path to D' config JSON file |
+| `max_output_modifications` | — | 2 | Max iterations for output gate MODIFY loop |
 | `narrative_dir` | `--narrative-dir` | `.springdrift/memory/narrative` | Directory for narrative JSON-L files (narrative is always enabled) |
 | `archivist_model` | — | task_model | Model used by the Archivist for narrative generation |
 | `narrative_threading` | — | True | Enable automatic thread assignment |
@@ -401,6 +407,7 @@ At startup, the Librarian replays artifact metadata from disk (configurable via
 | `introspect` | All | Perceive system state: identity, agent roster, D' config, cycle ID |
 | `how_to` | HOW_TO.md | Operator guide: tool selection heuristics, degradation paths |
 | `cancel_agent` | Registry | Stop a running agent delegation by name |
+| `report_false_positive` | Meta | Flag a D' rejection as a false positive (cycle_id + reason) |
 | `complete_task_step` | Tasks | Mark a step complete on a task |
 | `flag_risk` | Tasks | Record that a predicted risk has materialised |
 | `activate_task` | Tasks | Set a pending task as current focus |
@@ -612,12 +619,51 @@ config. Falls back to a provided fallback prompt when no identity files exist.
 `profile.discover(dirs)` scans for directories with `config.toml`. `profile.load(name, dirs)`
 returns a `Profile` with agents, D' path, schedule path, and skills dir. Profiles are
 "uniforms not personalities" — set at startup via `--profile`, not runtime-switchable.
-Per-profile D' uses dual-gate format: `tool_gate` + `output_gate` sections in `dprime.json`.
+Per-profile D' uses the unified config format in `dprime.json` (see below).
+
+**D' unified config** — `dprime/config.gleam` loads a unified JSON format from
+`dprime.json` (see `.springdrift_example/dprime.json` for a full example). The unified
+format has four top-level keys:
+
+- `gates` — named gate configs: `input` (pre-cycle input screening), `tool` (before
+  tool dispatch), `output` (finished report quality, optional), `post_exec` (after tool
+  execution, optional). Each gate defines `features`, `modify_threshold`,
+  `reject_threshold`, and optional `canary_enabled`.
+- `agent_overrides` — per-agent tool gate configs keyed by agent name (e.g. `coder`,
+  `researcher`). When a specialist agent dispatches tool calls, `get_agent_tool_config`
+  returns the agent-specific features and thresholds instead of the default `tool` gate.
+- `meta` — Layer 3b observer settings: `enabled`, `rate_limit_max_cycles`,
+  `elevated_score_threshold`, `rejection_count_threshold`, `tighten_factor`, etc.
+- `shared` — common settings applied to all gates that don't explicitly override them
+  (`tiers`, `max_history`, `stall_window`, `max_iterations`).
+
+Backward compatible with the old `tool_gate`/`output_gate` dual-gate format and
+single-gate format — `load_unified` auto-detects and converts.
 
 **Output gate** — second D' evaluation point in `dprime/output_gate.gleam`. Evaluates
 finished reports for quality (unsourced claims, causal overreach, stale data) before
 delivery. Uses the same scoring infrastructure but with output-focused prompts. Bounded
-modification loop (max 2 iterations).
+modification loop (max `max_output_modifications` iterations, default 2). The tool gate
+and output gate maintain separate `DprimeState` instances (gate state isolation) to
+prevent cross-contamination of history and thresholds.
+
+**D' normalization** — BF-03 fix ensures all D' scores are normalized to [0,1] via
+min-max scaling before gate decisions. Raw importance-weighted sums are no longer
+compared directly against thresholds.
+
+**Meta observer** — Layer 3b post-cycle safety evaluation in `src/meta/`. Runs after
+each cognitive cycle completes, analyzing patterns across gate decisions. Detectors
+(`meta/detectors.gleam`) check for: rate limit violations (too many gates in a window),
+cumulative risk drift, rejection pattern anomalies, Layer 3a persistence (repeated
+threshold tightening), and high false positive rate (too many rejections flagged as
+false positives, suggesting overly aggressive thresholds). The observer
+(`meta/observer.gleam`) aggregates detector signals into `MetaIntervention` actions.
+Integrated into the cognitive loop as a post-cycle hook — interventions are logged but
+do not block the current cycle. The `report_false_positive` tool lets the agent flag
+D' rejections as incorrect; these annotations persist to JSONL (`meta/log.gleam`) and
+are factored into the repeated rejection detector (annotated cycles are excluded) and
+the high false positive rate detector (escalates to user when >=50% of rejections in
+the window are false positives).
 
 **Scheduler** — BEAM-native task scheduling in `scheduler/runner.gleam`. Uses OTP
 `process.send_after` for recurring tick-based execution. `scheduler/delivery.gleam`
@@ -797,7 +843,7 @@ threading = true
 .springdrift/profiles/
 └── analyst/
     ├── config.toml          # Required — name, description, models, agents
-    ├── dprime.json          # Optional — dual-gate D' config (tool_gate + output_gate)
+    ├── dprime.json          # Optional — unified D' config (gates + agent_overrides + meta + shared)
     ├── schedule.toml        # Optional — recurring tasks with delivery config
     └── skills/              # Optional — profile-specific skills
         └── summarize/

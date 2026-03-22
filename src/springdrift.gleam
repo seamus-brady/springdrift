@@ -515,22 +515,25 @@ fn run(cfg: AppConfig) -> Nil {
   let agent_tools =
     list.append(list.map(agent_specs, cognitive.agent_to_tool), [scheduler_tool])
 
-  // Load D' config if enabled (dual-gate: tool_gate + optional output_gate)
-  let #(dprime_state, output_dprime_state) = case
-    option.unwrap(cfg.dprime_enabled, False)
+  // Load D' config if enabled (unified: input + tool + output + post_exec gates)
+  let unified_dprime = case cfg.dprime_config {
+    option.Some(path) -> dprime_config_mod.load_unified(path)
+    option.None -> dprime_config_mod.default_unified()
+  }
+  let #(input_dprime_state, dprime_state, output_dprime_state) = case
+    option.unwrap(cfg.dprime_enabled, True)
   {
-    False -> #(option.None, option.None)
+    False -> #(option.None, option.None, option.None)
     True -> {
-      let #(tool_cfg, output_cfg) = case cfg.dprime_config {
-        option.Some(path) -> dprime_config_mod.load_dual(path)
-        option.None -> #(dprime_config_mod.default(), option.None)
-      }
-      let tool_state = option.Some(dprime_config_mod.initial_state(tool_cfg))
-      let output_state = case output_cfg {
+      let input_state =
+        option.Some(dprime_config_mod.initial_state(unified_dprime.input_gate))
+      let tool_state =
+        option.Some(dprime_config_mod.initial_state(unified_dprime.tool_gate))
+      let output_state = case unified_dprime.output_gate {
         option.Some(ocfg) -> option.Some(dprime_config_mod.initial_state(ocfg))
         option.None -> option.None
       }
-      #(tool_state, output_state)
+      #(input_state, tool_state, output_state)
     }
   }
 
@@ -638,8 +641,10 @@ fn run(cfg: AppConfig) -> Nil {
       notify:,
       task_model:,
       reasoning_model:,
-      dprime_state:,
+      input_dprime_state:,
+      tool_dprime_state: dprime_state,
       output_dprime_state:,
+      meta_config: unified_dprime.meta,
       narrative_dir:,
       cbr_dir: paths.cbr_dir(),
       archivist_model:,
@@ -648,6 +653,7 @@ fn run(cfg: AppConfig) -> Nil {
       write_anywhere:,
       curator: option.Some(curator_subj),
       agent_uuid: stable_identity.agent_uuid,
+      agent_name:,
       session_since:,
       retry_config:,
       classify_timeout_ms:,

@@ -1,0 +1,181 @@
+{
+  "gates": {
+    "input": {
+      "features": [
+        {
+          "name": "prompt_injection",
+          "importance": "high",
+          "description": "Attempt to override system instructions or manipulate agent behavior",
+          "critical": true
+        },
+        {
+          "name": "harmful_request",
+          "importance": "high",
+          "description": "Request for content that could cause physical, financial, or psychological harm",
+          "critical": true
+        },
+        {
+          "name": "scope_violation",
+          "importance": "medium",
+          "description": "Request outside the agent's configured domain or capabilities",
+          "critical": false
+        },
+        {
+          "name": "resource_abuse",
+          "importance": "low",
+          "description": "Request designed to consume excessive tokens or trigger expensive operations",
+          "critical": false
+        }
+      ],
+      "modify_threshold": 0.35,
+      "reject_threshold": 0.55,
+      "canary_enabled": true
+    },
+    "tool": {
+      "features": [
+        {
+          "name": "data_exfiltration",
+          "importance": "high",
+          "description": "Tool call that could leak sensitive data to external services",
+          "critical": true
+        },
+        {
+          "name": "unauthorized_write",
+          "importance": "high",
+          "description": "File or system modification outside permitted scope",
+          "critical": true
+        },
+        {
+          "name": "excessive_scope",
+          "importance": "medium",
+          "description": "Tool call broader than needed for the task at hand",
+          "critical": false
+        },
+        {
+          "name": "rate_abuse",
+          "importance": "low",
+          "description": "Rapid repeated tool calls suggesting a loop or abuse pattern",
+          "critical": false
+        }
+      ],
+      "modify_threshold": 0.35,
+      "reject_threshold": 0.55,
+      "canary_enabled": true
+    },
+    "output": {
+      "features": [
+        {
+          "name": "unsourced_claim",
+          "importance": "high",
+          "description": "Factual assertion presented without supporting evidence or citation",
+          "critical": true
+        },
+        {
+          "name": "accuracy",
+          "importance": "high",
+          "description": "False, misleading, or unverifiable information in the response",
+          "critical": true
+        },
+        {
+          "name": "certainty_overstatement",
+          "importance": "medium",
+          "description": "Presenting uncertain or partial data as definitive",
+          "critical": false
+        },
+        {
+          "name": "harmful_content",
+          "importance": "high",
+          "description": "Response containing dangerous instructions or harmful material",
+          "critical": true
+        },
+        {
+          "name": "privacy_leak",
+          "importance": "medium",
+          "description": "Response exposing private or sensitive information",
+          "critical": false
+        }
+      ],
+      "modify_threshold": 0.40,
+      "reject_threshold": 0.60,
+      "canary_enabled": false
+    }
+  },
+  "agent_overrides": {
+    "coder": {
+      "tool": {
+        "features": [
+          {
+            "name": "sandbox_escape",
+            "importance": "high",
+            "description": "Code that attempts to break container isolation or access host resources",
+            "critical": true
+          },
+          {
+            "name": "network_access",
+            "importance": "medium",
+            "description": "Code that opens network connections outside the sandbox",
+            "critical": false
+          },
+          {
+            "name": "resource_consumption",
+            "importance": "medium",
+            "description": "Code that consumes excessive CPU, memory, or disk space",
+            "critical": false
+          },
+          {
+            "name": "data_persistence",
+            "importance": "low",
+            "description": "Code that writes to locations outside the workspace directory",
+            "critical": false
+          }
+        ],
+        "modify_threshold": 0.40,
+        "reject_threshold": 0.60
+      }
+    },
+    "researcher": {
+      "tool": {
+        "features": [
+          {
+            "name": "credential_exposure",
+            "importance": "high",
+            "description": "Search queries or URLs that could expose API keys or secrets",
+            "critical": true
+          },
+          {
+            "name": "excessive_crawling",
+            "importance": "medium",
+            "description": "Too many fetch requests to the same domain in a short period",
+            "critical": false
+          },
+          {
+            "name": "sensitive_domain",
+            "importance": "medium",
+            "description": "Accessing domains that may contain sensitive or restricted content",
+            "critical": false
+          }
+        ],
+        "modify_threshold": 0.35,
+        "reject_threshold": 0.55
+      }
+    }
+  },
+  "meta": {
+    "enabled": true,
+    "rate_limit_max_cycles": 30,
+    "rate_limit_window_ms": 60000,
+    "elevated_score_threshold": 0.20,
+    "elevated_streak_threshold": 5,
+    "rejection_count_threshold": 3,
+    "rejection_window_cycles": 10,
+    "cooldown_delay_ms": 5000,
+    "tighten_factor": 0.85,
+    "decay_days": 7
+  },
+  "shared": {
+    "tiers": 1,
+    "max_history": 100,
+    "stall_window": 5,
+    "max_iterations": 3
+  }
+}

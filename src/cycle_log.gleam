@@ -569,6 +569,102 @@ pub fn log_directory() -> String {
   cycle_log_dir()
 }
 
+/// A tool call detail with input and output content.
+pub type ToolDetail {
+  ToolDetail(name: String, input: String, output: String, success: Bool)
+}
+
+/// Load tool call details for a specific cycle_id from all date files.
+/// Returns tool name, input JSON, output content, and success flag.
+pub fn load_tool_details_for_cycle(cycle_id: String) -> List(ToolDetail) {
+  let dir = cycle_log_dir()
+  case simplifile.read_directory(dir) {
+    Error(_) -> []
+    Ok(files) -> {
+      files
+      |> list.filter(fn(f) { string.ends_with(f, ".jsonl") })
+      |> list.sort(fn(a, b) { string.compare(b, a) })
+      |> list.flat_map(fn(f) {
+        let path = dir <> "/" <> f
+        case simplifile.read(path) {
+          Error(_) -> []
+          Ok(contents) -> parse_tool_details(contents, cycle_id)
+        }
+      })
+    }
+  }
+}
+
+fn parse_tool_details(
+  contents: String,
+  target_cycle_id: String,
+) -> List(ToolDetail) {
+  let lines =
+    string.split(contents, "\n")
+    |> list.filter(fn(l) { string.trim(l) != "" })
+
+  // First pass: collect tool_call entries (name + input)
+  let calls =
+    list.filter_map(lines, fn(line) {
+      let call_decoder = {
+        use type_str <- decode.field("type", decode.string)
+        use cid <- decode.field("cycle_id", decode.string)
+        case type_str == "tool_call" && cid == target_cycle_id {
+          True -> {
+            use name <- decode.field("name", decode.string)
+            use tool_use_id <- decode.field("tool_use_id", decode.string)
+            use input <- decode.optional_field("input", "", decode.string)
+            decode.success(#(tool_use_id, name, input))
+          }
+          False -> decode.failure(#("", "", ""), "not matching")
+        }
+      }
+      case json.parse(line, call_decoder) {
+        Ok(tuple) -> Ok(tuple)
+        Error(_) -> Error(Nil)
+      }
+    })
+
+  // Second pass: collect tool_result entries (content + success)
+  let results =
+    list.filter_map(lines, fn(line) {
+      let result_decoder = {
+        use type_str <- decode.field("type", decode.string)
+        use cid <- decode.field("cycle_id", decode.string)
+        case type_str == "tool_result" && cid == target_cycle_id {
+          True -> {
+            use tool_use_id <- decode.field("tool_use_id", decode.string)
+            use success <- decode.field("success", decode.bool)
+            use content <- decode.optional_field("content", "", decode.string)
+            decode.success(#(tool_use_id, success, content))
+          }
+          False -> decode.failure(#("", False, ""), "not matching")
+        }
+      }
+      case json.parse(line, result_decoder) {
+        Ok(tuple) -> Ok(tuple)
+        Error(_) -> Error(Nil)
+      }
+    })
+
+  // Join calls with results by tool_use_id
+  list.map(calls, fn(call) {
+    let #(tool_use_id, name, input) = call
+    let #(success, output) = case
+      list.find(results, fn(r) { r.0 == tool_use_id })
+    {
+      Ok(#(_, s, c)) -> #(s, c)
+      Error(_) -> #(True, "")
+    }
+    ToolDetail(
+      name:,
+      input: string.slice(input, 0, 1000),
+      output: string.slice(output, 0, 1000),
+      success:,
+    )
+  })
+}
+
 pub fn messages_for_rewind(
   cycles: List(CycleData),
   up_to_index: Int,

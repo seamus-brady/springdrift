@@ -9,6 +9,7 @@
 
 import agent/types as agent_types
 import cbr/types as cbr_types
+import cycle_log
 import dag/types as dag_types
 import facts/log as facts_log
 import facts/types as facts_types
@@ -25,6 +26,8 @@ import llm/tool
 import llm/types.{
   type Tool, type ToolCall, type ToolResult, ToolFailure, ToolSuccess,
 }
+import meta/log as meta_log
+import meta/types as meta_types
 import narrative/librarian.{type LibrarianMessage}
 import narrative/log as narrative_log
 import narrative/types as narrative_types
@@ -43,6 +46,57 @@ fn days_ago_date(days: Int) -> String
 // ---------------------------------------------------------------------------
 // Tool definitions
 // ---------------------------------------------------------------------------
+
+/// Check if a tool is exempt from D' tool gate evaluation.
+/// Memory tools are internal system operations — read-only queries,
+/// fact management, diagnostic inspection, and safety feedback.
+/// They cannot exfiltrate data, modify files, or access the network.
+/// Gating them causes false positives and blocks the safety feedback loop.
+pub fn is_dprime_exempt(name: String) -> Bool {
+  case name {
+    // Read-only queries
+    "recall_recent"
+    | "recall_search"
+    | "recall_threads"
+    | "recall_cases"
+    | "reflect"
+    | "inspect_cycle"
+    | "list_recent_cycles"
+    | "query_tool_activity"
+    | "introspect"
+    | "how_to" -> True
+    // Fact management (internal key-value store)
+    "memory_write"
+    | "memory_read"
+    | "memory_clear_key"
+    | "memory_query_facts"
+    | "memory_trace_fact" -> True
+    // CBR case management (internal)
+    "correct_case" | "annotate_case" | "suppress_case" | "boost_case" -> True
+    // Planner tools (internal task tracking)
+    "complete_task_step"
+    | "flag_risk"
+    | "activate_task"
+    | "abandon_task"
+    | "create_endeavour"
+    | "add_task_to_endeavour"
+    | "get_active_work"
+    | "get_task_detail" -> True
+    // Safety feedback — MUST be exempt to avoid chicken-and-egg blocking
+    "report_false_positive" -> True
+    // Agent management
+    "cancel_agent" -> True
+    // Built-in tools
+    "calculator" | "get_current_datetime" | "read_skill" -> True
+    // Agent delegations — sub-agents have their own D' gates on tool calls,
+    // so gating the delegation itself is double-counting
+    _ ->
+      case string.starts_with(name, "agent_") {
+        True -> True
+        False -> False
+      }
+  }
+}
 
 pub fn all() -> List(Tool) {
   [
@@ -66,6 +120,7 @@ pub fn all() -> List(Tool) {
     suppress_case_tool(),
     boost_case_tool(),
     cancel_agent_tool(),
+    report_false_positive_tool(),
   ]
 }
 
@@ -246,9 +301,15 @@ fn inspect_cycle_tool() -> Tool {
   |> tool.with_description(
     "Inspect a specific cycle by its ID. Returns the full cycle tree: the root cognitive "
     <> "cycle and all agent sub-cycles, including tool calls, D' gate decisions, token "
-    <> "counts, and agent outputs. Use this to drill into a specific interaction.",
+    <> "counts, and agent outputs. Set detail to 'full' to include tool call inputs and "
+    <> "outputs — useful for debugging what a sub-agent actually did.",
   )
   |> tool.add_string_param("cycle_id", "The cycle ID to inspect", True)
+  |> tool.add_string_param(
+    "detail",
+    "Level of detail: 'summary' (default) or 'full' (includes tool inputs/outputs)",
+    False,
+  )
   |> tool.build()
 }
 
@@ -441,6 +502,7 @@ pub fn execute_with_how_to(
     "suppress_case" -> run_suppress_case(call, lib)
     "boost_case" -> run_boost_case(call, lib)
     "cancel_agent" -> run_cancel_agent(call, agent_mgmt)
+    "report_false_positive" -> run_report_false_positive(call)
     _ -> ToolFailure(tool_use_id: call.id, error: "Unknown tool: " <> call.name)
   }
 }
@@ -1165,7 +1227,8 @@ fn run_inspect_cycle(
     Some(l) -> {
       let decoder = {
         use cycle_id <- decode.field("cycle_id", decode.string)
-        decode.success(cycle_id)
+        use detail <- decode.optional_field("detail", "summary", decode.string)
+        decode.success(#(cycle_id, detail))
       }
       case json.parse(call.input_json, decoder) {
         Error(_) ->
@@ -1173,7 +1236,8 @@ fn run_inspect_cycle(
             tool_use_id: call.id,
             error: "Invalid inspect_cycle input: missing cycle_id",
           )
-        Ok(cycle_id) -> {
+        Ok(#(cycle_id, detail)) -> {
+          let full = detail == "full"
           let subj = process.new_subject()
           process.send(
             l,
@@ -1193,7 +1257,7 @@ fn run_inspect_cycle(
             Ok(Ok(subtree)) ->
               ToolSuccess(
                 tool_use_id: call.id,
-                content: format_subtree(subtree, 0),
+                content: format_subtree(subtree, 0, full),
               )
           }
         }
@@ -1202,12 +1266,31 @@ fn run_inspect_cycle(
   }
 }
 
-fn format_subtree(tree: dag_types.DagSubtree, depth: Int) -> String {
+fn format_subtree(tree: dag_types.DagSubtree, depth: Int, full: Bool) -> String {
   let indent = string.repeat("  ", depth)
   let node = tree.root
   let type_str = case node.node_type {
-    dag_types.CognitiveCycle -> "cognitive"
-    dag_types.AgentCycle -> "agent"
+    dag_types.CognitiveCycle ->
+      case node.instance_name {
+        "" -> "cognitive"
+        name ->
+          name
+          <> " ("
+          <> case node.instance_id {
+            "" -> "cognitive"
+            id -> id
+          }
+          <> ")"
+      }
+    dag_types.AgentCycle ->
+      case node.agent_output {
+        Some(dag_types.CoderOutput(..)) -> "sub-agent:coder"
+        Some(dag_types.ResearchOutput(..)) -> "sub-agent:researcher"
+        Some(dag_types.PlanOutput(..)) -> "sub-agent:planner"
+        Some(dag_types.WriterOutput(..)) -> "sub-agent:writer"
+        Some(dag_types.GenericOutput(..)) -> "sub-agent"
+        None -> "sub-agent"
+      }
     dag_types.SchedulerCycle -> "scheduler"
   }
   let outcome_str = case node.outcome {
@@ -1295,16 +1378,48 @@ fn format_subtree(tree: dag_types.DagSubtree, depth: Int) -> String {
     <> tools_str
     <> gates_str
     <> agent_str
+  // When full detail requested, load tool call inputs/outputs from cycle log
+  let detail_str = case full {
+    False -> ""
+    True -> {
+      let details = cycle_log.load_tool_details_for_cycle(node.cycle_id)
+      case details {
+        [] -> ""
+        _ ->
+          "\n"
+          <> string.join(
+            list.map(details, fn(d) {
+              indent
+              <> "    "
+              <> d.name
+              <> case d.success {
+                True -> ""
+                False -> " FAILED"
+              }
+              <> "\n"
+              <> indent
+              <> "      IN: "
+              <> string.slice(d.input, 0, 500)
+              <> "\n"
+              <> indent
+              <> "      OUT: "
+              <> string.slice(d.output, 0, 500)
+            }),
+            "\n",
+          )
+      }
+    }
+  }
   let children_str = case tree.children {
     [] -> ""
     children ->
       "\n"
       <> string.join(
-        list.map(children, fn(child) { format_subtree(child, depth + 1) }),
+        list.map(children, fn(child) { format_subtree(child, depth + 1, full) }),
         "\n",
       )
   }
-  header <> children_str
+  header <> detail_str <> children_str
 }
 
 // ---------------------------------------------------------------------------
@@ -1654,8 +1769,33 @@ fn run_list_recent_cycles(
                     dag_types.NodePending -> "pending"
                   }
                   let type_label = case node.parent_id {
-                    None -> "[root]"
-                    Some(pid) -> "[agent of " <> string.slice(pid, 0, 8) <> "]"
+                    None ->
+                      case node.instance_name {
+                        "" -> "[cognitive]"
+                        name ->
+                          "["
+                          <> name
+                          <> " ("
+                          <> case node.instance_id {
+                            "" -> "cognitive"
+                            id -> id
+                          }
+                          <> ")]"
+                      }
+                    Some(pid) -> {
+                      let sub_name = case node.agent_output {
+                        Some(dag_types.CoderOutput(..)) -> "coder"
+                        Some(dag_types.ResearchOutput(..)) -> "researcher"
+                        Some(dag_types.PlanOutput(..)) -> "planner"
+                        Some(dag_types.WriterOutput(..)) -> "writer"
+                        _ -> "agent"
+                      }
+                      "["
+                      <> sub_name
+                      <> " of "
+                      <> string.slice(pid, 0, 8)
+                      <> "]"
+                    }
                   }
                   let indent = case node.parent_id {
                     None -> ""
@@ -2124,6 +2264,67 @@ fn run_boost_case(
               ToolFailure(tool_use_id: call.id, error: "Boost failed: " <> e)
           }
       }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// report_false_positive
+// ---------------------------------------------------------------------------
+
+fn report_false_positive_tool() -> Tool {
+  tool.new("report_false_positive")
+  |> tool.with_description(
+    "Report a D' safety rejection as a false positive. Use when you believe a "
+    <> "rejection was incorrect — the request was legitimate but the safety system "
+    <> "blocked it. This feedback is used by the meta observer to detect overly "
+    <> "aggressive thresholds and avoid escalating on repeated false rejections.",
+  )
+  |> tool.add_string_param(
+    "cycle_id",
+    "The cycle_id where the false rejection occurred (from inspect_cycle or the rejection notice)",
+    True,
+  )
+  |> tool.add_string_param(
+    "reason",
+    "Brief explanation of why this was a false positive",
+    True,
+  )
+  |> tool.build()
+}
+
+fn run_report_false_positive(call: ToolCall) -> ToolResult {
+  let decoder = {
+    use cycle_id <- decode.field("cycle_id", decode.string)
+    use reason <- decode.field("reason", decode.string)
+    decode.success(#(cycle_id, reason))
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "Invalid report_false_positive input: missing cycle_id or reason",
+      )
+    Ok(#(cycle_id, reason)) -> {
+      let annotation =
+        meta_types.FalsePositiveAnnotation(
+          cycle_id:,
+          reason:,
+          timestamp: get_datetime(),
+        )
+      meta_log.append_false_positive(annotation)
+      slog.info(
+        "memory",
+        "report_false_positive",
+        "False positive reported for cycle " <> cycle_id <> ": " <> reason,
+        Some(cycle_id),
+      )
+      ToolSuccess(
+        tool_use_id: call.id,
+        content: "False positive recorded for cycle "
+          <> cycle_id
+          <> ". The meta observer will factor this into its rejection pattern analysis.",
+      )
     }
   }
 }

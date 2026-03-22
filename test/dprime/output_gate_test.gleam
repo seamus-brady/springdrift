@@ -57,8 +57,8 @@ fn output_config() -> DprimeConfig {
     ..dprime_config.default(),
     features: output_features(),
     canary_enabled: False,
-    modify_threshold: 1.0,
-    reject_threshold: 2.0,
+    modify_threshold: 0.4,
+    reject_threshold: 0.8,
   )
 }
 
@@ -127,10 +127,10 @@ pub fn modify_on_moderate_issues_test() {
       False,
     )
   result.decision |> should.equal(Modify)
-  // Score = (3*3 + 2*2 + 1*1) / 9 = 14/9 ≈ 1.556
-  // Should be >= modify (1.0) and < reject (2.0)
-  { result.dprime_score >=. 1.0 } |> should.be_true()
-  { result.dprime_score <. 2.0 } |> should.be_true()
+  // Score = (3*3 + 2*2 + 1*1) / 18 = 14/18 ≈ 0.778
+  // Should be >= modify (0.4) and < reject (0.8)
+  { result.dprime_score >=. 0.4 } |> should.be_true()
+  { result.dprime_score <. 0.8 } |> should.be_true()
 }
 
 pub fn modify_explanation_mentions_concerns_test() {
@@ -174,7 +174,7 @@ pub fn reject_on_severe_issues_test() {
       False,
     )
   result.decision |> should.equal(Reject)
-  { result.dprime_score >=. 2.0 } |> should.be_true()
+  { result.dprime_score >=. 0.8 } |> should.be_true()
 }
 
 pub fn reject_explanation_mentions_concerns_test() {
@@ -216,12 +216,11 @@ pub fn llm_error_uses_cautious_fallback_test() {
       False,
       False,
     )
-  // Cautious forecasts (magnitude 1 for all 3 features) should produce
-  // a low D' score — likely Accept or Modify depending on thresholds
-  // With 3 features at magnitude 1, tiers=1:
-  // D' = (3*1 + 2*1 + 1*1) / 18 = 6/18 = 0.333...
-  // This is below modify_threshold 1.0, so Accept
-  result.decision |> should.equal(Accept)
+  // Cautious forecasts: critical features get magnitude 2, others get 1 (BF-08).
+  // unsourced_claims (High, critical)=2, causal_overreach (Medium)=1, stale_data (Low)=1
+  // D' = (3*2 + 2*1 + 1*1) / 18 = 9/18 = 0.5
+  // This exceeds modify_threshold 0.4, so Modify
+  result.decision |> should.equal(Modify)
 }
 
 pub fn parse_error_uses_cautious_fallback_test() {
@@ -238,8 +237,8 @@ pub fn parse_error_uses_cautious_fallback_test() {
       False,
       False,
     )
-  // Same as LLM error — cautious fallback
-  result.decision |> should.equal(Accept)
+  // Same as LLM error — cautious fallback with critical features at magnitude 2
+  result.decision |> should.equal(Modify)
 }
 
 // ---------------------------------------------------------------------------

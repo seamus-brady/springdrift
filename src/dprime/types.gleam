@@ -139,6 +139,7 @@ pub type DprimeConfig {
     canary_enabled: Bool,
     max_iterations: Int,
     max_candidates: Int,
+    max_output_modifications: Int,
   )
 }
 

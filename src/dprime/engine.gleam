@@ -50,8 +50,15 @@ pub fn feature_importance(feature: Feature, tiers: Int) -> Int {
   }
 }
 
-/// Scaling unit: 3^(tiers+1).
-/// For 1 tier: 9, 2 tiers: 27, 3 tiers: 81.
+/// Maximum possible D' score for a feature set.
+/// sum(feature_importance_i * max_magnitude) where max_magnitude = 3.
+/// This normalizes D' to true [0, 1] space.
+pub fn max_possible_score(features: List(Feature), tiers: Int) -> Int {
+  list.fold(features, 0, fn(acc, f) { acc + feature_importance(f, tiers) * 3 })
+}
+
+/// Legacy scaling unit — kept for backward compatibility with tests.
+/// Prefer max_possible_score for correct normalization.
 pub fn scaling_unit(tiers: Int) -> Int {
   pow3(tiers + 1)
 }
@@ -74,13 +81,18 @@ pub fn compute_dprime(
   features: List(Feature),
   tiers: Int,
 ) -> Float {
-  let unit = scaling_unit(tiers)
-  let sum =
-    list.fold(features, 0, fn(acc, feature) {
-      let magnitude = find_magnitude(forecasts, feature.name)
-      acc + feature_importance(feature, tiers) * magnitude
-    })
-  int.to_float(sum) /. int.to_float(unit)
+  let max = max_possible_score(features, tiers)
+  case max {
+    0 -> 0.0
+    _ -> {
+      let sum =
+        list.fold(features, 0, fn(acc, feature) {
+          let magnitude = find_magnitude(forecasts, feature.name)
+          acc + feature_importance(feature, tiers) * magnitude
+        })
+      int.to_float(sum) /. int.to_float(max)
+    }
+  }
 }
 
 /// Compute D' for reactive layer using critical features and reactive scaling.

@@ -160,7 +160,8 @@ pub fn dprime_mixed_features_test() {
     Forecast(feature_name: "accuracy", magnitude: 1, rationale: ""),
   ]
   let score = engine.compute_dprime(forecasts, features, 1)
-  let diff = case score -. 0.8889 {
+  // sum = 3*2 + 2*1 = 8, max = 3*3 + 2*3 = 15, D' = 8/15 = 0.5333
+  let diff = case score -. 0.5333 {
     d if d <. 0.0 -> 0.0 -. d
     d -> d
   }
@@ -176,7 +177,8 @@ pub fn dprime_missing_forecast_treated_as_zero_test() {
     Forecast(feature_name: "safety", magnitude: 1, rationale: ""),
   ]
   let score = engine.compute_dprime(forecasts, features, 1)
-  let diff = case score -. 0.3333 {
+  // sum = 3*1 + 2*0 = 3, max = 3*3 + 2*3 = 15, D' = 3/15 = 0.2
+  let diff = case score -. 0.2 {
     d if d <. 0.0 -> 0.0 -. d
     d -> d
   }
@@ -198,7 +200,8 @@ pub fn dprime_2_tier_scaling_test() {
     Forecast(feature_name: "safety", magnitude: 2, rationale: ""),
   ]
   let score = engine.compute_dprime(forecasts, features, 2)
-  let diff = case score -. 0.2222 {
+  // importance = 3*1 = 3 (no feature_set_importance), sum = 3*2 = 6, max = 3*3 = 9, D' = 6/9 = 0.6667
+  let diff = case score -. 0.6667 {
     d if d <. 0.0 -> 0.0 -. d
     d -> d
   }

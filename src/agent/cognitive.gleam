@@ -18,6 +18,7 @@ import agent/types.{
 import agent/worker
 import cycle_log
 import dag/types as dag_types
+import dprime/meta as dprime_meta
 import gleam/dict
 import gleam/erlang/process.{type Subject}
 import gleam/float
@@ -27,6 +28,8 @@ import gleam/option.{None, Some}
 import gleam/string
 import llm/response
 import llm/types as llm_types
+import meta/log as meta_log
+import meta/types as meta_types
 import narrative/curator as narrative_curator
 import narrative/librarian
 import planner/log as planner_log
@@ -88,7 +91,8 @@ pub fn start(
         archivist_max_tokens: cfg.archivist_max_tokens,
         save_in_progress: False,
         save_pending: None,
-        dprime_state: cfg.dprime_state,
+        input_dprime_state: cfg.input_dprime_state,
+        tool_dprime_state: cfg.tool_dprime_state,
         output_dprime_state: cfg.output_dprime_state,
         cycle_tool_calls: [],
         cycle_started_ms: 0,
@@ -108,6 +112,7 @@ pub fn start(
         supervisor: None,
         identity: IdentityContext(
           agent_uuid: cfg.agent_uuid,
+          agent_name: cfg.agent_name,
           session_since: cfg.session_since,
           write_anywhere: cfg.write_anywhere,
         ),
@@ -124,6 +129,15 @@ pub fn start(
         pending_sensory_events: [],
         active_task_id: None,
         planner_dir: cfg.planner_dir,
+        meta_state: case cfg.input_dprime_state {
+          Some(_) -> {
+            let meta_cfg =
+              option.unwrap(cfg.meta_config, meta_types.default_config())
+            // Restore from JSONL with configurable decay window
+            Some(meta_log.restore_state(meta_cfg, meta_cfg.decay_days))
+          }
+          None -> None
+        },
       )
     process.send(setup, self)
     cognitive_loop(state)
@@ -452,6 +466,16 @@ fn handle_user_input(
           cycle_started_ms: monotonic_now_ms(),
           cycle_node_type: dag_types.CognitiveCycle,
           dprime_decisions: [],
+          // Reset D' iteration counters at cycle start so
+          // per-cycle MODIFY budgets don't accumulate across cycles
+          tool_dprime_state: option.map(
+            state.tool_dprime_state,
+            dprime_meta.reset_iterations,
+          ),
+          input_dprime_state: option.map(
+            state.input_dprime_state,
+            dprime_meta.reset_iterations,
+          ),
         )
 
       // Spawn async classification worker — rescue catches panics
@@ -574,6 +598,14 @@ fn handle_scheduler_input(
           cycle_started_ms: monotonic_now_ms(),
           cycle_node_type: dag_types.SchedulerCycle,
           dprime_decisions: [],
+          tool_dprime_state: option.map(
+            state.tool_dprime_state,
+            dprime_meta.reset_iterations,
+          ),
+          input_dprime_state: option.map(
+            state.input_dprime_state,
+            dprime_meta.reset_iterations,
+          ),
         )
 
       // Select input text based on job kind
@@ -752,7 +784,7 @@ fn handle_classify_complete(
           state.task_model
         }
       }
-      case state.dprime_state {
+      case state.input_dprime_state {
         None ->
           cognitive_llm.proceed_with_model(
             state,
@@ -927,6 +959,12 @@ fn handle_think_complete(
                           tokens_out: resp.usage.output_tokens,
                           duration_ms:,
                           agent_output: None,
+                          instance_name: state.identity.agent_name,
+                          instance_id: string.slice(
+                            state.identity.agent_uuid,
+                            0,
+                            8,
+                          ),
                         )),
                       )
                     None -> Nil
@@ -946,6 +984,12 @@ fn handle_think_complete(
                     reply_model,
                     Some(resp.usage),
                   )
+                  // Post-cycle meta observation (Layer 3b)
+                  let state =
+                    cognitive_state.apply_meta_observation(
+                      state,
+                      resp.usage.input_tokens + resp.usage.output_tokens,
+                    )
                   // Fire-and-forget save
                   let new_state =
                     CognitiveState(
@@ -962,8 +1006,21 @@ fn handle_think_complete(
         }
         True -> {
           let calls = response.tool_calls(resp)
-          // D' gate intercept: if enabled, evaluate before dispatch
-          case state.dprime_state {
+          // D' gate intercept: if enabled, evaluate before dispatch.
+          // Skip D' when ALL tool calls are exempt (memory, planner,
+          // builtin tools — internal operations that can't exfiltrate
+          // data or modify the filesystem).
+          let all_exempt =
+            list.all(calls, fn(c) { memory.is_dprime_exempt(c.name) })
+          case state.tool_dprime_state {
+            _ if all_exempt ->
+              cognitive_agents.dispatch_tool_calls(
+                state,
+                task_id,
+                resp,
+                calls,
+                rt,
+              )
             None ->
               cognitive_agents.dispatch_tool_calls(
                 state,

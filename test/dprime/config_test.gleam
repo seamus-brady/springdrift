@@ -1,8 +1,10 @@
 import dprime/config as dprime_config
+import dprime/types as dprime_types
 import gleam/list
 import gleam/option.{None, Some}
 import gleeunit
 import gleeunit/should
+import meta/types as meta_types
 import simplifile
 
 pub fn main() -> Nil {
@@ -20,9 +22,9 @@ pub fn default_has_seven_features_test() {
 
 pub fn default_has_expected_thresholds_test() {
   let cfg = dprime_config.default()
-  cfg.modify_threshold |> should.equal(1.2)
-  cfg.reject_threshold |> should.equal(2.0)
-  cfg.reactive_reject_threshold |> should.equal(0.8)
+  cfg.modify_threshold |> should.equal(0.35)
+  cfg.reject_threshold |> should.equal(0.55)
+  cfg.reactive_reject_threshold |> should.equal(0.65)
 }
 
 pub fn default_tiers_is_one_test() {
@@ -49,8 +51,8 @@ pub fn default_has_agent_id_test() {
 
 pub fn default_has_threshold_floors_test() {
   let cfg = dprime_config.default()
-  cfg.min_modify_threshold |> should.equal(0.8)
-  cfg.min_reject_threshold |> should.equal(1.5)
+  cfg.min_modify_threshold |> should.equal(0.2)
+  cfg.min_reject_threshold |> should.equal(0.4)
 }
 
 pub fn default_adaptation_disabled_test() {
@@ -136,8 +138,8 @@ pub fn load_partial_json_uses_defaults_for_missing_fields_test() {
   let cfg = dprime_config.load(path)
   list.length(cfg.features) |> should.equal(1)
   cfg.tiers |> should.equal(1)
-  cfg.modify_threshold |> should.equal(1.2)
-  cfg.reject_threshold |> should.equal(2.0)
+  cfg.modify_threshold |> should.equal(0.35)
+  cfg.reject_threshold |> should.equal(0.55)
   cfg.canary_enabled |> should.be_true
   let _ = simplifile.delete(path)
 }
@@ -240,4 +242,264 @@ pub fn load_dual_missing_file_test() {
     dprime_config.load_dual("/tmp/nonexistent_dual.json")
   tool_cfg |> should.equal(dprime_config.default())
   output_cfg |> should.equal(None)
+}
+
+// ---------------------------------------------------------------------------
+// default_unified
+// ---------------------------------------------------------------------------
+
+pub fn default_unified_has_default_gates_test() {
+  let u = dprime_config.default_unified()
+  u.input_gate |> should.equal(dprime_config.default())
+  u.tool_gate |> should.equal(dprime_config.default())
+  u.output_gate |> should.equal(None)
+  u.post_exec_gate |> should.equal(None)
+  u.agent_overrides |> should.equal([])
+  u.meta |> should.equal(None)
+}
+
+// ---------------------------------------------------------------------------
+// get_agent_tool_config
+// ---------------------------------------------------------------------------
+
+pub fn get_agent_tool_config_no_override_test() {
+  let u = dprime_config.default_unified()
+  let cfg = dprime_config.get_agent_tool_config(u, "researcher")
+  cfg |> should.equal(u.tool_gate)
+}
+
+pub fn get_agent_tool_config_with_override_test() {
+  let custom_gate =
+    dprime_types.DprimeConfig(
+      ..dprime_config.default(),
+      modify_threshold: 0.1,
+      reject_threshold: 0.2,
+    )
+  let override =
+    dprime_config.AgentDprimeOverride(
+      agent_name: "researcher",
+      tool_gate: Some(custom_gate),
+    )
+  let u =
+    dprime_config.UnifiedDprimeConfig(
+      ..dprime_config.default_unified(),
+      agent_overrides: [override],
+    )
+  let cfg = dprime_config.get_agent_tool_config(u, "researcher")
+  cfg |> should.equal(custom_gate)
+}
+
+pub fn get_agent_tool_config_override_with_none_falls_back_test() {
+  let override =
+    dprime_config.AgentDprimeOverride(agent_name: "researcher", tool_gate: None)
+  let u =
+    dprime_config.UnifiedDprimeConfig(
+      ..dprime_config.default_unified(),
+      agent_overrides: [override],
+    )
+  let cfg = dprime_config.get_agent_tool_config(u, "researcher")
+  cfg |> should.equal(u.tool_gate)
+}
+
+// ---------------------------------------------------------------------------
+// load_unified — new unified format
+// ---------------------------------------------------------------------------
+
+pub fn load_unified_with_gates_test() {
+  let json =
+    "{
+  \"gates\": {
+    \"input\": {
+      \"features\": [
+        {\"name\": \"input_safety\", \"importance\": \"high\", \"critical\": true}
+      ],
+      \"modify_threshold\": 0.3
+    },
+    \"tool\": {
+      \"features\": [
+        {\"name\": \"fs_write\", \"importance\": \"medium\"}
+      ],
+      \"modify_threshold\": 0.4,
+      \"reject_threshold\": 0.7
+    }
+  }
+}"
+  let path = "/tmp/dprime_test_unified.json"
+  let assert Ok(_) = simplifile.write(path, json)
+  let u = dprime_config.load_unified(path)
+  list.length(u.input_gate.features) |> should.equal(1)
+  u.input_gate.modify_threshold |> should.equal(0.3)
+  list.length(u.tool_gate.features) |> should.equal(1)
+  u.tool_gate.modify_threshold |> should.equal(0.4)
+  u.tool_gate.reject_threshold |> should.equal(0.7)
+  u.output_gate |> should.equal(None)
+  u.post_exec_gate |> should.equal(None)
+  u.agent_overrides |> should.equal([])
+  u.meta |> should.equal(None)
+  let _ = simplifile.delete(path)
+}
+
+pub fn load_unified_with_output_gate_test() {
+  let json =
+    "{
+  \"gates\": {
+    \"input\": {
+      \"features\": [{\"name\": \"safety\", \"importance\": \"high\"}]
+    },
+    \"tool\": {
+      \"features\": [{\"name\": \"safety\", \"importance\": \"high\"}]
+    },
+    \"output\": {
+      \"features\": [{\"name\": \"quality\", \"importance\": \"medium\"}],
+      \"modify_threshold\": 0.25
+    }
+  }
+}"
+  let path = "/tmp/dprime_test_unified_output.json"
+  let assert Ok(_) = simplifile.write(path, json)
+  let u = dprime_config.load_unified(path)
+  let assert Some(out) = u.output_gate
+  list.length(out.features) |> should.equal(1)
+  out.modify_threshold |> should.equal(0.25)
+  let _ = simplifile.delete(path)
+}
+
+pub fn load_unified_with_agent_overrides_test() {
+  let json =
+    "{
+  \"gates\": {
+    \"input\": {
+      \"features\": [{\"name\": \"safety\", \"importance\": \"high\"}]
+    },
+    \"tool\": {
+      \"features\": [{\"name\": \"safety\", \"importance\": \"high\"}]
+    }
+  },
+  \"agent_overrides\": [
+    {
+      \"agent_name\": \"researcher\",
+      \"tool\": {
+        \"features\": [{\"name\": \"web_access\", \"importance\": \"low\"}],
+        \"reject_threshold\": 0.9
+      }
+    }
+  ]
+}"
+  let path = "/tmp/dprime_test_unified_overrides.json"
+  let assert Ok(_) = simplifile.write(path, json)
+  let u = dprime_config.load_unified(path)
+  list.length(u.agent_overrides) |> should.equal(1)
+  let assert [override] = u.agent_overrides
+  override.agent_name |> should.equal("researcher")
+  let assert Some(tool_cfg) = override.tool_gate
+  tool_cfg.reject_threshold |> should.equal(0.9)
+  let _ = simplifile.delete(path)
+}
+
+pub fn load_unified_with_meta_test() {
+  let json =
+    "{
+  \"gates\": {
+    \"input\": {
+      \"features\": [{\"name\": \"safety\", \"importance\": \"high\"}]
+    },
+    \"tool\": {
+      \"features\": [{\"name\": \"safety\", \"importance\": \"high\"}]
+    }
+  },
+  \"meta\": {
+    \"enabled\": true,
+    \"cooldown_delay_ms\": 10000,
+    \"tighten_factor\": 0.8
+  }
+}"
+  let path = "/tmp/dprime_test_unified_meta.json"
+  let assert Ok(_) = simplifile.write(path, json)
+  let u = dprime_config.load_unified(path)
+  let assert Some(meta) = u.meta
+  meta.enabled |> should.be_true
+  meta.cooldown_delay_ms |> should.equal(10_000)
+  meta.tighten_factor |> should.equal(0.8)
+  // Other fields should get defaults
+  meta.max_history |> should.equal(meta_types.default_config().max_history)
+  let _ = simplifile.delete(path)
+}
+
+pub fn load_unified_with_shared_test() {
+  let json =
+    "{
+  \"gates\": {
+    \"input\": {
+      \"features\": [{\"name\": \"safety\", \"importance\": \"high\"}]
+    },
+    \"tool\": {
+      \"features\": [{\"name\": \"safety\", \"importance\": \"high\"}],
+      \"tiers\": 3
+    }
+  },
+  \"shared\": {
+    \"tiers\": 2,
+    \"max_iterations\": 5
+  }
+}"
+  let path = "/tmp/dprime_test_unified_shared.json"
+  let assert Ok(_) = simplifile.write(path, json)
+  let u = dprime_config.load_unified(path)
+  // input_gate should get shared tiers=2 (had default 1)
+  u.input_gate.tiers |> should.equal(2)
+  u.input_gate.max_iterations |> should.equal(5)
+  // tool_gate explicitly set tiers=3, so shared should not override
+  u.tool_gate.tiers |> should.equal(3)
+  u.tool_gate.max_iterations |> should.equal(5)
+  let _ = simplifile.delete(path)
+}
+
+pub fn load_unified_falls_back_to_dual_format_test() {
+  let json =
+    "{
+  \"tool_gate\": {
+    \"features\": [{\"name\": \"fs_write\", \"importance\": \"medium\"}],
+    \"modify_threshold\": 0.4
+  },
+  \"output_gate\": {
+    \"features\": [{\"name\": \"quality\", \"importance\": \"high\"}]
+  }
+}"
+  let path = "/tmp/dprime_test_unified_dual_fallback.json"
+  let assert Ok(_) = simplifile.write(path, json)
+  let u = dprime_config.load_unified(path)
+  // Dual format uses tool_gate for both input and tool
+  u.input_gate.modify_threshold |> should.equal(0.4)
+  u.tool_gate.modify_threshold |> should.equal(0.4)
+  let assert Some(_) = u.output_gate
+  u.agent_overrides |> should.equal([])
+  let _ = simplifile.delete(path)
+}
+
+pub fn load_unified_falls_back_to_single_format_test() {
+  let json =
+    "{
+  \"features\": [{\"name\": \"safety\", \"importance\": \"high\"}],
+  \"reject_threshold\": 0.8
+}"
+  let path = "/tmp/dprime_test_unified_single_fallback.json"
+  let assert Ok(_) = simplifile.write(path, json)
+  let u = dprime_config.load_unified(path)
+  u.input_gate.reject_threshold |> should.equal(0.8)
+  u.tool_gate.reject_threshold |> should.equal(0.8)
+  u.output_gate |> should.equal(None)
+  let _ = simplifile.delete(path)
+}
+
+pub fn load_unified_missing_file_returns_defaults_test() {
+  let u = dprime_config.load_unified("/tmp/nonexistent_unified.json")
+  u |> should.equal(dprime_config.default_unified())
+}
+
+pub fn load_unified_invalid_json_returns_defaults_test() {
+  let path = "/tmp/dprime_test_unified_invalid.json"
+  let assert Ok(_) = simplifile.write(path, "not valid {{{")
+  let u = dprime_config.load_unified(path)
+  u |> should.equal(dprime_config.default_unified())
+  let _ = simplifile.delete(path)
 }

@@ -131,3 +131,41 @@ pub fn redact_no_false_positives_test() {
   let result = redactor.redact(input)
   should.equal(result, input)
 }
+
+// UUID false positive regression test — task IDs must NOT be redacted
+
+pub fn redact_preserves_task_uuid_test() {
+  // Plain UUID — must not be redacted
+  let input = "task-fde57327-a1b2-c3d4-e5f6-789012345678"
+  let result = redactor.redact(input)
+  should.be_false(contains(result, "REDACTED"))
+}
+
+pub fn redact_preserves_task_id_json_field_test() {
+  // task_id JSON field with UUID value
+  let input = "{\"task_id\": \"task-fde57327-a1b2-c3d4-e5f6-789012345678\"}"
+  let result = redactor.redact(input)
+  should.be_false(contains(result, "REDACTED"))
+}
+
+pub fn redact_preserves_cycle_id_test() {
+  let input = "{\"cycle_id\": \"5c8250ad-58b2-4565-be1e-9f76ff4c461a\"}"
+  let result = redactor.redact(input)
+  should.be_true(contains(result, "5c8250ad"))
+  should.be_true(!contains(result, "REDACTED"))
+}
+
+pub fn redact_preserves_memory_key_field_test() {
+  // memory_write tool has a "key" field — must not be redacted
+  let input = "{\"key\": \"dublin_rental_market_data\", \"value\": \"1800\"}"
+  let result = redactor.redact(input)
+  should.be_true(contains(result, "dublin_rental_market_data"))
+  should.be_true(!contains(result, "REDACTED"))
+}
+
+pub fn redact_still_catches_real_api_key_field_test() {
+  // Fields with secret-specific names should still be caught
+  let input = "{\"api_key\": \"sk-proj-1234567890abcdefghij\"}"
+  let result = redactor.redact(input)
+  should.be_true(contains(result, "[REDACTED:api_key]"))
+}

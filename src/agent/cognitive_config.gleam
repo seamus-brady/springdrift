@@ -7,6 +7,7 @@ import gleam/string
 import llm/provider.{type Provider}
 import llm/retry
 import llm/types as llm_types
+import meta/types as meta_types
 import narrative/curator.{type CuratorMessage}
 import narrative/librarian.{type LibrarianMessage}
 import narrative/threading
@@ -31,8 +32,10 @@ pub type CognitiveConfig {
     notify: Subject(Notification),
     task_model: String,
     reasoning_model: String,
-    dprime_state: Option(dprime_types.DprimeState),
+    input_dprime_state: Option(dprime_types.DprimeState),
+    tool_dprime_state: Option(dprime_types.DprimeState),
     output_dprime_state: Option(dprime_types.DprimeState),
+    meta_config: Option(meta_types.MetaConfig),
     narrative_dir: String,
     cbr_dir: String,
     archivist_model: String,
@@ -41,6 +44,7 @@ pub type CognitiveConfig {
     write_anywhere: Bool,
     curator: Option(Subject(CuratorMessage)),
     agent_uuid: String,
+    agent_name: String,
     session_since: String,
     retry_config: retry.RetryConfig,
     classify_timeout_ms: Int,
@@ -79,8 +83,10 @@ pub fn default_test_config(
     notify:,
     task_model: "mock-model",
     reasoning_model: "mock-reasoning",
-    dprime_state: None,
+    input_dprime_state: None,
+    tool_dprime_state: None,
     output_dprime_state: None,
+    meta_config: None,
     narrative_dir:,
     cbr_dir:,
     archivist_model: "mock-model",
@@ -89,6 +95,7 @@ pub fn default_test_config(
     write_anywhere: False,
     curator: None,
     agent_uuid: "",
+    agent_name: "test-agent",
     session_since: "",
     retry_config: retry.default_retry_config(),
     classify_timeout_ms: 10_000,
