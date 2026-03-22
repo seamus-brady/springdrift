@@ -133,8 +133,8 @@ pub fn should_tighten_false_when_scores_low_test() {
           timestamp: "t3",
         ),
       ],
-      current_modify_threshold: 1.2,
-      current_reject_threshold: 2.0,
+      current_modify_threshold: 0.25,
+      current_reject_threshold: 0.4,
       iteration_count: 0,
     )
   meta.should_tighten(state) |> should.be_false
@@ -165,8 +165,8 @@ pub fn should_tighten_true_when_scores_high_test() {
           timestamp: "t3",
         ),
       ],
-      current_modify_threshold: 1.2,
-      current_reject_threshold: 2.0,
+      current_modify_threshold: 0.25,
+      current_reject_threshold: 0.4,
       iteration_count: 0,
     )
   meta.should_tighten(state) |> should.be_true
@@ -213,8 +213,8 @@ pub fn should_intervene_stalled_when_history_high_test() {
           timestamp: "t3",
         ),
       ],
-      current_modify_threshold: 1.2,
-      current_reject_threshold: 2.0,
+      current_modify_threshold: 0.25,
+      current_reject_threshold: 0.4,
       iteration_count: 1,
     )
   meta.should_intervene(state) |> should.equal(Stalled)
@@ -227,14 +227,14 @@ pub fn should_intervene_stalled_when_history_high_test() {
 pub fn tighten_thresholds_multiplies_by_0_9_test() {
   let state = test_state()
   let tightened = meta.tighten_thresholds(state)
-  // 1.2 * 0.9 = 1.08
-  let diff_m = case tightened.current_modify_threshold -. 1.08 {
+  // 0.25 * 0.9 = 0.225
+  let diff_m = case tightened.current_modify_threshold -. 0.225 {
     d if d <. 0.0 -> 0.0 -. d
     d -> d
   }
   let assert True = diff_m <. 0.001
-  // 2.0 * 0.9 = 1.8
-  let diff_r = case tightened.current_reject_threshold -. 1.8 {
+  // 0.40 * 0.9 = 0.36
+  let diff_r = case tightened.current_reject_threshold -. 0.36 {
     d if d <. 0.0 -> 0.0 -. d
     d -> d
   }
@@ -300,8 +300,8 @@ pub fn maybe_escalate_modify_to_reject_when_stalled_test() {
           timestamp: "t3",
         ),
       ],
-      current_modify_threshold: 1.2,
-      current_reject_threshold: 2.0,
+      current_modify_threshold: 0.25,
+      current_reject_threshold: 0.4,
       iteration_count: 0,
     )
   meta.maybe_escalate(state, Modify) |> should.equal(Reject)
@@ -332,8 +332,8 @@ pub fn maybe_escalate_accept_unchanged_when_stalled_test() {
           timestamp: "t3",
         ),
       ],
-      current_modify_threshold: 1.2,
-      current_reject_threshold: 2.0,
+      current_modify_threshold: 0.25,
+      current_reject_threshold: 0.4,
       iteration_count: 0,
     )
   meta.maybe_escalate(state, Accept) |> should.equal(Accept)

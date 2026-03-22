@@ -22,14 +22,14 @@ fn test_state() {
 
 pub fn candidate_count_below_modify_test() {
   let config = dprime_config.default()
-  // Below modify threshold (1.2) → 1 candidate
-  deliberative.candidate_count(0.5, config) |> should.equal(1)
+  // Below modify threshold (0.25) → 1 candidate
+  deliberative.candidate_count(0.1, config) |> should.equal(1)
 }
 
 pub fn candidate_count_above_modify_test() {
   let config = dprime_config.default()
-  // Above modify threshold (1.2) → min(3, max_candidates)
-  deliberative.candidate_count(1.5, config) |> should.equal(3)
+  // Above modify threshold (0.25) → min(3, max_candidates)
+  deliberative.candidate_count(0.5, config) |> should.equal(3)
 }
 
 // ---------------------------------------------------------------------------
