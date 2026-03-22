@@ -64,7 +64,7 @@ src/
 │   ├── scorer.gleam           LLM magnitude scoring with prompt building + JSON parsing
 │   ├── canary.gleam           Hijack + leakage probes (fail-closed, fresh tokens per request)
 │   ├── gate.gleam             Three-layer H-CogAff orchestrator (reactive → deliberative → meta)
-│   ├── config.gleam           D' config loading from JSON, dual-gate support (tool + output)
+│   ├── config.gleam           D' config loading from JSON, unified format (gates + agent overrides + meta + shared)
 │   ├── output_gate.gleam      Output quality gate — evaluates finished reports before delivery
 │   └── meta.gleam             History ring buffer, stall detection, threshold tightening
 │
@@ -618,7 +618,26 @@ config. Falls back to a provided fallback prompt when no identity files exist.
 `profile.discover(dirs)` scans for directories with `config.toml`. `profile.load(name, dirs)`
 returns a `Profile` with agents, D' path, schedule path, and skills dir. Profiles are
 "uniforms not personalities" — set at startup via `--profile`, not runtime-switchable.
-Per-profile D' uses dual-gate format: `tool_gate` + `output_gate` sections in `dprime.json`.
+Per-profile D' uses the unified config format in `dprime.json` (see below).
+
+**D' unified config** — `dprime/config.gleam` loads a unified JSON format from
+`dprime.json` (see `.springdrift_example/dprime.json` for a full example). The unified
+format has four top-level keys:
+
+- `gates` — named gate configs: `input` (pre-cycle input screening), `tool` (before
+  tool dispatch), `output` (finished report quality, optional), `post_exec` (after tool
+  execution, optional). Each gate defines `features`, `modify_threshold`,
+  `reject_threshold`, and optional `canary_enabled`.
+- `agent_overrides` — per-agent tool gate configs keyed by agent name (e.g. `coder`,
+  `researcher`). When a specialist agent dispatches tool calls, `get_agent_tool_config`
+  returns the agent-specific features and thresholds instead of the default `tool` gate.
+- `meta` — Layer 3b observer settings: `enabled`, `rate_limit_max_cycles`,
+  `elevated_score_threshold`, `rejection_count_threshold`, `tighten_factor`, etc.
+- `shared` — common settings applied to all gates that don't explicitly override them
+  (`tiers`, `max_history`, `stall_window`, `max_iterations`).
+
+Backward compatible with the old `tool_gate`/`output_gate` dual-gate format and
+single-gate format — `load_unified` auto-detects and converts.
 
 **Output gate** — second D' evaluation point in `dprime/output_gate.gleam`. Evaluates
 finished reports for quality (unsourced claims, causal overreach, stale data) before
@@ -817,7 +836,7 @@ threading = true
 .springdrift/profiles/
 └── analyst/
     ├── config.toml          # Required — name, description, models, agents
-    ├── dprime.json          # Optional — dual-gate D' config (tool_gate + output_gate)
+    ├── dprime.json          # Optional — unified D' config (gates + agent_overrides + meta + shared)
     ├── schedule.toml        # Optional — recurring tasks with delivery config
     └── skills/              # Optional — profile-specific skills
         └── summarize/

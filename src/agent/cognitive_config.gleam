@@ -7,6 +7,7 @@ import gleam/string
 import llm/provider.{type Provider}
 import llm/retry
 import llm/types as llm_types
+import meta/types as meta_types
 import narrative/curator.{type CuratorMessage}
 import narrative/librarian.{type LibrarianMessage}
 import narrative/threading
@@ -31,8 +32,10 @@ pub type CognitiveConfig {
     notify: Subject(Notification),
     task_model: String,
     reasoning_model: String,
-    dprime_state: Option(dprime_types.DprimeState),
+    input_dprime_state: Option(dprime_types.DprimeState),
+    tool_dprime_state: Option(dprime_types.DprimeState),
     output_dprime_state: Option(dprime_types.DprimeState),
+    meta_config: Option(meta_types.MetaConfig),
     narrative_dir: String,
     cbr_dir: String,
     archivist_model: String,
@@ -80,8 +83,10 @@ pub fn default_test_config(
     notify:,
     task_model: "mock-model",
     reasoning_model: "mock-reasoning",
-    dprime_state: None,
+    input_dprime_state: None,
+    tool_dprime_state: None,
     output_dprime_state: None,
+    meta_config: None,
     narrative_dir:,
     cbr_dir:,
     archivist_model: "mock-model",

@@ -89,8 +89,8 @@ pub fn start(
         archivist_max_tokens: cfg.archivist_max_tokens,
         save_in_progress: False,
         save_pending: None,
-        input_dprime_state: cfg.dprime_state,
-        tool_dprime_state: cfg.dprime_state,
+        input_dprime_state: cfg.input_dprime_state,
+        tool_dprime_state: cfg.tool_dprime_state,
         output_dprime_state: cfg.output_dprime_state,
         cycle_tool_calls: [],
         cycle_started_ms: 0,
@@ -127,8 +127,14 @@ pub fn start(
         pending_sensory_events: [],
         active_task_id: None,
         planner_dir: cfg.planner_dir,
-        meta_state: case cfg.dprime_state {
-          Some(_) -> Some(meta_types.initial_state(meta_types.default_config()))
+        meta_state: case cfg.input_dprime_state {
+          Some(_) ->
+            Some(
+              meta_types.initial_state(option.unwrap(
+                cfg.meta_config,
+                meta_types.default_config(),
+              )),
+            )
           None -> None
         },
       )
