@@ -123,6 +123,8 @@ pub type MetaConfig {
     cooldown_delay_ms: Int,
     /// Threshold tightening factor (e.g. 0.85 = tighten by 15%)
     tighten_factor: Float,
+    /// Days of meta observation history to retain across restarts
+    decay_days: Int,
   )
 }
 
@@ -143,6 +145,7 @@ pub fn default_config() -> MetaConfig {
     drift_check_interval: 20,
     cooldown_delay_ms: 5000,
     tighten_factor: 0.85,
+    decay_days: 7,
   )
 }
 

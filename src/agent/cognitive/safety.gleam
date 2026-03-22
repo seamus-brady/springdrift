@@ -15,6 +15,7 @@ import dprime/types as dprime_types
 import gleam/dict
 import gleam/erlang/process.{type Subject}
 import gleam/float
+import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
@@ -29,6 +30,105 @@ fn with_assistant_error(state: CognitiveState, text: String) -> CognitiveState {
       llm_types.TextContent(text:),
     ])
   CognitiveState(..state, messages: list.append(state.messages, [msg]))
+}
+
+/// Technical rejection notice for the agent — goes to notification channel,
+/// DAG audit, and message history as a system note. Contains full feature
+/// breakdown for pattern learning.
+fn build_rejection_notice(
+  gate_name: String,
+  result: dprime_types.GateResult,
+  content_type: String,
+) -> String {
+  let feature_triggers = case result.forecasts {
+    [] -> ""
+    forecasts -> {
+      let fired =
+        forecasts
+        |> list.filter(fn(f) { f.magnitude > 0 })
+        |> list.sort(fn(a, b) { int.compare(b.magnitude, a.magnitude) })
+        |> list.map(fn(f) {
+          f.feature_name <> "=" <> int.to_string(f.magnitude) <> "/3"
+        })
+        |> string.join(", ")
+      case fired {
+        "" -> ""
+        triggers -> " Feature triggers: [" <> triggers <> "]."
+      }
+    }
+  }
+  "[D' "
+  <> gate_name
+  <> " gate: "
+  <> case result.decision {
+    dprime_types.Reject -> "REJECTED"
+    dprime_types.Modify -> "MODIFIED"
+    dprime_types.Accept -> "ACCEPTED"
+  }
+  <> " (score: "
+  <> float.to_string(result.dprime_score)
+  <> "). "
+  <> result.explanation
+  <> feature_triggers
+  <> " Content type: "
+  <> content_type
+  <> ". Original text redacted from logs.]"
+}
+
+/// Human-friendly response for the user. Maps the highest-scoring feature
+/// to a contextual, actionable message. No jargon, no scores, no thresholds.
+fn build_user_response(result: dprime_types.GateResult) -> String {
+  // Find the highest-magnitude fired feature
+  let top_feature = case result.forecasts {
+    [] -> ""
+    forecasts ->
+      forecasts
+      |> list.filter(fn(f) { f.magnitude > 0 })
+      |> list.sort(fn(a, b) { int.compare(b.magnitude, a.magnitude) })
+      |> list.first
+      |> option.from_result
+      |> option.map(fn(f) { f.feature_name })
+      |> option.unwrap("")
+  }
+  case top_feature {
+    "harmful_request" -> "I can't help with that — it involves potential harm."
+    "prompt_injection" ->
+      "That looks like it's trying to override my instructions. I can't process it."
+    "scope_violation" -> "That's outside what I'm set up to help with."
+    "data_exfiltration" ->
+      "I can't execute that — it could expose sensitive data."
+    "unauthorized_write" ->
+      "I can't execute that — it would modify files outside the permitted scope."
+    "sandbox_escape" ->
+      "I can't run that code — it could break container isolation."
+    "unsourced_claim" ->
+      "I need to revise my response — it contained unsupported claims."
+    "accuracy" ->
+      "I need to revise my response — it may contain inaccurate information."
+    "privacy_leak" | "privacy" ->
+      "I've held back my response — it could expose private information."
+    "harmful_content" ->
+      "I've held back my response — it may contain harmful material."
+    "certainty_overstatement" ->
+      "I need to revise my response — it overstated certainty on uncertain data."
+    "user_safety" -> "I can't help with that — it could put someone at risk."
+    "legal_compliance" ->
+      "I can't help with that — it may involve legal or compliance issues."
+    "resource_abuse" ->
+      "That request would consume excessive resources. Please refine it."
+    "network_access" ->
+      "I can't run that code — it attempts to access the network."
+    "resource_consumption" ->
+      "I can't run that code — it would use excessive resources."
+    "credential_exposure" ->
+      "I can't do that search — it could expose credentials."
+    "excessive_crawling" ->
+      "I'm rate-limiting my web requests to avoid overloading the source."
+    "sensitive_domain" ->
+      "I can't access that source — it may contain sensitive content."
+    _ ->
+      "I've flagged a concern with that request and can't proceed as asked."
+  }
 }
 
 /// Spawn a D' safety evaluation for tool calls (pre-dispatch gate).
@@ -283,11 +383,8 @@ pub fn handle_safety_gate_complete(
           let modify_msg =
             llm_types.Message(role: llm_types.User, content: [
               llm_types.TextContent(
-                text: "[Safety system: D' evaluation flagged potential concerns (score: "
-                <> float.to_string(result.dprime_score)
-                <> "). "
-                <> result.explanation
-                <> ". Please reconsider your approach and proceed with additional caution.]",
+                text: build_rejection_notice("tool", result, "tool dispatch")
+                <> " Please reconsider your approach and proceed with additional caution.",
               ),
             ])
           let messages =
@@ -335,11 +432,11 @@ pub fn handle_safety_gate_complete(
         list.map(calls, fn(call) {
           llm_types.ToolResultContent(
             tool_use_id: call.id,
-            content: "[Safety system rejected: "
-              <> result.explanation
-              <> " (D' score: "
-              <> float.to_string(result.dprime_score)
-              <> ")]",
+            content: build_rejection_notice(
+              "tool",
+              result,
+              "tool call: " <> call.name,
+            ),
             is_error: True,
           )
         })
@@ -545,11 +642,8 @@ pub fn handle_input_safety_gate_complete(
       let caution_msg =
         llm_types.Message(role: llm_types.User, content: [
           llm_types.TextContent(
-            text: "[Safety system: D' input evaluation flagged potential concerns (score: "
-            <> float.to_string(result.dprime_score)
-            <> "). "
-            <> result.explanation
-            <> ". Please proceed with additional caution.]",
+            text: build_rejection_notice("input", result, "user query")
+            <> " Please proceed with additional caution.",
           ),
         ])
       let messages = list.append(state.messages, [caution_msg])
@@ -564,19 +658,16 @@ pub fn handle_input_safety_gate_complete(
     }
 
     dprime_types.Reject -> {
-      // Reply directly with refusal — no LLM call
-      let reject_text =
-        "[Safety system: query rejected (D' score: "
-        <> float.to_string(result.dprime_score)
-        <> "). "
-        <> result.explanation
-        <> "]"
+      // User sees a clean, contextual message
+      let user_text = build_user_response(result)
+      // Agent's history gets the technical details for pattern learning
+      let agent_text = build_rejection_notice("input", result, "user query")
       process.send(
         reply_to,
-        CognitiveReply(response: reject_text, model:, usage: None),
+        CognitiveReply(response: user_text, model:, usage: None),
       )
       let state = cognitive_state.apply_meta_observation(state, 0)
-      let state = with_assistant_error(state, reject_text)
+      let state = with_assistant_error(state, agent_text)
       CognitiveState(..state, status: Idle)
     }
   }
@@ -926,14 +1017,17 @@ pub fn handle_output_gate_complete(
         "Output gate: REJECT (" <> explanation <> ")",
         state.cycle_id,
       )
-      let reject_text =
-        "[Report rejected by quality gate: " <> explanation <> "]"
+      // User sees a clean, contextual message
+      let user_text = build_user_response(result)
+      // Agent's history gets the technical details for pattern learning
+      let agent_text =
+        build_rejection_notice("output", result, "agent response")
       process.send(
         reply_to,
-        CognitiveReply(response: reject_text, model: state.model, usage: None),
+        CognitiveReply(response: user_text, model: state.model, usage: None),
       )
       let state = cognitive_state.apply_meta_observation(state, 0)
-      let state = with_assistant_error(state, reject_text)
+      let state = with_assistant_error(state, agent_text)
       CognitiveState(..state, status: Idle)
     }
   }

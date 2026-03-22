@@ -13,6 +13,11 @@ import gleam/option.{type Option, None, Some}
 import llm/provider.{type Provider}
 import llm/retry
 import llm/types as llm_types
+
+@external(erlang, "springdrift_ffi", "get_datetime")
+fn get_datetime() -> String
+
+import meta/log as meta_log
 import meta/observer as meta_observer
 import meta/types as meta_types
 import narrative/curator.{type CuratorMessage}
@@ -165,12 +170,14 @@ pub fn apply_meta_observation(
       let obs =
         meta_types.MetaObservation(
           cycle_id:,
-          timestamp: "",
+          timestamp: get_datetime(),
           gate_decisions: gate_summaries,
           tokens_used:,
           tool_call_count: list.length(state.cycle_tool_calls),
           had_delegations: !dict.is_empty(state.active_delegations),
         )
+      // Persist to JSONL for cross-session continuity
+      meta_log.append(obs)
       let new_ms = meta_observer.observe(ms, obs)
       CognitiveState(..state, meta_state: Some(new_ms))
     }

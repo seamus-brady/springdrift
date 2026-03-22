@@ -27,6 +27,7 @@ import gleam/option.{None, Some}
 import gleam/string
 import llm/response
 import llm/types as llm_types
+import meta/log as meta_log
 import meta/types as meta_types
 import narrative/curator as narrative_curator
 import narrative/librarian
@@ -128,13 +129,12 @@ pub fn start(
         active_task_id: None,
         planner_dir: cfg.planner_dir,
         meta_state: case cfg.input_dprime_state {
-          Some(_) ->
-            Some(
-              meta_types.initial_state(option.unwrap(
-                cfg.meta_config,
-                meta_types.default_config(),
-              )),
-            )
+          Some(_) -> {
+            let meta_cfg =
+              option.unwrap(cfg.meta_config, meta_types.default_config())
+            // Restore from JSONL with configurable decay window
+            Some(meta_log.restore_state(meta_cfg, meta_cfg.decay_days))
+          }
           None -> None
         },
       )

@@ -511,6 +511,11 @@ fn meta_decoder() -> decode.Decoder(meta_types.MetaConfig) {
     defaults.tighten_factor,
     decode.float,
   )
+  use decay_days <- decode.optional_field(
+    "decay_days",
+    defaults.decay_days,
+    decode.int,
+  )
   decode.success(meta_types.MetaConfig(
     enabled:,
     max_history:,
@@ -526,6 +531,7 @@ fn meta_decoder() -> decode.Decoder(meta_types.MetaConfig) {
     drift_check_interval:,
     cooldown_delay_ms:,
     tighten_factor:,
+    decay_days:,
   ))
 }
 

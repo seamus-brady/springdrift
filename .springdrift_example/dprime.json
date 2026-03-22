@@ -169,7 +169,8 @@
     "rejection_count_threshold": 3,
     "rejection_window_cycles": 10,
     "cooldown_delay_ms": 5000,
-    "tighten_factor": 0.85
+    "tighten_factor": 0.85,
+    "decay_days": 7
   },
   "shared": {
     "tiers": 1,
