@@ -407,6 +407,7 @@ At startup, the Librarian replays artifact metadata from disk (configurable via
 | `introspect` | All | Perceive system state: identity, agent roster, D' config, cycle ID |
 | `how_to` | HOW_TO.md | Operator guide: tool selection heuristics, degradation paths |
 | `cancel_agent` | Registry | Stop a running agent delegation by name |
+| `report_false_positive` | Meta | Flag a D' rejection as a false positive (cycle_id + reason) |
 | `complete_task_step` | Tasks | Mark a step complete on a task |
 | `flag_risk` | Tasks | Record that a predicted risk has materialised |
 | `activate_task` | Tasks | Set a pending task as current focus |
@@ -653,10 +654,16 @@ compared directly against thresholds.
 **Meta observer** — Layer 3b post-cycle safety evaluation in `src/meta/`. Runs after
 each cognitive cycle completes, analyzing patterns across gate decisions. Detectors
 (`meta/detectors.gleam`) check for: rate limit violations (too many gates in a window),
-cumulative risk drift, rejection pattern anomalies, and Layer 3a persistence (repeated
-threshold tightening). The observer (`meta/observer.gleam`) aggregates detector signals
-into `MetaIntervention` actions. Integrated into the cognitive loop as a post-cycle
-hook — interventions are logged but do not block the current cycle.
+cumulative risk drift, rejection pattern anomalies, Layer 3a persistence (repeated
+threshold tightening), and high false positive rate (too many rejections flagged as
+false positives, suggesting overly aggressive thresholds). The observer
+(`meta/observer.gleam`) aggregates detector signals into `MetaIntervention` actions.
+Integrated into the cognitive loop as a post-cycle hook — interventions are logged but
+do not block the current cycle. The `report_false_positive` tool lets the agent flag
+D' rejections as incorrect; these annotations persist to JSONL (`meta/log.gleam`) and
+are factored into the repeated rejection detector (annotated cycles are excluded) and
+the high false positive rate detector (escalates to user when >=50% of rejections in
+the window are false positives).
 
 **Scheduler** — BEAM-native task scheduling in `scheduler/runner.gleam`. Uses OTP
 `process.send_after` for recurring tick-based execution. `scheduler/delivery.gleam`

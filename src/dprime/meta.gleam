@@ -5,7 +5,8 @@
 
 import dprime/types.{
   type DprimeState, type GateDecision, type GateResult, type Intervention,
-  AbortMaxIterations, DprimeHistoryEntry, DprimeState, NoIntervention, Stalled,
+  AbortMaxIterations, Accept, DprimeHistoryEntry, DprimeState, NoIntervention,
+  Stalled,
 }
 import gleam/float
 import gleam/int
@@ -40,11 +41,15 @@ pub fn record(
       <> ")",
     None,
   )
-  DprimeState(
-    ..state,
-    history: trimmed,
-    iteration_count: state.iteration_count + 1,
-  )
+  // Only increment iteration count for non-Accept decisions.
+  // Accept means the evaluation passed — it shouldn't count toward
+  // the MODIFY loop limit. Otherwise, normal tool call batches within
+  // a single cycle quickly exhaust the max_iterations budget.
+  let new_iteration_count = case result.decision {
+    Accept -> state.iteration_count
+    _ -> state.iteration_count + 1
+  }
+  DprimeState(..state, history: trimmed, iteration_count: new_iteration_count)
 }
 
 /// Reset iteration count (call at the start of each new user request).

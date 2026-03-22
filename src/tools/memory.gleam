@@ -26,6 +26,8 @@ import llm/tool
 import llm/types.{
   type Tool, type ToolCall, type ToolResult, ToolFailure, ToolSuccess,
 }
+import meta/log as meta_log
+import meta/types as meta_types
 import narrative/librarian.{type LibrarianMessage}
 import narrative/log as narrative_log
 import narrative/types as narrative_types
@@ -44,6 +46,57 @@ fn days_ago_date(days: Int) -> String
 // ---------------------------------------------------------------------------
 // Tool definitions
 // ---------------------------------------------------------------------------
+
+/// Check if a tool is exempt from D' tool gate evaluation.
+/// Memory tools are internal system operations — read-only queries,
+/// fact management, diagnostic inspection, and safety feedback.
+/// They cannot exfiltrate data, modify files, or access the network.
+/// Gating them causes false positives and blocks the safety feedback loop.
+pub fn is_dprime_exempt(name: String) -> Bool {
+  case name {
+    // Read-only queries
+    "recall_recent"
+    | "recall_search"
+    | "recall_threads"
+    | "recall_cases"
+    | "reflect"
+    | "inspect_cycle"
+    | "list_recent_cycles"
+    | "query_tool_activity"
+    | "introspect"
+    | "how_to" -> True
+    // Fact management (internal key-value store)
+    "memory_write"
+    | "memory_read"
+    | "memory_clear_key"
+    | "memory_query_facts"
+    | "memory_trace_fact" -> True
+    // CBR case management (internal)
+    "correct_case" | "annotate_case" | "suppress_case" | "boost_case" -> True
+    // Planner tools (internal task tracking)
+    "complete_task_step"
+    | "flag_risk"
+    | "activate_task"
+    | "abandon_task"
+    | "create_endeavour"
+    | "add_task_to_endeavour"
+    | "get_active_work"
+    | "get_task_detail" -> True
+    // Safety feedback — MUST be exempt to avoid chicken-and-egg blocking
+    "report_false_positive" -> True
+    // Agent management
+    "cancel_agent" -> True
+    // Built-in tools
+    "calculator" | "get_current_datetime" | "read_skill" -> True
+    // Agent delegations — sub-agents have their own D' gates on tool calls,
+    // so gating the delegation itself is double-counting
+    _ ->
+      case string.starts_with(name, "agent_") {
+        True -> True
+        False -> False
+      }
+  }
+}
 
 pub fn all() -> List(Tool) {
   [
@@ -67,6 +120,7 @@ pub fn all() -> List(Tool) {
     suppress_case_tool(),
     boost_case_tool(),
     cancel_agent_tool(),
+    report_false_positive_tool(),
   ]
 }
 
@@ -448,6 +502,7 @@ pub fn execute_with_how_to(
     "suppress_case" -> run_suppress_case(call, lib)
     "boost_case" -> run_boost_case(call, lib)
     "cancel_agent" -> run_cancel_agent(call, agent_mgmt)
+    "report_false_positive" -> run_report_false_positive(call)
     _ -> ToolFailure(tool_use_id: call.id, error: "Unknown tool: " <> call.name)
   }
 }
@@ -2209,6 +2264,67 @@ fn run_boost_case(
               ToolFailure(tool_use_id: call.id, error: "Boost failed: " <> e)
           }
       }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// report_false_positive
+// ---------------------------------------------------------------------------
+
+fn report_false_positive_tool() -> Tool {
+  tool.new("report_false_positive")
+  |> tool.with_description(
+    "Report a D' safety rejection as a false positive. Use when you believe a "
+    <> "rejection was incorrect — the request was legitimate but the safety system "
+    <> "blocked it. This feedback is used by the meta observer to detect overly "
+    <> "aggressive thresholds and avoid escalating on repeated false rejections.",
+  )
+  |> tool.add_string_param(
+    "cycle_id",
+    "The cycle_id where the false rejection occurred (from inspect_cycle or the rejection notice)",
+    True,
+  )
+  |> tool.add_string_param(
+    "reason",
+    "Brief explanation of why this was a false positive",
+    True,
+  )
+  |> tool.build()
+}
+
+fn run_report_false_positive(call: ToolCall) -> ToolResult {
+  let decoder = {
+    use cycle_id <- decode.field("cycle_id", decode.string)
+    use reason <- decode.field("reason", decode.string)
+    decode.success(#(cycle_id, reason))
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "Invalid report_false_positive input: missing cycle_id or reason",
+      )
+    Ok(#(cycle_id, reason)) -> {
+      let annotation =
+        meta_types.FalsePositiveAnnotation(
+          cycle_id:,
+          reason:,
+          timestamp: get_datetime(),
+        )
+      meta_log.append_false_positive(annotation)
+      slog.info(
+        "memory",
+        "report_false_positive",
+        "False positive reported for cycle " <> cycle_id <> ": " <> reason,
+        Some(cycle_id),
+      )
+      ToolSuccess(
+        tool_use_id: call.id,
+        content: "False positive recorded for cycle "
+          <> cycle_id
+          <> ". The meta observer will factor this into its rejection pattern analysis.",
+      )
     }
   }
 }

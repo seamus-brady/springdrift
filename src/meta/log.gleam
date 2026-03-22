@@ -10,7 +10,10 @@ import gleam/json
 import gleam/list
 import gleam/option.{Some}
 import gleam/string
-import meta/types.{type MetaConfig, type MetaObservation, type MetaState}
+import meta/types.{
+  type FalsePositiveAnnotation, type MetaConfig, type MetaObservation,
+  type MetaState,
+}
 import simplifile
 import slog
 
@@ -61,6 +64,87 @@ pub fn append(obs: MetaObservation) -> Nil {
   }
 }
 
+/// Append a false positive annotation to today's JSONL file.
+pub fn append_false_positive(fp: FalsePositiveAnnotation) -> Nil {
+  let dir = meta_dir()
+  let date = get_date()
+  let path = dir <> "/" <> date <> "-meta.jsonl"
+  let _ = simplifile.create_directory_all(dir)
+  let entry =
+    json.object([
+      #("type", json.string("false_positive")),
+      #("cycle_id", json.string(fp.cycle_id)),
+      #("reason", json.string(fp.reason)),
+      #("timestamp", json.string(fp.timestamp)),
+    ])
+  case simplifile.append(path, json.to_string(entry) <> "\n") {
+    Ok(_) -> Nil
+    Error(e) ->
+      slog.log_error(
+        "meta/log",
+        "append_false_positive",
+        "Failed to append: " <> simplifile.describe_error(e),
+        Some(fp.cycle_id),
+      )
+  }
+}
+
+/// Load false positive annotations from recent JSONL files.
+pub fn load_false_positives(max_days: Int) -> List(FalsePositiveAnnotation) {
+  let dir = meta_dir()
+  let today = get_date()
+  case simplifile.read_directory(dir) {
+    Error(_) -> []
+    Ok(files) ->
+      files
+      |> list.filter(fn(f) { string.ends_with(f, "-meta.jsonl") })
+      |> list.filter(fn(f) {
+        let date = string.slice(f, 0, 10)
+        days_between(date, today) <= max_days
+      })
+      |> list.sort(string.compare)
+      |> list.flat_map(fn(f) {
+        let path = dir <> "/" <> f
+        case simplifile.read(path) {
+          Error(_) -> []
+          Ok(contents) -> parse_false_positives(contents)
+        }
+      })
+  }
+}
+
+fn parse_false_positives(contents: String) -> List(FalsePositiveAnnotation) {
+  contents
+  |> string.split("\n")
+  |> list.filter(fn(l) { string.trim(l) != "" })
+  |> list.filter_map(fn(line) {
+    case json.parse(line, false_positive_decoder()) {
+      Ok(fp) -> Ok(fp)
+      Error(_) -> Error(Nil)
+    }
+  })
+}
+
+fn false_positive_decoder() -> decode.Decoder(FalsePositiveAnnotation) {
+  use entry_type <- decode.optional_field("type", "", decode.string)
+  use cycle_id <- decode.field("cycle_id", decode.string)
+  use reason <- decode.optional_field("reason", "", decode.string)
+  use timestamp <- decode.optional_field("timestamp", "", decode.string)
+  case entry_type {
+    "false_positive" ->
+      decode.success(types.FalsePositiveAnnotation(
+        cycle_id:,
+        reason:,
+        timestamp:,
+      ))
+    _ ->
+      decode.failure(
+        types.FalsePositiveAnnotation(cycle_id: "", reason: "", timestamp: ""),
+        "not a false_positive entry",
+      )
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Load with decay
 // ---------------------------------------------------------------------------
@@ -96,9 +180,10 @@ pub fn load_recent(max_days: Int) -> List(MetaObservation) {
 /// the restored state uses fresh config thresholds (full reset).
 pub fn restore_state(config: MetaConfig, max_days: Int) -> MetaState {
   let observations = load_recent(max_days)
+  let false_positives = load_false_positives(max_days)
   let base_state = types.initial_state(config)
   case observations {
-    [] -> base_state
+    [] -> types.MetaState(..base_state, false_positives:)
     _ -> {
       // Replay observations to rebuild state
       let state =
@@ -120,6 +205,8 @@ pub fn restore_state(config: MetaConfig, max_days: Int) -> MetaState {
         pending_intervention: types.NoIntervention,
         // Don't carry forward signals — they'll be re-detected
         last_signals: [],
+        // Restore false positive annotations
+        false_positives:,
       )
     }
   }

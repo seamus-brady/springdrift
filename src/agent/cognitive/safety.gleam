@@ -126,8 +126,7 @@ fn build_user_response(result: dprime_types.GateResult) -> String {
       "I'm rate-limiting my web requests to avoid overloading the source."
     "sensitive_domain" ->
       "I can't access that source — it may contain sensitive content."
-    _ ->
-      "I've flagged a concern with that request and can't proceed as asked."
+    _ -> "I've flagged a concern with that request and can't proceed as asked."
   }
 }
 

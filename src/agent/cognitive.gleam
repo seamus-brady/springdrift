@@ -18,6 +18,7 @@ import agent/types.{
 import agent/worker
 import cycle_log
 import dag/types as dag_types
+import dprime/meta as dprime_meta
 import gleam/dict
 import gleam/erlang/process.{type Subject}
 import gleam/float
@@ -465,6 +466,16 @@ fn handle_user_input(
           cycle_started_ms: monotonic_now_ms(),
           cycle_node_type: dag_types.CognitiveCycle,
           dprime_decisions: [],
+          // Reset D' iteration counters at cycle start so
+          // per-cycle MODIFY budgets don't accumulate across cycles
+          tool_dprime_state: option.map(
+            state.tool_dprime_state,
+            dprime_meta.reset_iterations,
+          ),
+          input_dprime_state: option.map(
+            state.input_dprime_state,
+            dprime_meta.reset_iterations,
+          ),
         )
 
       // Spawn async classification worker — rescue catches panics
@@ -587,6 +598,14 @@ fn handle_scheduler_input(
           cycle_started_ms: monotonic_now_ms(),
           cycle_node_type: dag_types.SchedulerCycle,
           dprime_decisions: [],
+          tool_dprime_state: option.map(
+            state.tool_dprime_state,
+            dprime_meta.reset_iterations,
+          ),
+          input_dprime_state: option.map(
+            state.input_dprime_state,
+            dprime_meta.reset_iterations,
+          ),
         )
 
       // Select input text based on job kind
@@ -987,8 +1006,21 @@ fn handle_think_complete(
         }
         True -> {
           let calls = response.tool_calls(resp)
-          // D' gate intercept: if enabled, evaluate before dispatch
+          // D' gate intercept: if enabled, evaluate before dispatch.
+          // Skip D' when ALL tool calls are exempt (memory, planner,
+          // builtin tools — internal operations that can't exfiltrate
+          // data or modify the filesystem).
+          let all_exempt =
+            list.all(calls, fn(c) { memory.is_dprime_exempt(c.name) })
           case state.tool_dprime_state {
+            _ if all_exempt ->
+              cognitive_agents.dispatch_tool_calls(
+                state,
+                task_id,
+                resp,
+                calls,
+                rt,
+              )
             None ->
               cognitive_agents.dispatch_tool_calls(
                 state,

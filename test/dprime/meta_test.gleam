@@ -60,6 +60,19 @@ pub fn record_increments_iteration_count_test() {
   new_state.iteration_count |> should.equal(1)
 }
 
+pub fn record_accept_does_not_increment_iteration_count_test() {
+  let state = test_state()
+  let result = test_gate_result(0.1, Accept)
+  let s1 = meta.record(state, "cycle-1", result, "2026-03-04T10:00:00Z")
+  s1.iteration_count |> should.equal(0)
+  let s2 = meta.record(s1, "cycle-2", result, "2026-03-04T10:01:00Z")
+  s2.iteration_count |> should.equal(0)
+  // But Modify still increments
+  let modify_result = test_gate_result(0.5, Modify)
+  let s3 = meta.record(s2, "cycle-3", modify_result, "2026-03-04T10:02:00Z")
+  s3.iteration_count |> should.equal(1)
+}
+
 pub fn record_prepends_newest_first_test() {
   let state = test_state()
   let r1 = test_gate_result(0.1, Accept)
@@ -92,7 +105,8 @@ pub fn record_trims_to_max_history_test() {
 
 pub fn reset_iterations_test() {
   let state = test_state()
-  let r = test_gate_result(0.1, Accept)
+  // Use Modify since Accept no longer increments iteration_count
+  let r = test_gate_result(0.5, Modify)
   let s1 = meta.record(state, "c1", r, "t1")
   s1.iteration_count |> should.equal(1)
   let s2 = meta.reset_iterations(s1)

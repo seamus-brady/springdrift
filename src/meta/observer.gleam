@@ -8,8 +8,8 @@ import gleam/list
 import meta/detectors
 import meta/types.{
   type MetaIntervention, type MetaObservation, type MetaSignal, type MetaState,
-  CumulativeRiskSignal, EscalateToUser, ForceCooldown, InjectCaution,
-  Layer3aPersistenceSignal, NoIntervention, RateLimitSignal,
+  CumulativeRiskSignal, EscalateToUser, ForceCooldown, HighFalsePositiveSignal,
+  InjectCaution, Layer3aPersistenceSignal, NoIntervention, RateLimitSignal,
   RepeatedRejectionSignal, TightenAllGates,
 }
 
@@ -88,27 +88,42 @@ fn determine_intervention(
             _ -> False
           }
         })
+      let has_high_fp =
+        list.any(signals, fn(s) {
+          case s {
+            HighFalsePositiveSignal(..) -> True
+            _ -> False
+          }
+        })
 
-      // Rate limit + repeated rejections = escalate to user
-      case has_rate_limit && has_repeated_rejection {
+      // Priority: high FP rate > rate+rejection > rejection > cumulative/3a > rate > none
+      case has_high_fp {
         True ->
           EscalateToUser(
-            title: "Meta observer: safety concern",
-            body: "High cycle rate combined with repeated D' rejections. The agent may be stuck in a blocked loop.",
+            title: "Meta observer: high false positive rate",
+            body: "Multiple D' rejections have been flagged as false positives. Current thresholds may be too aggressive — consider reviewing dprime.json.",
           )
         False ->
-          case has_repeated_rejection {
-            True -> ForceCooldown(delay_ms: state.config.cooldown_delay_ms)
+          case has_rate_limit && has_repeated_rejection {
+            True ->
+              EscalateToUser(
+                title: "Meta observer: safety concern",
+                body: "High cycle rate combined with repeated D' rejections. The agent may be stuck in a blocked loop.",
+              )
             False ->
-              case has_cumulative || has_layer3a {
-                True -> TightenAllGates(factor: state.config.tighten_factor)
+              case has_repeated_rejection {
+                True -> ForceCooldown(delay_ms: state.config.cooldown_delay_ms)
                 False ->
-                  case has_rate_limit {
-                    True ->
-                      InjectCaution(
-                        message: "Meta observer: high cycle rate detected. Consider whether current approach is productive.",
-                      )
-                    False -> NoIntervention
+                  case has_cumulative || has_layer3a {
+                    True -> TightenAllGates(factor: state.config.tighten_factor)
+                    False ->
+                      case has_rate_limit {
+                        True ->
+                          InjectCaution(
+                            message: "Meta observer: high cycle rate detected. Consider whether current approach is productive.",
+                          )
+                        False -> NoIntervention
+                      }
                   }
               }
           }

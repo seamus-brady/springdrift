@@ -22,7 +22,7 @@ pub fn main() -> Nil {
 
 pub fn memory_tools_defined_test() {
   let tools = memory.all()
-  tools |> list.length |> should.equal(20)
+  tools |> list.length |> should.equal(21)
 }
 
 pub fn recall_recent_tool_exists_test() {
@@ -898,4 +898,64 @@ pub fn annotate_case_no_librarian_test() {
       should.be_true(string.contains(e, "not available"))
     _ -> should.fail()
   }
+}
+
+// ---------------------------------------------------------------------------
+// D' exemption tests
+// ---------------------------------------------------------------------------
+
+pub fn dprime_exempt_memory_read_tools_test() {
+  memory.is_dprime_exempt("recall_recent") |> should.be_true
+  memory.is_dprime_exempt("recall_search") |> should.be_true
+  memory.is_dprime_exempt("recall_threads") |> should.be_true
+  memory.is_dprime_exempt("recall_cases") |> should.be_true
+  memory.is_dprime_exempt("reflect") |> should.be_true
+  memory.is_dprime_exempt("inspect_cycle") |> should.be_true
+  memory.is_dprime_exempt("list_recent_cycles") |> should.be_true
+  memory.is_dprime_exempt("query_tool_activity") |> should.be_true
+  memory.is_dprime_exempt("introspect") |> should.be_true
+  memory.is_dprime_exempt("how_to") |> should.be_true
+}
+
+pub fn dprime_exempt_memory_write_tools_test() {
+  memory.is_dprime_exempt("memory_write") |> should.be_true
+  memory.is_dprime_exempt("memory_read") |> should.be_true
+  memory.is_dprime_exempt("memory_clear_key") |> should.be_true
+  memory.is_dprime_exempt("memory_query_facts") |> should.be_true
+  memory.is_dprime_exempt("memory_trace_fact") |> should.be_true
+}
+
+pub fn dprime_exempt_planner_tools_test() {
+  memory.is_dprime_exempt("complete_task_step") |> should.be_true
+  memory.is_dprime_exempt("flag_risk") |> should.be_true
+  memory.is_dprime_exempt("activate_task") |> should.be_true
+  memory.is_dprime_exempt("abandon_task") |> should.be_true
+  memory.is_dprime_exempt("create_endeavour") |> should.be_true
+  memory.is_dprime_exempt("get_active_work") |> should.be_true
+  memory.is_dprime_exempt("get_task_detail") |> should.be_true
+}
+
+pub fn dprime_exempt_safety_feedback_test() {
+  // Critical: safety feedback tool MUST be exempt to avoid chicken-and-egg
+  memory.is_dprime_exempt("report_false_positive") |> should.be_true
+}
+
+pub fn dprime_exempt_agent_delegations_test() {
+  memory.is_dprime_exempt("agent_planner") |> should.be_true
+  memory.is_dprime_exempt("agent_researcher") |> should.be_true
+  memory.is_dprime_exempt("agent_coder") |> should.be_true
+  memory.is_dprime_exempt("agent_writer") |> should.be_true
+  memory.is_dprime_exempt("agent_observer") |> should.be_true
+  memory.is_dprime_exempt("agent_scheduler") |> should.be_true
+}
+
+pub fn dprime_not_exempt_external_tools_test() {
+  // External-facing tools should NOT be exempt
+  memory.is_dprime_exempt("fetch_url") |> should.be_false
+  memory.is_dprime_exempt("web_search") |> should.be_false
+  memory.is_dprime_exempt("run_code") |> should.be_false
+  memory.is_dprime_exempt("serve") |> should.be_false
+  memory.is_dprime_exempt("sandbox_exec") |> should.be_false
+  memory.is_dprime_exempt("write_file") |> should.be_false
+  memory.is_dprime_exempt("request_human_input") |> should.be_false
 }

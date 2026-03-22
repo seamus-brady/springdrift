@@ -43,19 +43,21 @@ fn redact_jwts(text: String) -> String {
 }
 
 /// API keys by prefix: sk-ant-, sk-, ghp_, xoxb-, AIza
-/// Also catches JSON fields named key/token/secret/apikey/api_key with long opaque values
+/// Also catches JSON fields specifically named for secrets with long opaque values.
+/// Note: "key" and "token" alone are too generic (matches memory_write "key" param,
+/// "tokens_used" context, etc.). Only match compound names that imply secrets.
 fn redact_api_keys(text: String) -> String {
-  // Known prefixes
+  // Known prefixes (word boundary prevents matching inside words like "task-...")
   let t1 =
-    re_replace_all(text, "sk-ant-[A-Za-z0-9_-]{20,}", "[REDACTED:api_key]")
-  let t2 = re_replace_all(t1, "sk-[A-Za-z0-9_-]{20,}", "[REDACTED:api_key]")
+    re_replace_all(text, "\\bsk-ant-[A-Za-z0-9_-]{20,}", "[REDACTED:api_key]")
+  let t2 = re_replace_all(t1, "\\bsk-[A-Za-z0-9_-]{20,}", "[REDACTED:api_key]")
   let t3 = re_replace_all(t2, "ghp_[A-Za-z0-9]{20,}", "[REDACTED:api_key]")
   let t4 = re_replace_all(t3, "xoxb-[A-Za-z0-9-]{20,}", "[REDACTED:api_key]")
   let t5 = re_replace_all(t4, "AIza[A-Za-z0-9_-]{20,}", "[REDACTED:api_key]")
-  // JSON fields: "key": "long_opaque_value", "token": "...", etc.
+  // JSON fields with secret-specific names only (not generic "key" or "token")
   re_replace_all(
     t5,
-    "\"(?:key|token|secret|apikey|api_key)\"\\s*:\\s*\"[^\"]{20,}\"",
+    "\"(?:secret|apikey|api_key|access_token|auth_token|refresh_token|client_secret|private_key)\"\\s*:\\s*\"[^\"]{20,}\"",
     "\"[REDACTED:api_key]\"",
   )
 }

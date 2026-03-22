@@ -7,7 +7,7 @@
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import meta/types.{
-  type MetaSignal, type MetaState, CumulativeRiskSignal,
+  type MetaSignal, type MetaState, CumulativeRiskSignal, HighFalsePositiveSignal,
   Layer3aPersistenceSignal, RateLimitSignal, RepeatedRejectionSignal,
 }
 
@@ -58,16 +58,46 @@ pub fn detect_cumulative_risk(state: MetaState) -> Option(MetaSignal) {
 // ---------------------------------------------------------------------------
 
 /// Detect repeated rejections within a window of recent cycles.
+/// Rejections on cycles annotated as false positives are excluded.
 pub fn detect_repeated_rejections(state: MetaState) -> Option(MetaSignal) {
   let cfg = state.config
   let window = list.take(state.observations, cfg.rejection_window_cycles)
-  let rejection_count = list.count(window, types.has_rejection)
+  let rejection_count =
+    list.count(window, fn(obs) {
+      types.has_rejection(obs) && !types.is_false_positive(state, obs.cycle_id)
+    })
   case rejection_count >= cfg.rejection_count_threshold {
     True ->
       Some(RepeatedRejectionSignal(
         rejection_count:,
         window_cycles: cfg.rejection_window_cycles,
       ))
+    False -> None
+  }
+}
+
+/// Detect high false positive rate — suggests thresholds are too aggressive.
+pub fn detect_high_false_positive_rate(state: MetaState) -> Option(MetaSignal) {
+  let cfg = state.config
+  let window = list.take(state.observations, cfg.rejection_window_cycles)
+  let rejection_count = list.count(window, types.has_rejection)
+  let fp_count =
+    list.count(window, fn(obs) {
+      types.has_rejection(obs) && types.is_false_positive(state, obs.cycle_id)
+    })
+  // Signal when there are at least 2 false positives AND they represent >50% of rejections
+  case fp_count >= 2 && rejection_count > 0 {
+    True -> {
+      let fp_rate = int_to_float(fp_count) /. int_to_float(rejection_count)
+      case fp_rate >=. 0.5 {
+        True ->
+          Some(HighFalsePositiveSignal(
+            fp_count:,
+            window_cycles: cfg.rejection_window_cycles,
+          ))
+        False -> None
+      }
+    }
     False -> None
   }
 }
@@ -108,6 +138,7 @@ pub fn run_all(state: MetaState) -> List(MetaSignal) {
     detect_cumulative_risk(state),
     detect_repeated_rejections(state),
     detect_layer3a_persistence(state),
+    detect_high_false_positive_rate(state),
   ]
   |> list.filter_map(fn(opt) {
     case opt {

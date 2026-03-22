@@ -44,6 +44,8 @@ pub type MetaSignal {
   Layer3aPersistenceSignal(tightening_count: Int, window_cycles: Int)
   /// Persona drift detected (bounded LLM check)
   PersonaDriftSignal(drift_description: String, confidence: Float)
+  /// High false positive rate suggests thresholds are too aggressive
+  HighFalsePositiveSignal(fp_count: Int, window_cycles: Int)
 }
 
 // ---------------------------------------------------------------------------
@@ -68,6 +70,11 @@ pub type MetaIntervention {
 // Meta state — persisted between cycles
 // ---------------------------------------------------------------------------
 
+/// A false positive annotation — agent reported a D' rejection was wrong.
+pub type FalsePositiveAnnotation {
+  FalsePositiveAnnotation(cycle_id: String, reason: String, timestamp: String)
+}
+
 /// Persistent meta observer state, updated after each cycle.
 pub type MetaState {
   MetaState(
@@ -85,6 +92,8 @@ pub type MetaState {
     total_cycles: Int,
     /// Configuration
     config: MetaConfig,
+    /// False positive annotations from agent feedback
+    false_positives: List(FalsePositiveAnnotation),
   )
 }
 
@@ -159,6 +168,7 @@ pub fn initial_state(config: MetaConfig) -> MetaState {
     rejection_streak: 0,
     total_cycles: 0,
     config:,
+    false_positives: [],
   )
 }
 
@@ -177,6 +187,19 @@ pub fn record_observation(state: MetaState, obs: MetaObservation) -> MetaState {
 }
 
 import gleam/list
+
+/// Record a false positive annotation.
+pub fn record_false_positive(
+  state: MetaState,
+  annotation: FalsePositiveAnnotation,
+) -> MetaState {
+  MetaState(..state, false_positives: [annotation, ..state.false_positives])
+}
+
+/// Check if a cycle_id has been annotated as a false positive.
+pub fn is_false_positive(state: MetaState, cycle_id: String) -> Bool {
+  list.any(state.false_positives, fn(fp) { fp.cycle_id == cycle_id })
+}
 
 /// Check if any gate decision in an observation was a rejection.
 pub fn has_rejection(obs: MetaObservation) -> Bool {
