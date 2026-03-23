@@ -146,6 +146,7 @@ src/
     └── adapters/
         ├── anthropic.gleam    Anthropic SDK translation
         ├── openai.gleam       OpenAI / OpenRouter translation
+        ├── vertex.gleam       Google Vertex AI (Anthropic models via rawPredict)
         └── mock.gleam         Test/fallback provider with injectable responses
 ```
 
@@ -302,7 +303,7 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 
 | Field | CLI flag | Default | Purpose |
 |---|---|---|---|
-| `provider` | `--provider` | mock | anthropic \| openrouter \| openai \| mistral \| local \| mock |
+| `provider` | `--provider` | mock | anthropic \| openrouter \| openai \| mistral \| vertex \| local \| mock |
 | `task_model` | `--task-model` | provider default | Model for Simple queries |
 | `reasoning_model` | `--reasoning-model` | provider default | Model for Complex queries |
 | `agent_name` | `--agent-name` | "Springdrift" | Agent name (used in persona `{{agent_name}}` slot) |
@@ -349,6 +350,9 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `sandbox_port_stride` | — | 100 | Host port stride per slot |
 | `sandbox_ports_per_slot` | — | 5 | Ports forwarded per slot |
 | `sandbox_auto_machine` | — | True | Auto-start podman machine on macOS |
+| `vertex_project_id` | — | None | GCP project ID (required for vertex provider) |
+| `vertex_location` | — | "europe-west1" | GCP location / region |
+| `vertex_endpoint` | — | derived from location | Vertex AI endpoint hostname (e.g. `europe-west1-aiplatform.googleapis.com`) |
 
 ## Memory architecture
 
@@ -815,6 +819,7 @@ The config is organized into these TOML sections:
 | `[services]` | External API base URLs (DuckDuckGo, Brave, Jina) |
 | `[sandbox]` | Local Podman sandbox: enabled, pool_size, memory, ports, image |
 | `[delegation]` | Agent delegation depth limits |
+| `[vertex]` | Google Vertex AI provider: project_id, location, endpoint |
 
 Quick example (top-level fields only):
 

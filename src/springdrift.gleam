@@ -27,6 +27,7 @@ import llm/adapters/local as local_adapter
 import llm/adapters/mistral as mistral_adapter
 import llm/adapters/mock
 import llm/adapters/openai as openai_adapter
+import llm/adapters/vertex as vertex_adapter
 import llm/provider.{type Provider}
 import llm/retry
 import llm/types as llm_types
@@ -895,7 +896,11 @@ fn select_provider(
       case anthropic_adapter.provider_with_timeout(llm_timeout_ms) {
         Ok(p) -> {
           io.println("Provider : Anthropic")
-          #(p, "claude-haiku-4-5-20251001", "claude-opus-4-6")
+          let tm =
+            option.unwrap(cfg.anthropic_task_model, "claude-haiku-4-5-20251001")
+          let rm =
+            option.unwrap(cfg.anthropic_reasoning_model, "claude-opus-4-6")
+          #(p, tm, rm)
         }
         Error(_) -> {
           io.println("Error: ANTHROPIC_API_KEY not set. Falling back to mock.")
@@ -931,7 +936,14 @@ fn select_provider(
       case mistral_adapter.provider_from_env() {
         Ok(p) -> {
           io.println("Provider : Mistral")
-          #(p, mistral_adapter.mistral_small, mistral_adapter.mistral_large)
+          let tm =
+            option.unwrap(cfg.mistral_task_model, mistral_adapter.mistral_small)
+          let rm =
+            option.unwrap(
+              cfg.mistral_reasoning_model,
+              mistral_adapter.mistral_large,
+            )
+          #(p, tm, rm)
         }
         Error(_) -> {
           io.println("Error: MISTRAL_API_KEY not set. Falling back to mock.")
@@ -939,11 +951,62 @@ fn select_provider(
         }
       }
     }
+    option.Some("vertex") -> {
+      let project_id = option.unwrap(cfg.vertex_project_id, "")
+      let location = option.unwrap(cfg.vertex_location, "europe-west1")
+      let endpoint =
+        option.unwrap(
+          cfg.vertex_endpoint,
+          location <> "-aiplatform.googleapis.com",
+        )
+      case project_id {
+        "" -> {
+          io.println(
+            "Error: vertex provider requires [vertex] project_id in config.toml.",
+          )
+          #(mock_provider(), "mock-model", "mock-model")
+        }
+        _ ->
+          case
+            vertex_adapter.provider_from_config(project_id, location, endpoint)
+          {
+            Ok(p) -> {
+              io.println(
+                "Provider : Vertex AI (project: "
+                <> project_id
+                <> ", endpoint: "
+                <> endpoint
+                <> ")",
+              )
+              let tm =
+                option.unwrap(
+                  cfg.vertex_task_model,
+                  vertex_adapter.claude_haiku_4_5,
+                )
+              let rm =
+                option.unwrap(
+                  cfg.vertex_reasoning_model,
+                  vertex_adapter.claude_opus_4_6,
+                )
+              #(p, tm, rm)
+            }
+            Error(_) -> {
+              io.println(
+                "Error: VERTEX_AI_TOKEN not set. Falling back to mock.",
+              )
+              #(mock_provider(), "mock-model", "mock-model")
+            }
+          }
+      }
+    }
     option.Some("local") ->
       case local_adapter.provider_from_env() {
         Ok(p) -> {
           io.println("Provider : Local")
-          #(p, local_adapter.smollm3, local_adapter.smollm3)
+          let tm = option.unwrap(cfg.local_task_model, local_adapter.smollm3)
+          let rm =
+            option.unwrap(cfg.local_reasoning_model, local_adapter.smollm3)
+          #(p, tm, rm)
         }
         Error(_) -> {
           io.println(

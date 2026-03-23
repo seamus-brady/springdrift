@@ -169,6 +169,19 @@ pub type AppConfig {
     xstructor_max_retries: Option(Int),
     // ── Preamble budget ──
     preamble_budget_chars: Option(Int),
+    // ── Vertex AI ──
+    vertex_project_id: Option(String),
+    vertex_location: Option(String),
+    vertex_endpoint: Option(String),
+    // ── Per-provider model overrides ──
+    vertex_task_model: Option(String),
+    vertex_reasoning_model: Option(String),
+    anthropic_task_model: Option(String),
+    anthropic_reasoning_model: Option(String),
+    mistral_task_model: Option(String),
+    mistral_reasoning_model: Option(String),
+    local_task_model: Option(String),
+    local_reasoning_model: Option(String),
     // ── Delegation ──
     max_delegation_depth: Option(Int),
     // ── Forecaster ──
@@ -304,6 +317,17 @@ pub fn default() -> AppConfig {
     autonomous_token_budget_per_hour: None,
     xstructor_max_retries: None,
     preamble_budget_chars: None,
+    vertex_project_id: None,
+    vertex_location: None,
+    vertex_endpoint: None,
+    vertex_task_model: None,
+    vertex_reasoning_model: None,
+    anthropic_task_model: None,
+    anthropic_reasoning_model: None,
+    mistral_task_model: None,
+    mistral_reasoning_model: None,
+    local_task_model: None,
+    local_reasoning_model: None,
     max_delegation_depth: None,
     forecaster_enabled: None,
     forecaster_tick_ms: None,
@@ -706,6 +730,50 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       override_cfg.preamble_budget_chars,
       base.preamble_budget_chars,
     ),
+    vertex_project_id: option.or(
+      override_cfg.vertex_project_id,
+      base.vertex_project_id,
+    ),
+    vertex_location: option.or(
+      override_cfg.vertex_location,
+      base.vertex_location,
+    ),
+    vertex_endpoint: option.or(
+      override_cfg.vertex_endpoint,
+      base.vertex_endpoint,
+    ),
+    vertex_task_model: option.or(
+      override_cfg.vertex_task_model,
+      base.vertex_task_model,
+    ),
+    vertex_reasoning_model: option.or(
+      override_cfg.vertex_reasoning_model,
+      base.vertex_reasoning_model,
+    ),
+    anthropic_task_model: option.or(
+      override_cfg.anthropic_task_model,
+      base.anthropic_task_model,
+    ),
+    anthropic_reasoning_model: option.or(
+      override_cfg.anthropic_reasoning_model,
+      base.anthropic_reasoning_model,
+    ),
+    mistral_task_model: option.or(
+      override_cfg.mistral_task_model,
+      base.mistral_task_model,
+    ),
+    mistral_reasoning_model: option.or(
+      override_cfg.mistral_reasoning_model,
+      base.mistral_reasoning_model,
+    ),
+    local_task_model: option.or(
+      override_cfg.local_task_model,
+      base.local_task_model,
+    ),
+    local_reasoning_model: option.or(
+      override_cfg.local_reasoning_model,
+      base.local_reasoning_model,
+    ),
     max_delegation_depth: option.or(
       override_cfg.max_delegation_depth,
       base.max_delegation_depth,
@@ -1011,7 +1079,7 @@ fn get_toml_float(
   }
 }
 
-fn get_toml_string_array(
+fn get_toml_str_array(
   table: dict.Dict(String, tom.Toml),
   path: List(String),
 ) -> Option(List(String)) {
@@ -1045,7 +1113,7 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     max_context_messages: get_int("max_context_messages"),
     log_verbose: get_bool("log_verbose"),
     write_anywhere: get_bool("write_anywhere"),
-    skills_dirs: get_toml_string_array(table, ["skills_dirs"]),
+    skills_dirs: get_toml_str_array(table, ["skills_dirs"]),
     log_retention_days: get_int("log_retention_days"),
     log_max_file_bytes: get_int("log_max_file_bytes"),
     config_path: None,
@@ -1229,6 +1297,20 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
       "narrative", "preamble_budget_chars",
     ]),
     // ── [delegation] ──
+    // ── [vertex] ──
+    vertex_project_id: get_toml_str(table, ["vertex", "project_id"]),
+    vertex_location: get_toml_str(table, ["vertex", "location"]),
+    vertex_endpoint: get_toml_str(table, ["vertex", "endpoint"]),
+    vertex_task_model: get_toml_str(table, ["vertex", "task_model"]),
+    vertex_reasoning_model: get_toml_str(table, ["vertex", "reasoning_model"]),
+    anthropic_task_model: get_toml_str(table, ["anthropic", "task_model"]),
+    anthropic_reasoning_model: get_toml_str(table, [
+      "anthropic", "reasoning_model",
+    ]),
+    mistral_task_model: get_toml_str(table, ["mistral", "task_model"]),
+    mistral_reasoning_model: get_toml_str(table, ["mistral", "reasoning_model"]),
+    local_task_model: get_toml_str(table, ["local", "task_model"]),
+    local_reasoning_model: get_toml_str(table, ["local", "reasoning_model"]),
     max_delegation_depth: get_toml_int(table, ["delegation", "max_depth"]),
     // ── [forecaster] ──
     forecaster_enabled: get_toml_bool(table, ["forecaster", "enabled"]),
@@ -1273,7 +1355,7 @@ const known_keys = [
   "narrative", "agent", "log_retention_days", "log_max_file_bytes", "timeouts",
   "retry", "limits", "scoring", "housekeeping", "housekeeper", "cbr", "agents",
   "web", "services", "scheduler", "xstructor", "forecaster", "sandbox",
-  "delegation",
+  "delegation", "vertex", "anthropic", "mistral", "local",
 ]
 
 const known_narrative_keys = [
@@ -1363,7 +1445,15 @@ fn validate_config_values(cfg: AppConfig) -> Nil {
     Some(p) ->
       case
         list.contains(
-          ["anthropic", "openrouter", "openai", "mistral", "local", "mock"],
+          [
+            "anthropic",
+            "openrouter",
+            "openai",
+            "mistral",
+            "vertex",
+            "local",
+            "mock",
+          ],
           p,
         )
       {
@@ -1374,7 +1464,7 @@ fn validate_config_values(cfg: AppConfig) -> Nil {
             "validate",
             "Unknown provider: \""
               <> p
-              <> "\". Valid: anthropic, openrouter, openai, mistral, local, mock",
+              <> "\". Valid: anthropic, openrouter, openai, mistral, vertex, local, mock",
             None,
           )
       }

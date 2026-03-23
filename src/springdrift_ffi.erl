@@ -16,7 +16,9 @@
          ms_until_datetime/1, advance_datetime_ms/2,
          re_replace_all/3,
          set_env/2,
-         run_cmd/3, which/1]).
+         run_cmd/3, which/1,
+         json_encode_term/1, json_decode_to_string/1,
+         identity/1]).
 
 %% Read one line from stdin.
 %% Returns {ok, Binary} (including trailing newline) or {error, nil} on EOF.
@@ -588,3 +590,19 @@ which(Name) when is_binary(Name) ->
         false -> {error, nil};
         Path -> {ok, list_to_binary(Path)}
     end.
+
+%% Encode an Erlang/Gleam term to a JSON binary string.
+%% Uses thoas (gleam_json's backend) for encoding.
+json_encode_term(Term) ->
+    iolist_to_binary(thoas:encode(Term)).
+
+%% Decode a JSON binary string into an Erlang term, then re-encode it.
+%% Used to capture a JSON object from a parsed response as a string.
+json_decode_to_string(Bin) when is_binary(Bin) ->
+    case thoas:decode(Bin) of
+        {ok, Term} -> {ok, iolist_to_binary(thoas:encode(Term))};
+        {error, _} -> {error, <<"invalid json">>}
+    end.
+
+%% Identity function — used for type coercion between opaque Gleam types.
+identity(X) -> X.
