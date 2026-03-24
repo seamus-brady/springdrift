@@ -17,8 +17,6 @@ import gleam/list
 import gleam/option.{Some}
 import gleam/string
 import llm/provider.{type Provider}
-import llm/request
-import llm/response
 import slog
 
 /// Evaluate a completed report/output against output quality features.
@@ -149,50 +147,19 @@ fn score_output(
   model: String,
   cycle_id: String,
   verbose: Bool,
-  redact: Bool,
+  _redact: Bool,
 ) -> List(Forecast) {
-  let req =
-    request.new(model, 512)
-    |> request.with_system(
-      "You are a report quality evaluator. Respond with ONLY a JSON array. No explanation, no markdown, no preamble.",
-    )
-    |> request.with_user_message(prompt)
-
-  case verbose {
-    True -> cycle_log.log_llm_request(cycle_id, req)
-    False -> Nil
-  }
-
-  case provider.chat(req) {
-    Ok(resp) -> {
-      case verbose {
-        True -> cycle_log.log_llm_response(cycle_id, resp, redact)
-        False -> Nil
-      }
-      let text = response.text(resp)
-      case scorer.parse_forecasts(text) {
-        Ok(forecasts) -> forecasts
-        Error(_) -> {
-          slog.warn(
-            "dprime/output_gate",
-            "score_output",
-            "Parse failed, using cautious fallback",
-            Some(cycle_id),
-          )
-          scorer.cautious_forecasts(features)
-        }
-      }
-    }
-    Error(_) -> {
-      slog.warn(
-        "dprime/output_gate",
-        "score_output",
-        "LLM error, using cautious fallback",
-        Some(cycle_id),
-      )
-      scorer.cautious_forecasts(features)
-    }
-  }
+  // Use the same XStructor-based scoring as the input/tool gates.
+  // The prompt contains the report text and quality standards.
+  scorer.score_features(
+    prompt,
+    "",
+    features,
+    provider,
+    model,
+    cycle_id,
+    verbose,
+  )
 }
 
 // ---------------------------------------------------------------------------
