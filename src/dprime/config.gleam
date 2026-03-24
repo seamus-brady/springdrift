@@ -384,17 +384,30 @@ pub fn load_unified(path: String) -> UnifiedDprimeConfig {
 
 fn unified_decoder() -> decode.Decoder(UnifiedDprimeConfig) {
   use gates <- decode.field("gates", gates_decoder())
-  use agent_overrides_raw <- decode.optional_field(
+  // agent_overrides can be either:
+  // - object keyed by agent name: {"coder": {"tool": {...}}}  (current format)
+  // - list with agent_name field: [{"agent_name": "coder", "tool": {...}}]  (legacy)
+  use agent_overrides <- decode.optional_field(
     "agent_overrides",
-    dict.new(),
-    decode.dict(decode.string, agent_override_value_decoder()),
+    [],
+    decode.one_of(
+      // Try object/dict format first (current)
+      decode.map(
+        decode.dict(decode.string, agent_override_value_decoder()),
+        fn(d) {
+          dict.to_list(d)
+          |> list.map(fn(pair) {
+            let #(name, tool_gate) = pair
+            AgentDprimeOverride(agent_name: name, tool_gate: tool_gate)
+          })
+        },
+      ),
+      [
+        // Fall back to list format (legacy)
+        decode.list(agent_override_list_decoder()),
+      ],
+    ),
   )
-  let agent_overrides =
-    dict.to_list(agent_overrides_raw)
-    |> list.map(fn(pair) {
-      let #(name, tool_gate) = pair
-      AgentDprimeOverride(agent_name: name, tool_gate: tool_gate)
-    })
   use meta <- decode.optional_field(
     "meta",
     None,
@@ -440,7 +453,7 @@ fn gates_decoder() -> decode.Decoder(
   decode.success(#(input, tool, output, post_exec))
 }
 
-/// Decode the value side of an agent override entry: {"tool": {...}}
+/// Decode the value side of an agent override entry (dict format): {"tool": {...}}
 fn agent_override_value_decoder() -> decode.Decoder(Option(DprimeConfig)) {
   use tool_gate <- decode.optional_field(
     "tool",
@@ -448,6 +461,17 @@ fn agent_override_value_decoder() -> decode.Decoder(Option(DprimeConfig)) {
     decode.optional(config_decoder()),
   )
   decode.success(tool_gate)
+}
+
+/// Decode a single agent override from list format (legacy): {"agent_name": "coder", "tool": {...}}
+fn agent_override_list_decoder() -> decode.Decoder(AgentDprimeOverride) {
+  use agent_name <- decode.field("agent_name", decode.string)
+  use tool_gate <- decode.optional_field(
+    "tool",
+    None,
+    decode.optional(config_decoder()),
+  )
+  decode.success(AgentDprimeOverride(agent_name:, tool_gate:))
 }
 
 fn meta_decoder() -> decode.Decoder(meta_types.MetaConfig) {
