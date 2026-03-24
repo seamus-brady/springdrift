@@ -968,7 +968,12 @@ fn select_provider(
         }
         _ ->
           case
-            vertex_adapter.provider_from_config(project_id, location, endpoint)
+            vertex_adapter.provider_from_config(
+              project_id,
+              location,
+              endpoint,
+              cfg.vertex_credentials,
+            )
           {
             Ok(p) -> {
               io.println(
@@ -990,10 +995,13 @@ fn select_provider(
                 )
               #(p, tm, rm)
             }
-            Error(_) -> {
-              io.println(
-                "Error: VERTEX_AI_TOKEN not set. Falling back to mock.",
-              )
+            Error(e) -> {
+              let reason = case e {
+                llm_types.ConfigError(reason:) -> reason
+                _ -> "unknown error"
+              }
+              io.println("Error: Vertex AI auth failed: " <> reason)
+              io.println("Falling back to mock.")
               #(mock_provider(), "mock-model", "mock-model")
             }
           }

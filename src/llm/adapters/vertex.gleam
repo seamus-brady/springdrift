@@ -1,14 +1,15 @@
 //// Google Vertex AI adapter — Anthropic Claude models on Vertex AI.
 ////
 //// Uses the Vertex AI rawPredict endpoint with Anthropic message format.
-//// Auth via VERTEX_AI_TOKEN env var (pre-obtained OAuth2 bearer token).
-//// Project ID and region configured in config.toml under [vertex].
+//// Auth via service account key file (JWT → OAuth2 token exchange) or
+//// VERTEX_AI_TOKEN env var (pre-obtained bearer token, for testing).
 ////
 //// Key differences from the direct Anthropic API:
 //// - Model is in the URL path, not the request body
 //// - anthropic_version goes in the request body, not as a header
 //// - Auth uses Bearer token, not x-api-key
 
+import gleam/bit_array
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/json
@@ -17,6 +18,7 @@ import gleam/option.{None, Some}
 import gleam/string
 import llm/provider.{type Provider, Provider}
 import llm/types
+import simplifile
 import slog
 
 // ---------------------------------------------------------------------------
@@ -51,37 +53,291 @@ fn http_post(
 fn json_encode_term(term: Dynamic) -> String
 
 /// Create a raw Json value from a pre-encoded JSON string.
-/// gleam_json's Json type is an opaque wrapper around iodata —
-/// a binary string IS valid iodata, so this is a safe cast.
 @external(erlang, "springdrift_ffi", "identity")
 fn raw_json(value: String) -> json.Json
+
+/// RSA-SHA256 sign: returns base64url-encoded signature.
+@external(erlang, "springdrift_ffi", "sign_rs256")
+fn sign_rs256(pem: String, message: String) -> Result(String, String)
+
+/// Current UTC unix timestamp in seconds.
+@external(erlang, "springdrift_ffi", "unix_now")
+fn unix_now() -> Int
+
+/// ETS table operations for token cache.
+@external(erlang, "springdrift_ffi", "ets_new")
+fn ets_new(name: String) -> Dynamic
+
+@external(erlang, "springdrift_ffi", "ets_insert")
+fn ets_insert(table: Dynamic, key: String, value: String) -> Nil
+
+@external(erlang, "springdrift_ffi", "ets_lookup")
+fn ets_lookup(table: Dynamic, key: String) -> Result(String, Nil)
+
+// ---------------------------------------------------------------------------
+// Service account key type
+// ---------------------------------------------------------------------------
+
+pub type ServiceAccountKey {
+  ServiceAccountKey(
+    client_email: String,
+    private_key_id: String,
+    private_key_pem: String,
+    token_uri: String,
+  )
+}
+
+/// Auth strategy — either a static token or a service account key for JWT auth.
+pub type VertexAuth {
+  StaticToken(token: String)
+  ServiceAccount(key: ServiceAccountKey, token_cache: Dynamic)
+}
 
 // ---------------------------------------------------------------------------
 // Public provider constructors
 // ---------------------------------------------------------------------------
 
-/// Create a Vertex AI provider with explicit settings.
-pub fn provider(
-  token: String,
-  project_id: String,
-  location: String,
-  endpoint: String,
-) -> Provider {
-  Provider(name: "vertex", chat: fn(req) {
-    do_chat(token, project_id, location, endpoint, req)
-  })
-}
-
-/// Create a Vertex AI provider from environment and config.
-/// Reads VERTEX_AI_TOKEN from env. Project, location, and endpoint come from config.
-pub fn provider_from_config(
+/// Create a Vertex AI provider with a service account key file.
+/// Reads the JSON key file, mints tokens automatically via JWT exchange.
+pub fn provider_from_service_account(
+  credentials_path: String,
   project_id: String,
   location: String,
   endpoint: String,
 ) -> Result(Provider, types.LlmError) {
-  case get_env("VERTEX_AI_TOKEN") {
-    Error(Nil) -> Error(types.ConfigError(reason: "VERTEX_AI_TOKEN is not set"))
-    Ok(token) -> Ok(provider(token, project_id, location, endpoint))
+  case simplifile.read(credentials_path) {
+    Error(e) ->
+      Error(types.ConfigError(
+        reason: "Failed to read credentials file '"
+        <> credentials_path
+        <> "': "
+        <> simplifile.describe_error(e),
+      ))
+    Ok(key_json) ->
+      case parse_service_account_key(key_json) {
+        Error(reason) -> Error(types.ConfigError(reason: reason))
+        Ok(key) -> {
+          let cache = ets_new("vertex_token_cache")
+          let auth = ServiceAccount(key: key, token_cache: cache)
+          Ok(
+            Provider(name: "vertex", chat: fn(req) {
+              do_chat_with_auth(auth, project_id, location, endpoint, req)
+            }),
+          )
+        }
+      }
+  }
+}
+
+/// Create a Vertex AI provider from config.
+/// Tries: 1) credentials file, 2) VERTEX_AI_TOKEN env var.
+pub fn provider_from_config(
+  project_id: String,
+  location: String,
+  endpoint: String,
+  credentials_path: option.Option(String),
+) -> Result(Provider, types.LlmError) {
+  // Try service account key file first
+  case credentials_path {
+    Some(path) ->
+      provider_from_service_account(path, project_id, location, endpoint)
+    None ->
+      // Fall back to GOOGLE_APPLICATION_CREDENTIALS env var
+      case get_env("GOOGLE_APPLICATION_CREDENTIALS") {
+        Ok(path) ->
+          provider_from_service_account(path, project_id, location, endpoint)
+        Error(Nil) ->
+          // Fall back to static token env var
+          case get_env("VERTEX_AI_TOKEN") {
+            Ok(token) -> {
+              let auth = StaticToken(token: token)
+              Ok(
+                Provider(name: "vertex", chat: fn(req) {
+                  do_chat_with_auth(auth, project_id, location, endpoint, req)
+                }),
+              )
+            }
+            Error(Nil) ->
+              Error(types.ConfigError(
+                reason: "Vertex AI auth not configured. Set one of: "
+                <> "[vertex] credentials in config.toml, "
+                <> "GOOGLE_APPLICATION_CREDENTIALS env var, "
+                <> "or VERTEX_AI_TOKEN env var",
+              ))
+          }
+      }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Token acquisition
+// ---------------------------------------------------------------------------
+
+const vertex_ai_scope = "https://www.googleapis.com/auth/cloud-platform"
+
+/// Get a valid bearer token from the auth strategy.
+fn get_token(auth: VertexAuth) -> Result(String, types.LlmError) {
+  case auth {
+    StaticToken(token:) -> Ok(token)
+    ServiceAccount(key:, token_cache:) -> {
+      // Check cache — token is valid for 3600s, refresh at 3000s
+      let now = unix_now()
+      case ets_lookup(token_cache, "token") {
+        Ok(cached) ->
+          case ets_lookup(token_cache, "expires_at") {
+            Ok(expires_str) ->
+              case parse_int(expires_str) {
+                Ok(expires_at) if now < expires_at -> Ok(cached)
+                _ -> mint_and_cache_token(key, token_cache)
+              }
+            Error(Nil) -> mint_and_cache_token(key, token_cache)
+          }
+        Error(Nil) -> mint_and_cache_token(key, token_cache)
+      }
+    }
+  }
+}
+
+fn mint_and_cache_token(
+  key: ServiceAccountKey,
+  cache: Dynamic,
+) -> Result(String, types.LlmError) {
+  slog.debug("vertex", "mint_token", "Minting new OAuth2 token via JWT", None)
+  case create_signed_jwt(key) {
+    Error(reason) ->
+      Error(types.ConfigError(reason: "JWT signing failed: " <> reason))
+    Ok(jwt) ->
+      case exchange_jwt_for_token(jwt, key.token_uri) {
+        Error(reason) ->
+          Error(types.ConfigError(reason: "Token exchange failed: " <> reason))
+        Ok(token) -> {
+          let now = unix_now()
+          // Cache with 50-minute expiry (tokens last 60 min)
+          ets_insert(cache, "token", token)
+          ets_insert(cache, "expires_at", int_to_string(now + 3000))
+          slog.info("vertex", "mint_token", "OAuth2 token acquired", None)
+          Ok(token)
+        }
+      }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// JWT creation (RS256)
+// ---------------------------------------------------------------------------
+
+fn create_signed_jwt(key: ServiceAccountKey) -> Result(String, String) {
+  let now = unix_now()
+  let header =
+    json.object([
+      #("alg", json.string("RS256")),
+      #("typ", json.string("JWT")),
+      #("kid", json.string(key.private_key_id)),
+    ])
+  let payload =
+    json.object([
+      #("iss", json.string(key.client_email)),
+      #("sub", json.string(key.client_email)),
+      #("aud", json.string(key.token_uri)),
+      #("scope", json.string(vertex_ai_scope)),
+      #("iat", json.int(now)),
+      #("exp", json.int(now + 3600)),
+    ])
+
+  let header_b64 = base64url_encode(json.to_string(header))
+  let payload_b64 = base64url_encode(json.to_string(payload))
+  let signing_input = header_b64 <> "." <> payload_b64
+
+  case sign_rs256(key.private_key_pem, signing_input) {
+    Ok(sig) -> Ok(signing_input <> "." <> sig)
+    Error(reason) -> Error(reason)
+  }
+}
+
+fn base64url_encode(s: String) -> String {
+  s
+  |> bit_array.from_string
+  |> bit_array.base64_url_encode(False)
+}
+
+// ---------------------------------------------------------------------------
+// Token exchange (JWT → access token)
+// ---------------------------------------------------------------------------
+
+fn exchange_jwt_for_token(
+  jwt: String,
+  token_uri: String,
+) -> Result(String, String) {
+  let body =
+    "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion="
+    <> jwt
+  let headers = [
+    #("Content-Type", "application/x-www-form-urlencoded"),
+  ]
+
+  case http_post(token_uri, headers, body) {
+    Error(reason) -> Error("HTTP request failed: " <> reason)
+    Ok(#(200, resp_body)) ->
+      case json.parse(resp_body, token_response_decoder()) {
+        Ok(token) -> Ok(token)
+        Error(e) ->
+          Error("Failed to decode token response: " <> string.inspect(e))
+      }
+    Ok(#(status, resp_body)) ->
+      Error(
+        "HTTP "
+        <> int_to_string(status)
+        <> ": "
+        <> string.slice(resp_body, 0, 300),
+      )
+  }
+}
+
+fn token_response_decoder() -> decode.Decoder(String) {
+  use token <- decode.field("access_token", decode.string)
+  decode.success(token)
+}
+
+// ---------------------------------------------------------------------------
+// Service account key parsing
+// ---------------------------------------------------------------------------
+
+fn parse_service_account_key(
+  key_json: String,
+) -> Result(ServiceAccountKey, String) {
+  let decoder = {
+    use client_email <- decode.field("client_email", decode.string)
+    use private_key_id <- decode.field("private_key_id", decode.string)
+    use private_key_pem <- decode.field("private_key", decode.string)
+    use token_uri <- decode.field("token_uri", decode.string)
+    decode.success(ServiceAccountKey(
+      client_email:,
+      private_key_id:,
+      private_key_pem:,
+      token_uri:,
+    ))
+  }
+  case json.parse(key_json, decoder) {
+    Ok(key) -> Ok(key)
+    Error(e) ->
+      Error("Failed to parse service account key: " <> string.inspect(e))
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+@external(erlang, "erlang", "integer_to_binary")
+fn int_to_string(n: Int) -> String
+
+@external(erlang, "erlang", "binary_to_integer")
+fn parse_int_ffi(s: String) -> Int
+
+fn parse_int(s: String) -> Result(Int, Nil) {
+  case s {
+    "" -> Error(Nil)
+    _ -> Ok(parse_int_ffi(s))
   }
 }
 
@@ -113,6 +369,19 @@ fn endpoint_url(
 // Chat implementation
 // ---------------------------------------------------------------------------
 
+fn do_chat_with_auth(
+  auth: VertexAuth,
+  project_id: String,
+  location: String,
+  endpoint: String,
+  req: types.LlmRequest,
+) -> Result(types.LlmResponse, types.LlmError) {
+  case get_token(auth) {
+    Error(e) -> Error(e)
+    Ok(token) -> do_chat(token, project_id, location, endpoint, req)
+  }
+}
+
 fn do_chat(
   token: String,
   project_id: String,
@@ -127,8 +396,25 @@ fn do_chat(
   slog.debug("vertex", "do_chat", "POST " <> url, None)
 
   case http_post(url, headers, body) {
-    Error(reason) -> Error(types.NetworkError(reason: reason))
-    Ok(#(status_code, response_body)) ->
+    Error(reason) -> {
+      slog.log_error("vertex", "do_chat", "Network error: " <> reason, None)
+      Error(types.NetworkError(reason: reason))
+    }
+    Ok(#(status_code, response_body)) -> {
+      // Log all non-200 responses for debugging
+      case status_code {
+        200 -> Nil
+        _ ->
+          slog.log_error(
+            "vertex",
+            "do_chat",
+            "HTTP "
+              <> string.inspect(status_code)
+              <> ": "
+              <> string.slice(response_body, 0, 500),
+            None,
+          )
+      }
       case status_code {
         200 -> decode_response(response_body)
         429 ->
@@ -142,10 +428,9 @@ fn do_chat(
             <> "): check VERTEX_AI_TOKEN. Response: "
             <> string.slice(response_body, 0, 200),
           ))
-        code if code >= 500 ->
-          Error(types.ApiError(status_code: code, message: response_body))
         code -> Error(types.ApiError(status_code: code, message: response_body))
       }
+    }
   }
 }
 

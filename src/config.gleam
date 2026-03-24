@@ -173,6 +173,7 @@ pub type AppConfig {
     vertex_project_id: Option(String),
     vertex_location: Option(String),
     vertex_endpoint: Option(String),
+    vertex_credentials: Option(String),
     // ── Per-provider model overrides ──
     vertex_task_model: Option(String),
     vertex_reasoning_model: Option(String),
@@ -320,6 +321,7 @@ pub fn default() -> AppConfig {
     vertex_project_id: None,
     vertex_location: None,
     vertex_endpoint: None,
+    vertex_credentials: None,
     vertex_task_model: None,
     vertex_reasoning_model: None,
     anthropic_task_model: None,
@@ -741,6 +743,10 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     vertex_endpoint: option.or(
       override_cfg.vertex_endpoint,
       base.vertex_endpoint,
+    ),
+    vertex_credentials: option.or(
+      override_cfg.vertex_credentials,
+      base.vertex_credentials,
     ),
     vertex_task_model: option.or(
       override_cfg.vertex_task_model,
@@ -1301,6 +1307,7 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     vertex_project_id: get_toml_str(table, ["vertex", "project_id"]),
     vertex_location: get_toml_str(table, ["vertex", "location"]),
     vertex_endpoint: get_toml_str(table, ["vertex", "endpoint"]),
+    vertex_credentials: get_toml_str(table, ["vertex", "credentials"]),
     vertex_task_model: get_toml_str(table, ["vertex", "task_model"]),
     vertex_reasoning_model: get_toml_str(table, ["vertex", "reasoning_model"]),
     anthropic_task_model: get_toml_str(table, ["anthropic", "task_model"]),

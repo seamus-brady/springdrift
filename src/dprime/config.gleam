@@ -4,6 +4,7 @@ import dprime/types.{
   type DprimeConfig, type DprimeState, DprimeConfig, DprimeState, Feature, High,
   Low, Medium,
 }
+import gleam/dict
 import gleam/dynamic/decode
 import gleam/int
 import gleam/json
@@ -383,11 +384,17 @@ pub fn load_unified(path: String) -> UnifiedDprimeConfig {
 
 fn unified_decoder() -> decode.Decoder(UnifiedDprimeConfig) {
   use gates <- decode.field("gates", gates_decoder())
-  use agent_overrides <- decode.optional_field(
+  use agent_overrides_raw <- decode.optional_field(
     "agent_overrides",
-    [],
-    decode.list(agent_override_decoder()),
+    dict.new(),
+    decode.dict(decode.string, agent_override_value_decoder()),
   )
+  let agent_overrides =
+    dict.to_list(agent_overrides_raw)
+    |> list.map(fn(pair) {
+      let #(name, tool_gate) = pair
+      AgentDprimeOverride(agent_name: name, tool_gate: tool_gate)
+    })
   use meta <- decode.optional_field(
     "meta",
     None,
@@ -433,14 +440,14 @@ fn gates_decoder() -> decode.Decoder(
   decode.success(#(input, tool, output, post_exec))
 }
 
-fn agent_override_decoder() -> decode.Decoder(AgentDprimeOverride) {
-  use agent_name <- decode.field("agent_name", decode.string)
+/// Decode the value side of an agent override entry: {"tool": {...}}
+fn agent_override_value_decoder() -> decode.Decoder(Option(DprimeConfig)) {
   use tool_gate <- decode.optional_field(
     "tool",
     None,
     decode.optional(config_decoder()),
   )
-  decode.success(AgentDprimeOverride(agent_name:, tool_gate:))
+  decode.success(tool_gate)
 }
 
 fn meta_decoder() -> decode.Decoder(meta_types.MetaConfig) {
