@@ -9,6 +9,7 @@
 import cycle_log
 import dprime/canary
 import dprime/deliberative
+import dprime/deterministic.{type DeterministicConfig, Blocked, Escalated, Pass}
 import dprime/engine
 import dprime/meta
 import dprime/scorer
@@ -34,13 +35,111 @@ pub fn evaluate(
   verbose: Bool,
   redact: Bool,
 ) -> GateResult {
+  evaluate_with_deterministic(
+    instruction,
+    context,
+    state,
+    provider,
+    model,
+    cycle_id,
+    verbose,
+    redact,
+    None,
+  )
+}
+
+/// Evaluate with an optional deterministic pre-filter.
+/// When det_config is Some, runs deterministic.check_input before LLM gates.
+pub fn evaluate_with_deterministic(
+  instruction: String,
+  context: String,
+  state: DprimeState,
+  provider: Provider,
+  model: String,
+  cycle_id: String,
+  verbose: Bool,
+  redact: Bool,
+  det_config: Option(DeterministicConfig),
+) -> GateResult {
   slog.info(
     "dprime/gate",
     "evaluate",
     "Starting D' safety evaluation",
     Some(cycle_id),
   )
-  // Layer 0: Canary probes (if enabled)
+
+  // Layer -1: Deterministic pre-filter (if configured)
+  let #(proceed, context) = case det_config {
+    None -> #(True, context)
+    Some(dc) -> {
+      let det_result = deterministic.check_input(instruction, dc)
+      case det_result {
+        Blocked(rule_id, _reason) -> {
+          slog.warn(
+            "dprime/gate",
+            "evaluate",
+            "Deterministic block: rule " <> rule_id,
+            Some(cycle_id),
+          )
+          cycle_log.log_dprime_layer(
+            cycle_id,
+            "deterministic",
+            "reject",
+            1.0,
+            "Deterministic block: banned pattern detected",
+          )
+          #(False, context)
+        }
+        Escalated(_rule_id, det_context) -> {
+          slog.info(
+            "dprime/gate",
+            "evaluate",
+            "Deterministic escalation, adding context",
+            Some(cycle_id),
+          )
+          #(True, det_context <> "\n" <> context)
+        }
+        Pass -> #(True, context)
+      }
+    }
+  }
+
+  case proceed {
+    False ->
+      GateResult(
+        decision: Reject,
+        dprime_score: 1.0,
+        forecasts: [],
+        explanation: "Deterministic block: banned pattern detected",
+        layer: Reactive,
+        canary_result: None,
+      )
+    True ->
+      // Layer 0: Canary probes (if enabled)
+      evaluate_canary(
+        instruction,
+        context,
+        state,
+        provider,
+        model,
+        cycle_id,
+        verbose,
+        redact,
+      )
+  }
+}
+
+/// Run canary probes and continue to reactive evaluation.
+fn evaluate_canary(
+  instruction: String,
+  context: String,
+  state: DprimeState,
+  provider: Provider,
+  model: String,
+  cycle_id: String,
+  verbose: Bool,
+  redact: Bool,
+) -> GateResult {
   case state.config.canary_enabled {
     True -> {
       slog.debug(

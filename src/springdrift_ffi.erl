@@ -15,8 +15,14 @@
          mailbox_size/0, add_days/2,
          ms_until_datetime/1, advance_datetime_ms/2,
          re_replace_all/3,
+         re_match_caseless/2,
+         re_is_valid_pattern/1,
          set_env/2,
-         run_cmd/3, which/1]).
+         run_cmd/3, which/1,
+         json_encode_term/1, json_decode_to_string/1,
+         identity/1,
+         sign_rs256/2, unix_now/0,
+         ets_new/1, ets_insert/3, ets_lookup/2]).
 
 %% Read one line from stdin.
 %% Returns {ok, Binary} (including trailing newline) or {error, nil} on EOF.
@@ -161,9 +167,11 @@ http_post(Url, Headers, Body) ->
         true  -> binary_to_list(Body);
         false -> Body
     end,
-    HeaderList = [{binary_to_list(K), binary_to_list(V)} || {K, V} <- Headers],
+    %% Extract Content-Type from headers if present, default to application/json
+    {ContentType, OtherHeaders} = extract_content_type(Headers),
+    HeaderList = [{binary_to_list(K), binary_to_list(V)} || {K, V} <- OtherHeaders],
     Opts = [{timeout, 300000}],
-    case httpc:request(post, {UrlStr, HeaderList, "application/json", BodyStr}, Opts, [{body_format, binary}]) of
+    case httpc:request(post, {UrlStr, HeaderList, ContentType, BodyStr}, Opts, [{body_format, binary}]) of
         {ok, {{_, StatusCode, _}, _, RespBody}} ->
             {ok, {StatusCode, RespBody}};
         {error, Reason} ->
@@ -588,3 +596,104 @@ which(Name) when is_binary(Name) ->
         false -> {error, nil};
         Path -> {ok, list_to_binary(Path)}
     end.
+
+%% Extract Content-Type from a headers list. Returns {ContentTypeStr, RemainingHeaders}.
+extract_content_type(Headers) ->
+    extract_content_type(Headers, "application/json", []).
+
+extract_content_type([], CT, Acc) ->
+    {CT, lists:reverse(Acc)};
+extract_content_type([{K, V} | Rest], _CT, Acc) when is_binary(K) ->
+    case string:lowercase(K) of
+        <<"content-type">> ->
+            extract_content_type(Rest, binary_to_list(V), Acc);
+        _ ->
+            extract_content_type(Rest, _CT, [{K, V} | Acc])
+    end;
+extract_content_type([H | Rest], CT, Acc) ->
+    extract_content_type(Rest, CT, [H | Acc]).
+
+%% Case-insensitive regex match. Returns true if the pattern matches anywhere in
+%% the text, false otherwise. Returns false on invalid patterns (fail-open).
+re_match_caseless(Text, Pattern) when is_binary(Text), is_binary(Pattern) ->
+    case re:compile(Pattern, [caseless]) of
+        {ok, MP} ->
+            case re:run(Text, MP) of
+                {match, _} -> true;
+                nomatch -> false
+            end;
+        {error, _} ->
+            false
+    end.
+
+%% Check if a regex pattern is valid (compiles without errors).
+re_is_valid_pattern(Pattern) when is_binary(Pattern) ->
+    case re:compile(Pattern) of
+        {ok, _} -> true;
+        {error, _} -> false
+    end.
+
+%% Encode an Erlang/Gleam term to a JSON binary string.
+json_encode_term(Term) ->
+    iolist_to_binary(thoas:encode(Term)).
+
+%% Decode a JSON binary string into an Erlang term, then re-encode it.
+json_decode_to_string(Bin) when is_binary(Bin) ->
+    case thoas:decode(Bin) of
+        {ok, Term} -> {ok, iolist_to_binary(thoas:encode(Term))};
+        {error, _} -> {error, <<"invalid json">>}
+    end.
+
+%% Identity function — used for type coercion between opaque Gleam types.
+identity(X) -> X.
+
+%% Simple ETS key-value store for token caching.
+ets_new(Name) when is_binary(Name) ->
+    ets:new(binary_to_atom(Name, utf8), [set, public]).
+
+ets_insert(Tab, Key, Value) when is_binary(Key), is_binary(Value) ->
+    ets:insert(Tab, {Key, Value}),
+    nil.
+
+ets_lookup(Tab, Key) when is_binary(Key) ->
+    case ets:lookup(Tab, Key) of
+        [{_, Value}] -> {ok, Value};
+        [] -> {error, nil}
+    end.
+
+%% RSA-SHA256 signing for JWT service account auth.
+sign_rs256(PemBin, Message) when is_binary(PemBin), is_binary(Message) ->
+    try
+        Entries = public_key:pem_decode(PemBin),
+        PrivKey = first_private_key(Entries),
+        Signature = public_key:sign(Message, sha256, PrivKey),
+        Encoded = base64url_encode_no_pad(Signature),
+        {ok, Encoded}
+    catch
+        Class:Reason ->
+            {error, iolist_to_binary(io_lib:format("~p:~p", [Class, Reason]))}
+    end.
+
+first_private_key([]) ->
+    error(no_private_key_found);
+first_private_key([{Type, _, not_encrypted} = Entry | Rest]) ->
+    case Type of
+        'RSAPrivateKey' -> public_key:pem_entry_decode(Entry);
+        'PrivateKeyInfo' -> public_key:pem_entry_decode(Entry);
+        _ -> first_private_key(Rest)
+    end;
+first_private_key([_ | Rest]) ->
+    first_private_key(Rest).
+
+base64url_encode_no_pad(Bin) ->
+    B64 = base64:encode(Bin),
+    binary:replace(
+        binary:replace(
+            binary:replace(B64, <<"+">>, <<"-">>, [global]),
+            <<"/">>, <<"_">>, [global]),
+        <<"=">>, <<"">>, [global]).
+
+%% Current UTC Unix timestamp in seconds.
+unix_now() ->
+    calendar:datetime_to_gregorian_seconds(calendar:universal_time())
+    - calendar:datetime_to_gregorian_seconds({{1970, 1, 1}, {0, 0, 0}}).

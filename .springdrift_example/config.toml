@@ -7,18 +7,13 @@
 
 # ── LLM provider and models ─────────────────────────────────────────────────
 
-# "anthropic" | "openrouter" | "openai" | "mistral" | "local" | "mock"
+# "vertex" | "anthropic" | "openrouter" | "openai" | "mistral" | "local" | "mock"
 provider = "mock"
 
-# Model for Simple queries (fast, cheap)
-# task_model = "claude-haiku-4-5-20251001"      # Anthropic
-# task_model = "mistral-small-latest"            # Mistral
-# task_model = "gpt-4o-mini"                     # OpenAI / OpenRouter
-
-# Model for Complex queries (slow, powerful)
-# reasoning_model = "claude-opus-4-6"            # Anthropic
-# reasoning_model = "mistral-large-latest"       # Mistral
-# reasoning_model = "gpt-4o"                     # OpenAI / OpenRouter
+# Top-level task_model / reasoning_model override any per-provider setting.
+# Prefer using the per-provider sections below instead.
+# task_model = "claude-haiku-4-5-20251001"
+# reasoning_model = "claude-opus-4-6"
 
 # Maximum output tokens per LLM call (default: 2048)
 max_tokens = 2048
@@ -370,6 +365,38 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 # auto_machine = true
 
 # ── Delegation ───────────────────────────────────────────────────────────────
+# ── Vertex AI ───────────────────────────────────────────────────────────────
+# Google Vertex AI provider settings (used when provider = "vertex").
+# Auth token comes from VERTEX_AI_TOKEN environment variable.
+
+[vertex]
+# GCP project ID (required for vertex provider)
+# project_id = "my-gcp-project"
+# GCP location / region (default: "europe-west1")
+# location = "europe-west1"
+# Vertex AI endpoint hostname (default: derived from location)
+# endpoint = "europe-west1-aiplatform.googleapis.com"
+# Models for vertex provider
+# task_model = "claude-haiku-4-5-20251001"
+# reasoning_model = "claude-opus-4-6"
+
+# ── Per-provider model defaults ─────────────────────────────────────────────
+# Each provider section can set task_model and reasoning_model.
+# These are used when that provider is active. Top-level task_model /
+# reasoning_model and CLI flags --task-model / --reasoning-model override.
+
+[anthropic]
+# task_model = "claude-haiku-4-5-20251001"
+# reasoning_model = "claude-opus-4-6"
+
+[mistral]
+# task_model = "mistral-small-latest"
+# reasoning_model = "mistral-large-latest"
+
+[local]
+# task_model = "smollm3-3b"
+# reasoning_model = "smollm3-3b"
+
 # Agent delegation depth and control limits.
 
 [delegation]

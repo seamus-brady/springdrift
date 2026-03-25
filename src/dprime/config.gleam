@@ -1,9 +1,14 @@
 //// D' configuration — default features, JSON loading, state initialization.
 
+import dprime/deterministic.{
+  type DeterministicConfig, type DeterministicRule, type RuleAction, BlockAction,
+  DeterministicConfig, DeterministicRule, EscalateAction,
+}
 import dprime/types.{
   type DprimeConfig, type DprimeState, DprimeConfig, DprimeState, Feature, High,
   Low, Medium,
 }
+import gleam/dict
 import gleam/dynamic/decode
 import gleam/int
 import gleam/json
@@ -124,6 +129,7 @@ pub type UnifiedDprimeConfig {
     post_exec_gate: Option(DprimeConfig),
     agent_overrides: List(AgentDprimeOverride),
     meta: Option(meta_types.MetaConfig),
+    deterministic: DeterministicConfig,
   )
 }
 
@@ -140,6 +146,7 @@ pub fn default_unified() -> UnifiedDprimeConfig {
     post_exec_gate: None,
     agent_overrides: [],
     meta: None,
+    deterministic: deterministic.default_config(),
   )
 }
 
@@ -340,6 +347,7 @@ pub fn load_unified(path: String) -> UnifiedDprimeConfig {
                 post_exec_gate: None,
                 agent_overrides: [],
                 meta: None,
+                deterministic: deterministic.default_config(),
               )
             }
             Error(_) ->
@@ -359,6 +367,7 @@ pub fn load_unified(path: String) -> UnifiedDprimeConfig {
                     post_exec_gate: None,
                     agent_overrides: [],
                     meta: None,
+                    deterministic: deterministic.default_config(),
                   )
                 }
                 Error(_) -> {
@@ -383,10 +392,29 @@ pub fn load_unified(path: String) -> UnifiedDprimeConfig {
 
 fn unified_decoder() -> decode.Decoder(UnifiedDprimeConfig) {
   use gates <- decode.field("gates", gates_decoder())
+  // agent_overrides can be either:
+  // - object keyed by agent name: {"coder": {"tool": {...}}}  (current format)
+  // - list with agent_name field: [{"agent_name": "coder", "tool": {...}}]  (legacy)
   use agent_overrides <- decode.optional_field(
     "agent_overrides",
     [],
-    decode.list(agent_override_decoder()),
+    decode.one_of(
+      // Try object/dict format first (current)
+      decode.map(
+        decode.dict(decode.string, agent_override_value_decoder()),
+        fn(d) {
+          dict.to_list(d)
+          |> list.map(fn(pair) {
+            let #(name, tool_gate) = pair
+            AgentDprimeOverride(agent_name: name, tool_gate: tool_gate)
+          })
+        },
+      ),
+      [
+        // Fall back to list format (legacy)
+        decode.list(agent_override_list_decoder()),
+      ],
+    ),
   )
   use meta <- decode.optional_field(
     "meta",
@@ -397,6 +425,11 @@ fn unified_decoder() -> decode.Decoder(UnifiedDprimeConfig) {
     "shared",
     None,
     decode.optional(shared_decoder()),
+  )
+  use det <- decode.optional_field(
+    "deterministic",
+    deterministic.default_config(),
+    deterministic_config_decoder(),
   )
 
   // Apply shared fields to all gates that don't explicitly override them
@@ -412,6 +445,7 @@ fn unified_decoder() -> decode.Decoder(UnifiedDprimeConfig) {
     post_exec_gate:,
     agent_overrides:,
     meta:,
+    deterministic: det,
   ))
 }
 
@@ -433,7 +467,18 @@ fn gates_decoder() -> decode.Decoder(
   decode.success(#(input, tool, output, post_exec))
 }
 
-fn agent_override_decoder() -> decode.Decoder(AgentDprimeOverride) {
+/// Decode the value side of an agent override entry (dict format): {"tool": {...}}
+fn agent_override_value_decoder() -> decode.Decoder(Option(DprimeConfig)) {
+  use tool_gate <- decode.optional_field(
+    "tool",
+    None,
+    decode.optional(config_decoder()),
+  )
+  decode.success(tool_gate)
+}
+
+/// Decode a single agent override from list format (legacy): {"agent_name": "coder", "tool": {...}}
+fn agent_override_list_decoder() -> decode.Decoder(AgentDprimeOverride) {
   use agent_name <- decode.field("agent_name", decode.string)
   use tool_gate <- decode.optional_field(
     "tool",
@@ -753,4 +798,62 @@ fn dual_gate_decoder() -> decode.Decoder(#(DprimeConfig, DprimeConfig)) {
   use tool_gate <- decode.field("tool_gate", config_decoder())
   use output_gate <- decode.field("output_gate", config_decoder())
   decode.success(#(tool_gate, output_gate))
+}
+
+// ---------------------------------------------------------------------------
+// Deterministic config decoder
+// ---------------------------------------------------------------------------
+
+fn deterministic_config_decoder() -> decode.Decoder(DeterministicConfig) {
+  let defaults = deterministic.default_config()
+  use enabled <- decode.optional_field("enabled", defaults.enabled, decode.bool)
+  use input_rules <- decode.optional_field(
+    "input_rules",
+    [],
+    decode.list(deterministic_rule_decoder()),
+  )
+  use tool_rules <- decode.optional_field(
+    "tool_rules",
+    [],
+    decode.list(deterministic_rule_decoder()),
+  )
+  use output_rules <- decode.optional_field(
+    "output_rules",
+    [],
+    decode.list(deterministic_rule_decoder()),
+  )
+  use path_allowlist <- decode.optional_field(
+    "path_allowlist",
+    [],
+    decode.list(decode.string),
+  )
+  use domain_allowlist <- decode.optional_field(
+    "domain_allowlist",
+    [],
+    decode.list(decode.string),
+  )
+  decode.success(DeterministicConfig(
+    enabled:,
+    input_rules:,
+    tool_rules:,
+    output_rules:,
+    path_allowlist:,
+    domain_allowlist:,
+  ))
+}
+
+fn deterministic_rule_decoder() -> decode.Decoder(DeterministicRule) {
+  use id <- decode.field("id", decode.string)
+  use pattern <- decode.field("pattern", decode.string)
+  use action_str <- decode.field("action", decode.string)
+  let action = parse_rule_action(action_str)
+  decode.success(DeterministicRule(id:, pattern:, action:))
+}
+
+fn parse_rule_action(s: String) -> RuleAction {
+  case s {
+    "block" -> BlockAction
+    "escalate" -> EscalateAction
+    _ -> EscalateAction
+  }
 }

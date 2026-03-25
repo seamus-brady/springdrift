@@ -27,6 +27,7 @@ import llm/adapters/local as local_adapter
 import llm/adapters/mistral as mistral_adapter
 import llm/adapters/mock
 import llm/adapters/openai as openai_adapter
+import llm/adapters/vertex as vertex_adapter
 import llm/provider.{type Provider}
 import llm/retry
 import llm/types as llm_types
@@ -246,9 +247,9 @@ fn run(cfg: AppConfig) -> Nil {
   let reasoning_model =
     option.unwrap(cfg.reasoning_model, default_reasoning_model)
 
-  let initial_messages = case list.contains(get_startup_args(), "--resume") {
-    True -> storage.load()
-    False -> []
+  let initial_messages = case list.contains(get_startup_args(), "--fresh") {
+    True -> []
+    False -> storage.load()
   }
 
   // Narrative config (always enabled)
@@ -629,46 +630,52 @@ fn run(cfg: AppConfig) -> Nil {
     |> result.unwrap(how_to_content.builtin())
 
   let cognitive_subj = case
-    cognitive.start(CognitiveConfig(
-      provider: p,
-      system:,
-      max_tokens:,
-      max_context_messages: cfg.max_context_messages,
-      agent_tools:,
-      initial_messages:,
-      registry: registry.new(),
-      verbose:,
-      notify:,
-      task_model:,
-      reasoning_model:,
-      input_dprime_state:,
-      tool_dprime_state: dprime_state,
-      output_dprime_state:,
-      meta_config: unified_dprime.meta,
-      narrative_dir:,
-      cbr_dir: paths.cbr_dir(),
-      archivist_model:,
-      archivist_max_tokens:,
-      librarian: lib,
-      write_anywhere:,
-      curator: option.Some(curator_subj),
-      agent_uuid: stable_identity.agent_uuid,
-      agent_name:,
-      session_since:,
-      retry_config:,
-      classify_timeout_ms:,
-      threading_config:,
-      memory_limits: tools_memory.MemoryLimits(
-        recall_max_entries:,
-        cbr_max_results:,
+    cognitive.start(
+      CognitiveConfig(
+        provider: p,
+        system:,
+        max_tokens:,
+        max_context_messages: cfg.max_context_messages,
+        agent_tools:,
+        initial_messages:,
+        registry: registry.new(),
+        verbose:,
+        notify:,
+        task_model:,
+        reasoning_model:,
+        input_dprime_state:,
+        tool_dprime_state: dprime_state,
+        output_dprime_state:,
+        meta_config: unified_dprime.meta,
+        narrative_dir:,
+        cbr_dir: paths.cbr_dir(),
+        archivist_model:,
+        archivist_max_tokens:,
+        librarian: lib,
+        write_anywhere:,
+        curator: option.Some(curator_subj),
+        agent_uuid: stable_identity.agent_uuid,
+        agent_name:,
+        session_since:,
+        retry_config:,
+        classify_timeout_ms:,
+        threading_config:,
+        memory_limits: tools_memory.MemoryLimits(
+          recall_max_entries:,
+          cbr_max_results:,
+        ),
+        input_queue_cap: option.unwrap(cfg.input_queue_cap, 10),
+        how_to_content: option.Some(how_to_content),
+        redact_secrets:,
+        planner_dir: paths.planner_dir(),
+        max_delegation_depth: option.unwrap(cfg.max_delegation_depth, 3),
+        sandbox_enabled: option.is_some(sandbox_mgr),
+        deterministic_config: case option.unwrap(cfg.dprime_enabled, True) {
+          True -> option.Some(unified_dprime.deterministic)
+          False -> option.None
+        },
       ),
-      input_queue_cap: option.unwrap(cfg.input_queue_cap, 10),
-      how_to_content: option.Some(how_to_content),
-      redact_secrets:,
-      planner_dir: paths.planner_dir(),
-      max_delegation_depth: option.unwrap(cfg.max_delegation_depth, 3),
-      sandbox_enabled: option.is_some(sandbox_mgr),
-    ))
+    )
   {
     Ok(subj) -> subj
     Error(_) -> {
@@ -792,8 +799,9 @@ fn run(cfg: AppConfig) -> Nil {
   }
 
   // Inject active tasks as sensory events on resume
-  case list.contains(get_startup_args(), "--resume") {
-    True -> {
+  case list.contains(get_startup_args(), "--fresh") {
+    True -> Nil
+    False -> {
       let active_tasks = librarian.get_active_tasks(librarian_subj)
       let now = get_date_ffi()
       list.each(active_tasks, fn(task) {
@@ -830,7 +838,6 @@ fn run(cfg: AppConfig) -> Nil {
           )
       }
     }
-    False -> Nil
   }
 
   // Start GUI
@@ -895,7 +902,11 @@ fn select_provider(
       case anthropic_adapter.provider_with_timeout(llm_timeout_ms) {
         Ok(p) -> {
           io.println("Provider : Anthropic")
-          #(p, "claude-haiku-4-5-20251001", "claude-opus-4-6")
+          let tm =
+            option.unwrap(cfg.anthropic_task_model, "claude-haiku-4-5-20251001")
+          let rm =
+            option.unwrap(cfg.anthropic_reasoning_model, "claude-opus-4-6")
+          #(p, tm, rm)
         }
         Error(_) -> {
           io.println("Error: ANTHROPIC_API_KEY not set. Falling back to mock.")
@@ -931,7 +942,14 @@ fn select_provider(
       case mistral_adapter.provider_from_env() {
         Ok(p) -> {
           io.println("Provider : Mistral")
-          #(p, mistral_adapter.mistral_small, mistral_adapter.mistral_large)
+          let tm =
+            option.unwrap(cfg.mistral_task_model, mistral_adapter.mistral_small)
+          let rm =
+            option.unwrap(
+              cfg.mistral_reasoning_model,
+              mistral_adapter.mistral_large,
+            )
+          #(p, tm, rm)
         }
         Error(_) -> {
           io.println("Error: MISTRAL_API_KEY not set. Falling back to mock.")
@@ -939,11 +957,70 @@ fn select_provider(
         }
       }
     }
+    option.Some("vertex") -> {
+      let project_id = option.unwrap(cfg.vertex_project_id, "")
+      let location = option.unwrap(cfg.vertex_location, "europe-west1")
+      let endpoint =
+        option.unwrap(
+          cfg.vertex_endpoint,
+          location <> "-aiplatform.googleapis.com",
+        )
+      case project_id {
+        "" -> {
+          io.println(
+            "Error: vertex provider requires [vertex] project_id in config.toml.",
+          )
+          #(mock_provider(), "mock-model", "mock-model")
+        }
+        _ ->
+          case
+            vertex_adapter.provider_from_config(
+              project_id,
+              location,
+              endpoint,
+              cfg.vertex_credentials,
+            )
+          {
+            Ok(p) -> {
+              io.println(
+                "Provider : Vertex AI (project: "
+                <> project_id
+                <> ", endpoint: "
+                <> endpoint
+                <> ")",
+              )
+              let tm =
+                option.unwrap(
+                  cfg.vertex_task_model,
+                  vertex_adapter.claude_haiku_4_5,
+                )
+              let rm =
+                option.unwrap(
+                  cfg.vertex_reasoning_model,
+                  vertex_adapter.claude_opus_4_6,
+                )
+              #(p, tm, rm)
+            }
+            Error(e) -> {
+              let reason = case e {
+                llm_types.ConfigError(reason:) -> reason
+                _ -> "unknown error"
+              }
+              io.println("Error: Vertex AI auth failed: " <> reason)
+              io.println("Falling back to mock.")
+              #(mock_provider(), "mock-model", "mock-model")
+            }
+          }
+      }
+    }
     option.Some("local") ->
       case local_adapter.provider_from_env() {
         Ok(p) -> {
           io.println("Provider : Local")
-          #(p, local_adapter.smollm3, local_adapter.smollm3)
+          let tm = option.unwrap(cfg.local_task_model, local_adapter.smollm3)
+          let rm =
+            option.unwrap(cfg.local_reasoning_model, local_adapter.smollm3)
+          #(p, tm, rm)
         }
         Error(_) -> {
           io.println(

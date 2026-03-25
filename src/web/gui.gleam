@@ -18,6 +18,7 @@ import narrative/librarian.{type LibrarianMessage}
 import narrative/log as narrative_log
 import planner/types as planner_types
 import scheduler/types as scheduler_types
+import simplifile
 import slog
 import web/auth
 import web/html
@@ -30,6 +31,7 @@ import web/protocol
 type WsMsg {
   GotReply(agent_types.CognitiveReply)
   GotNotification(agent_types.Notification)
+  SendHistory(String)
 }
 
 // ---------------------------------------------------------------------------
@@ -235,11 +237,15 @@ fn ws_on_init(
   // Register with the relay so the main process forwards notifications here
   process.send(relay, Register(notify_subject))
 
-  // Build selector that bridges cognitive replies + notifications into WsMsg
+  // Channel for sending session history on connect
+  let history_subject: Subject(String) = process.new_subject()
+
+  // Build selector that bridges cognitive replies + notifications + history into WsMsg
   let selector: Selector(WsMsg) =
     process.new_selector()
     |> process.select_map(reply_subject, fn(cr) { GotReply(cr) })
     |> process.select_map(notify_subject, fn(n) { GotNotification(n) })
+    |> process.select_map(history_subject, fn(h) { SendHistory(h) })
 
   let state =
     WsState(
@@ -253,27 +259,24 @@ fn ws_on_init(
       ws_max_bytes:,
     )
 
-  // Replay initial messages after init
-  let replay_msgs = initial_messages
+  // Send session history as a single message after init
+  let history_msgs = initial_messages
   process.spawn_unlinked(fn() {
-    // Small delay to ensure the WS handler is ready to receive Custom messages
     process.sleep(50)
-    list.each(replay_msgs, fn(msg) {
-      case msg.role {
-        Assistant -> {
-          let text = extract_text(msg)
-          process.send(
-            reply_subject,
-            agent_types.CognitiveReply(
-              response: text,
-              model: "history",
-              usage: None,
-            ),
-          )
-        }
-        User -> Nil
-      }
-    })
+    let messages_json =
+      json.to_string(
+        json.array(history_msgs, fn(msg) {
+          let role = case msg.role {
+            User -> "user"
+            Assistant -> "assistant"
+          }
+          json.object([
+            #("role", json.string(role)),
+            #("text", json.string(extract_text(msg))),
+          ])
+        }),
+      )
+    process.send(history_subject, messages_json)
   })
 
   #(state, Some(selector))
@@ -422,6 +425,57 @@ fn ws_handler(
               }
               mist.continue(state)
             }
+            Ok(protocol.RequestDprimeData) -> {
+              case state.librarian {
+                Some(lib) -> {
+                  let reply_subj = process.new_subject()
+                  process.send(
+                    lib,
+                    librarian.QueryDayAll(
+                      date: get_today_date(),
+                      reply_to: reply_subj,
+                    ),
+                  )
+                  case process.receive(reply_subj, 2000) {
+                    Ok(nodes) -> {
+                      let gates_json =
+                        json.to_string(json.array(
+                          extract_dprime_gates(nodes),
+                          encode_dprime_gate,
+                        ))
+                      let _ =
+                        mist.send_text_frame(
+                          conn,
+                          protocol.encode_server_message(protocol.DprimeData(
+                            gates_json:,
+                          )),
+                        )
+                      Nil
+                    }
+                    Error(_) -> Nil
+                  }
+                }
+                None -> Nil
+              }
+              mist.continue(state)
+            }
+            Ok(protocol.RequestDprimeConfig) -> {
+              // Read dprime.json directly from disk
+              let config_json = case
+                simplifile.read(".springdrift/dprime.json")
+              {
+                Ok(contents) -> contents
+                Error(_) -> "{\"error\":\"dprime.json not found\"}"
+              }
+              let _ =
+                mist.send_text_frame(
+                  conn,
+                  protocol.encode_server_message(protocol.DprimeConfigData(
+                    config_json:,
+                  )),
+                )
+              mist.continue(state)
+            }
             Ok(protocol.RequestRewind(index:)) -> {
               let cycles = cycle_log.load_cycles()
               let messages = cycle_log.messages_for_rewind(cycles, index)
@@ -468,6 +522,16 @@ fn ws_handler(
       let server_msg = notification_to_server_message(notification)
       let _ =
         mist.send_text_frame(conn, protocol.encode_server_message(server_msg))
+      mist.continue(state)
+    }
+
+    // Session history on connect
+    mist.Custom(SendHistory(messages_json)) -> {
+      let _ =
+        mist.send_text_frame(
+          conn,
+          protocol.encode_server_message(protocol.SessionHistory(messages_json:)),
+        )
       mist.continue(state)
     }
 
@@ -683,5 +747,53 @@ fn encode_endeavour(endeavour: planner_types.Endeavour) -> json.Json {
     #("task_count", json.int(list.length(endeavour.task_ids))),
     #("created_at", json.string(endeavour.created_at)),
     #("updated_at", json.string(endeavour.updated_at)),
+  ])
+}
+
+// ---------------------------------------------------------------------------
+// D' gate data extraction
+// ---------------------------------------------------------------------------
+
+type DprimeGateRecord {
+  DprimeGateRecord(
+    cycle_id: String,
+    timestamp: String,
+    node_type: String,
+    gate: String,
+    decision: String,
+    score: Float,
+  )
+}
+
+fn extract_dprime_gates(
+  nodes: List(dag_types.CycleNode),
+) -> List(DprimeGateRecord) {
+  list.flat_map(nodes, fn(node) {
+    let nt = case node.node_type {
+      dag_types.CognitiveCycle -> "cognitive"
+      dag_types.AgentCycle -> "agent"
+      dag_types.SchedulerCycle -> "scheduler"
+    }
+    list.map(node.dprime_gates, fn(g) {
+      DprimeGateRecord(
+        cycle_id: node.cycle_id,
+        timestamp: node.timestamp,
+        node_type: nt,
+        gate: g.gate,
+        decision: g.decision,
+        score: g.score,
+      )
+    })
+  })
+}
+
+fn encode_dprime_gate(record: DprimeGateRecord) -> json.Json {
+  json.object([
+    #("cycle_id", json.string(record.cycle_id)),
+    #("timestamp", json.string(record.timestamp)),
+    #("node_type", json.string(record.node_type)),
+    #("gate", json.string(record.gate)),
+    #("decision", json.string(record.decision)),
+    #("score", json.float(record.score)),
   ])
 }

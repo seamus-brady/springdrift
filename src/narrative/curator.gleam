@@ -1097,6 +1097,10 @@ pub fn render_sensorium_delegations(
             "" -> ""
             i -> " instruction=\"" <> string.slice(i, 0, 100) <> "\""
           }
+          let violation_attr = case d.violation_count > 0 {
+            True -> " violations=\"" <> int.to_string(d.violation_count) <> "\""
+            False -> ""
+          }
           "    <agent name=\""
           <> d.agent
           <> "\" turn=\""
@@ -1110,6 +1114,7 @@ pub fn render_sensorium_delegations(
           <> "\""
           <> tool_attr
           <> instr_attr
+          <> violation_attr
           <> "/>"
         })
         |> string.join("\n")

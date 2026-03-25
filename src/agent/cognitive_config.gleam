@@ -1,5 +1,6 @@
 import agent/registry.{type Registry}
 import agent/types.{type Notification}
+import dprime/deterministic.{type DeterministicConfig}
 import dprime/types as dprime_types
 import gleam/erlang/process.{type Subject}
 import gleam/option.{type Option, None}
@@ -56,6 +57,7 @@ pub type CognitiveConfig {
     planner_dir: String,
     max_delegation_depth: Int,
     sandbox_enabled: Bool,
+    deterministic_config: Option(DeterministicConfig),
   )
 }
 
@@ -107,5 +109,6 @@ pub fn default_test_config(
     planner_dir: base <> "/planner",
     max_delegation_depth: 3,
     sandbox_enabled: False,
+    deterministic_config: None,
   )
 }

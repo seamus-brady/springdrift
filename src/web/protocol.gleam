@@ -31,6 +31,8 @@ pub type ClientMessage {
   RequestSchedulerData
   RequestSchedulerCycles
   RequestPlannerData
+  RequestDprimeData
+  RequestDprimeConfig
 }
 
 pub type ServerMessage {
@@ -47,6 +49,9 @@ pub type ServerMessage {
   SchedulerData(jobs_json: String)
   SchedulerCyclesData(cycles_json: String)
   PlannerData(tasks_json: String, endeavours_json: String)
+  DprimeData(gates_json: String)
+  DprimeConfigData(config_json: String)
+  SessionHistory(messages_json: String)
 }
 
 pub type CycleDataJson {
@@ -88,6 +93,8 @@ pub fn decode_client_message(json_string: String) -> Result(ClientMessage, Nil) 
       "request_scheduler_data" -> decode.success(RequestSchedulerData)
       "request_scheduler_cycles" -> decode.success(RequestSchedulerCycles)
       "request_planner_data" -> decode.success(RequestPlannerData)
+      "request_dprime_data" -> decode.success(RequestDprimeData)
+      "request_dprime_config" -> decode.success(RequestDprimeConfig)
       _ -> decode.failure(UserMessage(""), "Unknown client message type")
     }
   }
@@ -204,6 +211,15 @@ pub fn encode_server_message(msg: ServerMessage) -> String {
       <> ",\"endeavours\":"
       <> endeavours_json
       <> "}"
+
+    DprimeData(gates_json:) ->
+      "{\"type\":\"dprime_data\",\"gates\":" <> gates_json <> "}"
+
+    DprimeConfigData(config_json:) ->
+      "{\"type\":\"dprime_config_data\",\"config\":" <> config_json <> "}"
+
+    SessionHistory(messages_json:) ->
+      "{\"type\":\"session_history\",\"messages\":" <> messages_json <> "}"
   }
 }
 

@@ -64,7 +64,8 @@ src/
 │   ├── scorer.gleam           LLM magnitude scoring with prompt building + JSON parsing
 │   ├── canary.gleam           Hijack + leakage probes (fail-closed, fresh tokens per request)
 │   ├── gate.gleam             Three-layer H-CogAff orchestrator (reactive → deliberative → meta)
-│   ├── config.gleam           D' config loading from JSON, unified format (gates + agent overrides + meta + shared)
+│   ├── config.gleam           D' config loading from JSON, unified format (gates + agent overrides + meta + shared + deterministic)
+│   ├── deterministic.gleam    Deterministic pre-filter — regex rules, path/domain allowlists (no LLM calls)
 │   ├── output_gate.gleam      Output quality gate — evaluates finished reports before delivery
 │   └── meta.gleam             History ring buffer, stall detection, threshold tightening
 │
@@ -146,6 +147,7 @@ src/
     └── adapters/
         ├── anthropic.gleam    Anthropic SDK translation
         ├── openai.gleam       OpenAI / OpenRouter translation
+        ├── vertex.gleam       Google Vertex AI (Anthropic models via rawPredict)
         └── mock.gleam         Test/fallback provider with injectable responses
 ```
 
@@ -302,7 +304,7 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 
 | Field | CLI flag | Default | Purpose |
 |---|---|---|---|
-| `provider` | `--provider` | mock | anthropic \| openrouter \| openai \| mistral \| local \| mock |
+| `provider` | `--provider` | mock | anthropic \| openrouter \| openai \| mistral \| vertex \| local \| mock |
 | `task_model` | `--task-model` | provider default | Model for Simple queries |
 | `reasoning_model` | `--reasoning-model` | provider default | Model for Complex queries |
 | `agent_name` | `--agent-name` | "Springdrift" | Agent name (used in persona `{{agent_name}}` slot) |
@@ -349,6 +351,9 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `sandbox_port_stride` | — | 100 | Host port stride per slot |
 | `sandbox_ports_per_slot` | — | 5 | Ports forwarded per slot |
 | `sandbox_auto_machine` | — | True | Auto-start podman machine on macOS |
+| `vertex_project_id` | — | None | GCP project ID (required for vertex provider) |
+| `vertex_location` | — | "europe-west1" | GCP location / region |
+| `vertex_endpoint` | — | derived from location | Vertex AI endpoint hostname (e.g. `europe-west1-aiplatform.googleapis.com`) |
 
 ## Memory architecture
 
@@ -623,7 +628,7 @@ Per-profile D' uses the unified config format in `dprime.json` (see below).
 
 **D' unified config** — `dprime/config.gleam` loads a unified JSON format from
 `dprime.json` (see `.springdrift_example/dprime.json` for a full example). The unified
-format has four top-level keys:
+format has five top-level keys:
 
 - `gates` — named gate configs: `input` (pre-cycle input screening), `tool` (before
   tool dispatch), `output` (finished report quality, optional), `post_exec` (after tool
@@ -636,6 +641,12 @@ format has four top-level keys:
   `elevated_score_threshold`, `rejection_count_threshold`, `tighten_factor`, etc.
 - `shared` — common settings applied to all gates that don't explicitly override them
   (`tiers`, `max_history`, `stall_window`, `max_iterations`).
+- `deterministic` — regex-based pre-filter rules that run BEFORE any LLM calls.
+  Contains `input_rules`, `tool_rules`, `output_rules` (each a list of `{id, pattern,
+  action}` where action is `"block"` or `"escalate"`), plus `path_allowlist` and
+  `domain_allowlist`. Deterministic blocks short-circuit the gate with no LLM cost.
+  Escalations enrich context for the LLM scorer. The agent sees decisions ("banned
+  pattern detected") but NOT the rule patterns — patterns are operator-only config.
 
 Backward compatible with the old `tool_gate`/`output_gate` dual-gate format and
 single-gate format — `load_unified` auto-detects and converts.
@@ -815,6 +826,7 @@ The config is organized into these TOML sections:
 | `[services]` | External API base URLs (DuckDuckGo, Brave, Jina) |
 | `[sandbox]` | Local Podman sandbox: enabled, pool_size, memory, ports, image |
 | `[delegation]` | Agent delegation depth limits |
+| `[vertex]` | Google Vertex AI provider: project_id, location, endpoint |
 
 Quick example (top-level fields only):
 

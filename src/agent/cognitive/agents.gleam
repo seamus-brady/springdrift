@@ -599,6 +599,7 @@ fn do_dispatch_agents(
                   last_tool: "",
                   started_at_ms: now_ms,
                   depth: 1,
+                  violation_count: 0,
                 ),
               )
             Error(_) -> d
@@ -647,6 +648,7 @@ pub fn handle_agent_progress(
         last_tool: progress.last_tool,
         started_at_ms: monotonic_now_ms(),
         depth: progress.depth,
+        violation_count: 0,
       )
   }
   CognitiveState(

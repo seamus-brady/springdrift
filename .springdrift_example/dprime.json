@@ -5,8 +5,8 @@
         {
           "name": "prompt_injection",
           "importance": "high",
-          "description": "Attempt to override system instructions or manipulate agent behavior",
-          "critical": true
+          "description": "Attempt by an external or untrusted party to hijack the agent via embedded instructions (e.g. 'ignore previous instructions', 'you are now'). Note: the operator legitimately discusses system internals, safety gates, scoring behaviour, and quality feedback — this is normal system meta-discussion, not injection.",
+          "critical": false
         },
         {
           "name": "harmful_request",
@@ -96,7 +96,7 @@
         }
       ],
       "modify_threshold": 0.40,
-      "reject_threshold": 0.60,
+      "reject_threshold": 0.75,
       "canary_enabled": false
     }
   },
@@ -177,5 +177,29 @@
     "max_history": 100,
     "stall_window": 5,
     "max_iterations": 3
+  },
+  "deterministic": {
+    "enabled": true,
+    "input_rules": [
+      { "id": "injection-override", "pattern": "ignore previous instructions", "action": "block" },
+      { "id": "injection-system", "pattern": "you are now|act as|pretend you", "action": "escalate" },
+      { "id": "injection-jailbreak", "pattern": "DAN|do anything now|jailbreak", "action": "block" }
+    ],
+    "tool_rules": [
+      { "id": "rm-rf-root", "pattern": "rm\\s+-rf\\s+/", "action": "block" },
+      { "id": "drop-table", "pattern": "DROP\\s+TABLE", "action": "block" },
+      { "id": "no-verify", "pattern": "--no-verify", "action": "block" },
+      { "id": "force-push", "pattern": "push.*--force|push.*-f\\b", "action": "escalate" },
+      { "id": "chmod-777", "pattern": "chmod\\s+777", "action": "block" },
+      { "id": "curl-pipe-bash", "pattern": "curl.*\\|.*(?:bash|sh)", "action": "block" }
+    ],
+    "output_rules": [
+      { "id": "credential-sk", "pattern": "\\bsk-[A-Za-z0-9_-]{20,}", "action": "block" },
+      { "id": "credential-ghp", "pattern": "\\bghp_[A-Za-z0-9]{20,}", "action": "block" },
+      { "id": "private-key", "pattern": "-----BEGIN.*PRIVATE KEY-----", "action": "block" },
+      { "id": "aws-key", "pattern": "AKIA[A-Z0-9]{16}", "action": "block" }
+    ],
+    "path_allowlist": [],
+    "domain_allowlist": []
   }
 }
