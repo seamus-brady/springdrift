@@ -18,6 +18,7 @@ import narrative/librarian.{type LibrarianMessage}
 import narrative/log as narrative_log
 import planner/types as planner_types
 import scheduler/types as scheduler_types
+import simplifile
 import slog
 import web/auth
 import web/html
@@ -422,6 +423,57 @@ fn ws_handler(
               }
               mist.continue(state)
             }
+            Ok(protocol.RequestDprimeData) -> {
+              case state.librarian {
+                Some(lib) -> {
+                  let reply_subj = process.new_subject()
+                  process.send(
+                    lib,
+                    librarian.QueryDayAll(
+                      date: get_today_date(),
+                      reply_to: reply_subj,
+                    ),
+                  )
+                  case process.receive(reply_subj, 2000) {
+                    Ok(nodes) -> {
+                      let gates_json =
+                        json.to_string(json.array(
+                          extract_dprime_gates(nodes),
+                          encode_dprime_gate,
+                        ))
+                      let _ =
+                        mist.send_text_frame(
+                          conn,
+                          protocol.encode_server_message(protocol.DprimeData(
+                            gates_json:,
+                          )),
+                        )
+                      Nil
+                    }
+                    Error(_) -> Nil
+                  }
+                }
+                None -> Nil
+              }
+              mist.continue(state)
+            }
+            Ok(protocol.RequestDprimeConfig) -> {
+              // Read dprime.json directly from disk
+              let config_json = case
+                simplifile.read(".springdrift/dprime.json")
+              {
+                Ok(contents) -> contents
+                Error(_) -> "{\"error\":\"dprime.json not found\"}"
+              }
+              let _ =
+                mist.send_text_frame(
+                  conn,
+                  protocol.encode_server_message(protocol.DprimeConfigData(
+                    config_json:,
+                  )),
+                )
+              mist.continue(state)
+            }
             Ok(protocol.RequestRewind(index:)) -> {
               let cycles = cycle_log.load_cycles()
               let messages = cycle_log.messages_for_rewind(cycles, index)
@@ -683,5 +735,53 @@ fn encode_endeavour(endeavour: planner_types.Endeavour) -> json.Json {
     #("task_count", json.int(list.length(endeavour.task_ids))),
     #("created_at", json.string(endeavour.created_at)),
     #("updated_at", json.string(endeavour.updated_at)),
+  ])
+}
+
+// ---------------------------------------------------------------------------
+// D' gate data extraction
+// ---------------------------------------------------------------------------
+
+type DprimeGateRecord {
+  DprimeGateRecord(
+    cycle_id: String,
+    timestamp: String,
+    node_type: String,
+    gate: String,
+    decision: String,
+    score: Float,
+  )
+}
+
+fn extract_dprime_gates(
+  nodes: List(dag_types.CycleNode),
+) -> List(DprimeGateRecord) {
+  list.flat_map(nodes, fn(node) {
+    let nt = case node.node_type {
+      dag_types.CognitiveCycle -> "cognitive"
+      dag_types.AgentCycle -> "agent"
+      dag_types.SchedulerCycle -> "scheduler"
+    }
+    list.map(node.dprime_gates, fn(g) {
+      DprimeGateRecord(
+        cycle_id: node.cycle_id,
+        timestamp: node.timestamp,
+        node_type: nt,
+        gate: g.gate,
+        decision: g.decision,
+        score: g.score,
+      )
+    })
+  })
+}
+
+fn encode_dprime_gate(record: DprimeGateRecord) -> json.Json {
+  json.object([
+    #("cycle_id", json.string(record.cycle_id)),
+    #("timestamp", json.string(record.timestamp)),
+    #("node_type", json.string(record.node_type)),
+    #("gate", json.string(record.gate)),
+    #("decision", json.string(record.decision)),
+    #("score", json.float(record.score)),
   ])
 }

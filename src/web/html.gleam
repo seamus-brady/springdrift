@@ -283,6 +283,8 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
   <button class=\"tab-btn\" data-tab=\"scheduler\">Scheduler</button>
   <button class=\"tab-btn\" data-tab=\"cycles\">Cycles</button>
   <button class=\"tab-btn\" data-tab=\"planner\">Planner</button>
+  <button class=\"tab-btn\" data-tab=\"dprime\">D' Safety</button>
+  <button class=\"tab-btn\" data-tab=\"dprime-config\">D' Config</button>
 </div>
 <div id=\"content-area\">
   <div id=\"narrative-tab\" class=\"tab-content active\">
@@ -320,6 +322,18 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
       </div>
     </div>
   </div>
+  <div id=\"dprime-tab\" class=\"tab-content\">
+    <button class=\"refresh-btn\" id=\"dprime-refresh\">Refresh</button>
+    <div id=\"dprime-container\">
+      <table class=\"admin-table\"><thead><tr>
+        <th>Time</th><th>Cycle</th><th>Type</th><th>Gate</th><th>Decision</th><th>Score</th>
+      </tr></thead><tbody id=\"dprime-body\"></tbody></table>
+    </div>
+  </div>
+  <div id=\"dprime-config-tab\" class=\"tab-content\">
+    <button class=\"refresh-btn\" id=\"dprime-config-refresh\">Refresh</button>
+    <div id=\"dprime-config-container\">Loading D' configuration...</div>
+  </div>
 </div>
 </div>
 </div>
@@ -346,6 +360,8 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
       else if (tab === 'scheduler') requestSchedulerData();
       else if (tab === 'cycles') requestSchedulerCycles();
       else if (tab === 'planner') requestPlannerData();
+      else if (tab === 'dprime') requestDprimeData();
+      else if (tab === 'dprime-config') requestDprimeConfig();
     });
   });
 
@@ -354,6 +370,8 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
   document.getElementById('scheduler-refresh').addEventListener('click', requestSchedulerData);
   document.getElementById('cycles-refresh').addEventListener('click', requestSchedulerCycles);
   document.getElementById('planner-refresh').addEventListener('click', requestPlannerData);
+  document.getElementById('dprime-refresh').addEventListener('click', requestDprimeData);
+  document.getElementById('dprime-config-refresh').addEventListener('click', requestDprimeConfig);
 
   function requestLogData() {
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -383,6 +401,133 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'request_planner_data' }));
     }
+  }
+
+  function requestDprimeData() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'request_dprime_data' }));
+    }
+  }
+
+  function requestDprimeConfig() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'request_dprime_config' }));
+    }
+  }
+
+  function dprimeScoreColor(score) {
+    if (score < 0.35) return '#248a3d';
+    if (score <= 0.55) return '#c77c00';
+    return '#d70015';
+  }
+
+  function dprimeDecisionBadge(decision) {
+    var d = decision.toUpperCase();
+    if (d === 'ACCEPT') return '\\u2705 ACCEPT';
+    if (d === 'MODIFY') return '\\u26A0\\uFE0F MODIFY';
+    if (d === 'REJECT') return '\\u274C REJECT';
+    if (d === 'ABORT') return '\\u26D4 ABORT';
+    return decision;
+  }
+
+  function renderDprimeGates(gates) {
+    var body = document.getElementById('dprime-body');
+    if (!gates || gates.length === 0) {
+      body.innerHTML = '<tr><td colspan=\"6\" style=\"text-align:center;opacity:.5\">No D\\' gate decisions today</td></tr>';
+      return;
+    }
+    var sorted = gates.slice().reverse();
+    body.innerHTML = sorted.map(function(g) {
+      var time = (g.timestamp || '').substring(11, 19);
+      var scoreColor = dprimeScoreColor(g.score);
+      return '<tr>' +
+        '<td>' + escapeHtml(time) + '</td>' +
+        '<td>' + escapeHtml((g.cycle_id || '').substring(0, 8)) + '</td>' +
+        '<td>' + escapeHtml(g.node_type) + '</td>' +
+        '<td><span class=\"dprime-gate-badge dprime-gate-' + escapeHtml(g.gate) + '\">' + escapeHtml(g.gate) + '</span></td>' +
+        '<td>' + dprimeDecisionBadge(g.decision) + '</td>' +
+        '<td style=\"color:' + scoreColor + ';font-weight:600\">' + g.score.toFixed(3) + '</td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  function renderDprimeConfig(config) {
+    var container = document.getElementById('dprime-config-container');
+    if (!config || config.error) {
+      container.innerHTML = '<div style=\"opacity:.5;padding:20px\">D\\' config not available: ' + (config ? config.error : 'no data') + '</div>';
+      return;
+    }
+    var html = '';
+
+    // Gates
+    var gates = config.gates || {};
+    var gateNames = Object.keys(gates);
+    gateNames.forEach(function(gateName) {
+      var gate = gates[gateName];
+      var features = gate.features || [];
+      var canary = gate.canary_enabled ? '\\u2705 Canary enabled' : '\\u274c Canary disabled';
+      html += '<div class=\"dprime-config-gate\">';
+      html += '<h3 class=\"dprime-gate-title\"><span class=\"dprime-gate-badge dprime-gate-' + gateName + '\">' + gateName + '</span> gate';
+      html += '<span class=\"dprime-thresholds\">modify: ' + (gate.modify_threshold || '?') + ' | reject: ' + (gate.reject_threshold || '?') + ' | ' + canary + '</span></h3>';
+      html += '<table class=\"admin-table\"><thead><tr><th>Feature</th><th>Importance</th><th>Critical</th><th>Description</th></tr></thead><tbody>';
+      features.forEach(function(f) {
+        var imp = f.importance || 'medium';
+        var impColor = imp === 'high' ? '#d70015' : imp === 'medium' ? '#c77c00' : '#248a3d';
+        var crit = f.critical ? '\\u26a0\\ufe0f Yes' : 'No';
+        html += '<tr><td style=\"font-weight:600\">' + escapeHtml(f.name) + '</td>';
+        html += '<td style=\"color:' + impColor + '\">' + imp + '</td>';
+        html += '<td>' + crit + '</td>';
+        html += '<td style=\"opacity:.8;font-size:12px\">' + escapeHtml(f.description || '') + '</td></tr>';
+      });
+      html += '</tbody></table></div>';
+    });
+
+    // Agent overrides
+    var overrides = config.agent_overrides || {};
+    var agentNames = Object.keys(overrides);
+    if (agentNames.length > 0) {
+      html += '<div class=\"dprime-config-gate\"><h3 class=\"dprime-gate-title\">Agent Overrides</h3>';
+      agentNames.forEach(function(agentName) {
+        var ovr = overrides[agentName];
+        var toolGate = ovr.tool || {};
+        var features = toolGate.features || [];
+        html += '<h4 style=\"margin:12px 0 6px;font-size:13px;color:var(--text-secondary)\">' + escapeHtml(agentName) + ' agent';
+        if (toolGate.modify_threshold) html += ' <span class=\"dprime-thresholds\">modify: ' + toolGate.modify_threshold + ' | reject: ' + toolGate.reject_threshold + '</span>';
+        html += '</h4>';
+        if (features.length > 0) {
+          html += '<table class=\"admin-table\"><thead><tr><th>Feature</th><th>Importance</th><th>Critical</th><th>Description</th></tr></thead><tbody>';
+          features.forEach(function(f) {
+            var imp = f.importance || 'medium';
+            var impColor = imp === 'high' ? '#d70015' : imp === 'medium' ? '#c77c00' : '#248a3d';
+            var crit = f.critical ? '\\u26a0\\ufe0f Yes' : 'No';
+            html += '<tr><td style=\"font-weight:600\">' + escapeHtml(f.name) + '</td>';
+            html += '<td style=\"color:' + impColor + '\">' + imp + '</td>';
+            html += '<td>' + crit + '</td>';
+            html += '<td style=\"opacity:.8;font-size:12px\">' + escapeHtml(f.description || '') + '</td></tr>';
+          });
+          html += '</tbody></table>';
+        }
+      });
+      html += '</div>';
+    }
+
+    // Meta config
+    var meta = config.meta;
+    if (meta) {
+      html += '<div class=\"dprime-config-gate\"><h3 class=\"dprime-gate-title\">Meta Observer</h3>';
+      html += '<div style=\"font-size:13px;line-height:1.8;padding:8px 0\">';
+      html += '<span style=\"opacity:.6\">Enabled:</span> ' + (meta.enabled ? '\\u2705' : '\\u274c') + ' &nbsp;';
+      html += '<span style=\"opacity:.6\">Rate limit:</span> ' + (meta.rate_limit_max_cycles || '?') + ' cycles/' + ((meta.rate_limit_window_ms || 60000)/1000) + 's &nbsp;';
+      html += '<span style=\"opacity:.6\">Elevated threshold:</span> ' + (meta.elevated_score_threshold || '?') + ' &nbsp;';
+      html += '<span style=\"opacity:.6\">Streak threshold:</span> ' + (meta.elevated_streak_threshold || '?') + ' &nbsp;';
+      html += '<span style=\"opacity:.6\">Rejection threshold:</span> ' + (meta.rejection_count_threshold || '?') + '/' + (meta.rejection_window_cycles || '?') + ' cycles &nbsp;';
+      html += '<span style=\"opacity:.6\">Cooldown:</span> ' + (meta.cooldown_delay_ms || '?') + 'ms &nbsp;';
+      html += '<span style=\"opacity:.6\">Tighten factor:</span> ' + (meta.tighten_factor || '?') + ' &nbsp;';
+      html += '<span style=\"opacity:.6\">Decay:</span> ' + (meta.decay_days || '?') + ' days';
+      html += '</div></div>';
+    }
+
+    container.innerHTML = html || '<div style=\"opacity:.5;padding:20px\">No D\\' configuration loaded</div>';
   }
 
   function renderSchedulerJobs(jobs) {
@@ -551,6 +696,34 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
         break;
       case 'planner_data':
         renderPlannerData(data.tasks, data.endeavours);
+        break;
+      case 'dprime_data':
+        renderDprimeGates(data.gates);
+        break;
+      case 'dprime_config_data':
+        renderDprimeConfig(data.config);
+        break;
+      case 'notification':
+        if (data.kind === 'safety') {
+          var dprimeTab = document.getElementById('dprime-tab');
+          if (dprimeTab && dprimeTab.classList.contains('active')) {
+            var body = document.getElementById('dprime-body');
+            var emptyRow = body.querySelector('td[colspan]');
+            if (emptyRow) body.innerHTML = '';
+            var now = new Date();
+            var time = ('0'+now.getHours()).slice(-2)+':'+('0'+now.getMinutes()).slice(-2)+':'+('0'+now.getSeconds()).slice(-2);
+            var scoreColor = dprimeScoreColor(data.score);
+            var row = '<tr style=\"background:rgba(218,126,55,0.06)\">' +
+              '<td>' + time + '</td>' +
+              '<td>live</td>' +
+              '<td>-</td>' +
+              '<td>' + escapeHtml(data.decision.toLowerCase().indexOf('tool') >= 0 ? 'tool' : 'input') + '</td>' +
+              '<td>' + dprimeDecisionBadge(data.decision) + '</td>' +
+              '<td style=\"color:' + scoreColor + ';font-weight:600\">' + data.score.toFixed(3) + '</td>' +
+              '</tr>';
+            body.insertAdjacentHTML('afterbegin', row);
+          }
+        }
         break;
     }
   }
@@ -1064,6 +1237,33 @@ fn shared_css() -> String {
   .log-mod { color: var(--text-secondary); white-space: nowrap; }
   .log-msg { color: var(--text); word-break: break-all; }
   .log-cycle { color: var(--text-dim); white-space: nowrap; }
+
+  /* ── D' Safety tab ─────────────────────────────── */
+  #dprime-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 0 16px;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  #dprime-container::-webkit-scrollbar { display: none; }
+  .dprime-gate-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 5px;
+    text-transform: uppercase;
+  }
+  .dprime-gate-input { background: rgba(0,122,255,0.10); color: #007aff; }
+  .dprime-gate-tool { background: rgba(255,149,0,0.12); color: #c77c00; }
+  .dprime-gate-output { background: rgba(52,199,89,0.12); color: #248a3d; }
+  .dprime-gate-post_exec { background: rgba(175,82,222,0.12); color: #8944ab; }
+
+  /* ── D' Config tab ─────────────────────────────── */
+  #dprime-config-container { max-height: calc(100vh - 200px); overflow-y: auto; }
+  .dprime-config-gate { margin-bottom: 24px; }
+  .dprime-gate-title { font-size: 14px; font-weight: 600; margin: 16px 0 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .dprime-thresholds { font-size: 12px; font-weight: 400; opacity: 0.6; margin-left: 8px; }
 "
 }
 
