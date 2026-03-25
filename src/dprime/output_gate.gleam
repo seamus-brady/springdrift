@@ -5,16 +5,17 @@
 //// Uses the same D' scoring infrastructure but with output-focused prompts.
 
 import cycle_log
+import dprime/deterministic.{type DeterministicConfig, Blocked, Escalated, Pass}
 import dprime/engine
 import dprime/scorer
 import dprime/types.{
   type DprimeState, type Feature, type Forecast, type GateResult, Accept,
-  Deliberative, GateResult, Modify, Reject,
+  Deliberative, GateResult, Modify, Reactive, Reject,
 }
 import gleam/float
 import gleam/int
 import gleam/list
-import gleam/option.{Some}
+import gleam/option.{type Option, None, Some}
 import gleam/string
 import llm/provider.{type Provider}
 import slog
@@ -22,6 +23,102 @@ import slog
 /// Evaluate a completed report/output against output quality features.
 /// Returns a GateResult with Accept/Modify/Reject decision.
 pub fn evaluate(
+  report_text: String,
+  original_query: String,
+  state: DprimeState,
+  provider: Provider,
+  model: String,
+  cycle_id: String,
+  verbose: Bool,
+  redact: Bool,
+) -> GateResult {
+  evaluate_with_deterministic(
+    report_text,
+    original_query,
+    state,
+    provider,
+    model,
+    cycle_id,
+    verbose,
+    redact,
+    None,
+  )
+}
+
+/// Evaluate with an optional deterministic pre-filter for output.
+pub fn evaluate_with_deterministic(
+  report_text: String,
+  original_query: String,
+  state: DprimeState,
+  provider: Provider,
+  model: String,
+  cycle_id: String,
+  verbose: Bool,
+  redact: Bool,
+  det_config: Option(DeterministicConfig),
+) -> GateResult {
+  // Deterministic pre-filter for output
+  let det_blocked = case det_config {
+    Some(dc) -> {
+      let det_result = deterministic.check_output(report_text, dc)
+      case det_result {
+        Blocked(rule_id, _reason) -> {
+          slog.warn(
+            "dprime/output_gate",
+            "evaluate",
+            "Deterministic block: rule " <> rule_id,
+            Some(cycle_id),
+          )
+          cycle_log.log_dprime_layer(
+            cycle_id,
+            "deterministic_output",
+            "reject",
+            1.0,
+            "Deterministic block: banned output pattern detected",
+          )
+          True
+        }
+        Escalated(_rule_id, _det_context) -> {
+          slog.info(
+            "dprime/output_gate",
+            "evaluate",
+            "Deterministic escalation on output, continuing with LLM gate",
+            Some(cycle_id),
+          )
+          False
+        }
+        Pass -> False
+      }
+    }
+    None -> False
+  }
+
+  case det_blocked {
+    True ->
+      GateResult(
+        decision: Reject,
+        dprime_score: 1.0,
+        forecasts: [],
+        explanation: "Deterministic block: banned output pattern detected",
+        layer: Reactive,
+        canary_result: None,
+      )
+    False ->
+      evaluate_llm(
+        report_text,
+        original_query,
+        state,
+        provider,
+        model,
+        cycle_id,
+        verbose,
+        redact,
+      )
+  }
+}
+
+/// Run the LLM-based output quality evaluation.
+fn evaluate_llm(
   report_text: String,
   original_query: String,
   state: DprimeState,

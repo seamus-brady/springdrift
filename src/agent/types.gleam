@@ -460,5 +460,6 @@ pub type DelegationInfo {
     last_tool: String,
     started_at_ms: Int,
     depth: Int,
+    violation_count: Int,
   )
 }

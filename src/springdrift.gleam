@@ -247,9 +247,9 @@ fn run(cfg: AppConfig) -> Nil {
   let reasoning_model =
     option.unwrap(cfg.reasoning_model, default_reasoning_model)
 
-  let initial_messages = case list.contains(get_startup_args(), "--resume") {
-    True -> storage.load()
-    False -> []
+  let initial_messages = case list.contains(get_startup_args(), "--fresh") {
+    True -> []
+    False -> storage.load()
   }
 
   // Narrative config (always enabled)
@@ -630,46 +630,52 @@ fn run(cfg: AppConfig) -> Nil {
     |> result.unwrap(how_to_content.builtin())
 
   let cognitive_subj = case
-    cognitive.start(CognitiveConfig(
-      provider: p,
-      system:,
-      max_tokens:,
-      max_context_messages: cfg.max_context_messages,
-      agent_tools:,
-      initial_messages:,
-      registry: registry.new(),
-      verbose:,
-      notify:,
-      task_model:,
-      reasoning_model:,
-      input_dprime_state:,
-      tool_dprime_state: dprime_state,
-      output_dprime_state:,
-      meta_config: unified_dprime.meta,
-      narrative_dir:,
-      cbr_dir: paths.cbr_dir(),
-      archivist_model:,
-      archivist_max_tokens:,
-      librarian: lib,
-      write_anywhere:,
-      curator: option.Some(curator_subj),
-      agent_uuid: stable_identity.agent_uuid,
-      agent_name:,
-      session_since:,
-      retry_config:,
-      classify_timeout_ms:,
-      threading_config:,
-      memory_limits: tools_memory.MemoryLimits(
-        recall_max_entries:,
-        cbr_max_results:,
+    cognitive.start(
+      CognitiveConfig(
+        provider: p,
+        system:,
+        max_tokens:,
+        max_context_messages: cfg.max_context_messages,
+        agent_tools:,
+        initial_messages:,
+        registry: registry.new(),
+        verbose:,
+        notify:,
+        task_model:,
+        reasoning_model:,
+        input_dprime_state:,
+        tool_dprime_state: dprime_state,
+        output_dprime_state:,
+        meta_config: unified_dprime.meta,
+        narrative_dir:,
+        cbr_dir: paths.cbr_dir(),
+        archivist_model:,
+        archivist_max_tokens:,
+        librarian: lib,
+        write_anywhere:,
+        curator: option.Some(curator_subj),
+        agent_uuid: stable_identity.agent_uuid,
+        agent_name:,
+        session_since:,
+        retry_config:,
+        classify_timeout_ms:,
+        threading_config:,
+        memory_limits: tools_memory.MemoryLimits(
+          recall_max_entries:,
+          cbr_max_results:,
+        ),
+        input_queue_cap: option.unwrap(cfg.input_queue_cap, 10),
+        how_to_content: option.Some(how_to_content),
+        redact_secrets:,
+        planner_dir: paths.planner_dir(),
+        max_delegation_depth: option.unwrap(cfg.max_delegation_depth, 3),
+        sandbox_enabled: option.is_some(sandbox_mgr),
+        deterministic_config: case option.unwrap(cfg.dprime_enabled, True) {
+          True -> option.Some(unified_dprime.deterministic)
+          False -> option.None
+        },
       ),
-      input_queue_cap: option.unwrap(cfg.input_queue_cap, 10),
-      how_to_content: option.Some(how_to_content),
-      redact_secrets:,
-      planner_dir: paths.planner_dir(),
-      max_delegation_depth: option.unwrap(cfg.max_delegation_depth, 3),
-      sandbox_enabled: option.is_some(sandbox_mgr),
-    ))
+    )
   {
     Ok(subj) -> subj
     Error(_) -> {
@@ -793,8 +799,9 @@ fn run(cfg: AppConfig) -> Nil {
   }
 
   // Inject active tasks as sensory events on resume
-  case list.contains(get_startup_args(), "--resume") {
-    True -> {
+  case list.contains(get_startup_args(), "--fresh") {
+    True -> Nil
+    False -> {
       let active_tasks = librarian.get_active_tasks(librarian_subj)
       let now = get_date_ffi()
       list.each(active_tasks, fn(task) {
@@ -831,7 +838,6 @@ fn run(cfg: AppConfig) -> Nil {
           )
       }
     }
-    False -> Nil
   }
 
   // Start GUI

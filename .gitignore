@@ -9,3 +9,4 @@ erl_crash.dump
 *.local.json
 _impl_docs/
 springdrift-066b5291fc32.json
+./claude/worktrees/

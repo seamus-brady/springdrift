@@ -64,7 +64,8 @@ src/
 │   ├── scorer.gleam           LLM magnitude scoring with prompt building + JSON parsing
 │   ├── canary.gleam           Hijack + leakage probes (fail-closed, fresh tokens per request)
 │   ├── gate.gleam             Three-layer H-CogAff orchestrator (reactive → deliberative → meta)
-│   ├── config.gleam           D' config loading from JSON, unified format (gates + agent overrides + meta + shared)
+│   ├── config.gleam           D' config loading from JSON, unified format (gates + agent overrides + meta + shared + deterministic)
+│   ├── deterministic.gleam    Deterministic pre-filter — regex rules, path/domain allowlists (no LLM calls)
 │   ├── output_gate.gleam      Output quality gate — evaluates finished reports before delivery
 │   └── meta.gleam             History ring buffer, stall detection, threshold tightening
 │
@@ -627,7 +628,7 @@ Per-profile D' uses the unified config format in `dprime.json` (see below).
 
 **D' unified config** — `dprime/config.gleam` loads a unified JSON format from
 `dprime.json` (see `.springdrift_example/dprime.json` for a full example). The unified
-format has four top-level keys:
+format has five top-level keys:
 
 - `gates` — named gate configs: `input` (pre-cycle input screening), `tool` (before
   tool dispatch), `output` (finished report quality, optional), `post_exec` (after tool
@@ -640,6 +641,12 @@ format has four top-level keys:
   `elevated_score_threshold`, `rejection_count_threshold`, `tighten_factor`, etc.
 - `shared` — common settings applied to all gates that don't explicitly override them
   (`tiers`, `max_history`, `stall_window`, `max_iterations`).
+- `deterministic` — regex-based pre-filter rules that run BEFORE any LLM calls.
+  Contains `input_rules`, `tool_rules`, `output_rules` (each a list of `{id, pattern,
+  action}` where action is `"block"` or `"escalate"`), plus `path_allowlist` and
+  `domain_allowlist`. Deterministic blocks short-circuit the gate with no LLM cost.
+  Escalations enrich context for the LLM scorer. The agent sees decisions ("banned
+  pattern detected") but NOT the rule patterns — patterns are operator-only config.
 
 Backward compatible with the old `tool_gate`/`output_gate` dual-gate format and
 single-gate format — `load_unified` auto-detects and converts.

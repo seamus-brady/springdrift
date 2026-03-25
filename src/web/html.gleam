@@ -53,7 +53,7 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
 <script>
 " <> sidebar_js() <> "
 (function() {
-  var STORAGE_KEY = 'springdrift_chat_history';
+  // Chat history is server-authoritative — no localStorage
   var msgs = document.getElementById('messages');
   var form = document.getElementById('chat-form');
   var input = document.getElementById('chat-input');
@@ -64,6 +64,7 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
   var thinkingEl = null;
   var isThinking = false;
   var waitingForAnswer = false;
+  var wasRevised = false;
   var reconnectDelay = 1000;
   var chatHistory = [];
 
@@ -74,34 +75,36 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
     catch(e) { return escapeHtml(text); }
   }
 
-  function saveChatHistory() {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(chatHistory)); }
-    catch(e) {}
-  }
+  function saveChatHistory() {}
 
-  function loadChatHistory() {
-    try {
-      var stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        chatHistory = JSON.parse(stored);
-        chatHistory.forEach(function(item) {
-          if (item.role === 'user') renderUserMessage(item.text);
-          else if (item.role === 'assistant') renderAssistantMessage(item.text, item.model, item.usage);
-          else if (item.role === 'notification') renderNotification(item.text);
-        });
-        scrollBottom();
+  function renderSessionHistory(messages) {
+    msgs.innerHTML = '';
+    chatHistory = [];
+    if (!messages || messages.length === 0) return;
+    messages.forEach(function(item) {
+      if (item.role === 'user') {
+        renderUserMessage(item.text);
+        chatHistory.push({ role: 'user', text: item.text });
+      } else if (item.role === 'assistant') {
+        renderAssistantMessage(item.text, null, null, false);
+        chatHistory.push({ role: 'assistant', text: item.text });
       }
-    } catch(e) { chatHistory = []; }
+    });
+    scrollBottom();
   }
 
   " <> ws_connect_js() <> "
 
   function handleServerMessage(data) {
     switch (data.type) {
+      case 'session_history':
+        renderSessionHistory(data.messages);
+        break;
       case 'assistant_message':
         removeThinking();
         waitingForAnswer = false;
-        addAssistantMessage(data.text, data.model, data.usage);
+        addAssistantMessage(data.text, data.model, data.usage, wasRevised);
+        wasRevised = false;
         break;
       case 'thinking':
         showThinking();
@@ -120,6 +123,7 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
         } else if (data.kind === 'safety') {
           var badge = data.decision === 'ACCEPT' ? '\\u2705' : data.decision === 'REJECT' ? '\\u274C' : '\\u26A0\\uFE0F';
           addNotification(badge + ' D\\' ' + data.decision + ' (score: ' + data.score.toFixed(2) + ')');
+          if (data.decision === 'MODIFY') wasRevised = true;
         }
         break;
     }
@@ -132,9 +136,16 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
     msgs.appendChild(el);
   }
 
-  function renderAssistantMessage(text, model, usage) {
+  function renderAssistantMessage(text, model, usage, revised) {
     var el = document.createElement('div');
     el.className = 'msg assistant';
+    if (revised) {
+      var badge = document.createElement('span');
+      badge.className = 'revised-badge';
+      badge.textContent = 'revised';
+      badge.title = 'This response was revised by the D\\' quality gate before delivery';
+      el.appendChild(badge);
+    }
     var body = document.createElement('div');
     body.className = 'md-body';
     body.innerHTML = renderMarkdown(text);
@@ -165,9 +176,9 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
     scrollBottom();
   }
 
-  function addAssistantMessage(text, model, usage) {
-    renderAssistantMessage(text, model, usage);
-    chatHistory.push({ role: 'assistant', text: text, model: model, usage: usage });
+  function addAssistantMessage(text, model, usage, revised) {
+    renderAssistantMessage(text, model, usage, revised);
+    chatHistory.push({ role: 'assistant', text: text, model: model, usage: usage, revised: revised || false });
     saveChatHistory();
     scrollBottom();
   }
@@ -246,7 +257,7 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
     sendMessage();
   });
 
-  loadChatHistory();
+  // History is loaded from server on WebSocket connect (session_history message)
   connect();
 })();
 </script>
@@ -525,6 +536,40 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
       html += '<span style=\"opacity:.6\">Tighten factor:</span> ' + (meta.tighten_factor || '?') + ' &nbsp;';
       html += '<span style=\"opacity:.6\">Decay:</span> ' + (meta.decay_days || '?') + ' days';
       html += '</div></div>';
+    }
+
+    // Deterministic pre-filter
+    var det = config.deterministic;
+    if (det) {
+      html += '<div class=\"dprime-config-gate\"><h3 class=\"dprime-gate-title\">Deterministic Pre-filter</h3>';
+      html += '<div style=\"font-size:13px;line-height:1.8;padding:8px 0\">';
+      html += '<span style=\"opacity:.6\">Enabled:</span> ' + (det.enabled ? '\\u2705' : '\\u274c') + ' &nbsp;';
+      var inputCount = (det.input_rules || []).length;
+      var toolCount = (det.tool_rules || []).length;
+      var outputCount = (det.output_rules || []).length;
+      html += '<span style=\"opacity:.6\">Input rules:</span> ' + inputCount + ' &nbsp;';
+      html += '<span style=\"opacity:.6\">Tool rules:</span> ' + toolCount + ' &nbsp;';
+      html += '<span style=\"opacity:.6\">Output rules:</span> ' + outputCount + ' &nbsp;';
+      var pathCount = (det.path_allowlist || []).length;
+      var domainCount = (det.domain_allowlist || []).length;
+      if (pathCount > 0) html += '<span style=\"opacity:.6\">Path allowlist:</span> ' + pathCount + ' entries &nbsp;';
+      if (domainCount > 0) html += '<span style=\"opacity:.6\">Domain allowlist:</span> ' + domainCount + ' entries &nbsp;';
+      html += '</div>';
+      // Show rules in a table if any exist
+      var allRules = [];
+      (det.input_rules || []).forEach(function(r) { allRules.push({scope: 'input', id: r.id, action: r.action}); });
+      (det.tool_rules || []).forEach(function(r) { allRules.push({scope: 'tool', id: r.id, action: r.action}); });
+      (det.output_rules || []).forEach(function(r) { allRules.push({scope: 'output', id: r.id, action: r.action}); });
+      if (allRules.length > 0) {
+        html += '<table class=\"admin-table\"><thead><tr><th>Scope</th><th>Rule ID</th><th>Action</th></tr></thead><tbody>';
+        allRules.forEach(function(r) {
+          var actionColor = r.action === 'block' ? '#d70015' : '#c77c00';
+          html += '<tr><td>' + r.scope + '</td><td style=\"font-weight:600\">' + escapeHtml(r.id) + '</td>';
+          html += '<td style=\"color:' + actionColor + '\">' + r.action + '</td></tr>';
+        });
+        html += '</tbody></table>';
+      }
+      html += '</div>';
     }
 
     container.innerHTML = html || '<div style=\"opacity:.5;padding:20px\">No D\\' configuration loaded</div>';
@@ -923,6 +968,18 @@ fn shared_css() -> String {
     align-self: flex-start;
     border-bottom-left-radius: 6px;
     box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    position: relative;
+  }
+  .revised-badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 600;
+    color: #c77c00;
+    background: rgba(255,149,0,0.10);
+    padding: 2px 7px;
+    border-radius: 4px;
+    margin-bottom: 6px;
+    cursor: help;
   }
 
   /* ── Markdown inside assistant messages ──────────── */

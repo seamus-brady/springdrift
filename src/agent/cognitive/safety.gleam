@@ -8,6 +8,7 @@ import agent/worker
 import cycle_log
 import dag/types as dag_types
 import dprime/audit as dprime_audit
+import dprime/deterministic.{Blocked, Escalated, Pass}
 import dprime/gate
 import dprime/meta
 import dprime/output_gate
@@ -159,32 +160,113 @@ pub fn spawn_safety_gate(
   // Build context from recent messages (character-budget walker, all content types)
   let ctx = build_context_string(state.messages, 2000)
 
+  let det_config = state.config.deterministic_config
+  let redact_secrets = state.redact_secrets
+
   // TODO(BF-12): Gate processes have no timeout. If the LLM call inside
   // gate.evaluate hangs, the cognitive loop waits forever. A timeout
   // mechanism (e.g. process.send_after with a new message type) should be
   // added to cancel stalled gate evaluations.
   process.spawn_unlinked(fn() {
-    let result =
-      gate.evaluate(
-        instruction,
-        ctx,
-        dprime_st,
-        provider,
-        model,
-        cycle_id,
-        verbose,
-        state.redact_secrets,
-      )
-    process.send(
-      self,
-      types.SafetyGateComplete(
-        task_id:,
-        result:,
-        response: resp,
-        calls:,
-        reply_to:,
-      ),
-    )
+    // Deterministic pre-filter for tool calls
+    let det_result = case det_config {
+      Some(dc) -> {
+        let combined =
+          list.map(calls, fn(c) { c.name <> " " <> c.input_json })
+          |> string.join("; ")
+        deterministic.check_tool(combined, "", dc)
+      }
+      None -> Pass
+    }
+    case det_result {
+      Blocked(rule_id, _reason) -> {
+        slog.warn(
+          "cognitive",
+          "spawn_safety_gate",
+          "Deterministic tool block: rule " <> rule_id,
+          Some(cycle_id),
+        )
+        cycle_log.log_dprime_layer(
+          cycle_id,
+          "deterministic_tool",
+          "reject",
+          1.0,
+          "Deterministic block: banned tool pattern detected",
+        )
+        let reject_result =
+          dprime_types.GateResult(
+            decision: dprime_types.Reject,
+            dprime_score: 1.0,
+            forecasts: [],
+            explanation: "Deterministic block: banned tool pattern detected",
+            layer: dprime_types.Reactive,
+            canary_result: None,
+          )
+        process.send(
+          self,
+          types.SafetyGateComplete(
+            task_id:,
+            result: reject_result,
+            response: resp,
+            calls:,
+            reply_to:,
+          ),
+        )
+      }
+      Escalated(_rule_id, det_context) -> {
+        slog.info(
+          "cognitive",
+          "spawn_safety_gate",
+          "Deterministic tool escalation, adding context",
+          Some(cycle_id),
+        )
+        let enriched_ctx = det_context <> "\n" <> ctx
+        let result =
+          gate.evaluate(
+            instruction,
+            enriched_ctx,
+            dprime_st,
+            provider,
+            model,
+            cycle_id,
+            verbose,
+            redact_secrets,
+          )
+        process.send(
+          self,
+          types.SafetyGateComplete(
+            task_id:,
+            result:,
+            response: resp,
+            calls:,
+            reply_to:,
+          ),
+        )
+      }
+      Pass -> {
+        let result =
+          gate.evaluate(
+            instruction,
+            ctx,
+            dprime_st,
+            provider,
+            model,
+            cycle_id,
+            verbose,
+            redact_secrets,
+          )
+        process.send(
+          self,
+          types.SafetyGateComplete(
+            task_id:,
+            result:,
+            response: resp,
+            calls:,
+            reply_to:,
+          ),
+        )
+      }
+    }
   })
 
   CognitiveState(
@@ -505,13 +587,16 @@ pub fn spawn_input_safety_gate(
   // Build context from recent messages (character-budget walker, all content types)
   let ctx = build_context_string(state.messages, 2000)
 
+  let det_config = state.config.deterministic_config
+  let redact_secrets = state.redact_secrets
+
   // TODO(BF-12): Gate processes have no timeout. If the LLM call inside
   // gate.evaluate hangs, the cognitive loop waits forever. A timeout
   // mechanism (e.g. process.send_after with a new message type) should be
   // added to cancel stalled gate evaluations.
   process.spawn_unlinked(fn() {
     let result =
-      gate.evaluate(
+      gate.evaluate_with_deterministic(
         instruction,
         ctx,
         dprime_st,
@@ -519,7 +604,8 @@ pub fn spawn_input_safety_gate(
         scorer_model,
         cycle_id,
         verbose,
-        state.redact_secrets,
+        redact_secrets,
+        det_config,
       )
     process.send(
       self,
@@ -842,13 +928,15 @@ pub fn spawn_output_gate(
     })
     |> option.from_result
     |> option.unwrap(state.last_user_input)
+  let det_config = state.config.deterministic_config
+  let redact_secrets = state.redact_secrets
   // TODO(BF-12): Gate processes have no timeout. If the LLM call inside
   // output_gate.evaluate hangs, the cognitive loop waits forever. A timeout
   // mechanism (e.g. process.send_after with a new message type) should be
   // added to cancel stalled gate evaluations.
   process.spawn_unlinked(fn() {
     let result =
-      output_gate.evaluate(
+      output_gate.evaluate_with_deterministic(
         report_text,
         query,
         output_state,
@@ -856,7 +944,8 @@ pub fn spawn_output_gate(
         model,
         cycle_id,
         verbose,
-        state.redact_secrets,
+        redact_secrets,
+        det_config,
       )
     process.send(
       self,
@@ -973,9 +1062,8 @@ pub fn handle_output_gate_complete(
           let correction_msg =
             llm_types.Message(role: llm_types.User, content: [
               llm_types.TextContent(
-                text: "The quality gate flagged the following issues with your report. Please revise:\n\n"
-                <> explanation
-                <> "\n\nPlease produce an updated report addressing these issues.",
+                text: "[SYSTEM: Your response was NOT delivered to the user. The quality gate flagged the following issues. Please revise and produce an updated response.]\n\n"
+                <> explanation,
               ),
             ])
           let messages = list.append(state.messages, [correction_msg])
@@ -1018,9 +1106,10 @@ pub fn handle_output_gate_complete(
       )
       // User sees a clean, contextual message
       let user_text = build_user_response(result)
-      // Agent's history gets the technical details for pattern learning
+      // Agent's history gets the technical details + explicit non-delivery notice
       let agent_text =
-        build_rejection_notice("output", result, "agent response")
+        "[SYSTEM: Your response was NOT delivered to the user — it was rejected by the quality gate.] "
+        <> build_rejection_notice("output", result, "agent response")
       process.send(
         reply_to,
         CognitiveReply(response: user_text, model: state.model, usage: None),

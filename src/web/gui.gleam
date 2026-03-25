@@ -31,6 +31,7 @@ import web/protocol
 type WsMsg {
   GotReply(agent_types.CognitiveReply)
   GotNotification(agent_types.Notification)
+  SendHistory(String)
 }
 
 // ---------------------------------------------------------------------------
@@ -236,11 +237,15 @@ fn ws_on_init(
   // Register with the relay so the main process forwards notifications here
   process.send(relay, Register(notify_subject))
 
-  // Build selector that bridges cognitive replies + notifications into WsMsg
+  // Channel for sending session history on connect
+  let history_subject: Subject(String) = process.new_subject()
+
+  // Build selector that bridges cognitive replies + notifications + history into WsMsg
   let selector: Selector(WsMsg) =
     process.new_selector()
     |> process.select_map(reply_subject, fn(cr) { GotReply(cr) })
     |> process.select_map(notify_subject, fn(n) { GotNotification(n) })
+    |> process.select_map(history_subject, fn(h) { SendHistory(h) })
 
   let state =
     WsState(
@@ -254,27 +259,24 @@ fn ws_on_init(
       ws_max_bytes:,
     )
 
-  // Replay initial messages after init
-  let replay_msgs = initial_messages
+  // Send session history as a single message after init
+  let history_msgs = initial_messages
   process.spawn_unlinked(fn() {
-    // Small delay to ensure the WS handler is ready to receive Custom messages
     process.sleep(50)
-    list.each(replay_msgs, fn(msg) {
-      case msg.role {
-        Assistant -> {
-          let text = extract_text(msg)
-          process.send(
-            reply_subject,
-            agent_types.CognitiveReply(
-              response: text,
-              model: "history",
-              usage: None,
-            ),
-          )
-        }
-        User -> Nil
-      }
-    })
+    let messages_json =
+      json.to_string(
+        json.array(history_msgs, fn(msg) {
+          let role = case msg.role {
+            User -> "user"
+            Assistant -> "assistant"
+          }
+          json.object([
+            #("role", json.string(role)),
+            #("text", json.string(extract_text(msg))),
+          ])
+        }),
+      )
+    process.send(history_subject, messages_json)
   })
 
   #(state, Some(selector))
@@ -520,6 +522,16 @@ fn ws_handler(
       let server_msg = notification_to_server_message(notification)
       let _ =
         mist.send_text_frame(conn, protocol.encode_server_message(server_msg))
+      mist.continue(state)
+    }
+
+    // Session history on connect
+    mist.Custom(SendHistory(messages_json)) -> {
+      let _ =
+        mist.send_text_frame(
+          conn,
+          protocol.encode_server_message(protocol.SessionHistory(messages_json:)),
+        )
       mist.continue(state)
     }
 

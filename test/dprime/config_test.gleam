@@ -1,4 +1,5 @@
 import dprime/config as dprime_config
+import dprime/deterministic.{BlockAction, EscalateAction}
 import dprime/types as dprime_types
 import gleam/list
 import gleam/option.{None, Some}
@@ -501,5 +502,105 @@ pub fn load_unified_invalid_json_returns_defaults_test() {
   let assert Ok(_) = simplifile.write(path, "not valid {{{")
   let u = dprime_config.load_unified(path)
   u |> should.equal(dprime_config.default_unified())
+  let _ = simplifile.delete(path)
+}
+
+// ---------------------------------------------------------------------------
+// Deterministic config in unified format
+// ---------------------------------------------------------------------------
+
+pub fn load_unified_with_deterministic_section_test() {
+  let json =
+    "{
+  \"gates\": {
+    \"input\": {
+      \"features\": [{\"name\": \"safety\", \"importance\": \"high\"}]
+    },
+    \"tool\": {
+      \"features\": [{\"name\": \"safety\", \"importance\": \"high\"}]
+    }
+  },
+  \"deterministic\": {
+    \"enabled\": true,
+    \"input_rules\": [
+      {\"id\": \"injection-override\", \"pattern\": \"ignore previous instructions\", \"action\": \"block\"}
+    ],
+    \"tool_rules\": [
+      {\"id\": \"rm-rf\", \"pattern\": \"rm\\\\s+-rf\\\\s+/\", \"action\": \"block\"}
+    ],
+    \"output_rules\": [
+      {\"id\": \"credential-leak\", \"pattern\": \"sk-[A-Za-z0-9_-]{20,}\", \"action\": \"block\"}
+    ],
+    \"path_allowlist\": [\"/home/user/projects\"],
+    \"domain_allowlist\": [\"example.com\", \"api.openai.com\"]
+  }
+}"
+  let path = "/tmp/dprime_test_unified_deterministic.json"
+  let assert Ok(_) = simplifile.write(path, json)
+  let u = dprime_config.load_unified(path)
+  u.deterministic.enabled |> should.be_true
+  list.length(u.deterministic.input_rules) |> should.equal(1)
+  list.length(u.deterministic.tool_rules) |> should.equal(1)
+  list.length(u.deterministic.output_rules) |> should.equal(1)
+  list.length(u.deterministic.path_allowlist) |> should.equal(1)
+  list.length(u.deterministic.domain_allowlist) |> should.equal(2)
+  // Verify rule details
+  let assert [input_rule] = u.deterministic.input_rules
+  input_rule.id |> should.equal("injection-override")
+  input_rule.action |> should.equal(BlockAction)
+  let assert [tool_rule] = u.deterministic.tool_rules
+  tool_rule.id |> should.equal("rm-rf")
+  tool_rule.action |> should.equal(BlockAction)
+  let _ = simplifile.delete(path)
+}
+
+pub fn load_unified_missing_deterministic_defaults_to_empty_test() {
+  let json =
+    "{
+  \"gates\": {
+    \"input\": {
+      \"features\": [{\"name\": \"safety\", \"importance\": \"high\"}]
+    },
+    \"tool\": {
+      \"features\": [{\"name\": \"safety\", \"importance\": \"high\"}]
+    }
+  }
+}"
+  let path = "/tmp/dprime_test_unified_no_deterministic.json"
+  let assert Ok(_) = simplifile.write(path, json)
+  let u = dprime_config.load_unified(path)
+  u.deterministic |> should.equal(deterministic.default_config())
+  u.deterministic.enabled |> should.be_true
+  u.deterministic.input_rules |> should.equal([])
+  u.deterministic.tool_rules |> should.equal([])
+  u.deterministic.output_rules |> should.equal([])
+  u.deterministic.path_allowlist |> should.equal([])
+  u.deterministic.domain_allowlist |> should.equal([])
+  let _ = simplifile.delete(path)
+}
+
+pub fn load_unified_deterministic_with_escalate_action_test() {
+  let json =
+    "{
+  \"gates\": {
+    \"input\": {
+      \"features\": [{\"name\": \"safety\", \"importance\": \"high\"}]
+    },
+    \"tool\": {
+      \"features\": [{\"name\": \"safety\", \"importance\": \"high\"}]
+    }
+  },
+  \"deterministic\": {
+    \"enabled\": true,
+    \"input_rules\": [
+      {\"id\": \"suspicious\", \"pattern\": \"you are now\", \"action\": \"escalate\"}
+    ]
+  }
+}"
+  let path = "/tmp/dprime_test_unified_det_escalate.json"
+  let assert Ok(_) = simplifile.write(path, json)
+  let u = dprime_config.load_unified(path)
+  let assert [rule] = u.deterministic.input_rules
+  rule.action |> should.equal(EscalateAction)
   let _ = simplifile.delete(path)
 }

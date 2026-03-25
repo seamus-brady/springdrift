@@ -51,6 +51,7 @@ pub type ServerMessage {
   PlannerData(tasks_json: String, endeavours_json: String)
   DprimeData(gates_json: String)
   DprimeConfigData(config_json: String)
+  SessionHistory(messages_json: String)
 }
 
 pub type CycleDataJson {
@@ -216,6 +217,9 @@ pub fn encode_server_message(msg: ServerMessage) -> String {
 
     DprimeConfigData(config_json:) ->
       "{\"type\":\"dprime_config_data\",\"config\":" <> config_json <> "}"
+
+    SessionHistory(messages_json:) ->
+      "{\"type\":\"session_history\",\"messages\":" <> messages_json <> "}"
   }
 }
 

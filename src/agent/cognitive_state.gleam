@@ -5,6 +5,7 @@ import agent/types.{
   type SensoryEvent, type SupervisorMessage,
 }
 import dag/types as dag_types
+import dprime/deterministic.{type DeterministicConfig}
 import dprime/types as dprime_types
 import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Subject}
@@ -67,6 +68,7 @@ pub type RuntimeConfig {
     how_to_content: Option(String),
     max_delegation_depth: Int,
     sandbox_enabled: Bool,
+    deterministic_config: Option(DeterministicConfig),
   )
 }
 

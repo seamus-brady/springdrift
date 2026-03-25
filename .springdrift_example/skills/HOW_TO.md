@@ -31,9 +31,13 @@ intent and domain. Past cases reveal which tools worked and what pitfalls to avo
 For diagnostic questions (what failed, why, patterns over time) use the diagnostic
 tools: `reflect`, `inspect_cycle`, `list_recent_cycles`, `query_tool_activity`.
 
+### D' Deterministic Pre-Filter
+
+Some blocks happen instantly without any LLM evaluation — these are deterministic pattern matches on known-bad inputs, banned commands, or credential leaks. When a deterministic rule fires, you see a decision like "deterministic block: banned pattern detected" but the specific rule pattern is not disclosed. These blocks are fast (no LLM cost) and non-negotiable.
+
 ### D' Rejection Format
 
-When D' blocks something, you receive two layers of information:
+When D' blocks something via the LLM scorer, you receive two layers of information:
 
 **In your message history** — a technical notice for pattern learning:
 ```

@@ -15,6 +15,8 @@
          mailbox_size/0, add_days/2,
          ms_until_datetime/1, advance_datetime_ms/2,
          re_replace_all/3,
+         re_match_caseless/2,
+         re_is_valid_pattern/1,
          set_env/2,
          run_cmd/3, which/1,
          json_encode_term/1, json_decode_to_string/1,
@@ -176,22 +178,6 @@ http_post(Url, Headers, Body) ->
             {error, list_to_binary(io_lib:format("~p", [Reason]))}
     end.
 
-
-%% Extract Content-Type from a headers list. Returns {ContentTypeStr, RemainingHeaders}.
-extract_content_type(Headers) ->
-    extract_content_type(Headers, "application/json", []).
-
-extract_content_type([], CT, Acc) ->
-    {CT, lists:reverse(Acc)};
-extract_content_type([{K, V} | Rest], _CT, Acc) when is_binary(K) ->
-    case string:lowercase(K) of
-        <<"content-type">> ->
-            extract_content_type(Rest, binary_to_list(V), Acc);
-        _ ->
-            extract_content_type(Rest, _CT, [{K, V} | Acc])
-    end;
-extract_content_type([H | Rest], CT, Acc) ->
-    extract_content_type(Rest, CT, [H | Acc]).
 
 %% Run a zero-arity function, catching any throw/error/exit.
 %% Returns {ok, Result} or {error, Reason}.
@@ -611,13 +597,47 @@ which(Name) when is_binary(Name) ->
         Path -> {ok, list_to_binary(Path)}
     end.
 
+%% Extract Content-Type from a headers list. Returns {ContentTypeStr, RemainingHeaders}.
+extract_content_type(Headers) ->
+    extract_content_type(Headers, "application/json", []).
+
+extract_content_type([], CT, Acc) ->
+    {CT, lists:reverse(Acc)};
+extract_content_type([{K, V} | Rest], _CT, Acc) when is_binary(K) ->
+    case string:lowercase(K) of
+        <<"content-type">> ->
+            extract_content_type(Rest, binary_to_list(V), Acc);
+        _ ->
+            extract_content_type(Rest, _CT, [{K, V} | Acc])
+    end;
+extract_content_type([H | Rest], CT, Acc) ->
+    extract_content_type(Rest, CT, [H | Acc]).
+
+%% Case-insensitive regex match. Returns true if the pattern matches anywhere in
+%% the text, false otherwise. Returns false on invalid patterns (fail-open).
+re_match_caseless(Text, Pattern) when is_binary(Text), is_binary(Pattern) ->
+    case re:compile(Pattern, [caseless]) of
+        {ok, MP} ->
+            case re:run(Text, MP) of
+                {match, _} -> true;
+                nomatch -> false
+            end;
+        {error, _} ->
+            false
+    end.
+
+%% Check if a regex pattern is valid (compiles without errors).
+re_is_valid_pattern(Pattern) when is_binary(Pattern) ->
+    case re:compile(Pattern) of
+        {ok, _} -> true;
+        {error, _} -> false
+    end.
+
 %% Encode an Erlang/Gleam term to a JSON binary string.
-%% Uses thoas (gleam_json's backend) for encoding.
 json_encode_term(Term) ->
     iolist_to_binary(thoas:encode(Term)).
 
 %% Decode a JSON binary string into an Erlang term, then re-encode it.
-%% Used to capture a JSON object from a parsed response as a string.
 json_decode_to_string(Bin) when is_binary(Bin) ->
     case thoas:decode(Bin) of
         {ok, Term} -> {ok, iolist_to_binary(thoas:encode(Term))};
@@ -629,8 +649,7 @@ identity(X) -> X.
 
 %% Simple ETS key-value store for token caching.
 ets_new(Name) when is_binary(Name) ->
-    Tab = ets:new(binary_to_atom(Name, utf8), [set, public]),
-    Tab.
+    ets:new(binary_to_atom(Name, utf8), [set, public]).
 
 ets_insert(Tab, Key, Value) when is_binary(Key), is_binary(Value) ->
     ets:insert(Tab, {Key, Value}),
@@ -643,8 +662,6 @@ ets_lookup(Tab, Key) when is_binary(Key) ->
     end.
 
 %% RSA-SHA256 signing for JWT service account auth.
-%% Signs Message with the PEM-encoded RSA private key.
-%% Returns {ok, Base64UrlSignature} | {error, Reason}.
 sign_rs256(PemBin, Message) when is_binary(PemBin), is_binary(Message) ->
     try
         Entries = public_key:pem_decode(PemBin),

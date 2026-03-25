@@ -124,6 +124,7 @@ pub fn start(
           how_to_content: cfg.how_to_content,
           max_delegation_depth: cfg.max_delegation_depth,
           sandbox_enabled: cfg.sandbox_enabled,
+          deterministic_config: cfg.deterministic_config,
         ),
         redact_secrets: cfg.redact_secrets,
         pending_sensory_events: [],
