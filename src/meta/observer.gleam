@@ -10,7 +10,7 @@ import meta/types.{
   type MetaIntervention, type MetaObservation, type MetaSignal, type MetaState,
   CumulativeRiskSignal, EscalateToUser, ForceCooldown, HighFalsePositiveSignal,
   InjectCaution, Layer3aPersistenceSignal, NoIntervention, RateLimitSignal,
-  RepeatedRejectionSignal, TightenAllGates,
+  RepeatedRejectionSignal, TightenAllGates, VirtueDriftSignal,
 }
 
 /// Evaluate a new observation against the meta state.
@@ -96,33 +96,63 @@ fn determine_intervention(
           }
         })
 
-      // Priority: high FP rate > rate+rejection > rejection > cumulative/3a > rate > none
-      case has_high_fp {
-        True ->
+      let has_virtue_drift =
+        list.any(signals, fn(s) {
+          case s {
+            VirtueDriftSignal(..) -> True
+            _ -> False
+          }
+        })
+
+      // Priority: virtue drift / high FP > rate+rejection > rejection > cumulative/3a > rate > none
+      case has_virtue_drift {
+        True -> {
+          let desc =
+            list.find_map(signals, fn(s) {
+              case s {
+                VirtueDriftSignal(_, d) -> Ok(d)
+                _ -> Error(Nil)
+              }
+            })
+          let body = case desc {
+            Ok(d) -> d
+            Error(_) -> "Normative calculus drift detected"
+          }
           EscalateToUser(
-            title: "Meta observer: high false positive rate",
-            body: "Multiple D' rejections have been flagged as false positives. Current thresholds may be too aggressive — consider reviewing dprime.json.",
+            title: "Normative calculus: virtue drift",
+            body: body <> " — review character.json or D' thresholds.",
           )
+        }
         False ->
-          case has_rate_limit && has_repeated_rejection {
+          case has_high_fp {
             True ->
               EscalateToUser(
-                title: "Meta observer: safety concern",
-                body: "High cycle rate combined with repeated D' rejections. The agent may be stuck in a blocked loop.",
+                title: "Meta observer: high false positive rate",
+                body: "Multiple D' rejections have been flagged as false positives. Current thresholds may be too aggressive — consider reviewing dprime.json.",
               )
             False ->
-              case has_repeated_rejection {
-                True -> ForceCooldown(delay_ms: state.config.cooldown_delay_ms)
+              case has_rate_limit && has_repeated_rejection {
+                True ->
+                  EscalateToUser(
+                    title: "Meta observer: safety concern",
+                    body: "High cycle rate combined with repeated D' rejections. The agent may be stuck in a blocked loop.",
+                  )
                 False ->
-                  case has_cumulative || has_layer3a {
-                    True -> TightenAllGates(factor: state.config.tighten_factor)
+                  case has_repeated_rejection {
+                    True ->
+                      ForceCooldown(delay_ms: state.config.cooldown_delay_ms)
                     False ->
-                      case has_rate_limit {
+                      case has_cumulative || has_layer3a {
                         True ->
-                          InjectCaution(
-                            message: "Meta observer: high cycle rate detected. Consider whether current approach is productive.",
-                          )
-                        False -> NoIntervention
+                          TightenAllGates(factor: state.config.tighten_factor)
+                        False ->
+                          case has_rate_limit {
+                            True ->
+                              InjectCaution(
+                                message: "Meta observer: high cycle rate detected. Consider whether current approach is productive.",
+                              )
+                            False -> NoIntervention
+                          }
                       }
                   }
               }

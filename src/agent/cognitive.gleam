@@ -32,6 +32,7 @@ import meta/log as meta_log
 import meta/types as meta_types
 import narrative/curator as narrative_curator
 import narrative/librarian
+import normative/drift as normative_drift
 import planner/log as planner_log
 import planner/types as planner_types
 import query_complexity
@@ -130,6 +131,8 @@ pub fn start(
           fact_decay_half_life_days: cfg.fact_decay_half_life_days,
           escalation_config: cfg.escalation_config,
           gate_timeout_ms: cfg.gate_timeout_ms,
+          normative_calculus_enabled: cfg.normative_calculus_enabled,
+          character_spec: cfg.character_spec,
         ),
         redact_secrets: cfg.redact_secrets,
         pending_sensory_events: [],
@@ -151,6 +154,10 @@ pub fn start(
         session_cycles: 0,
         session_cbr_hits: 0,
         consecutive_probe_failures: 0,
+        drift_state: case cfg.normative_calculus_enabled {
+          True -> Some(normative_drift.new(20))
+          False -> None
+        },
       )
     process.send(setup, self)
     cognitive_loop(state)
@@ -942,10 +949,16 @@ fn handle_think_complete(
                   content: resp.content,
                 )
               let messages = list.append(state.messages, [assistant_msg])
-              // Check for output gate
-              case state.output_dprime_state {
-                Some(output_state) -> {
-                  // Spawn output gate evaluation instead of replying immediately
+              // Check for output gate — skip LLM scoring on short
+              // conversational replies (deterministic rules still run)
+              let output_gate_min_length = 300
+              let reply_length = string.length(reply_text)
+              case
+                state.output_dprime_state,
+                reply_length >= output_gate_min_length
+              {
+                Some(output_state), True -> {
+                  // Substantive response — full output gate evaluation
                   cognitive_safety.spawn_output_gate(
                     state,
                     output_state,
@@ -956,7 +969,17 @@ fn handle_think_complete(
                     ogc,
                   )
                 }
-                None -> {
+                Some(_), False -> {
+                  // Short reply — run deterministic rules only, skip LLM scorer
+                  cognitive_safety.check_deterministic_only(
+                    state,
+                    reply_text,
+                    rt,
+                    messages,
+                    task_id,
+                  )
+                }
+                None, _ -> {
                   // Update DAG node with final outcome
                   let duration_ms = case state.cycle_started_ms {
                     0 -> 0

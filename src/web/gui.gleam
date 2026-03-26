@@ -16,6 +16,8 @@ import llm/types.{type Message, Assistant, TextContent, User}
 import mist.{type Connection, type ResponseData}
 import narrative/librarian.{type LibrarianMessage}
 import narrative/log as narrative_log
+import normative/character as normative_character
+import paths
 import planner/types as planner_types
 import scheduler/types as scheduler_types
 import simplifile
@@ -470,11 +472,19 @@ fn ws_handler(
             }
             Ok(protocol.RequestDprimeConfig) -> {
               // Read dprime.json directly from disk
-              let config_json = case
-                simplifile.read(".springdrift/dprime.json")
-              {
+              let base_json = case simplifile.read(".springdrift/dprime.json") {
                 Ok(contents) -> contents
                 Error(_) -> "{\"error\":\"dprime.json not found\"}"
+              }
+              // Append normative calculus status from character.json
+              let nc_json = build_normative_config_json()
+              let config_json = case string.ends_with(base_json, "}") {
+                True ->
+                  string.drop_end(base_json, 1)
+                  <> ",\"normative_calculus\":"
+                  <> nc_json
+                  <> "}"
+                False -> base_json
               }
               let _ =
                 mist.send_text_frame(
@@ -811,4 +821,53 @@ fn encode_dprime_gate(record: DprimeGateRecord) -> json.Json {
     #("decision", json.string(record.decision)),
     #("score", json.float(record.score)),
   ])
+}
+
+/// Build JSON for the normative calculus config panel in the web admin.
+/// Reads character.json from identity directories and config.toml for enabled flag.
+fn build_normative_config_json() -> String {
+  // Check if normative calculus is enabled by reading config
+  let enabled = case simplifile.read(paths.local_config()) {
+    Ok(contents) ->
+      string.contains(contents, "normative_calculus_enabled = true")
+    Error(_) -> False
+  }
+
+  let character =
+    normative_character.load_character(paths.default_identity_dirs())
+
+  case character {
+    Some(spec) -> {
+      let endeavours =
+        list.map(spec.highest_endeavour, fn(np) {
+          json.object([
+            #(
+              "level",
+              json.string(normative_character.level_to_string(np.level)),
+            ),
+            #(
+              "operator",
+              json.string(normative_character.operator_to_string(np.operator)),
+            ),
+            #("description", json.string(np.description)),
+          ])
+        })
+      json.to_string(
+        json.object([
+          #("enabled", json.bool(enabled)),
+          #("character_loaded", json.bool(True)),
+          #("virtue_count", json.int(list.length(spec.virtues))),
+          #("endeavour_count", json.int(list.length(spec.highest_endeavour))),
+          #("endeavours", json.array(endeavours, fn(x) { x })),
+        ]),
+      )
+    }
+    None ->
+      json.to_string(
+        json.object([
+          #("enabled", json.bool(enabled)),
+          #("character_loaded", json.bool(False)),
+        ]),
+      )
+  }
 }

@@ -67,8 +67,17 @@ src/
 │   ├── config.gleam           D' config loading from JSON, unified format (gates + agent overrides + meta + shared + deterministic)
 │   ├── deterministic.gleam    Deterministic pre-filter — regex rules, path/domain allowlists (no LLM calls)
 │   ├── decay.gleam            Confidence decay — half-life time-based degradation for facts and CBR
-│   ├── output_gate.gleam      Output quality gate — evaluates finished reports before delivery
+│   ├── output_gate.gleam      Output quality gate — evaluates reports before delivery (+ normative calculus)
 │   └── meta.gleam             History ring buffer, stall detection, threshold tightening
+│
+├── normative/                 Normative calculus — Stoic virtue-based safety reasoning
+│   ├── types.gleam            NormativeLevel, NormativeOperator, Modality, NormativeProposition, etc.
+│   ├── axioms.gleam           Six Stoic axioms as pure predicates (Futility, Indifference, etc.)
+│   ├── calculus.gleam         Deterministic conflict resolution (5 rules + pre-processors)
+│   ├── judgement.gleam        8 floor rules → FlourishingVerdict (Flourishing/Constrained/Prohibited)
+│   ├── character.gleam        CharacterSpec loading from character.json + JSON decoder
+│   ├── bridge.gleam           D' forecasts → NormativePropositions translation layer
+│   └── drift.gleam            Virtue drift detector — ring buffer + 4 drift signal types
 │
 ├── meta/                      Layer 3b meta observer — post-cycle safety evaluation
 │   ├── types.gleam            MetaSignal, MetaIntervention, MetaObservation, MetaState
@@ -322,6 +331,7 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `dprime_enabled` | `--dprime` / `--no-dprime` | True | Enable D' safety evaluation before tool dispatch |
 | `dprime_config` | `--dprime-config` | built-in defaults | Path to D' config JSON file |
 | `gate_timeout_ms` | — | 60000 | Gate evaluation timeout (ms) — fail-open after this delay |
+| `normative_calculus_enabled` | — | False | Enable Stoic normative calculus in output gate (requires character.json) |
 | `max_output_modifications` | — | 2 | Max iterations for output gate MODIFY loop |
 | `narrative_dir` | `--narrative-dir` | `.springdrift/memory/narrative` | Directory for narrative JSON-L files (narrative is always enabled) |
 | `archivist_model` | — | task_model | Model used by the Archivist for narrative generation |
@@ -708,6 +718,17 @@ scoring to prevent exceeding the scorer's context window. Bounded modification l
 maintain separate `DprimeState` instances (gate state isolation) to prevent
 cross-contamination of history and thresholds.
 
+**Output gate length threshold** — responses under 300 characters skip the LLM
+scorer entirely. Deterministic rules (credential patterns, private keys) still run
+on all responses regardless of length. This prevents the scorer from flagging short
+conversational replies (e.g. "Sure, happy to help!") against research report quality
+standards. The threshold is applied in `cognitive.gleam` before `spawn_output_gate`.
+
+**Output gate MODIFY prompt** — when the output gate returns MODIFY, the cognitive
+loop injects a correction message telling the agent to fix ONLY the flagged issues
+while preserving all other content, structure, and tone. The prompt explicitly
+forbids removing unflagged information or adding unnecessary hedging.
+
 **Gate timeout (BF-12)** — all gate evaluations have a configurable timeout
 (`gate_timeout_ms`, default 60000). If the scorer LLM hangs, a `GateTimeout`
 message fires via `send_after`. The output gate timeout delivers the report
@@ -717,6 +738,62 @@ completions are ignored (status has already moved to Idle).
 **D' normalization** — BF-03 fix ensures all D' scores are normalized to [0,1] via
 min-max scaling before gate decisions. Raw importance-weighted sums are no longer
 compared directly against thresholds.
+
+**Normative calculus** — Stoic-inspired deterministic safety reasoning in
+`src/normative/`. Based on Becker's *A New Stoicism* (ported from the TallMountain
+Python implementation). When `normative_calculus_enabled = true`, the output gate
+applies virtue-based evaluation *after* D' scoring — no new LLM calls.
+
+The calculus operates on the existing D' scorer output:
+1. `bridge.forecasts_to_propositions` maps D' forecasts to user-side
+   `NormativeProposition`s (level from feature name, operator from magnitude)
+2. `calculus.resolve_all` resolves each user NP against the character spec's
+   `highest_endeavour` system NPs using 5 deterministic rules + 3 pre-processors
+3. `judgement.judge` applies 8 floor rules in priority order to produce a
+   `FlourishingVerdict` (Flourishing→Accept, Constrained→Modify, Prohibited→Reject)
+
+Core types in `normative/types.gleam`:
+- `NormativeLevel` — 14-tier enum (EthicalMoral=6000 through Operational=100)
+- `NormativeOperator` — Required(3), Ought(2), Indifferent(1)
+- `Modality` — Possible, Impossible
+- `ConflictSeverity` — NoConflict, Coordinate, Superordinate, Absolute
+- `FlourishingVerdict` — Flourishing, Constrained, Prohibited
+- `CharacterSpec` — virtues + highest_endeavour NPs (loaded from `character.json`)
+
+Six Stoic axioms (`normative/axioms.gleam`):
+- 6.6 Futility: IMPOSSIBLE modality is normatively inert
+- 6.7 Indifference: INDIFFERENT operator carries no weight
+- 6.2 Absolute prohibition: ETHICAL_MORAL + REQUIRED is categorical
+- 6.3 Moral priority: system level > user level → system wins
+- 6.4 Moral rank: same level, stronger operator → system wins
+- 6.5 Normative openness: no conflicts → compatible
+
+Eight floor rules (`normative/judgement.gleam`):
+1. PROHIBITED: any Absolute severity
+2. PROHIBITED: Superordinate at Legal or higher
+3. PROHIBITED: D' ≥ reject_threshold (preserves existing behaviour)
+4. CONSTRAINED: catastrophic + Superordinate
+5. CONSTRAINED: 2+ Coordinate conflicts
+6. CONSTRAINED: D' ≥ modify_threshold (preserves existing behaviour)
+7. CONSTRAINED: Superordinate at ProfessionalEthics–SafetyPhysical
+8. FLOURISHING: default
+
+Virtue drift detector (`normative/drift.gleam`): ring buffer of recent verdicts,
+detects high prohibition/constraint rates, repeated axiom firing, and
+over-restriction patterns.
+
+Character spec (`normative/character.gleam`): loaded from `identity/character.json`
+in identity directories using the same discovery pattern as `persona.md`. Contains
+virtues (name + behavioural expressions) and highest endeavour (list of NPs).
+`default_character()` provides a fallback with 5 virtues and 4 core commitments.
+
+Every verdict includes a named axiom trail — the list of rules that fired during
+resolution. This trail appears in the output gate explanation and cycle log,
+making decisions auditable and inspectable.
+
+Disabled by default (`normative_calculus_enabled = false` in `[dprime]` config
+section). When disabled, zero behaviour change — the output gate uses plain D'
+threshold comparison as before.
 
 **Meta observer** — Layer 3b post-cycle safety evaluation in `src/meta/`. Runs after
 each cognitive cycle completes, analyzing patterns across gate decisions. Detectors

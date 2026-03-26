@@ -16,9 +16,10 @@ simple — copy one directory and you have everything.
 ```
 .springdrift/
 ├── config.toml              Project-level config (overrides ~/.config/springdrift/config.toml)
-├── identity/                Agent identity files (persona + session preamble template)
+├── identity/                Agent identity files (persona + session preamble + character)
 │   ├── persona.md           First-person character text (supports {{agent_name}} slot)
-│   └── session_preamble.md  Dynamic session context with {{slot}} and [OMIT IF] rules
+│   ├── session_preamble.md  Dynamic session context with {{slot}} and [OMIT IF] rules
+│   └── character.json       Character spec for normative calculus (virtues + highest endeavour)
 ├── identity.json            Stable agent UUID (auto-generated on first run)
 ├── session.json             Session persistence (auto-generated)
 ├── skills/                  Skill definitions + operator guide
@@ -58,6 +59,14 @@ session context:
   and `[OMIT IF X]` rules to conditionally hide empty sections. The rendered
   preamble is wrapped in `<memory>` tags and appended after the persona.
 
+- **`character.json`** — character specification for the normative calculus. Defines
+  the agent's virtues (named behavioural expressions) and highest endeavour (normative
+  propositions). Only loaded when `normative_calculus_enabled = true` in `[dprime]`
+  config. Controls how the output gate reasons about quality decisions using Stoic
+  virtue ethics — each gate verdict includes a named axiom trail. The operator
+  controls strictness by choosing `required` (categorical) vs `ought` (advisory)
+  operators on each proposition.
+
 Identity files are searched in order: `.springdrift/identity/` (local override) then
 `~/.config/springdrift/identity/` (user default). If neither exists, the agent falls
 back to the configured system prompt.
@@ -94,10 +103,12 @@ This can be overridden per-job in a profile's schedule configuration.
 
 ## Included examples
 
-- **`identity/`** — default persona and session preamble template.
+- **`identity/`** — default persona, session preamble template, and character spec.
 - **`skills/`** — HOW_TO.md operator guide + web-research and shell-sandbox skills.
 - **`dprime.example.json`** — example D' safety gate configuration with seven
   features and tuned thresholds.
+- **`identity/character.json`** — example character spec with 5 virtues and 4 normative
+  commitments for the output gate's normative calculus.
 
 Profiles (advanced agent team configurations) are documented in CLAUDE.md but not
 included in the starter template. Create a `profiles/` directory if needed.

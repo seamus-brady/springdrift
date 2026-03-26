@@ -13,6 +13,7 @@ import meta/types as meta_types
 import narrative/curator.{type CuratorMessage}
 import narrative/librarian.{type LibrarianMessage}
 import narrative/threading
+import normative/types as normative_types
 import simplifile
 import tools/memory
 
@@ -62,6 +63,8 @@ pub type CognitiveConfig {
     fact_decay_half_life_days: Int,
     escalation_config: EscalationConfig,
     gate_timeout_ms: Int,
+    normative_calculus_enabled: Bool,
+    character_spec: Option(normative_types.CharacterSpec),
   )
 }
 
@@ -117,5 +120,7 @@ pub fn default_test_config(
     fact_decay_half_life_days: 30,
     escalation_config: escalation.default_config(),
     gate_timeout_ms: 60_000,
+    normative_calculus_enabled: False,
+    character_spec: None,
   )
 }

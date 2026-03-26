@@ -1,9 +1,13 @@
 import agent/cognitive/llm as cognitive_llm
+
+@external(erlang, "springdrift_ffi", "get_datetime")
+fn get_datetime() -> String
+
 import agent/cognitive/memory as cognitive_memory
 import agent/cognitive_state.{type CognitiveState, CognitiveState}
 import agent/types.{
   type CognitiveReply, CognitiveReply, Idle, PendingThink, SafetyGateNotice,
-  Thinking,
+  SensoryEvent, Thinking,
 }
 import agent/worker
 import cycle_log
@@ -23,6 +27,8 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
 import llm/types as llm_types
+import normative/drift as normative_drift
+import normative/types as normative_types
 import slog
 
 /// Add a synthetic assistant message to state so message history stays
@@ -41,8 +47,10 @@ fn with_assistant_error(state: CognitiveState, text: String) -> CognitiveState {
 fn build_rejection_notice(
   gate_name: String,
   result: dprime_types.GateResult,
-  content_type: String,
+  _content_type: String,
 ) -> String {
+  // Terse notice for agent message history — full explanation is in the cycle log.
+  // Verbose rejection notices eat context window and teach the agent to self-censor.
   let feature_triggers = case result.forecasts {
     [] -> ""
     forecasts -> {
@@ -56,7 +64,7 @@ fn build_rejection_notice(
         |> string.join(", ")
       case fired {
         "" -> ""
-        triggers -> " Feature triggers: [" <> triggers <> "]."
+        triggers -> " Triggers: [" <> triggers <> "]."
       }
     }
   }
@@ -70,12 +78,9 @@ fn build_rejection_notice(
   }
   <> " (score: "
   <> float.to_string(result.dprime_score)
-  <> "). "
-  <> result.explanation
+  <> ")."
   <> feature_triggers
-  <> " Content type: "
-  <> content_type
-  <> ". Original text redacted from logs.]"
+  <> "]"
 }
 
 /// Human-friendly response for the user. Maps the highest-scoring feature
@@ -1086,6 +1091,87 @@ pub fn handle_post_execution_gate_complete(
   }
 }
 
+/// Check only deterministic rules for short conversational replies.
+/// Skips the LLM scorer entirely. If deterministic rules block, sends a
+/// Reject via OutputGateComplete. Otherwise delivers the reply directly.
+pub fn check_deterministic_only(
+  state: CognitiveState,
+  reply_text: String,
+  reply_to: Subject(CognitiveReply),
+  messages: List(llm_types.Message),
+  task_id: String,
+) -> CognitiveState {
+  let cycle_id = option.unwrap(state.cycle_id, task_id)
+
+  // Run deterministic output rules if configured
+  let blocked = case state.config.deterministic_config {
+    Some(dc) -> {
+      let det_result = deterministic.check_output(reply_text, dc)
+      case det_result {
+        Blocked(rule_id, _reason) -> {
+          slog.warn(
+            "cognitive/safety",
+            "check_deterministic_only",
+            "Short reply blocked by deterministic rule: " <> rule_id,
+            Some(cycle_id),
+          )
+          True
+        }
+        Escalated(_, _) | Pass -> False
+      }
+    }
+    None -> False
+  }
+
+  case blocked {
+    True -> {
+      // Route through normal OutputGateComplete handling for consistent flow
+      let self = state.self
+      process.send(
+        self,
+        types.OutputGateComplete(
+          cycle_id:,
+          result: dprime_types.GateResult(
+            decision: dprime_types.Reject,
+            dprime_score: 1.0,
+            forecasts: [],
+            explanation: "Deterministic block: banned output pattern detected",
+            layer: dprime_types.Reactive,
+            canary_result: None,
+          ),
+          report_text: reply_text,
+          modification_count: 0,
+          reply_to:,
+        ),
+      )
+      CognitiveState(
+        ..state,
+        messages:,
+        status: Thinking(task_id:),
+        pending_output_reply: Some(#(reply_to, reply_text)),
+      )
+    }
+    False -> {
+      // Clean — deliver reply directly (same as no-output-gate path)
+      slog.info(
+        "cognitive/safety",
+        "check_deterministic_only",
+        "Short reply ("
+          <> int.to_string(string.length(reply_text))
+          <> " chars) — skipped LLM output gate",
+        Some(cycle_id),
+      )
+      process.send(
+        reply_to,
+        CognitiveReply(response: reply_text, model: state.model, usage: None),
+      )
+      let state = cognitive_state.apply_meta_observation(state, 0)
+      let state = with_assistant_error(state, reply_text)
+      CognitiveState(..state, messages:, status: Idle)
+    }
+  }
+}
+
 /// Spawn an output gate evaluation.
 pub fn spawn_output_gate(
   state: CognitiveState,
@@ -1130,6 +1216,8 @@ pub fn spawn_output_gate(
       gate_timeout_ms,
       types.GateTimeout(task_id:, gate: "output"),
     )
+  let character_spec = state.config.character_spec
+  let normative_enabled = state.config.normative_calculus_enabled
   process.spawn_unlinked(fn() {
     let result =
       output_gate.evaluate_with_deterministic(
@@ -1142,6 +1230,8 @@ pub fn spawn_output_gate(
         verbose,
         redact_secrets,
         det_config,
+        character_spec,
+        normative_enabled,
       )
     process.send(
       self,
@@ -1211,6 +1301,9 @@ pub fn handle_output_gate_complete(
     )
   dprime_audit.log_record(output_audit_record, cycle_id)
 
+  // Record normative verdict for drift tracking (when normative calculus enabled)
+  let state = record_normative_verdict(state, result.decision)
+
   let max_modifications = case state.output_dprime_state {
     Some(ds) -> ds.config.max_output_modifications
     None -> 2
@@ -1265,7 +1358,7 @@ pub fn handle_output_gate_complete(
           let correction_msg =
             llm_types.Message(role: llm_types.User, content: [
               llm_types.TextContent(
-                text: "[SYSTEM: Your response was NOT delivered to the user. The quality gate flagged the following issues. Please revise and produce an updated response.]\n\n"
+                text: "[SYSTEM: Your response was NOT delivered to the user. The quality gate flagged specific issues listed below. IMPORTANT: Fix ONLY the flagged issues. Preserve all other content, structure, and tone from your original response. Do not remove information that was not flagged. Do not add unnecessary hedging or caveats. Produce a corrected version of your full response.]\n\nFlagged issues:\n"
                 <> explanation,
               ),
             ])
@@ -1309,10 +1402,9 @@ pub fn handle_output_gate_complete(
       )
       // User sees a clean, contextual message
       let user_text = build_user_response(result)
-      // Agent's history gets the technical details + explicit non-delivery notice
+      // Agent's history gets a terse notice — full details in cycle log
       let agent_text =
-        "[SYSTEM: Your response was NOT delivered to the user — it was rejected by the quality gate.] "
-        <> build_rejection_notice("output", result, "agent response")
+        build_rejection_notice("output", result, "agent response")
       process.send(
         reply_to,
         CognitiveReply(response: user_text, model: state.model, usage: None),
@@ -1427,4 +1519,61 @@ fn extract_message_content(msg: llm_types.Message) -> String {
     }
   })
   |> string.join(" ")
+}
+
+// ---------------------------------------------------------------------------
+// Normative drift tracking
+// ---------------------------------------------------------------------------
+
+/// Record a normative verdict and check for drift.
+/// When drift is detected, emits a sensory event for the sensorium.
+fn drift_signal_type_label(signal: normative_drift.DriftSignal) -> String {
+  case signal.signal_type {
+    normative_drift.HighConstraintRate -> "high constraint rate"
+    normative_drift.HighProhibitionRate -> "high prohibition rate"
+    normative_drift.RepeatedAxiom -> "repeated axiom"
+    normative_drift.OverRestriction -> "over-restriction"
+  }
+}
+
+fn record_normative_verdict(
+  state: CognitiveState,
+  decision: dprime_types.GateDecision,
+) -> CognitiveState {
+  case state.drift_state {
+    None -> state
+    Some(ds) -> {
+      let verdict = case decision {
+        dprime_types.Accept -> normative_types.Flourishing
+        dprime_types.Modify -> normative_types.Constrained
+        dprime_types.Reject -> normative_types.Prohibited
+      }
+      let ds = normative_drift.record_verdict(ds, verdict, [])
+      let state = CognitiveState(..state, drift_state: Some(ds))
+
+      // Check for drift and emit sensory event if detected
+      case normative_drift.detect_drift(ds) {
+        Some(signal) -> {
+          slog.warn(
+            "cognitive/safety",
+            "record_normative_verdict",
+            "Virtue drift detected: " <> signal.description,
+            state.cycle_id,
+          )
+          let event =
+            SensoryEvent(
+              name: "normative_drift",
+              title: "Virtue drift: " <> drift_signal_type_label(signal),
+              body: signal.description,
+              fired_at: get_datetime(),
+            )
+          CognitiveState(..state, pending_sensory_events: [
+            event,
+            ..state.pending_sensory_events
+          ])
+        }
+        None -> state
+      }
+    }
+  }
 }

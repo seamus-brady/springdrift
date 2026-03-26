@@ -35,15 +35,42 @@ pub fn request_save(
   state: CognitiveState,
   messages: List(llm_types.Message),
 ) -> CognitiveState {
+  // Strip transient gate injection messages before persisting.
+  // MODIFY/REJECT injections are control signals — preserving them in session
+  // history creates a feedback loop where the agent learns to self-censor.
+  let clean_messages = filter_gate_injections(messages)
   case state.save_in_progress {
     True -> {
       // Queue for when current save completes
-      CognitiveState(..state, save_pending: Some(messages))
+      CognitiveState(..state, save_pending: Some(clean_messages))
     }
     False -> {
-      do_spawn_save(state, messages)
+      do_spawn_save(state, clean_messages)
       CognitiveState(..state, save_in_progress: True)
     }
+  }
+}
+
+/// Remove output gate injection messages from the message list.
+/// These are transient control signals (MODIFY corrections, REJECT notices)
+/// that should not persist into session history.
+fn filter_gate_injections(
+  messages: List(llm_types.Message),
+) -> List(llm_types.Message) {
+  list.filter(messages, fn(msg) { !is_gate_injection(msg) })
+}
+
+fn is_gate_injection(msg: llm_types.Message) -> Bool {
+  case msg.content {
+    [llm_types.TextContent(text: t), ..] ->
+      // MODIFY correction (User message)
+      string.starts_with(t, "[SYSTEM: Your response was NOT delivered")
+      // REJECT/MODIFY notice (Assistant message via with_assistant_error)
+      || string.starts_with(t, "[D' output gate: REJECTED")
+      || string.starts_with(t, "[D' output gate: MODIFIED")
+      // Input gate rejection (Assistant message)
+      || string.starts_with(t, "[D' input gate: REJECTED")
+    _ -> False
   }
 }
 

@@ -46,6 +46,8 @@ pub type MetaSignal {
   PersonaDriftSignal(drift_description: String, confidence: Float)
   /// High false positive rate suggests thresholds are too aggressive
   HighFalsePositiveSignal(fp_count: Int, window_cycles: Int)
+  /// Normative calculus virtue drift detected
+  VirtueDriftSignal(signal_type: String, description: String)
 }
 
 // ---------------------------------------------------------------------------

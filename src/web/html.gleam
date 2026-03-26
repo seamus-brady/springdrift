@@ -573,6 +573,30 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
       html += '</div>';
     }
 
+    // Normative calculus
+    var nc = config.normative_calculus;
+    if (nc) {
+      html += '<div class=\"dprime-config-gate\"><h3 class=\"dprime-gate-title\">Normative Calculus</h3>';
+      html += '<div style=\"font-size:13px;line-height:1.8;padding:8px 0\">';
+      html += '<span style=\"opacity:.6\">Enabled:</span> ' + (nc.enabled ? '\\u2705' : '\\u274c') + ' &nbsp;';
+      html += '<span style=\"opacity:.6\">Character spec:</span> ' + (nc.character_loaded ? '\\u2705 loaded' : '\\u274c not found') + ' &nbsp;';
+      if (nc.virtue_count) html += '<span style=\"opacity:.6\">Virtues:</span> ' + nc.virtue_count + ' &nbsp;';
+      if (nc.endeavour_count) html += '<span style=\"opacity:.6\">Highest endeavour NPs:</span> ' + nc.endeavour_count + ' &nbsp;';
+      html += '<span style=\"opacity:.6\">Output gate min length:</span> 300 chars';
+      html += '</div>';
+      if (nc.endeavours && nc.endeavours.length > 0) {
+        html += '<table class=\"admin-table\"><thead><tr><th>Level</th><th>Operator</th><th>Description</th></tr></thead><tbody>';
+        nc.endeavours.forEach(function(np) {
+          var opColor = np.operator === 'required' ? '#d70015' : np.operator === 'ought' ? '#c77c00' : '#248a3d';
+          html += '<tr><td>' + escapeHtml(np.level) + '</td>';
+          html += '<td style=\"color:' + opColor + ';font-weight:600\">' + np.operator + '</td>';
+          html += '<td>' + escapeHtml(np.description) + '</td></tr>';
+        });
+        html += '</tbody></table>';
+      }
+      html += '</div>';
+    }
+
     container.innerHTML = html || '<div style=\"opacity:.5;padding:20px\">No D\\' configuration loaded</div>';
   }
 

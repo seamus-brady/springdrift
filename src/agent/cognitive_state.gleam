@@ -15,6 +15,8 @@ import gleam/option.{type Option, None, Some}
 import llm/provider.{type Provider}
 import llm/retry
 import llm/types as llm_types
+import normative/drift as normative_drift
+import normative/types as normative_types
 
 @external(erlang, "springdrift_ffi", "get_datetime")
 fn get_datetime() -> String
@@ -73,6 +75,8 @@ pub type RuntimeConfig {
     fact_decay_half_life_days: Int,
     escalation_config: EscalationConfig,
     gate_timeout_ms: Int,
+    normative_calculus_enabled: Bool,
+    character_spec: Option(normative_types.CharacterSpec),
   )
 }
 
@@ -147,6 +151,8 @@ pub type CognitiveState {
     session_cbr_hits: Int,
     // --- Canary probe failure tracking ---
     consecutive_probe_failures: Int,
+    // --- Normative calculus drift tracking ---
+    drift_state: Option(normative_drift.DriftState),
   )
 }
 
