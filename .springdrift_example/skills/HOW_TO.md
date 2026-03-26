@@ -34,6 +34,18 @@ outcomes in the past are ranked higher. Maximum 4 cases are retrieved per query.
 For diagnostic questions (what failed, why, patterns over time) use the diagnostic
 tools: `reflect`, `inspect_cycle`, `list_recent_cycles`, `query_tool_activity`.
 
+### D' Gate Architecture
+
+The input gate uses a split evaluation path for performance:
+1. **Deterministic pre-filter** — regex pattern matches on known-bad inputs. Instant, no LLM cost.
+2. **Canary probes** (if enabled) — hijack and leakage detection using embedded tokens. 2 LLM calls. Fail-open: if the probe LLM errors, it passes with a warning (not evidence of hijacking). Consecutive failures are tracked — at 3+ failures, a sensory event alerts that the safety probe LLM may be degraded.
+3. **Fast-accept** — if deterministic clean and canaries clean, accept without LLM scoring.
+4. **LLM scorer** — only runs if the deterministic layer escalates (suspicious pattern).
+
+The tool gate always runs the full LLM scorer for non-exempt tools (web, file, shell). Memory, planner, builtin, and agent delegation tools are exempt.
+
+The output gate evaluates report quality. Gate timeout (default 60s) prevents blocking forever if the scorer LLM hangs — the report is delivered (fail-open).
+
 ### D' Deterministic Pre-Filter
 
 Some blocks happen instantly without any LLM evaluation — these are deterministic pattern matches on known-bad inputs, banned commands, or credential leaks. When a deterministic rule fires, you see a decision like "deterministic block: banned pattern detected" but the specific rule pattern is not disclosed. These blocks are fast (no LLM cost) and non-negotiable.

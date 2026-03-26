@@ -170,6 +170,86 @@ pub fn parse_forecasts(text: String) -> Result(List(Forecast), Nil) {
   }
 }
 
+/// Score features using a pre-built prompt (no additional wrapping).
+/// Used by the output gate which builds its own domain-specific prompt.
+pub fn score_with_custom_prompt(
+  prompt: String,
+  features: List(Feature),
+  provider: Provider,
+  model: String,
+  cycle_id: String,
+  verbose: Bool,
+) -> List(Forecast) {
+  slog.debug(
+    "dprime/scorer",
+    "score_with_custom_prompt",
+    "Scoring "
+      <> int.to_string(list.length(features))
+      <> " features via LLM (custom prompt)",
+    Some(cycle_id),
+  )
+  let schema_dir = paths.schemas_dir()
+  case
+    xstructor.compile_schema(schema_dir, "forecasts.xsd", schemas.forecasts_xsd)
+  {
+    Error(e) -> {
+      slog.warn(
+        "dprime/scorer",
+        "score_with_custom_prompt",
+        "Schema compilation failed: " <> e <> ", falling back to cautious",
+        Some(cycle_id),
+      )
+      cautious_forecasts(features)
+    }
+    Ok(schema) -> {
+      let system =
+        schemas.build_system_prompt(
+          "You are a report quality evaluator for an AI agent.",
+          schemas.forecasts_xsd,
+          schemas.forecasts_example,
+        )
+      let config =
+        xstructor.XStructorConfig(
+          schema: schema,
+          system_prompt: system,
+          xml_example: schemas.forecasts_example,
+          max_retries: 2,
+          max_tokens: 512,
+        )
+      case xstructor.generate(config, prompt, provider, model) {
+        Ok(result) -> {
+          case verbose {
+            True ->
+              slog.debug(
+                "dprime/scorer",
+                "score_with_custom_prompt",
+                "LLM scoring result: "
+                  <> int.to_string(
+                  list.length(extract_forecasts(result.elements)),
+                )
+                  <> " forecasts (retries: "
+                  <> int.to_string(result.retries_used)
+                  <> ")",
+                Some(cycle_id),
+              )
+            False -> Nil
+          }
+          extract_forecasts(result.elements)
+        }
+        Error(e) -> {
+          slog.warn(
+            "dprime/scorer",
+            "score_with_custom_prompt",
+            "XStructor generate failed: " <> e <> ", falling back to cautious",
+            Some(cycle_id),
+          )
+          cautious_forecasts(features)
+        }
+      }
+    }
+  }
+}
+
 /// Generate default (all-zero) forecasts for all features.
 pub fn default_forecasts(features: List(Feature)) -> List(Forecast) {
   list.map(features, fn(f) {

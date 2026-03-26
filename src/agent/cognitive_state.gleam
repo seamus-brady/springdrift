@@ -1,9 +1,9 @@
 import agent/cognitive/escalation.{type EscalationConfig}
 import agent/registry.{type Registry}
 import agent/types.{
-  type AgentCompletionRecord, type CognitiveMessage, type CognitiveStatus,
-  type DelegationInfo, type Notification, type PendingTask, type QueuedInput,
-  type SensoryEvent, type SupervisorMessage,
+  type AgentCompletionRecord, type CognitiveMessage, type CognitiveReply,
+  type CognitiveStatus, type DelegationInfo, type Notification, type PendingTask,
+  type QueuedInput, type SensoryEvent, type SupervisorMessage,
 }
 import dag/types as dag_types
 import dprime/deterministic.{type DeterministicConfig}
@@ -72,6 +72,7 @@ pub type RuntimeConfig {
     deterministic_config: Option(DeterministicConfig),
     fact_decay_half_life_days: Int,
     escalation_config: EscalationConfig,
+    gate_timeout_ms: Int,
   )
 }
 
@@ -133,6 +134,8 @@ pub type CognitiveState {
     redact_secrets: Bool,
     // --- Layer 3b meta observer ---
     meta_state: Option(meta_types.MetaState),
+    // --- Output gate pending reply (cleared on delivery) ---
+    pending_output_reply: Option(#(Subject(CognitiveReply), String)),
     // --- CBR retrieval tracking (cleared each cycle) ---
     retrieved_case_ids: List(String),
     // --- Session-level meta-state counters (reset on restart) ---
@@ -142,6 +145,8 @@ pub type CognitiveState {
     session_dprime_rejections: Int,
     session_cycles: Int,
     session_cbr_hits: Int,
+    // --- Canary probe failure tracking ---
+    consecutive_probe_failures: Int,
   )
 }
 

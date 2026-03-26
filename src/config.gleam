@@ -193,6 +193,8 @@ pub type AppConfig {
     escalation_enabled: Option(Bool),
     escalation_tool_failure_threshold: Option(Int),
     escalation_safety_score_threshold: Option(Float),
+    // ── Gate timeout ──
+    gate_timeout_ms: Option(Int),
     // ── Forecaster ──
     forecaster_enabled: Option(Bool),
     forecaster_tick_ms: Option(Int),
@@ -346,6 +348,7 @@ pub fn default() -> AppConfig {
     escalation_enabled: None,
     escalation_tool_failure_threshold: None,
     escalation_safety_score_threshold: None,
+    gate_timeout_ms: None,
     forecaster_enabled: None,
     forecaster_tick_ms: None,
     forecaster_replan_threshold: None,
@@ -826,6 +829,10 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     escalation_safety_score_threshold: option.or(
       override_cfg.escalation_safety_score_threshold,
       base.escalation_safety_score_threshold,
+    ),
+    gate_timeout_ms: option.or(
+      override_cfg.gate_timeout_ms,
+      base.gate_timeout_ms,
     ),
     forecaster_enabled: option.or(
       override_cfg.forecaster_enabled,
@@ -1380,6 +1387,8 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     escalation_safety_score_threshold: get_toml_float(table, [
       "escalation", "safety_score_threshold",
     ]),
+    // ── [dprime] ──
+    gate_timeout_ms: get_toml_int(table, ["dprime", "gate_timeout_ms"]),
     // ── [forecaster] ──
     forecaster_enabled: get_toml_bool(table, ["forecaster", "enabled"]),
     forecaster_tick_ms: get_toml_int(table, ["forecaster", "tick_ms"]),
@@ -1423,7 +1432,8 @@ const known_keys = [
   "narrative", "agent", "log_retention_days", "log_max_file_bytes", "timeouts",
   "retry", "limits", "scoring", "housekeeping", "housekeeper", "cbr", "agents",
   "web", "services", "scheduler", "xstructor", "forecaster", "sandbox",
-  "delegation", "escalation", "vertex", "anthropic", "mistral", "local",
+  "delegation", "escalation", "dprime", "vertex", "anthropic", "mistral",
+  "local",
 ]
 
 const known_narrative_keys = [

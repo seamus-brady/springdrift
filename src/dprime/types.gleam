@@ -76,7 +76,12 @@ pub type Intervention {
 // ---------------------------------------------------------------------------
 
 pub type ProbeResult {
-  ProbeResult(hijack_detected: Bool, leakage_detected: Bool, details: String)
+  ProbeResult(
+    hijack_detected: Bool,
+    leakage_detected: Bool,
+    probe_failed: Bool,
+    details: String,
+  )
 }
 
 // ---------------------------------------------------------------------------

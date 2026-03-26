@@ -477,9 +477,10 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
       var gate = gates[gateName];
       var features = gate.features || [];
       var canary = gate.canary_enabled ? '\\u2705 Canary enabled' : '\\u274c Canary disabled';
+      var mode = gateName === 'input' ? ' | Fast-accept (canary + deterministic only)' : '';
       html += '<div class=\"dprime-config-gate\">';
       html += '<h3 class=\"dprime-gate-title\"><span class=\"dprime-gate-badge dprime-gate-' + gateName + '\">' + gateName + '</span> gate';
-      html += '<span class=\"dprime-thresholds\">modify: ' + (gate.modify_threshold || '?') + ' | reject: ' + (gate.reject_threshold || '?') + ' | ' + canary + '</span></h3>';
+      html += '<span class=\"dprime-thresholds\">modify: ' + (gate.modify_threshold || '?') + ' | reject: ' + (gate.reject_threshold || '?') + ' | ' + canary + mode + '</span></h3>';
       html += '<table class=\"admin-table\"><thead><tr><th>Feature</th><th>Importance</th><th>Critical</th><th>Description</th></tr></thead><tbody>';
       features.forEach(function(f) {
         var imp = f.importance || 'medium';

@@ -115,7 +115,6 @@ pub fn evaluate_with_deterministic(
         canary_result: None,
       )
     True ->
-      // Layer 0: Canary probes (if enabled)
       evaluate_canary(
         instruction,
         context,

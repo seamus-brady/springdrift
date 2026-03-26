@@ -61,8 +61,8 @@ src/
 ├── dprime/                    D' discrepancy-gated safety system
 │   ├── types.gleam            Feature, Forecast, GateDecision, GateResult, DprimeConfig/State
 │   ├── engine.gleam           Pure D' computation (importance weighting, scaling, gate decision)
-│   ├── scorer.gleam           LLM magnitude scoring with prompt building + JSON parsing
-│   ├── canary.gleam           Hijack + leakage probes (fail-closed, fresh tokens per request)
+│   ├── scorer.gleam           LLM magnitude scoring with prompt building + XStructor XML output
+│   ├── canary.gleam           Hijack + leakage probes (fail-open, fresh tokens per request)
 │   ├── gate.gleam             Three-layer H-CogAff orchestrator (reactive → deliberative → meta)
 │   ├── config.gleam           D' config loading from JSON, unified format (gates + agent overrides + meta + shared + deterministic)
 │   ├── deterministic.gleam    Deterministic pre-filter — regex rules, path/domain allowlists (no LLM calls)
@@ -321,6 +321,7 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `gui` | `--gui` | tui | GUI mode: `tui` (terminal) or `web` (browser on port 8080) |
 | `dprime_enabled` | `--dprime` / `--no-dprime` | True | Enable D' safety evaluation before tool dispatch |
 | `dprime_config` | `--dprime-config` | built-in defaults | Path to D' config JSON file |
+| `gate_timeout_ms` | — | 60000 | Gate evaluation timeout (ms) — fail-open after this delay |
 | `max_output_modifications` | — | 2 | Max iterations for output gate MODIFY loop |
 | `narrative_dir` | `--narrative-dir` | `.springdrift/memory/narrative` | Directory for narrative JSON-L files (narrative is always enabled) |
 | `archivist_model` | — | task_model | Model used by the Archivist for narrative generation |
@@ -678,12 +679,40 @@ format has five top-level keys:
 Backward compatible with the old `tool_gate`/`output_gate` dual-gate format and
 single-gate format — `load_unified` auto-detects and converts.
 
+**Input gate fast-accept** — the input gate uses a split evaluation path for
+performance. Since the operator is the user, the primary threat on user input is
+indirect injection (not the operator themselves). The flow is:
+1. Deterministic regex pre-filter → Block (reject, no LLM) / Escalate / Pass
+2. If Pass: canary probes (hijack + leakage, 2 LLM calls) → if detected, reject
+3. If canaries clean: fast-accept (no LLM scorer). Done.
+4. If Escalate: full LLM scorer evaluation (reactive + deliberative layers).
+
+This reduces the input gate from ~5 LLM calls to 2 (canaries only) for normal
+benign input. The tool gate does NOT get fast-accept — it always runs the full
+LLM scorer for non-exempt tools, because the threat there is a compromised agent
+acting on indirect injection via web content.
+
+**Canary probes** — `dprime/canary.gleam` runs hijack and leakage probes using
+fresh random tokens per request. Fail-open: LLM errors during probes are treated
+as inconclusive (not evidence of hijacking). Consecutive probe failures are tracked
+on `CognitiveState.consecutive_probe_failures` — at 3 consecutive failures, a
+`canary_probe_degraded` sensory event is emitted so the agent and operator know the
+safety probe LLM may be degraded. Counter resets on successful probe.
+
 **Output gate** — second D' evaluation point in `dprime/output_gate.gleam`. Evaluates
 finished reports for quality (unsourced claims, causal overreach, stale data) before
-delivery. Uses the same scoring infrastructure but with output-focused prompts. Bounded
-modification loop (max `max_output_modifications` iterations, default 2). The tool gate
-and output gate maintain separate `DprimeState` instances (gate state isolation) to
-prevent cross-contamination of history and thresholds.
+delivery. Uses `scorer.score_with_custom_prompt` with an output-specific prompt (not
+the generic input/tool scoring wrapper). Report text is truncated to 6000 chars for
+scoring to prevent exceeding the scorer's context window. Bounded modification loop
+(max `max_output_modifications` iterations, default 2). The tool gate and output gate
+maintain separate `DprimeState` instances (gate state isolation) to prevent
+cross-contamination of history and thresholds.
+
+**Gate timeout (BF-12)** — all gate evaluations have a configurable timeout
+(`gate_timeout_ms`, default 60000). If the scorer LLM hangs, a `GateTimeout`
+message fires via `send_after`. The output gate timeout delivers the report
+(fail-open) using `pending_output_reply` stored on `CognitiveState`. Late gate
+completions are ignored (status has already moved to Idle).
 
 **D' normalization** — BF-03 fix ensures all D' scores are normalized to [0,1] via
 min-max scaling before gate decisions. Raw importance-weighted sums are no longer

@@ -259,13 +259,22 @@ fn ws_on_init(
       ws_max_bytes:,
     )
 
-  // Send session history as a single message after init
-  let history_msgs = initial_messages
+  // Query live messages from the cognitive loop (not the static boot snapshot)
   process.spawn_unlinked(fn() {
     process.sleep(50)
+    let msg_subject: Subject(List(Message)) = process.new_subject()
+    process.send(cognitive, agent_types.GetMessages(reply_to: msg_subject))
+    let selector =
+      process.new_selector()
+      |> process.select(msg_subject)
+    // Wait up to 2s for cognitive loop to respond
+    let live_messages = case process.selector_receive(selector, 2000) {
+      Ok(msgs) -> msgs
+      Error(_) -> initial_messages
+    }
     let messages_json =
       json.to_string(
-        json.array(history_msgs, fn(msg) {
+        json.array(live_messages, fn(msg) {
           let role = case msg.role {
             User -> "user"
             Assistant -> "assistant"

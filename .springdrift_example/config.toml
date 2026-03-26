@@ -60,6 +60,11 @@ write_anywhere = false
 # Path to D' config JSON (default: built-in)
 # dprime_config = "dprime.json"
 
+[dprime]
+# Timeout in ms for gate evaluation — if the scorer LLM hangs, fail-open
+# after this delay rather than blocking forever (default: 60000)
+# gate_timeout_ms = 60000
+
 # ── Agent identity ─────────────────────────────────────────────────────────
 
 [agent]

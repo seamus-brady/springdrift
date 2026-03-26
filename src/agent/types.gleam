@@ -299,6 +299,8 @@ pub type CognitiveMessage {
     modification_count: Int,
     reply_to: Subject(CognitiveReply),
   )
+  GetMessages(reply_to: Subject(List(Message)))
+  GateTimeout(task_id: String, gate: String)
   QueuedSensoryEvent(event: SensoryEvent)
   ForecasterSuggestion(
     task_id: String,
