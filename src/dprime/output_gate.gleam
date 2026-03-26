@@ -3,6 +3,10 @@
 //// Evaluates completed text against output-specific quality features
 //// (e.g. unsourced claims, causal overreach, stale data, certainty overstatement).
 //// Uses the same D' scoring infrastructure but with output-focused prompts.
+////
+//// When normative calculus is enabled, the gate applies virtue-based evaluation
+//// after D' scoring — mapping forecasts to normative propositions and resolving
+//// conflicts against the character spec's highest endeavour.
 
 import cycle_log
 import dprime/deterministic.{type DeterministicConfig, Blocked, Escalated, Pass}
@@ -18,6 +22,9 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import llm/provider.{type Provider}
+import normative/bridge as normative_bridge
+import normative/judgement as normative_judgement
+import normative/types as normative_types
 import slog
 
 /// Evaluate a completed report/output against output quality features.
@@ -42,10 +49,14 @@ pub fn evaluate(
     verbose,
     redact,
     None,
+    None,
+    False,
   )
 }
 
 /// Evaluate with an optional deterministic pre-filter for output.
+/// When `normative_enabled` is True and `character_spec` is Some, applies
+/// virtue-based normative evaluation after D' scoring.
 pub fn evaluate_with_deterministic(
   report_text: String,
   original_query: String,
@@ -56,6 +67,8 @@ pub fn evaluate_with_deterministic(
   verbose: Bool,
   redact: Bool,
   det_config: Option(DeterministicConfig),
+  character_spec: Option(normative_types.CharacterSpec),
+  normative_enabled: Bool,
 ) -> GateResult {
   // Deterministic pre-filter for output
   let det_blocked = case det_config {
@@ -113,6 +126,8 @@ pub fn evaluate_with_deterministic(
         cycle_id,
         verbose,
         redact,
+        character_spec,
+        normative_enabled,
       )
   }
 }
@@ -127,13 +142,20 @@ fn evaluate_llm(
   cycle_id: String,
   verbose: Bool,
   redact: Bool,
+  character_spec: Option(normative_types.CharacterSpec),
+  normative_enabled: Bool,
 ) -> GateResult {
   slog.info(
     "dprime/output_gate",
     "evaluate",
     "Evaluating output quality ("
       <> int.to_string(list.length(state.config.features))
-      <> " features)",
+      <> " features"
+      <> case normative_enabled {
+      True -> ", normative calculus enabled"
+      False -> ""
+    }
+      <> ")",
     Some(cycle_id),
   )
 
@@ -156,17 +178,46 @@ fn evaluate_llm(
 
   let score =
     engine.compute_dprime(forecasts, state.config.features, state.config.tiers)
-  let decision =
-    engine.gate_decision(
-      score,
-      state.current_modify_threshold,
-      state.current_reject_threshold,
-    )
+
+  // Branch: normative calculus or plain D' threshold comparison
+  case normative_enabled, character_spec {
+    True, Some(spec) ->
+      evaluate_normative(
+        forecasts,
+        state.config.features,
+        score,
+        state.current_modify_threshold,
+        state.current_reject_threshold,
+        spec,
+        cycle_id,
+      )
+    _, _ ->
+      evaluate_threshold(
+        forecasts,
+        state.config.features,
+        score,
+        state.current_modify_threshold,
+        state.current_reject_threshold,
+        cycle_id,
+      )
+  }
+}
+
+/// Threshold-based evaluation (existing behaviour, unchanged).
+fn evaluate_threshold(
+  forecasts: List(Forecast),
+  features: List(Feature),
+  score: Float,
+  modify_threshold: Float,
+  reject_threshold: Float,
+  cycle_id: String,
+) -> GateResult {
+  let decision = engine.gate_decision(score, modify_threshold, reject_threshold)
 
   let explanation = case decision {
     Accept -> "Output quality acceptable"
-    Modify -> build_modification_explanation(forecasts, state.config.features)
-    Reject -> build_rejection_explanation(forecasts, state.config.features)
+    Modify -> build_modification_explanation(forecasts, features)
+    Reject -> build_rejection_explanation(forecasts, features)
   }
 
   cycle_log.log_dprime_layer(
@@ -184,6 +235,75 @@ fn evaluate_llm(
       <> decision_to_string(decision)
       <> " (D' = "
       <> float.to_string(score)
+      <> ")",
+    Some(cycle_id),
+  )
+
+  GateResult(
+    decision:,
+    dprime_score: score,
+    forecasts:,
+    explanation:,
+    layer: Deliberative,
+    canary_result: option.None,
+  )
+}
+
+/// Normative calculus evaluation — maps D' forecasts to normative propositions,
+/// resolves conflicts against the character spec, and produces a verdict with
+/// axiom trail.
+fn evaluate_normative(
+  forecasts: List(Forecast),
+  features: List(Feature),
+  score: Float,
+  modify_threshold: Float,
+  reject_threshold: Float,
+  character_spec: normative_types.CharacterSpec,
+  cycle_id: String,
+) -> GateResult {
+  let judgement =
+    normative_bridge.evaluate(
+      score,
+      forecasts,
+      features,
+      character_spec,
+      modify_threshold,
+      reject_threshold,
+    )
+
+  let decision = normative_bridge.verdict_to_gate_decision(judgement.verdict)
+  let normative_explanation = normative_bridge.format_judgement(judgement)
+
+  // Combine normative explanation with concern details when not flourishing
+  let explanation = case decision {
+    Accept -> normative_explanation
+    Modify -> {
+      let concerns = build_modification_explanation(forecasts, features)
+      normative_explanation <> " — " <> concerns
+    }
+    Reject -> {
+      let concerns = build_rejection_explanation(forecasts, features)
+      normative_explanation <> " — " <> concerns
+    }
+  }
+
+  cycle_log.log_dprime_layer(
+    cycle_id,
+    "output_gate_normative",
+    decision_to_string(decision),
+    score,
+    explanation,
+  )
+
+  slog.info(
+    "dprime/output_gate",
+    "evaluate",
+    "Normative output gate: "
+      <> normative_judgement.verdict_to_string(judgement.verdict)
+      <> " (D' = "
+      <> float.to_string(score)
+      <> ", rule: "
+      <> judgement.floor_rule
       <> ")",
     Some(cycle_id),
   )

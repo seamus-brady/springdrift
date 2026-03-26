@@ -36,6 +36,7 @@ import narrative/curator
 import narrative/housekeeper
 import narrative/librarian
 import narrative/threading as narrative_threading
+import normative/character as normative_character
 import paths
 import planner/forecaster
 import planner/types as planner_types
@@ -645,6 +646,14 @@ fn run(cfg: AppConfig) -> Nil {
     })
     |> result.unwrap(how_to_content.builtin())
 
+  // Load character spec for normative calculus (from identity directories)
+  let normative_calculus_enabled =
+    option.unwrap(cfg.normative_calculus_enabled, False)
+  let character_spec = case normative_calculus_enabled {
+    True -> normative_character.load_character(paths.default_identity_dirs())
+    False -> option.None
+  }
+
   let cognitive_subj = case
     cognitive.start(CognitiveConfig(
       provider: p,
@@ -708,6 +717,8 @@ fn run(cfg: AppConfig) -> Nil {
         )
       },
       gate_timeout_ms: option.unwrap(cfg.gate_timeout_ms, 60_000),
+      normative_calculus_enabled:,
+      character_spec:,
     ))
   {
     Ok(subj) -> subj

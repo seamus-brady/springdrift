@@ -201,6 +201,8 @@ pub type AppConfig {
     forecaster_replan_threshold: Option(Float),
     forecaster_min_cycles: Option(Int),
     forecaster_stale_threshold_ms: Option(Int),
+    // ── Normative calculus ──
+    normative_calculus_enabled: Option(Bool),
   )
 }
 
@@ -354,6 +356,7 @@ pub fn default() -> AppConfig {
     forecaster_replan_threshold: None,
     forecaster_min_cycles: None,
     forecaster_stale_threshold_ms: None,
+    normative_calculus_enabled: None,
   )
 }
 
@@ -853,6 +856,10 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     forecaster_stale_threshold_ms: option.or(
       override_cfg.forecaster_stale_threshold_ms,
       base.forecaster_stale_threshold_ms,
+    ),
+    normative_calculus_enabled: option.or(
+      override_cfg.normative_calculus_enabled,
+      base.normative_calculus_enabled,
     ),
   )
 }
@@ -1398,6 +1405,10 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     forecaster_min_cycles: get_toml_int(table, ["forecaster", "min_cycles"]),
     forecaster_stale_threshold_ms: get_toml_int(table, [
       "forecaster", "stale_threshold_ms",
+    ]),
+    // ── [dprime] normative calculus ──
+    normative_calculus_enabled: get_toml_bool(table, [
+      "dprime", "normative_calculus_enabled",
     ]),
   )
 }

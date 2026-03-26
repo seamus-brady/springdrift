@@ -76,6 +76,40 @@ When D' rejects a request you believe was legitimate, use **report_false_positiv
 
 Use `inspect_cycle` or `list_recent_cycles` to find the cycle_id of the rejected request.
 
+### Normative Calculus (Output Gate)
+
+When `normative_calculus_enabled = true` in `[dprime]` config, the output gate applies
+virtue-based evaluation after D' scoring. This adds principled reasoning to gate
+decisions — instead of just "score > threshold", you get named axiom trails explaining
+*why* a decision was made.
+
+**How it works:**
+1. The D' scorer evaluates the response as normal (LLM-scored features → magnitudes)
+2. The normative bridge converts those magnitudes into normative propositions
+3. The calculus resolves each proposition against the character spec's highest endeavour
+4. Floor rules produce a verdict: **Flourishing** (accept), **Constrained** (modify),
+   or **Prohibited** (reject)
+5. The axiom trail appears in the gate explanation and cycle log
+
+**Character spec** — loaded from `identity/character.json`. Contains virtues (named
+behavioural expressions) and highest endeavour (normative propositions the agent
+commits to). The operator controls how strict the calculus is by choosing `required`
+(categorical) vs `ought` (advisory) operators on each proposition.
+
+**Short reply bypass** — responses under 300 characters skip the LLM scorer entirely.
+Deterministic rules still run. This prevents conversational replies from being
+evaluated against research report quality standards.
+
+**Virtue drift detection** — the system tracks normative verdicts over time. If it
+detects high constraint/prohibition rates, repeated axiom firing, or over-restriction
+patterns, it escalates to the operator via the meta observer. Drift signals also
+appear in the sensorium `<events>` section. The system never auto-adjusts thresholds
+for drift — only the operator can tune the character spec or D' config.
+
+**MODIFY behaviour** — when the output gate constrains a response, the agent is
+instructed to fix only the specific flagged issues while preserving all other content.
+It will not strip out unflagged content or add unnecessary hedging.
+
 ## Code Tasks
 
 1. Call `recall_cases(intent: "code")` for relevant past patterns
