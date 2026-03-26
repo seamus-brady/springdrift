@@ -280,6 +280,7 @@ pub fn make_superseded_fact(
     supersedes: Some(superseded_by_id),
     confidence: original.confidence,
     source: "housekeeping",
+    provenance: None,
   )
 }
 

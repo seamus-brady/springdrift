@@ -125,6 +125,8 @@ pub fn start(
           max_delegation_depth: cfg.max_delegation_depth,
           sandbox_enabled: cfg.sandbox_enabled,
           deterministic_config: cfg.deterministic_config,
+          fact_decay_half_life_days: cfg.fact_decay_half_life_days,
+          escalation_config: cfg.escalation_config,
         ),
         redact_secrets: cfg.redact_secrets,
         pending_sensory_events: [],

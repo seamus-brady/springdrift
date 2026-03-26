@@ -359,6 +359,7 @@ pub fn memory_write_and_read_roundtrip_test() {
       facts_dir: dir,
       cycle_id: "cycle-001",
       agent_id: "test-agent",
+      fact_decay_half_life_days: 30,
     ))
 
   // Write a fact
@@ -412,6 +413,7 @@ pub fn memory_write_clear_read_test() {
       facts_dir: dir,
       cycle_id: "cycle-001",
       agent_id: "test-agent",
+      fact_decay_half_life_days: 30,
     ))
 
   // Write
@@ -466,6 +468,7 @@ pub fn memory_trace_shows_history_test() {
       facts_dir: dir,
       cycle_id: "cycle-001",
       agent_id: "test-agent",
+      fact_decay_half_life_days: 30,
     ))
 
   // Write two versions
@@ -521,6 +524,7 @@ pub fn memory_query_finds_facts_test() {
       facts_dir: dir,
       cycle_id: "cycle-001",
       agent_id: "test-agent",
+      fact_decay_half_life_days: 30,
     ))
 
   // Write facts

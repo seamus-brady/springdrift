@@ -9,6 +9,7 @@
 //// Optional 5th signal (embedding) can be plugged in via embed_fn.
 
 import cbr/types.{type CbrCase, type CbrQuery, type ScoredCase, ScoredCase}
+import dprime/decay
 import gleam/dict.{type Dict}
 import gleam/float
 import gleam/int
@@ -141,12 +142,27 @@ pub fn retain_case(base: CaseBase, cbr_case: CbrCase) -> CaseBase {
 
 /// Retrieve cases matching a query, scored by weighted sum of multiple signals.
 /// Returns ScoredCase list sorted by score descending.
+/// When cbr_decay_half_life_days > 0 and today is provided, outcome confidence
+/// is decayed by half-life before contributing to the score.
 pub fn retrieve_cases(
   base: CaseBase,
   query: CbrQuery,
   metadata: Dict(String, CbrCase),
   weights: RetrievalWeights,
   min_score: Float,
+) -> List(ScoredCase) {
+  retrieve_cases_with_decay(base, query, metadata, weights, min_score, 0, "")
+}
+
+/// Retrieve cases with confidence decay applied to outcome confidence.
+pub fn retrieve_cases_with_decay(
+  base: CaseBase,
+  query: CbrQuery,
+  metadata: Dict(String, CbrCase),
+  weights: RetrievalWeights,
+  min_score: Float,
+  cbr_decay_half_life_days: Int,
+  today: String,
 ) -> List(ScoredCase) {
   let max_results = query.max_results
   let case_ids = dict.keys(metadata)
@@ -155,10 +171,19 @@ pub fn retrieve_cases(
     [] -> []
     _ -> {
       // Signal 1: Weighted field scoring (0.0–1.0)
+      // When decay is enabled, outcome confidence is decayed before scoring
       let field_scores =
         list.map(case_ids, fn(id) {
           case dict.get(metadata, id) {
-            Ok(c) -> #(id, weighted_field_score(query, c))
+            Ok(c) -> #(
+              id,
+              weighted_field_score_with_decay(
+                query,
+                c,
+                cbr_decay_half_life_days,
+                today,
+              ),
+            )
             Error(_) -> #(id, 0.0)
           }
         })
@@ -298,6 +323,60 @@ pub fn weighted_field_score(query: CbrQuery, cbr_case: CbrCase) -> Float {
     *. 0.1
   let status_score = case cbr_case.outcome.status {
     "success" -> 0.1
+    _ -> 0.0
+  }
+
+  intent_score +. domain_score +. keyword_score +. entity_score +. status_score
+}
+
+/// Score a case against a query with confidence decay applied to outcome.
+/// When cbr_decay_half_life_days <= 0 or today is empty, behaves identically
+/// to weighted_field_score.
+pub fn weighted_field_score_with_decay(
+  query: CbrQuery,
+  cbr_case: CbrCase,
+  cbr_decay_half_life_days: Int,
+  today: String,
+) -> Float {
+  let intent_score = case
+    string.lowercase(query.intent) == string.lowercase(cbr_case.problem.intent)
+  {
+    True -> 0.3
+    False -> 0.0
+  }
+  let domain_score = case
+    string.lowercase(query.domain) == string.lowercase(cbr_case.problem.domain)
+  {
+    True -> 0.3
+    False -> 0.0
+  }
+  let keyword_score =
+    jaccard(
+      list.map(query.keywords, string.lowercase),
+      list.map(cbr_case.problem.keywords, string.lowercase),
+    )
+    *. 0.2
+  let entity_score =
+    jaccard(
+      list.map(query.entities, string.lowercase),
+      list.map(cbr_case.problem.entities, string.lowercase),
+    )
+    *. 0.1
+
+  // Apply confidence decay to the status score component
+  let effective_confidence = case cbr_decay_half_life_days > 0 && today != "" {
+    True ->
+      decay.decay_fact_confidence(
+        cbr_case.outcome.confidence,
+        cbr_case.timestamp,
+        today,
+        cbr_decay_half_life_days,
+      )
+    False -> cbr_case.outcome.confidence
+  }
+  // Status score weighted by decayed confidence (max 0.1)
+  let status_score = case cbr_case.outcome.status {
+    "success" -> 0.1 *. effective_confidence
     _ -> 0.0
   }
 

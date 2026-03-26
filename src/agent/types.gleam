@@ -401,6 +401,7 @@ pub type Notification {
   SandboxStarted(pool_size: Int, port_range: String)
   SandboxContainerFailed(slot: Int, reason: String)
   SandboxUnavailable(reason: String)
+  ModelEscalation(from_model: String, to_model: String, reason: String)
 }
 
 // ---------------------------------------------------------------------------

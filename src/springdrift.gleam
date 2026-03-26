@@ -1,4 +1,5 @@
 import agent/cognitive
+import agent/cognitive/escalation as agent_cognitive_escalation
 import agent/cognitive_config.{CognitiveConfig}
 import agent/registry
 import agent/supervisor
@@ -324,6 +325,7 @@ fn run(cfg: AppConfig) -> Nil {
       ),
       min_score: option.unwrap(cfg.cbr_min_score, 0.0),
       embed_fn:,
+      cbr_decay_half_life_days: option.unwrap(cfg.cbr_decay_half_life_days, 60),
     )
 
   // Start the Librarian (supervised — auto-restarts on crash)
@@ -673,6 +675,24 @@ fn run(cfg: AppConfig) -> Nil {
         deterministic_config: case option.unwrap(cfg.dprime_enabled, True) {
           True -> option.Some(unified_dprime.deterministic)
           False -> option.None
+        },
+        fact_decay_half_life_days: option.unwrap(
+          cfg.fact_decay_half_life_days,
+          30,
+        ),
+        escalation_config: {
+          let esc_default = agent_cognitive_escalation.default_config()
+          agent_cognitive_escalation.EscalationConfig(
+            enabled: option.unwrap(cfg.escalation_enabled, esc_default.enabled),
+            tool_failure_threshold: option.unwrap(
+              cfg.escalation_tool_failure_threshold,
+              esc_default.tool_failure_threshold,
+            ),
+            safety_score_threshold: option.unwrap(
+              cfg.escalation_safety_score_threshold,
+              esc_default.safety_score_threshold,
+            ),
+          )
         },
       ),
     )

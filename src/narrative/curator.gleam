@@ -608,6 +608,7 @@ fn make_memory_fact(
     supersedes: None,
     confidence:,
     source: "curator_write",
+    provenance: None,
   )
 }
 

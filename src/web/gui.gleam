@@ -631,6 +631,12 @@ fn notification_to_server_message(
       )
     agent_types.SandboxUnavailable(reason:) ->
       protocol.ToolNotification(name: "sandbox:unavailable " <> reason)
+    agent_types.ModelEscalation(from_model:, to_model:, reason:) ->
+      protocol.SafetyNotification(
+        decision: "ESCALATED",
+        score: 0.0,
+        explanation: from_model <> " -> " <> to_model <> ": " <> reason,
+      )
   }
 }
 
