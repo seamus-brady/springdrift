@@ -65,12 +65,18 @@ write_anywhere = false
 # after this delay rather than blocking forever (default: 60000)
 # gate_timeout_ms = 60000
 
+# Enable normative calculus for output gate evaluation (default: false).
+# When enabled, the output gate applies virtue-based evaluation using the
+# character spec's highest endeavour (loaded from identity/character.json).
+# Produces verdicts with named axiom trails: auditable, inspectable, defensible.
+# normative_calculus_enabled = false
+
 # ── Agent identity ─────────────────────────────────────────────────────────
 
 [agent]
 # Agent name — substituted into {{agent_name}} in identity/persona.md
-name = "Springdrift"
-# version = ""
+name = "Nemo"
+version = " Springdrift Mk-3"
 
 # ── Prime Narrative ─────────────────────────────────────────────────────────
 
@@ -444,18 +450,6 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 [xstructor]
 # Max validation+retry attempts for XStructor XML generation (default: 3)
 # max_retries = 3
-
-# ── D' Safety System ─────────────────────────────────────────────────────────
-
-[dprime]
-# Gate evaluation timeout in ms (default: 60000)
-# gate_timeout_ms = 60000
-
-# Enable normative calculus for output gate evaluation (default: false).
-# When enabled, the output gate applies virtue-based evaluation using the
-# character spec's highest endeavour (loaded from identity/character.json).
-# Produces verdicts with named axiom trails: auditable, inspectable, defensible.
-# normative_calculus_enabled = false
 
 # ── Forecaster ───────────────────────────────────────────────────────────────
 # Plan-health forecaster using D' engine to detect when replanning is needed.
