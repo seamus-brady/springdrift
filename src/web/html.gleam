@@ -1509,6 +1509,18 @@ fn ws_connect_js() -> String {
       statusEl.textContent = 'connected';
       statusDot.className = 'dot connected';
       reconnectDelay = 1000;
+      // Load data for the default active tab on connect
+      var activeTab = document.querySelector('.tab-btn.active');
+      if (activeTab) {
+        var tab = activeTab.getAttribute('data-tab');
+        if (tab === 'narrative') requestNarrativeData();
+        else if (tab === 'log') requestLogData();
+        else if (tab === 'scheduler') requestSchedulerData();
+        else if (tab === 'cycles') requestSchedulerCycles();
+        else if (tab === 'planner') requestPlannerData();
+        else if (tab === 'dprime') requestDprimeData();
+        else if (tab === 'dprime-config') requestDprimeConfig();
+      }
     };
 
     ws.onclose = function() {

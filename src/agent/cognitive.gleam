@@ -949,16 +949,16 @@ fn handle_think_complete(
                   content: resp.content,
                 )
               let messages = list.append(state.messages, [assistant_msg])
-              // Check for output gate — skip LLM scoring on short
-              // conversational replies (deterministic rules still run)
-              let output_gate_min_length = 300
-              let reply_length = string.length(reply_text)
-              case
-                state.output_dprime_state,
-                reply_length >= output_gate_min_length
-              {
+              // Output gate strategy:
+              // - Autonomous (scheduler) cycles: full LLM scorer + normative
+              //   calculus — nobody's watching, quality matters before delivery
+              // - Interactive cycles: deterministic rules only — the operator
+              //   is the quality gate, don't destroy good output with false positives
+              let is_autonomous =
+                state.cycle_node_type == dag_types.SchedulerCycle
+              case state.output_dprime_state, is_autonomous {
                 Some(output_state), True -> {
-                  // Substantive response — full output gate evaluation
+                  // Autonomous delivery — full output gate evaluation
                   cognitive_safety.spawn_output_gate(
                     state,
                     output_state,
@@ -970,7 +970,7 @@ fn handle_think_complete(
                   )
                 }
                 Some(_), False -> {
-                  // Short reply — run deterministic rules only, skip LLM scorer
+                  // Interactive session — deterministic rules only, skip LLM scorer
                   cognitive_safety.check_deterministic_only(
                     state,
                     reply_text,
