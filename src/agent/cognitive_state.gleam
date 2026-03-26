@@ -133,6 +133,15 @@ pub type CognitiveState {
     redact_secrets: Bool,
     // --- Layer 3b meta observer ---
     meta_state: Option(meta_types.MetaState),
+    // --- CBR retrieval tracking (cleared each cycle) ---
+    retrieved_case_ids: List(String),
+    // --- Session-level meta-state counters (reset on restart) ---
+    session_tool_calls: Int,
+    session_tool_failures: Int,
+    session_dprime_modifications: Int,
+    session_dprime_rejections: Int,
+    session_cycles: Int,
+    session_cbr_hits: Int,
   )
 }
 

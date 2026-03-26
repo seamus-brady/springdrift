@@ -448,7 +448,50 @@ pub type AgentManagementContext {
 
 /// Default memory limits.
 pub fn default_limits() -> MemoryLimits {
-  MemoryLimits(recall_max_entries: 50, cbr_max_results: 20)
+  MemoryLimits(recall_max_entries: 50, cbr_max_results: 4)
+}
+
+/// Extract case IDs from recall_cases tool results.
+/// Parses `[case_id: xxx]` patterns from the result content.
+/// Accepts ToolCall list + ContentBlock list (ToolResultContent variant).
+pub fn extract_recalled_case_ids(
+  calls: List(ToolCall),
+  results: List(types.ContentBlock),
+) -> List(String) {
+  let recall_ids =
+    list.filter_map(calls, fn(call) {
+      case call.name == "recall_cases" {
+        True -> Ok(call.id)
+        False -> Error(Nil)
+      }
+    })
+  case recall_ids {
+    [] -> []
+    _ ->
+      list.flat_map(results, fn(r) {
+        case r {
+          types.ToolResultContent(tool_use_id: tuid, content: c, ..) ->
+            case list.contains(recall_ids, tuid) {
+              True -> parse_case_ids(c)
+              False -> []
+            }
+          _ -> []
+        }
+      })
+  }
+}
+
+/// Parse case IDs from the "[case_id: xxx]" format in recall_cases output.
+fn parse_case_ids(content: String) -> List(String) {
+  content
+  |> string.split("[case_id: ")
+  |> list.drop(1)
+  |> list.filter_map(fn(segment) {
+    case string.split_once(segment, "]") {
+      Ok(#(id, _)) -> Ok(id)
+      Error(_) -> Error(Nil)
+    }
+  })
 }
 
 /// Execute a memory tool call. Uses the Librarian if available,

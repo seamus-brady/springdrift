@@ -364,6 +364,20 @@ pub fn handle_safety_gate_complete(
       score: result.dprime_score,
       explanation: result.explanation,
     )
+  // Increment session-level D' counters
+  let state = case result.decision {
+    dprime_types.Modify ->
+      CognitiveState(
+        ..state,
+        session_dprime_modifications: state.session_dprime_modifications + 1,
+      )
+    dprime_types.Reject ->
+      CognitiveState(
+        ..state,
+        session_dprime_rejections: state.session_dprime_rejections + 1,
+      )
+    dprime_types.Accept -> state
+  }
   let state =
     CognitiveState(
       ..state,
@@ -702,6 +716,20 @@ pub fn handle_input_safety_gate_complete(
       score: result.dprime_score,
       explanation: result.explanation,
     )
+  // Increment session-level D' counters for input gate
+  let state = case result.decision {
+    dprime_types.Modify ->
+      CognitiveState(
+        ..state,
+        session_dprime_modifications: state.session_dprime_modifications + 1,
+      )
+    dprime_types.Reject ->
+      CognitiveState(
+        ..state,
+        session_dprime_rejections: state.session_dprime_rejections + 1,
+      )
+    dprime_types.Accept -> state
+  }
   let state =
     CognitiveState(
       ..state,

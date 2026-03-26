@@ -7,6 +7,7 @@ import gleam/option.{None, Some}
 import gleam/string
 import gleeunit/should
 import narrative/curator
+import narrative/virtual_memory
 import planner/types as planner_types
 
 // ---------------------------------------------------------------------------
@@ -193,4 +194,54 @@ pub fn tasks_no_active_tasks_but_open_endeavour_renders_test() {
   |> string.contains("<tasks active=\"0\" endeavours=\"1\">")
   |> should.equal(True)
   result |> string.contains("id=\"end-001\"") |> should.equal(True)
+}
+
+// ---------------------------------------------------------------------------
+// render_sensorium_vitals with meta-states
+// ---------------------------------------------------------------------------
+
+pub fn vitals_with_meta_states_renders_attributes_test() {
+  let constitution =
+    virtual_memory.ConstitutionSlot(
+      today_cycles: 5,
+      today_success_rate: 0.8,
+      agent_health: "All agents nominal",
+    )
+  let meta =
+    Some(curator.MetaStateContext(
+      uncertainty: 0.3,
+      prediction_error: 0.1,
+      novelty: 0.7,
+    ))
+  let result =
+    curator.render_sensorium_vitals(constitution, 2, "", "", None, meta)
+  result
+  |> string.contains("uncertainty=\"0.3\"")
+  |> should.equal(True)
+  result
+  |> string.contains("prediction_error=\"0.1\"")
+  |> should.equal(True)
+  result
+  |> string.contains("novelty=\"0.7\"")
+  |> should.equal(True)
+}
+
+pub fn vitals_without_meta_states_omits_attributes_test() {
+  let constitution =
+    virtual_memory.ConstitutionSlot(
+      today_cycles: 5,
+      today_success_rate: 0.8,
+      agent_health: "All agents nominal",
+    )
+  let result =
+    curator.render_sensorium_vitals(constitution, 2, "", "", None, None)
+  result
+  |> string.contains("uncertainty=")
+  |> should.equal(False)
+  result
+  |> string.contains("prediction_error=")
+  |> should.equal(False)
+  result
+  |> string.contains("novelty=")
+  |> should.equal(False)
 }

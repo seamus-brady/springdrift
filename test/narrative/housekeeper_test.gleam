@@ -192,3 +192,68 @@ pub fn housekeeper_empty_report_test() {
   should.equal(report.dag_nodes_evicted, 0)
   should.equal(report.artifacts_evicted, 0)
 }
+
+pub fn housekeeper_default_config_has_budget_debounce_test() {
+  let config = housekeeper.default_config()
+  should.equal(config.budget_dedup_debounce_ms, 1_800_000)
+}
+
+pub fn housekeeper_budget_triggered_dedup_accepted_test() {
+  // BudgetTriggeredDedup should be handled without crashing
+  let #(narrative_dir, cbr_dir, facts_dir, artifacts_dir) = setup_dirs()
+  let lib = start_librarian(narrative_dir, cbr_dir, facts_dir, artifacts_dir)
+  let config =
+    housekeeper.HousekeeperConfig(
+      ..housekeeper.default_config(),
+      short_tick_ms: 999_999_999,
+      medium_tick_ms: 999_999_999,
+      long_tick_ms: 999_999_999,
+      // Set debounce to 0 so the message is always accepted
+      budget_dedup_debounce_ms: 0,
+    )
+  case housekeeper.start(lib, narrative_dir, facts_dir, config) {
+    Ok(subj) -> {
+      // Send BudgetTriggeredDedup — should not crash
+      process.send(subj, housekeeper.BudgetTriggeredDedup)
+      // Give it time to process
+      process.sleep(100)
+      // Verify still alive by sending RunAll
+      let report = housekeeper.run_all(subj)
+      should.equal(report.cases_deduplicated, 0)
+      process.send(subj, housekeeper.Shutdown)
+    }
+    Error(_) -> should.fail()
+  }
+  process.send(lib, librarian.Shutdown)
+}
+
+pub fn housekeeper_budget_triggered_dedup_debounced_test() {
+  // Two rapid BudgetTriggeredDedup messages — second should be debounced
+  let #(narrative_dir, cbr_dir, facts_dir, artifacts_dir) = setup_dirs()
+  let lib = start_librarian(narrative_dir, cbr_dir, facts_dir, artifacts_dir)
+  let config =
+    housekeeper.HousekeeperConfig(
+      ..housekeeper.default_config(),
+      short_tick_ms: 999_999_999,
+      medium_tick_ms: 999_999_999,
+      long_tick_ms: 999_999_999,
+      // 10 second debounce — second message will be within debounce
+      budget_dedup_debounce_ms: 10_000,
+    )
+  case housekeeper.start(lib, narrative_dir, facts_dir, config) {
+    Ok(subj) -> {
+      // Send first BudgetTriggeredDedup (accepted — last_budget_dedup_ms is 0)
+      process.send(subj, housekeeper.BudgetTriggeredDedup)
+      process.sleep(50)
+      // Send second (should be debounced since <10s have passed)
+      process.send(subj, housekeeper.BudgetTriggeredDedup)
+      process.sleep(50)
+      // Verify still alive
+      let report = housekeeper.run_all(subj)
+      should.equal(report.cases_deduplicated, 0)
+      process.send(subj, housekeeper.Shutdown)
+    }
+    Error(_) -> should.fail()
+  }
+  process.send(lib, librarian.Shutdown)
+}

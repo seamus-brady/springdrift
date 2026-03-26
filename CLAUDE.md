@@ -66,6 +66,7 @@ src/
 │   ├── gate.gleam             Three-layer H-CogAff orchestrator (reactive → deliberative → meta)
 │   ├── config.gleam           D' config loading from JSON, unified format (gates + agent overrides + meta + shared + deterministic)
 │   ├── deterministic.gleam    Deterministic pre-filter — regex rules, path/domain allowlists (no LLM calls)
+│   ├── decay.gleam            Confidence decay — half-life time-based degradation for facts and CBR
 │   ├── output_gate.gleam      Output quality gate — evaluates finished reports before delivery
 │   └── meta.gleam             History ring buffer, stall detection, threshold tightening
 │
@@ -430,9 +431,14 @@ builds an XML sensorium block with clock/situation/schedule/vitals sections, ren
 back to a plain system prompt when no identity files exist.
 
 **Archivist** (`narrative/archivist.gleam`) runs after each final reply as a
-fire-and-forget `spawn_unlinked` process. It makes a single LLM call to generate a
-`NarrativeEntry` and a `CbrCase` from the cycle's context, assigns a thread, appends
-to JSONL, and notifies the Librarian. Failures never affect the user.
+fire-and-forget `spawn_unlinked` process. Uses a two-phase Reflector/Curator pipeline
+(per ACE paper 2510.04618): Phase 1 (Reflection) makes a plain-text LLM call focused
+on honest assessment of what worked/failed. Phase 2 (Curation) takes the reflection
+and generates structured `NarrativeEntry` + `CbrCase` via XStructor. If Phase 1 fails,
+falls back to the original single-call approach. If Phase 2 fails after Phase 1
+succeeds, the reflection is preserved in logs. Assigns thread, category, provenance,
+and usage stats. Appends to JSONL and notifies the Librarian. Also updates CBR usage
+stats for any cases retrieved during the cycle. Failures never affect the user.
 
 ## Agent subsystem
 
@@ -548,22 +554,38 @@ used by the Curator for session preamble population.
 **CBR memory** — case-based reasoning in `cbr/types.gleam`, `cbr/log.gleam`, and
 `cbr/bridge.gleam`. Each `CbrCase` captures problem (intent, domain, entities,
 keywords), solution (approach, agents, tools, steps), outcome (status, confidence,
-assessment, pitfalls), source narrative ID, and optional profile hint. The Librarian
-actor indexes CBR cases in ETS alongside narrative entries. `cbr/bridge.gleam`
-provides `CaseBase` with inverted index and optional semantic embeddings. Retrieval
-uses a weighted sum of 4-5 signals: weighted field score (intent/domain match,
-keyword/entity Jaccard), inverted index overlap, recency, domain match, and optional
-embedding cosine similarity. Weights are configurable via `RetrievalWeights`; when
+assessment, pitfalls), source narrative ID, optional category, and optional usage
+stats. The Librarian actor indexes CBR cases in ETS alongside narrative entries.
+`cbr/bridge.gleam` provides `CaseBase` with inverted index and optional semantic
+embeddings. Retrieval uses a weighted sum of 6 signals: weighted field score
+(intent/domain match, keyword/entity Jaccard), inverted index overlap, recency,
+domain match, optional embedding cosine similarity, and utility score (from usage
+tracking). Default retrieval cap is K=4 cases (per Memento paper finding that more
+causes context pollution). Weights are configurable via `RetrievalWeights`; when
 embeddings are unavailable, embedding weight is redistributed to the other signals.
 `cbr/log.gleam` provides append-only JSON-L persistence with lenient decoders
 (null → defaults).
 
+**CBR self-improvement** — cases track their own utility via `CbrUsageStats`
+(retrieval_count, retrieval_success_count, helpful_count, harmful_count). When
+`recall_cases` returns cases, their IDs are recorded. The Archivist updates usage
+stats post-cycle based on outcome success/failure. Retrieval scoring blends a
+Laplace-smoothed utility score: `(successes + 1) / (retrievals + 2)`. Cases are
+typed by `CbrCategory` (Strategy, CodePattern, Troubleshooting, Pitfall,
+DomainKnowledge) — assigned deterministically by the Archivist based on outcome.
+The Curator organises injected cases by category in the system prompt.
+
 **Facts store** — key-value memory in `facts/types.gleam` and `facts/log.gleam`.
 `MemoryFact` has scope (Session/Persistent/Global), operation (Write/Delete/Superseded),
-confidence score, and supersedes chain. Facts use daily-rotated JSONL files
-(`YYYY-MM-DD-facts.jsonl`). The Librarian replays recent files at startup and migrates
-legacy `facts.jsonl` to the new format. The Librarian indexes facts in ETS and supports
-read/write/delete operations.
+confidence score, supersedes chain, and optional `FactProvenance` (source_cycle_id,
+source_tool, source_agent, derivation: DirectObservation/Synthesis/OperatorProvided/
+Unknown). Facts use daily-rotated JSONL files (`YYYY-MM-DD-facts.jsonl`). The Librarian
+replays recent files at startup and migrates legacy `facts.jsonl` to the new format.
+The Librarian indexes facts in ETS and supports read/write/delete operations.
+Fact confidence decays at read time via half-life formula:
+`confidence_t = confidence_0 * 2^(-age_days / half_life_days)` (configurable,
+default 30 days). Stored confidence is never mutated — decay is applied at query time.
+`dprime/decay.gleam` provides the pure decay functions.
 
 **Artifact store** — large content storage in `artifacts/types.gleam` and `artifacts/log.gleam`.
 `ArtifactRecord` holds metadata + content in daily JSONL files (`artifacts-YYYY-MM-DD.jsonl`).
@@ -604,7 +626,12 @@ contains four sections:
 3. `<schedule>` — `pending`/`overdue` counts + `<job>` elements (omitted when empty)
 4. `<vitals>` — `cycles_today`, `agents_active`, conditional `agent_health`,
    conditional `last_failure` (from narrative entries, replaces raw success_rate),
-   and optional `cycles_remaining`/`tokens_remaining` budget attrs
+   optional `cycles_remaining`/`tokens_remaining` budget attrs, and three canonical
+   meta-states: `uncertainty` (proportion of cycles without CBR hits), `prediction_error`
+   (tool failure + D' modification/rejection rate), `novelty` (keyword dissimilarity to
+   recent narrative entries). Meta-states are derived from session counters and Librarian
+   data — no LLM calls needed. Based on Sloman's H-CogAff meta-management layer and
+   the Dupoux/LeCun/Malik System M paper (2603.15381).
 
 Previously separate preamble slots (`session_status`, `last_session_date`,
 `today_cycles`, `today_success_rate`, `agent_health`) are now absorbed into the

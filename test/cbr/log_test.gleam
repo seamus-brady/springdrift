@@ -53,6 +53,8 @@ fn make_case(case_id: String, intent: String, domain: String) -> CbrCase {
     source_narrative_id: "cycle-001",
     profile: None,
     redacted: False,
+    category: None,
+    usage_stats: None,
   )
 }
 

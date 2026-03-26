@@ -98,6 +98,7 @@ pub fn start(
         cycle_started_ms: 0,
         cycle_node_type: dag_types.CognitiveCycle,
         dprime_decisions: [],
+        retrieved_case_ids: [],
         memory: MemoryContext(
           narrative_dir: cfg.narrative_dir,
           cbr_dir: cfg.cbr_dir,
@@ -141,6 +142,12 @@ pub fn start(
           }
           None -> None
         },
+        session_tool_calls: 0,
+        session_tool_failures: 0,
+        session_dprime_modifications: 0,
+        session_dprime_rejections: 0,
+        session_cycles: 0,
+        session_cbr_hits: 0,
       )
     process.send(setup, self)
     cognitive_loop(state)
@@ -469,6 +476,8 @@ fn handle_user_input(
           cycle_started_ms: monotonic_now_ms(),
           cycle_node_type: dag_types.CognitiveCycle,
           dprime_decisions: [],
+          retrieved_case_ids: [],
+          session_cycles: state.session_cycles + 1,
           // Reset D' iteration counters at cycle start so
           // per-cycle MODIFY budgets don't accumulate across cycles
           tool_dprime_state: option.map(
@@ -601,6 +610,8 @@ fn handle_scheduler_input(
           cycle_started_ms: monotonic_now_ms(),
           cycle_node_type: dag_types.SchedulerCycle,
           dprime_decisions: [],
+          retrieved_case_ids: [],
+          session_cycles: state.session_cycles + 1,
           tool_dprime_state: option.map(
             state.tool_dprime_state,
             dprime_meta.reset_iterations,

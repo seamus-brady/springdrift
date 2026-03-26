@@ -4,7 +4,25 @@
 //// optimised for similarity retrieval. They capture the problem/solution/outcome
 //// structure that enables "how have I handled this before?" queries.
 
+import gleam/int
 import gleam/option.{type Option}
+
+// ---------------------------------------------------------------------------
+// Case category — what kind of knowledge this case captures
+// ---------------------------------------------------------------------------
+
+pub type CbrCategory {
+  /// High-level approach that worked
+  Strategy
+  /// Reusable code snippet or template
+  CodePattern
+  /// How to diagnose/fix a specific problem
+  Troubleshooting
+  /// What NOT to do — learned from failure
+  Pitfall
+  /// Factual knowledge about a domain
+  DomainKnowledge
+}
 
 // ---------------------------------------------------------------------------
 // Core case
@@ -21,7 +39,45 @@ pub type CbrCase {
     source_narrative_id: String,
     profile: Option(String),
     redacted: Bool,
+    category: Option(CbrCategory),
+    usage_stats: Option(CbrUsageStats),
   )
+}
+
+// ---------------------------------------------------------------------------
+// Usage tracking — retrieval feedback loop
+// ---------------------------------------------------------------------------
+
+pub type CbrUsageStats {
+  CbrUsageStats(
+    retrieval_count: Int,
+    retrieval_success_count: Int,
+    helpful_count: Int,
+    harmful_count: Int,
+  )
+}
+
+/// Create empty usage stats (all counters at zero).
+pub fn empty_usage_stats() -> CbrUsageStats {
+  CbrUsageStats(
+    retrieval_count: 0,
+    retrieval_success_count: 0,
+    helpful_count: 0,
+    harmful_count: 0,
+  )
+}
+
+/// Compute utility score with Laplace smoothing.
+/// Returns a value in (0, 1). With no data, returns 0.5 (neutral).
+pub fn utility_score(stats: Option(CbrUsageStats)) -> Float {
+  case stats {
+    option.None -> 0.5
+    option.Some(s) -> {
+      let num = int.to_float(s.retrieval_success_count + 1)
+      let denom = int.to_float(s.retrieval_count + 2)
+      num /. denom
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

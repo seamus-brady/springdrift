@@ -322,6 +322,10 @@ fn run(cfg: AppConfig) -> Nil {
           cfg.cbr_embedding_weight,
           default_weights.embedding_weight,
         ),
+        utility_weight: option.unwrap(
+          cfg.cbr_utility_weight,
+          default_weights.utility_weight,
+        ),
       ),
       min_score: option.unwrap(cfg.cbr_min_score, 0.0),
       embed_fn:,
@@ -396,8 +400,12 @@ fn run(cfg: AppConfig) -> Nil {
         cfg.thread_pruning_days,
         hk_default.thread_pruning_days,
       ),
+      budget_dedup_debounce_ms: option.unwrap(
+        cfg.housekeeper_budget_dedup_debounce_ms,
+        hk_default.budget_dedup_debounce_ms,
+      ),
     )
-  case
+  let housekeeper_subj = case
     housekeeper.start(
       librarian_subj,
       narrative_dir,
@@ -405,8 +413,14 @@ fn run(cfg: AppConfig) -> Nil {
       housekeeper_config,
     )
   {
-    Ok(_subj) -> io.println("Housekeeper: started")
-    Error(_) -> io.println("Housekeeper: failed to start (non-critical)")
+    Ok(subj) -> {
+      io.println("Housekeeper: started")
+      option.Some(subj)
+    }
+    Error(_) -> {
+      io.println("Housekeeper: failed to start (non-critical)")
+      option.None
+    }
   }
 
   // Start cache and rate limiter actors for web tools
@@ -800,6 +814,12 @@ fn run(cfg: AppConfig) -> Nil {
   // Set preamble budget from config
   let preamble_budget = option.unwrap(cfg.preamble_budget_chars, 8000)
   curator.set_preamble_budget(curator_subj, preamble_budget)
+
+  // Wire housekeeper to curator for budget-triggered dedup
+  case housekeeper_subj {
+    option.Some(hk) -> curator.set_housekeeper(curator_subj, hk)
+    option.None -> Nil
+  }
 
   // Start Forecaster if enabled (needs cognitive_subj + librarian)
   case option.unwrap(cfg.forecaster_enabled, False) {

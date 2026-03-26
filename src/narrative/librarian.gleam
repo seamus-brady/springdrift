@@ -408,6 +408,9 @@ pub type LibrarianMessage {
     reply_to: Subject(Result(Nil, String)),
   )
 
+  /// Update usage stats on a retrieved case (fire-and-forget).
+  UpdateCaseUsage(case_id: String, success: Bool)
+
   // --- Facts ingestion ---
   /// Index a new fact (after it's been written to JSONL).
   IndexFact(fact: facts_types.MemoryFact)
@@ -1077,6 +1080,16 @@ pub fn notify_new_case(
   cbr_case: cbr_types.CbrCase,
 ) -> Nil {
   process.send(librarian, IndexCase(cbr_case:))
+}
+
+/// Update usage stats on a retrieved CBR case (fire-and-forget).
+/// Increments retrieval_count, and conditionally retrieval_success_count.
+pub fn update_case_usage(
+  librarian: Subject(LibrarianMessage),
+  case_id: String,
+  success: Bool,
+) -> Nil {
+  process.send(librarian, UpdateCaseUsage(case_id:, success:))
 }
 
 /// Retrieve scored cases matching a query. Blocks until reply.
@@ -1754,6 +1767,37 @@ fn loop(state: LibrarianState) -> Nil {
               // Confidence doesn't affect field scoring — no CaseBase update needed.
               cbr_log.append(state.cbr_dir, updated)
               process.send(reply_to, Ok(Nil))
+              loop(state)
+            }
+          }
+        }
+
+        UpdateCaseUsage(case_id:, success:) -> {
+          case cbr_lookup(state.cbr_cases, case_id) {
+            Error(_) -> loop(state)
+            Ok(existing) -> {
+              let old_stats =
+                option.unwrap(
+                  existing.usage_stats,
+                  cbr_types.empty_usage_stats(),
+                )
+              let new_stats =
+                cbr_types.CbrUsageStats(
+                  retrieval_count: old_stats.retrieval_count + 1,
+                  retrieval_success_count: case success {
+                    True -> old_stats.retrieval_success_count + 1
+                    False -> old_stats.retrieval_success_count
+                  },
+                  helpful_count: old_stats.helpful_count,
+                  harmful_count: old_stats.harmful_count,
+                )
+              let updated =
+                cbr_types.CbrCase(
+                  ..existing,
+                  usage_stats: option.Some(new_stats),
+                )
+              cbr_insert(state.cbr_cases, case_id, updated)
+              cbr_log.append(state.cbr_dir, updated)
               loop(state)
             }
           }

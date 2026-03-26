@@ -1,8 +1,14 @@
 //// Archivist — generates NarrativeEntry from cycle context via LLM.
 ////
+//// Uses a two-phase Reflector + Curator approach (inspired by ACE):
+////   Phase 1 (Reflection): plain-text LLM call extracting raw insights
+////   Phase 2 (Curation): XStructor-validated generation using reflection as context
+////
+//// If Phase 1 fails, falls back to single-call generation (backward compat).
+//// If Phase 2 fails but Phase 1 succeeded, reflection is logged (insights preserved).
+////
 //// Runs asynchronously after the reply is sent to the user. If it fails,
 //// the cycle completes normally — the Archivist is never visible to the user.
-//// Uses XStructor XML-validated generation for structured output.
 
 import agent/types as agent_types
 import cbr/log as cbr_log
@@ -57,6 +63,7 @@ pub type ArchivistContext {
     tool_calls: Int,
     dprime_decisions: List(String),
     thread_index_json: String,
+    retrieved_case_ids: List(String),
   )
 }
 
@@ -64,14 +71,175 @@ pub type ArchivistContext {
 // Generate
 // ---------------------------------------------------------------------------
 
-/// Generate a NarrativeEntry from the Archivist context.
-/// Returns None if the LLM call fails (silent failure).
+/// Generate a NarrativeEntry from the Archivist context using two phases.
+///
+/// Phase 1 (Reflection): plain-text LLM call extracting raw insights.
+/// Phase 2 (Curation): XStructor-validated generation using reflection as context.
+///
+/// Falls back to single-call generation if Phase 1 fails.
+/// If Phase 2 fails but Phase 1 succeeded, reflection is logged and fallback used.
+/// Returns None only if both the LLM is unreachable.
 pub fn generate(
   ctx: ArchivistContext,
   provider: Provider,
   model: String,
   max_tokens: Int,
   _verbose: Bool,
+) -> Option(NarrativeEntry) {
+  // Phase 1: Reflection — extract raw insights via plain-text LLM call
+  case reflect(ctx, provider, model) {
+    Ok(reflection) -> {
+      // Log reflection before attempting curation (insurance against Phase 2 failure)
+      slog.info(
+        "narrative/archivist",
+        "generate",
+        "Phase 1 reflection complete for cycle "
+          <> ctx.cycle_id
+          <> ": "
+          <> string.slice(reflection, 0, 200),
+        Some(ctx.cycle_id),
+      )
+      // Phase 2: Curation — structured generation using reflection
+      case curate(ctx, reflection, provider, model, max_tokens) {
+        Some(entry) -> Some(entry)
+        None -> {
+          // Phase 2 failed but we have reflection — use fallback but preserve insights
+          slog.warn(
+            "narrative/archivist",
+            "generate",
+            "Phase 2 curation failed; using fallback with reflection preserved",
+            Some(ctx.cycle_id),
+          )
+          Some(fallback_entry(ctx))
+        }
+      }
+    }
+    Error(_) -> {
+      // Phase 1 failed — fall back to single-call approach (backward compat)
+      slog.warn(
+        "narrative/archivist",
+        "generate",
+        "Phase 1 reflection failed; falling back to single-call generation",
+        Some(ctx.cycle_id),
+      )
+      generate_single_call(ctx, provider, model, max_tokens)
+    }
+  }
+}
+
+/// Phase 1: Reflection — extract raw insights from cycle context.
+/// Returns plain text on success, Error on LLM failure.
+pub fn reflect(
+  ctx: ArchivistContext,
+  provider: Provider,
+  model: String,
+) -> Result(String, String) {
+  let prompt = build_reflection_prompt(ctx)
+  let req =
+    request.new(model, 1024)
+    |> request.with_system(reflection_system_prompt())
+    |> request.with_user_message(prompt)
+
+  case provider.chat(req) {
+    Ok(resp) -> {
+      let text = response.text(resp)
+      case string.is_empty(string.trim(text)) {
+        True -> Error("Empty reflection response")
+        False -> Ok(text)
+      }
+    }
+    Error(e) -> Error("LLM error: " <> string.inspect(e))
+  }
+}
+
+/// Phase 2: Curation — generate structured NarrativeEntry using reflection.
+/// Returns None on failure (XStructor validation or LLM error).
+pub fn curate(
+  ctx: ArchivistContext,
+  reflection: String,
+  provider: Provider,
+  model: String,
+  max_tokens: Int,
+) -> Option(NarrativeEntry) {
+  let prompt = build_curation_prompt(ctx, reflection)
+  let schema_dir = paths.schemas_dir()
+  case
+    xstructor.compile_schema(
+      schema_dir,
+      "narrative_entry.xsd",
+      schemas.narrative_entry_xsd,
+    )
+  {
+    Error(e) -> {
+      slog.warn(
+        "narrative/archivist",
+        "curate",
+        "Schema compile failed: " <> e <> " (falling back)",
+        Some(ctx.cycle_id),
+      )
+      Some(fallback_entry(ctx))
+    }
+    Ok(schema) -> {
+      let system =
+        schemas.build_system_prompt(
+          curation_system_prompt(),
+          schemas.narrative_entry_xsd,
+          schemas.narrative_entry_example,
+        )
+      let config =
+        xstructor.XStructorConfig(
+          schema: schema,
+          system_prompt: system,
+          xml_example: schemas.narrative_entry_example,
+          max_retries: 3,
+          max_tokens: max_tokens,
+        )
+      case xstructor.generate(config, prompt, provider, model) {
+        Ok(result) -> {
+          slog.info(
+            "narrative/archivist",
+            "curate",
+            "Phase 2 curation complete for cycle " <> ctx.cycle_id,
+            Some(ctx.cycle_id),
+          )
+          Some(extract_narrative_entry(result.elements, ctx))
+        }
+        Error(e) -> {
+          case string.starts_with(e, "LLM error:") {
+            True -> {
+              slog.warn(
+                "narrative/archivist",
+                "curate",
+                "LLM call failed during curation",
+                Some(ctx.cycle_id),
+              )
+              None
+            }
+            False -> {
+              slog.warn(
+                "narrative/archivist",
+                "curate",
+                "XStructor curation failed: "
+                  <> string.slice(e, 0, 300)
+                  <> " (falling back)",
+                Some(ctx.cycle_id),
+              )
+              Some(fallback_entry(ctx))
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+/// Single-call generation — the original approach used as fallback when
+/// Phase 1 reflection fails.
+fn generate_single_call(
+  ctx: ArchivistContext,
+  provider: Provider,
+  model: String,
+  max_tokens: Int,
 ) -> Option(NarrativeEntry) {
   let prompt = build_prompt(ctx)
   let schema_dir = paths.schemas_dir()
@@ -85,7 +253,7 @@ pub fn generate(
     Error(e) -> {
       slog.warn(
         "narrative/archivist",
-        "generate",
+        "generate_single_call",
         "Schema compile failed: " <> e <> " (falling back)",
         Some(ctx.cycle_id),
       )
@@ -110,19 +278,18 @@ pub fn generate(
         Ok(result) -> {
           slog.info(
             "narrative/archivist",
-            "generate",
-            "Generated narrative for cycle " <> ctx.cycle_id,
+            "generate_single_call",
+            "Generated narrative (single-call) for cycle " <> ctx.cycle_id,
             Some(ctx.cycle_id),
           )
           Some(extract_narrative_entry(result.elements, ctx))
         }
         Error(e) -> {
-          // Distinguish LLM errors (return None) from validation errors (fallback)
           case string.starts_with(e, "LLM error:") {
             True -> {
               slog.warn(
                 "narrative/archivist",
-                "generate",
+                "generate_single_call",
                 "LLM call failed, skipping narrative",
                 Some(ctx.cycle_id),
               )
@@ -131,7 +298,7 @@ pub fn generate(
             False -> {
               slog.warn(
                 "narrative/archivist",
-                "generate",
+                "generate_single_call",
                 "XStructor generation failed: "
                   <> string.slice(e, 0, 300)
                   <> " (falling back)",
@@ -313,6 +480,21 @@ pub fn spawn(
             }
             None -> Nil
           }
+
+          // Step 3: Update usage stats on retrieved CBR cases
+          case ctx.retrieved_case_ids {
+            [] -> Nil
+            ids ->
+              case lib {
+                Some(l) -> {
+                  let success = final_entry.outcome.status == Success
+                  list.each(ids, fn(case_id) {
+                    librarian.update_case_usage(l, case_id, success)
+                  })
+                }
+                None -> Nil
+              }
+          }
         }
         None -> Nil
       }
@@ -321,14 +503,54 @@ pub fn spawn(
 }
 
 // ---------------------------------------------------------------------------
-// Prompt
+// Phase 1: Reflection prompt — plain text, honest assessment
 // ---------------------------------------------------------------------------
 
-fn archivist_system_prompt_base() -> String {
-  "You are the Archivist for an AI agent called Springdrift. Your job is to write a first-person narrative record of what just happened in a conversation cycle.
+fn reflection_system_prompt() -> String {
+  "You are the Reflector for an AI agent called Springdrift. Your job is to honestly assess what just happened in a conversation cycle. Write in plain text — no XML, no JSON, no special formatting.
+
+Be candid and specific. Focus on what actually happened, not what should have happened."
+}
+
+fn build_reflection_prompt(ctx: ArchivistContext) -> String {
+  let agents_text = format_agent_completions(ctx.agent_completions)
+
+  let dprime_text = case ctx.dprime_decisions {
+    [] -> "No D' evaluations."
+    decisions -> "D' DECISIONS:\n" <> string.join(decisions, "\n")
+  }
+
+  "Reflect on this completed cycle and identify:
+1. What task was attempted?
+2. What approach was taken?
+3. What tools were used and what did they return?
+4. What worked well?
+5. What failed or was unexpected?
+6. What should be remembered for future similar tasks?
+7. Were there any D' safety gate decisions worth noting?
+
+CYCLE CONTEXT:
+CYCLE ID: " <> ctx.cycle_id <> "\nMODEL: " <> ctx.model_used <> "\nCLASSIFICATION: " <> ctx.classification <> "\n\nUSER INPUT:\n" <> ctx.user_input <> "\n\nFINAL RESPONSE:\n" <> string.slice(
+    ctx.final_response,
+    0,
+    2000,
+  ) <> "\n\n" <> agents_text <> "\n\n" <> dprime_text <> "\n\nTOTAL TOKENS: " <> int.to_string(
+    ctx.total_input_tokens,
+  ) <> " in + " <> int.to_string(ctx.total_output_tokens) <> " out" <> "\nTOOL CALLS: " <> int.to_string(
+    ctx.tool_calls,
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2: Curation prompt — structured generation from reflection
+// ---------------------------------------------------------------------------
+
+fn curation_system_prompt() -> String {
+  "You are the Curator for an AI agent called Springdrift. You are given a reflection (plain-text analysis of what happened in a cycle) and the original cycle context. Your job is to produce a structured first-person narrative record.
 
 RULES:
 - Write in first person, past tense: 'I was asked...', 'I delegated...', 'I found...'
+- Use the reflection's insights to produce an accurate, honest record
 - Be honest about confidence and limitations
 - Use the controlled vocabulary for intent classification
 
@@ -337,10 +559,48 @@ INTENT CLASSIFICATIONS: data_report, data_query, comparison, trend_analysis, mon
 OUTCOME STATUS: success, partial, failure"
 }
 
-fn build_prompt(ctx: ArchivistContext) -> String {
-  let agents_text = case ctx.agent_completions {
+fn build_curation_prompt(ctx: ArchivistContext, reflection: String) -> String {
+  let timestamp = get_datetime()
+  "REFLECTION (from Phase 1 analysis):\n"
+  <> reflection
+  <> "\n\n---\n\nCYCLE CONTEXT:\n"
+  <> "CYCLE ID: "
+  <> ctx.cycle_id
+  <> "\nTIMESTAMP: "
+  <> timestamp
+  <> "\nMODEL: "
+  <> ctx.model_used
+  <> "\nCLASSIFICATION: "
+  <> ctx.classification
+  <> "\n\nUSER INPUT:\n"
+  <> ctx.user_input
+  <> "\n\nFINAL RESPONSE:\n"
+  <> string.slice(ctx.final_response, 0, 2000)
+  <> "\n\nTOTAL TOKENS: "
+  <> int.to_string(ctx.total_input_tokens)
+  <> " in + "
+  <> int.to_string(ctx.total_output_tokens)
+  <> " out"
+  <> "\nTOOL CALLS: "
+  <> int.to_string(ctx.tool_calls)
+  <> "\nAGENT DELEGATIONS: "
+  <> int.to_string(list.length(ctx.agent_completions))
+  <> "\nD' EVALUATIONS: "
+  <> int.to_string(list.length(ctx.dprime_decisions))
+}
+
+// ---------------------------------------------------------------------------
+// Shared prompt helpers
+// ---------------------------------------------------------------------------
+
+/// Format agent completion records into text. Used by both reflection and
+/// single-call prompts.
+fn format_agent_completions(
+  completions: List(agent_types.AgentCompletionRecord),
+) -> String {
+  case completions {
     [] -> "No agents were delegated to."
-    completions ->
+    _ ->
       "AGENT DELEGATIONS:\n"
       <> string.join(
         list.map(completions, fn(c) {
@@ -385,6 +645,27 @@ fn build_prompt(ctx: ArchivistContext) -> String {
         "\n",
       )
   }
+}
+
+// ---------------------------------------------------------------------------
+// Original single-call prompt (kept for backward compat fallback)
+// ---------------------------------------------------------------------------
+
+fn archivist_system_prompt_base() -> String {
+  "You are the Archivist for an AI agent called Springdrift. Your job is to write a first-person narrative record of what just happened in a conversation cycle.
+
+RULES:
+- Write in first person, past tense: 'I was asked...', 'I delegated...', 'I found...'
+- Be honest about confidence and limitations
+- Use the controlled vocabulary for intent classification
+
+INTENT CLASSIFICATIONS: data_report, data_query, comparison, trend_analysis, monitoring_check, exploration, clarification, system_command, conversation
+
+OUTCOME STATUS: success, partial, failure"
+}
+
+fn build_prompt(ctx: ArchivistContext) -> String {
+  let agents_text = format_agent_completions(ctx.agent_completions)
 
   let dprime_text = case ctx.dprime_decisions {
     [] -> "No D' evaluations."
@@ -846,44 +1127,7 @@ RULES:
 }
 
 fn build_cbr_prompt(ctx: ArchivistContext, entry: NarrativeEntry) -> String {
-  let agents_text = case ctx.agent_completions {
-    [] -> "No agents used."
-    completions ->
-      "AGENTS USED:\n"
-      <> string.join(
-        list.map(completions, fn(c) {
-          let tool_lines = case c.tool_call_details {
-            [] -> ""
-            details ->
-              "\n"
-              <> string.join(
-                list.map(details, fn(d: agent_types.ToolCallDetail) {
-                  "    Tool: "
-                  <> d.name
-                  <> " → "
-                  <> string.slice(d.output_summary, 0, 150)
-                  <> " ["
-                  <> case d.success {
-                    True -> "SUCCESS"
-                    False -> "FAILED"
-                  }
-                  <> "]"
-                }),
-                "\n",
-              )
-          }
-          "- "
-          <> c.agent_human_name
-          <> ": "
-          <> case c.result {
-            Ok(r) -> "SUCCESS — " <> string.slice(r, 0, 500)
-            Error(e) -> "FAILED — " <> e
-          }
-          <> tool_lines
-        }),
-        "\n",
-      )
-  }
+  let agents_text = format_agent_completions(ctx.agent_completions)
 
   "CYCLE ID: "
   <> ctx.cycle_id
@@ -965,6 +1209,7 @@ fn extract_cbr_case(
         "cbr_case.outcome.pitfalls.pitfall",
       ),
     )
+  let category = assign_category(outcome, solution)
   cbr_types.CbrCase(
     case_id: ctx.cycle_id,
     timestamp: entry.timestamp,
@@ -975,7 +1220,42 @@ fn extract_cbr_case(
     source_narrative_id: ctx.cycle_id,
     profile: None,
     redacted: False,
+    category: category,
+    usage_stats: None,
   )
+}
+
+/// Deterministic category assignment based on outcome status and solution content.
+fn assign_category(
+  outcome: cbr_types.CbrOutcome,
+  solution: cbr_types.CbrSolution,
+) -> option.Option(cbr_types.CbrCategory) {
+  let status = string.lowercase(outcome.status)
+  let approach = string.lowercase(solution.approach)
+  case status {
+    "success" ->
+      case has_code_terms(approach) {
+        True -> Some(cbr_types.CodePattern)
+        False -> Some(cbr_types.Strategy)
+      }
+    "failure" ->
+      case list.is_empty(outcome.pitfalls) {
+        False -> Some(cbr_types.Pitfall)
+        True -> Some(cbr_types.Troubleshooting)
+      }
+    "partial" -> Some(cbr_types.DomainKnowledge)
+    _ -> None
+  }
+}
+
+/// Check if approach text contains code-related terms.
+fn has_code_terms(approach: String) -> Bool {
+  let terms = [
+    "code", "function", "implementation", "implement", "script", "program",
+    "compile", "refactor", "module", "class", "method", "snippet", "template",
+    "pattern", "algorithm",
+  ]
+  list.any(terms, fn(term) { string.contains(approach, term) })
 }
 
 // ---------------------------------------------------------------------------

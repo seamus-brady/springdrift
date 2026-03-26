@@ -65,7 +65,13 @@ pub type WorkingSlot {
 
 /// Retrieved CBR cases for the current query.
 pub type CbrSlotEntry {
-  CbrSlotEntry(case_id: String, intent: String, approach: String, score: Float)
+  CbrSlotEntry(
+    case_id: String,
+    intent: String,
+    approach: String,
+    score: Float,
+    category: String,
+  )
 }
 
 pub type CbrSlot {
@@ -291,24 +297,79 @@ fn render_working(slot: WorkingSlot) -> String {
 fn render_cbr(slot: CbrSlot) -> String {
   case slot.cases {
     [] -> ""
-    cases ->
+    cases -> {
+      // Group cases by category for organised presentation
+      let grouped = group_by_category(cases)
       "<similar_cases>"
       <> string.join(
-        list.map(cases, fn(c: CbrSlotEntry) {
-          "\n  <case id=\""
-          <> c.case_id
-          <> "\" intent=\""
-          <> c.intent
-          <> "\" score=\""
-          <> float_to_string(c.score)
-          <> "\">"
-          <> c.approach
-          <> "</case>"
+        list.map(grouped, fn(group) {
+          let #(category, entries) = group
+          let header = case category {
+            "" -> ""
+            cat -> "\n  <!-- " <> cat <> " -->"
+          }
+          header
+          <> string.join(
+            list.map(entries, fn(c: CbrSlotEntry) {
+              "\n  <case id=\""
+              <> c.case_id
+              <> "\" intent=\""
+              <> c.intent
+              <> "\" score=\""
+              <> float_to_string(c.score)
+              <> case c.category {
+                "" -> ""
+                cat -> "\" category=\"" <> cat
+              }
+              <> "\">"
+              <> c.approach
+              <> "</case>"
+            }),
+            "",
+          )
         }),
         "",
       )
       <> "\n</similar_cases>"
+    }
   }
+}
+
+/// Group cases by category, preserving order within each group.
+/// Category order: Pitfalls first (most important to know), then Strategies,
+/// Troubleshooting, CodePattern, DomainKnowledge, uncategorised last.
+fn group_by_category(
+  cases: List(CbrSlotEntry),
+) -> List(#(String, List(CbrSlotEntry))) {
+  let category_order = [
+    "Pitfalls to Avoid", "Strategies", "Troubleshooting", "Code Patterns",
+    "Domain Knowledge", "",
+  ]
+  let categorised =
+    list.map(cases, fn(c) {
+      let label = case c.category {
+        "pitfall" -> "Pitfalls to Avoid"
+        "strategy" -> "Strategies"
+        "troubleshooting" -> "Troubleshooting"
+        "code_pattern" -> "Code Patterns"
+        "domain_knowledge" -> "Domain Knowledge"
+        _ -> ""
+      }
+      #(label, c)
+    })
+  list.filter_map(category_order, fn(cat) {
+    let entries =
+      list.filter_map(categorised, fn(pair) {
+        case pair.0 == cat {
+          True -> Ok(pair.1)
+          False -> Error(Nil)
+        }
+      })
+    case entries {
+      [] -> Error(Nil)
+      _ -> Ok(#(cat, entries))
+    }
+  })
 }
 
 fn render_scratch(slot: ScratchSlot) -> String {

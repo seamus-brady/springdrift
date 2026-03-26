@@ -138,6 +138,7 @@ pub fn cbr_slot_renders_test() {
         intent: "research",
         approach: "web search + summarise",
         score: 0.85,
+        category: "",
       ),
     ])
   let result = virtual_memory.to_system_prompt(vm)
@@ -191,6 +192,7 @@ pub fn all_slots_populated_test() {
         intent: "research",
         approach: "web search",
         score: 0.9,
+        category: "",
       ),
     ])
     |> virtual_memory.set_scratchpad([

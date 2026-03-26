@@ -47,6 +47,7 @@ pub type RetrievalWeights {
     recency_weight: Float,
     domain_weight: Float,
     embedding_weight: Float,
+    utility_weight: Float,
   )
 }
 
@@ -58,6 +59,7 @@ pub fn default_weights() -> RetrievalWeights {
     recency_weight: 0.15,
     domain_weight: 0.15,
     embedding_weight: 0.1,
+    utility_weight: 0.15,
   )
 }
 
@@ -204,8 +206,11 @@ pub fn retrieve_cases_with_decay(
         False -> list.map(case_ids, fn(id) { #(id, 0.0) })
       }
 
+      // Signal 6: Utility score from usage stats (0.0–1.0, Laplace smoothed)
+      let utility_scores = utility_score_signal(metadata, case_ids)
+
       // Compute effective weights (renormalize when embeddings unavailable)
-      let #(w_field, w_index, w_recency, w_domain, w_embed) = case
+      let #(w_field, w_index, w_recency, w_domain, w_embed, w_utility) = case
         has_embeddings
       {
         True -> #(
@@ -214,6 +219,7 @@ pub fn retrieve_cases_with_decay(
           weights.recency_weight,
           weights.domain_weight,
           weights.embedding_weight,
+          weights.utility_weight,
         )
         False -> {
           let sum =
@@ -221,6 +227,7 @@ pub fn retrieve_cases_with_decay(
             +. weights.index_weight
             +. weights.recency_weight
             +. weights.domain_weight
+            +. weights.utility_weight
           case sum >. 0.0 {
             True -> #(
               weights.field_weight /. sum,
@@ -228,8 +235,9 @@ pub fn retrieve_cases_with_decay(
               weights.recency_weight /. sum,
               weights.domain_weight /. sum,
               0.0,
+              weights.utility_weight /. sum,
             )
-            False -> #(0.25, 0.25, 0.25, 0.25, 0.0)
+            False -> #(0.25, 0.25, 0.25, 0.25, 0.0, 0.0)
           }
         }
       }
@@ -240,6 +248,7 @@ pub fn retrieve_cases_with_decay(
       let recency_d = dict.from_list(recency_scores)
       let domain_d = dict.from_list(domain_scores)
       let embed_d = dict.from_list(embedding_scores)
+      let utility_d = dict.from_list(utility_scores)
 
       // Compute final weighted sum
       let scored =
@@ -249,6 +258,7 @@ pub fn retrieve_cases_with_decay(
           let r = dict.get(recency_d, id) |> result.unwrap(0.0)
           let d = dict.get(domain_d, id) |> result.unwrap(0.0)
           let e = dict.get(embed_d, id) |> result.unwrap(0.0)
+          let u = dict.get(utility_d, id) |> result.unwrap(0.5)
           let score =
             w_field
             *. f
@@ -260,6 +270,8 @@ pub fn retrieve_cases_with_decay(
             *. d
             +. w_embed
             *. e
+            +. w_utility
+            *. u
           #(id, score)
         })
 
@@ -653,6 +665,24 @@ fn embedding_score(
           })
       }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Utility scoring (from usage stats)
+// ---------------------------------------------------------------------------
+
+/// Score cases by utility using Laplace-smoothed retrieval success rate.
+/// Returns (0.0–1.0) per case. Cases without usage stats get 0.5 (neutral).
+fn utility_score_signal(
+  metadata: Dict(String, CbrCase),
+  case_ids: List(String),
+) -> List(#(String, Float)) {
+  list.map(case_ids, fn(id) {
+    case dict.get(metadata, id) {
+      Ok(c) -> #(id, types.utility_score(c.usage_stats))
+      Error(_) -> #(id, 0.5)
+    }
+  })
 }
 
 // ---------------------------------------------------------------------------

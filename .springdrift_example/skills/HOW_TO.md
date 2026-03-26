@@ -15,6 +15,9 @@ Choose tools in this order:
 
 Before starting a multi-step research task, call `recall_cases` with the relevant
 intent and domain. Past cases reveal which tools worked and what pitfalls to avoid.
+Cases are organised by category (Strategy, CodePattern, Troubleshooting, Pitfall,
+DomainKnowledge) and ranked by historical utility — cases that led to successful
+outcomes in the past are ranked higher. Maximum 4 cases are retrieved per query.
 
 ## Memory Tasks
 
