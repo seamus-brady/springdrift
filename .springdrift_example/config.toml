@@ -3,308 +3,111 @@
 # Copy to .springdrift/config.toml and customise.
 # All fields are optional — defaults (shown in comments) are applied at startup.
 # CLI flags always override config file values.
+#
+# IMPORTANT: bare keys (provider, max_tokens, gui, etc.) MUST appear before
+# any [section] header. TOML assigns bare keys to the section above them.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── LLM provider and models ─────────────────────────────────────────────────
-
-# "vertex" | "anthropic" | "openrouter" | "openai" | "mistral" | "local" | "mock"
+# ── Provider and models ──────────────────────────────────────────────────────
+# "anthropic" | "vertex" | "openrouter" | "openai" | "mistral" | "local" | "mock"
 provider = "mock"
 
-# Top-level task_model / reasoning_model override any per-provider setting.
-# Prefer using the per-provider sections below instead.
+# Top-level model overrides (apply regardless of provider — prefer per-provider sections)
 # task_model = "claude-haiku-4-5-20251001"
 # reasoning_model = "claude-opus-4-6"
 
-# Maximum output tokens per LLM call (default: 2048)
-max_tokens = 2048
+# ── Behaviour ────────────────────────────────────────────────────────────────
+max_tokens = 2048            # Max output tokens per LLM call
+max_turns = 5                # React-loop iterations per message
+max_consecutive_errors = 3   # Tool failures before abort
+# max_context_messages = 100 # Sliding-window cap on context messages (default: unlimited)
+gui = "web"                  # "tui" (terminal) or "web" (browser on port 8080)
 
-# ── Loop control ─────────────────────────────────────────────────────────────
-
-# React-loop iterations per message before giving up (default: 5)
-max_turns = 5
-
-# Consecutive tool failures before the loop aborts (default: 3)
-max_consecutive_errors = 3
-
-# Sliding-window cap on context messages; oldest dropped first (default: unlimited)
-# max_context_messages = 100
-
-# ── GUI ──────────────────────────────────────────────────────────────────────
-
-# GUI mode: "tui" (terminal, default) or "web" (browser)
-gui = "tui"
-
-# ── Logging and filesystem ───────────────────────────────────────────────────
-
-# Log full LLM request/response payloads to the cycle log (default: false)
+# ── Logging ──────────────────────────────────────────────────────────────────
 log_verbose = false
-
-# Allow write_file outside the project directory (default: false)
 write_anywhere = false
-
-# Days to retain system log files before cleanup (default: 30)
 # log_retention_days = 30
-
-# Maximum system log file size in bytes before rotation (default: 10485760 = 10MB)
 # log_max_file_bytes = 10485760
-
-# Extra directories to scan for SKILL.md files
-# Default dirs (.springdrift/skills and ~/.config/springdrift/skills) are always included
 # skills_dirs = ["/path/to/my/skills"]
 
-# ── D' safety system ────────────────────────────────────────────────────────
-
-# Enable D' safety evaluation (default: true)
+# ── D' safety ────────────────────────────────────────────────────────────────
 # dprime_enabled = true
-
-# Path to D' config JSON (default: built-in)
 # dprime_config = "dprime.json"
 
-[dprime]
-# Timeout in ms for gate evaluation — if the scorer LLM hangs, fail-open
-# after this delay rather than blocking forever (default: 60000)
-# gate_timeout_ms = 60000
+# ─────────────────────────────────────────────────────────────────────────────
+# Sections below. Order doesn't matter for [sections].
+# ─────────────────────────────────────────────────────────────────────────────
 
-# Enable normative calculus for output gate evaluation (default: false).
-# When enabled, the output gate applies virtue-based evaluation using the
-# character spec's highest endeavour (loaded from identity/character.json).
-# Produces verdicts with named axiom trails: auditable, inspectable, defensible.
-# normative_calculus_enabled = false
-
-# ── Agent identity ─────────────────────────────────────────────────────────
+# ── Identity ─────────────────────────────────────────────────────────────────
 
 [agent]
-# Agent name — substituted into {{agent_name}} in identity/persona.md
-name = "Nemo"
-version = " Springdrift Mk-3"
+name = "Nemo"                # Substituted into {{agent_name}} in identity/persona.md
+version = "Springdrift Mk-3"
 
-# ── Prime Narrative ─────────────────────────────────────────────────────────
+# ── Provider-specific models ─────────────────────────────────────────────────
+# Only the active provider's section is used at runtime.
+
+[anthropic]
+# task_model = "claude-haiku-4-5-20251001"
+# reasoning_model = "claude-opus-4-6"
+
+[vertex]
+# project_id = "my-gcp-project"
+# location = "europe-west1"
+# endpoint = "europe-west1-aiplatform.googleapis.com"
+# task_model = "claude-haiku-4-5"
+# reasoning_model = "claude-opus-4-6"
+
+[mistral]
+# task_model = "mistral-small-latest"
+# reasoning_model = "mistral-large-latest"
+
+[local]
+# task_model = "smollm3-3b"
+# reasoning_model = "smollm3-3b"
+
+# ── Memory ───────────────────────────────────────────────────────────────────
 
 [narrative]
-# directory = ".springdrift/memory/narrative"  # Default location
-# archivist_model = ""       # Defaults to task_model
-# archivist_max_tokens = 4096  # Max output tokens for archivist LLM calls
-threading = true             # Auto-assign threads by overlap scoring
-summaries = false            # Enable periodic summaries
-summary_schedule = "weekly"  # "weekly" or "monthly"
-# max_days = 30              # Days of history replayed into ETS at startup
-# redact_secrets = true      # Redact API keys/tokens/passwords in logs (default: true, --no-redact to disable)
-# Max chars for rendered preamble slots (default: 8000, ~2000 tokens)
+threading = true
+summaries = false
+summary_schedule = "weekly"
+# max_days = 30
+# archivist_model = ""
+# archivist_max_tokens = 4096
+# redact_secrets = true
 # preamble_budget_chars = 8000
 
-# ── Timeouts ─────────────────────────────────────────────────────────────────
-# All values in milliseconds unless noted otherwise.
-
-[timeouts]
-# LLM request timeout — how long to wait for a single LLM API call (default: 300000 = 5 min)
-# llm_request_ms = 300000
-
-# Query complexity classification timeout (default: 10000 = 10s)
-# classify_ms = 10000
-
-# Agent inter-turn delay — pacing between react-loop iterations (default: 200)
-# inter_turn_delay_ms = 200
-
-# Process startup handshake timeout (default: 5000 = 5s)
-# startup_ms = 5000
-
-# Librarian/Curator startup timeout — larger due to ETS replay (default: 30000 = 30s)
-# librarian_startup_ms = 30000
-
-# Scheduler job completion timeout — max time for a scheduled job (default: 300000 = 5 min)
-# scheduler_job_ms = 300000
-
-# Supervisor restart window — sliding window for counting restart events (default: 60000 = 60s)
-# restart_window_ms = 60000
-
-# Scheduler stuck-job timeout — mark job as failed if still running (default: 600000 = 10 min)
-# scheduler_stuck_ms = 600000
-
-# Scheduler tool timeout — how long scheduler agent tools wait for runner reply (default: 5000 = 5s)
-# scheduler_tool_ms = 5000
-
-# ── Scheduler ────────────────────────────────────────────────────────────────
-# Resource limits for autonomous scheduler execution.
-[scheduler]
-# Max autonomous cycles the scheduler may fire per hour (default: 20, 0 = unlimited)
-# max_autonomous_cycles_per_hour = 20
-
-# Max total tokens (input + output) the scheduler may consume per hour (default: 500000, 0 = unlimited)
-# autonomous_token_budget_per_hour = 500000
-
-# ── Retry ────────────────────────────────────────────────────────────────────
-# LLM call retry configuration with exponential backoff.
-
-[retry]
-# Maximum number of retry attempts per LLM call (default: 3)
-# max_retries = 3
-
-# Base delay before first retry for server errors, in ms (default: 500)
-# initial_delay_ms = 500
-
-# Delay for rate limit errors (HTTP 429), in ms (default: 5000)
-# rate_limit_delay_ms = 5000
-
-# Delay for server overload errors (HTTP 529), in ms (default: 2000)
-# overload_delay_ms = 2000
-
-# Maximum backoff cap — exponential backoff will never exceed this, in ms (default: 60000)
-# max_delay_ms = 60000
-
-# ── Size limits ──────────────────────────────────────────────────────────────
-
-[limits]
-# Max artifact content size before truncation, in characters (default: 50000 = ~50KB)
-# max_artifact_chars = 50000
-
-# Max fetch_url response size before truncation, in characters (default: 50000 = ~50KB)
-# max_fetch_chars = 50000
-
-# TUI input buffer limit in bytes (default: 102400 = 100KB)
-# tui_input_limit = 102400
-
-# WebSocket message size limit in bytes (default: 1048576 = 1MB)
-# websocket_max_bytes = 1048576
-
-# Max entries returned by recall_recent/recall_search (default: 20, max: 50)
-# recall_max_entries = 20
-
-# Max CBR cases returned by recall_cases (default: 4)
-# Memento (2508.16153) shows K=4 is optimal — more causes context pollution.
-# cbr_max_results = 4
-
-# Max results from web_search (DuckDuckGo) (default: 5, max: 10)
-# web_search_max_results = 5
-
-# Max results from Brave Search (default: 20, max: 20)
-# brave_search_max_results = 20
-
-# Brave Search rate limit in requests per second (default: 20)
-# brave_rate_limit_rps = 20
-
-# Brave Answers rate limit in requests per second (default: 2)
-# brave_answers_rate_limit_rps = 2
-
-# Brave Search cache TTL in milliseconds (default: 300000 = 5 min)
-# brave_cache_ttl_ms = 300000
-
-# Max queued inputs when cognitive loop is busy (default: 10)
-# input_queue_cap = 10
-
-# ── Thread scoring ───────────────────────────────────────────────────────────
-# Overlap scoring weights for automatic thread assignment.
-
-[scoring.threading]
-# Weight for location overlap (default: 3)
-# location_weight = 3
-
-# Weight for domain overlap (default: 2)
-# domain_weight = 2
-
-# Weight for keyword overlap (default: 1)
-# keyword_weight = 1
-
-# Minimum overlap score to assign entry to existing thread (default: 3)
-# threshold = 3
-
-# ── CBR retrieval ────────────────────────────────────────────────────────────
-# Case-Based Reasoning retrieval via weighted field scoring + inverted index.
-# Scores are a weighted sum of four (optionally five) signals, each normalized 0.0–1.0.
-
 [cbr]
-# Enable semantic embeddings via Ollama (default: true)
-# Requires Ollama running with the configured model pulled.
-# The agent will NOT start if Ollama is unreachable or the model is missing.
-# Set to false to disable embeddings and use only deterministic signals.
 # embedding_enabled = true
-
-# Ollama embedding model name (default: "nomic-embed-text")
 # embedding_model = "nomic-embed-text"
-
-# Ollama API base URL (default: http://localhost:11434)
 # embedding_base_url = "http://localhost:11434"
-
-# Weight for deterministic field scoring: intent, domain, keyword/entity jaccard (default: 0.35)
 # field_weight = 0.35
-
-# Weight for inverted index token overlap (default: 0.25)
 # index_weight = 0.25
-
-# Weight for recency — newer cases score higher (default: 0.15)
 # recency_weight = 0.15
-
-# Weight for exact domain match (default: 0.15)
 # domain_weight = 0.15
-
-# Weight for semantic embedding similarity (default: 0.10)
-# When embeddings are unavailable, this weight is redistributed to other signals.
 # embedding_weight = 0.10
-
-# Weight for utility score from retrieval success tracking (default: 0.15)
-# Uses Laplace-smoothed retrieval success rate. Neutral (0.5) for cases with no data.
 # utility_weight = 0.15
-
-# Minimum weighted score to include a case in results — 0.0 returns all (default: 0.0)
 # min_score = 0.01
 
-# ── Housekeeper ──────────────────────────────────────────────────────────────
-# Supervised GenServer for periodic ETS/memory maintenance.
-# Three tick intervals run independent maintenance passes.
+[scoring.threading]
+# location_weight = 3
+# domain_weight = 2
+# keyword_weight = 1
+# threshold = 3
 
-[housekeeper]
-# Short tick interval — narrative window trimming (default: 21600000 = 6h)
-# short_tick_ms = 21600000
+# ── Safety ───────────────────────────────────────────────────────────────────
 
-# Medium tick interval — fact conflicts + thread pruning (default: 43200000 = 12h)
-# medium_tick_ms = 43200000
+[dprime]
+# gate_timeout_ms = 60000
+# normative_calculus_enabled = false
 
-# Long tick interval — CBR dedup/pruning + DAG/artifact trim (default: 86400000 = 24h)
-# long_tick_ms = 86400000
+[escalation]
+# enabled = true
+# tool_failure_threshold = 2
+# safety_score_threshold = 0.4
 
-# Days of narrative entries to retain in ETS (default: 90)
-# narrative_days = 90
-
-# Days of CBR cases to retain (default: 180)
-# cbr_days = 180
-
-# Days of DAG nodes to retain in ETS (default: 30)
-# dag_days = 30
-
-# Days of artifact metadata to retain in ETS (default: 60)
-# artifact_days = 60
-
-# Minimum interval between budget-triggered dedup runs in ms (default: 1800000 = 30min)
-# When the preamble budget truncates memory slots, a CBR dedup is triggered
-# automatically — this debounce prevents it from running too frequently.
-# budget_dedup_debounce_ms = 1800000
-
-# ── Housekeeping ─────────────────────────────────────────────────────────────
-# Maintenance thresholds for CBR dedup, pruning, and fact management.
-
-[housekeeping]
-# Cosine similarity threshold for CBR case deduplication (default: 0.92)
-# dedup_similarity = 0.92
-
-# Confidence below this triggers CBR case pruning (default: 0.3)
-# pruning_confidence = 0.3
-
-# Minimum fact confidence for Curator display (default: 0.7)
-# fact_confidence = 0.7
-
-# Days after which low-confidence CBR cases are pruned (default: 60)
-# cbr_pruning_days = 60
-
-# Days after which single-cycle threads with no signal are pruned (default: 7)
-# thread_pruning_days = 7
-
-# Half-life in days for fact confidence decay (default: 30)
-# fact_decay_half_life_days = 30
-
-# Half-life in days for CBR case confidence decay (default: 60)
-# cbr_decay_half_life_days = 60
-
-# ── Agent specifications ─────────────────────────────────────────────────────
-# Per-agent configuration. Profiles override these when active.
+# ── Agents ───────────────────────────────────────────────────────────────────
 
 [agents.planner]
 # max_tokens = 2048
@@ -315,7 +118,7 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 # max_tokens = 2048
 # max_turns = 8
 # max_errors = 3
-# max_context_messages = 30   # Sliding window to keep context lean
+# max_context_messages = 30
 
 [agents.coder]
 # max_tokens = 4096
@@ -332,140 +135,107 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 # max_turns = 4
 # max_errors = 2
 
+[delegation]
+# max_depth = 3
+
+# ── Sandbox ──────────────────────────────────────────────────────────────────
+
+[sandbox]
+# enabled = true
+# pool_size = 2
+# memory_mb = 512
+# cpus = "1"
+# image = "python:3.12-slim"
+# exec_timeout_ms = 60000
+# port_base = 10000
+# port_stride = 100
+# ports_per_slot = 5
+# auto_machine = true
+
+# ── Scheduler ────────────────────────────────────────────────────────────────
+
+[scheduler]
+# max_autonomous_cycles_per_hour = 20
+# autonomous_token_budget_per_hour = 500000
+
 # ── Web GUI ──────────────────────────────────────────────────────────────────
 
 [web]
-# Port for the web GUI when gui = "web" (default: 8080)
 # port = 8080
 
-# ── External services ───────────────────────────────────────────────────────
-# Base URLs for third-party APIs. Override if using a proxy or self-hosted instance.
+# ── External services ────────────────────────────────────────────────────────
 
 [services]
-# DuckDuckGo HTML search endpoint
 # duckduckgo_url = "https://html.duckduckgo.com/html/"
-
-# Brave Search API
 # brave_search_base_url = "https://api.search.brave.com"
-
-# Brave Answers API (same base, different endpoint)
 # brave_answers_base_url = "https://api.search.brave.com"
-
-# Jina Reader API
 # jina_reader_base_url = "https://r.jina.ai/"
 
-# ── Sandbox ──────────────────────────────────────────────────────────────────
-# Local Podman sandbox for coder agent code execution and serving.
+# ── Timeouts (ms) ────────────────────────────────────────────────────────────
 
-[sandbox]
-# Enable Podman sandbox for coder agent (default: true)
-# Requires podman installed. On macOS, requires podman machine running.
-# Falls back gracefully if podman is unavailable.
-# enabled = true
+[timeouts]
+# llm_request_ms = 300000
+# classify_ms = 10000
+# inter_turn_delay_ms = 200
+# startup_ms = 5000
+# librarian_startup_ms = 30000
+# scheduler_job_ms = 300000
+# restart_window_ms = 60000
+# scheduler_stuck_ms = 600000
+# scheduler_tool_ms = 5000
 
-# Max containers in the pool (default: 2, max: 3)
-# One for serve, one for run_code — avoids slot exhaustion
-# pool_size = 2
+# ── Retry ────────────────────────────────────────────────────────────────────
 
-# Memory limit per container in MB (default: 512)
-# memory_mb = 512
+[retry]
+# max_retries = 3
+# initial_delay_ms = 500
+# rate_limit_delay_ms = 5000
+# overload_delay_ms = 2000
+# max_delay_ms = 60000
 
-# CPU limit per container (default: "1")
-# cpus = "1"
+# ── Size limits ──────────────────────────────────────────────────────────────
 
-# Container image (default: "python:3.12-slim")
-# image = "python:3.12-slim"
+[limits]
+# max_artifact_chars = 50000
+# max_fetch_chars = 50000
+# tui_input_limit = 102400
+# websocket_max_bytes = 1048576
+# recall_max_entries = 20
+# cbr_max_results = 4
+# web_search_max_results = 5
+# input_queue_cap = 10
 
-# Per-execution timeout in ms (default: 60000 = 1 min)
-# exec_timeout_ms = 60000
+# ── Maintenance ──────────────────────────────────────────────────────────────
 
-# Host port base for serve mode (default: 10000)
-# port_base = 10000
+[housekeeper]
+# short_tick_ms = 21600000
+# medium_tick_ms = 43200000
+# long_tick_ms = 86400000
+# narrative_days = 90
+# cbr_days = 180
+# dag_days = 30
+# artifact_days = 60
+# budget_dedup_debounce_ms = 1800000
 
-# Host port stride per slot — slot N maps to port_base + N*stride (default: 100)
-# port_stride = 100
-
-# Number of ports forwarded per slot (default: 5)
-# ports_per_slot = 5
-
-# Auto-start podman machine on macOS if not running (default: true)
-# auto_machine = true
-
-# ── Delegation ───────────────────────────────────────────────────────────────
-# ── Vertex AI ───────────────────────────────────────────────────────────────
-# Google Vertex AI provider settings (used when provider = "vertex").
-# Auth token comes from VERTEX_AI_TOKEN environment variable.
-
-[vertex]
-# GCP project ID (required for vertex provider)
-# project_id = "my-gcp-project"
-# GCP location / region (default: "europe-west1")
-# location = "europe-west1"
-# Vertex AI endpoint hostname (default: derived from location)
-# endpoint = "europe-west1-aiplatform.googleapis.com"
-# Models for vertex provider
-# task_model = "claude-haiku-4-5-20251001"
-# reasoning_model = "claude-opus-4-6"
-
-# ── Per-provider model defaults ─────────────────────────────────────────────
-# Each provider section can set task_model and reasoning_model.
-# These are used when that provider is active. Top-level task_model /
-# reasoning_model and CLI flags --task-model / --reasoning-model override.
-
-[anthropic]
-# task_model = "claude-haiku-4-5-20251001"
-# reasoning_model = "claude-opus-4-6"
-
-[mistral]
-# task_model = "mistral-small-latest"
-# reasoning_model = "mistral-large-latest"
-
-[local]
-# task_model = "smollm3-3b"
-# reasoning_model = "smollm3-3b"
-
-# Agent delegation depth and control limits.
-
-[delegation]
-# Maximum delegation depth — how many levels deep agent chains can go (default: 3)
-# max_depth = 3
-
-# ── Escalation ────────────────────────────────────────────────────────────────
-# Mid-cycle model escalation: automatically switch from task_model to
-# reasoning_model when the cheap model encounters difficulties.
-
-[escalation]
-# Enable mid-cycle model escalation (default: true)
-# enabled = true
-
-# Number of tool failures in the current cycle before escalation (default: 2)
-# tool_failure_threshold = 2
-
-# Average D' score threshold for safety-triggered escalation (default: 0.4)
-# safety_score_threshold = 0.4
+[housekeeping]
+# dedup_similarity = 0.92
+# pruning_confidence = 0.3
+# fact_confidence = 0.7
+# cbr_pruning_days = 60
+# thread_pruning_days = 7
+# fact_decay_half_life_days = 30
+# cbr_decay_half_life_days = 60
 
 # ── XStructor ────────────────────────────────────────────────────────────────
-# XML-schema-validated structured LLM output.
 
 [xstructor]
-# Max validation+retry attempts for XStructor XML generation (default: 3)
 # max_retries = 3
 
 # ── Forecaster ───────────────────────────────────────────────────────────────
-# Plan-health forecaster using D' engine to detect when replanning is needed.
 
 [forecaster]
-# Enable the plan-health forecaster (default: false)
 # enabled = false
-
-# Tick interval for forecaster evaluation in ms (default: 300000 = 5 min)
 # tick_ms = 300000
-
-# D' score threshold above which a replan is suggested (default: 0.55)
 # replan_threshold = 0.55
-
-# Minimum completed cycles before forecaster begins evaluating (default: 2)
 # min_cycles = 2
-
-# Staleness threshold in ms — tasks idle longer than this are flagged (default: 1800000 = 30 min)
 # stale_threshold_ms = 1800000
