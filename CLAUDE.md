@@ -718,16 +718,29 @@ scoring to prevent exceeding the scorer's context window. Bounded modification l
 maintain separate `DprimeState` instances (gate state isolation) to prevent
 cross-contamination of history and thresholds.
 
-**Output gate length threshold** — responses under 300 characters skip the LLM
-scorer entirely. Deterministic rules (credential patterns, private keys) still run
-on all responses regardless of length. This prevents the scorer from flagging short
-conversational replies (e.g. "Sure, happy to help!") against research report quality
-standards. The threshold is applied in `cognitive.gleam` before `spawn_output_gate`.
+**Output gate split strategy** — the output gate uses different evaluation paths
+depending on whether the cycle is interactive or autonomous:
+- **Interactive cycles** (user input): deterministic rules only (credential patterns,
+  private keys, PII). The LLM scorer is skipped entirely. The operator is present
+  and is the quality gate — pre-delivery LLM scoring destroys good output via false
+  positives and teaches the agent to self-censor.
+- **Autonomous cycles** (scheduler-triggered): full LLM scorer + normative calculus.
+  Nobody is watching, so quality evaluation before delivery matters.
+The split is based on `cycle_node_type` (`SchedulerCycle` vs `CognitiveCycle`).
+Deterministic rules always run on all output regardless of cycle type.
 
-**Output gate MODIFY prompt** — when the output gate returns MODIFY, the cognitive
-loop injects a correction message telling the agent to fix ONLY the flagged issues
-while preserving all other content, structure, and tone. The prompt explicitly
-forbids removing unflagged information or adding unnecessary hedging.
+**Output gate MODIFY prompt** — when the output gate returns MODIFY (autonomous
+cycles only), the cognitive loop injects a correction message telling the agent to
+fix ONLY the flagged issues while preserving all other content, structure, and tone.
+The prompt explicitly forbids removing unflagged information or adding unnecessary
+hedging.
+
+**Output gate session hygiene** — gate injection messages (MODIFY corrections, REJECT
+notices) are filtered from `session.json` before saving. These are transient control
+signals that, if persisted, create a feedback loop where the agent learns to
+self-censor on session resume. The filter is applied in `cognitive/memory.gleam`'s
+`request_save`. Rejection notices in the agent's live message history are kept terse
+(decision + score + triggers only) — full explanations go to the cycle log.
 
 **Gate timeout (BF-12)** — all gate evaluations have a configurable timeout
 (`gate_timeout_ms`, default 60000). If the scorer LLM hangs, a `GateTimeout`

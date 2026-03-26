@@ -44,7 +44,11 @@ The input gate uses a split evaluation path for performance:
 
 The tool gate always runs the full LLM scorer for non-exempt tools (web, file, shell). Memory, planner, builtin, and agent delegation tools are exempt.
 
-The output gate evaluates report quality. Gate timeout (default 60s) prevents blocking forever if the scorer LLM hangs — the report is delivered (fail-open).
+The output gate uses different strategies for interactive and autonomous cycles:
+- **Interactive** (user input): deterministic rules only. The operator is present and
+  judges quality directly. No LLM scoring, no MODIFY loop, no false positives.
+- **Autonomous** (scheduler): full LLM scorer + normative calculus before delivery.
+  Gate timeout (default 60s) prevents blocking forever — fail-open.
 
 ### D' Deterministic Pre-Filter
 
@@ -96,9 +100,10 @@ behavioural expressions) and highest endeavour (normative propositions the agent
 commits to). The operator controls how strict the calculus is by choosing `required`
 (categorical) vs `ought` (advisory) operators on each proposition.
 
-**Short reply bypass** — responses under 300 characters skip the LLM scorer entirely.
-Deterministic rules still run. This prevents conversational replies from being
-evaluated against research report quality standards.
+**Interactive vs autonomous** — during interactive sessions, the output gate runs
+deterministic rules only (credential leaks, private keys). The LLM scorer and
+normative calculus are skipped — the operator is present and is the quality gate.
+During autonomous cycles (scheduler-triggered), the full evaluation runs.
 
 **Virtue drift detection** — the system tracks normative verdicts over time. If it
 detects high constraint/prohibition rates, repeated axiom firing, or over-restriction

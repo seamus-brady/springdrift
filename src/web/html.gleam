@@ -686,41 +686,45 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
       narrativeContainer.innerHTML = '<div class=\"narrative-empty\">No narrative entries yet. Entries appear after conversations.</div>';
       return;
     }
-    var html = '';
+    var html = '<div style=\"opacity:.4;font-size:11px;padding:4px 8px\">' + entries.length + ' entries</div>';
     var sorted = entries.slice().reverse();
     sorted.forEach(function(e) {
-      var cycleShort = (e.cycle_id || '').substring(0, 8);
-      var time = (e.timestamp || '').substring(0, 19).replace('T', ' ');
-      var st = (e.outcome && e.outcome.status) || 'unknown';
-      var statusLabel = st.charAt(0).toUpperCase() + st.slice(1);
-      var threadHtml = '';
-      if (e.thread && e.thread.thread_name) {
-        threadHtml = '<span class=\"narrative-thread\">' + escapeHtml(e.thread.thread_name) + ' #' + (e.thread.position || 0) + '</span>';
-      }
-      var keywordsHtml = '';
-      if (e.keywords && e.keywords.length > 0) {
-        keywordsHtml = '<div class=\"narrative-keywords\">' +
-          e.keywords.map(function(k) { return '<span class=\"narrative-keyword\">' + escapeHtml(k) + '</span>'; }).join('') +
+      try {
+        var cycleShort = (e.cycle_id || '').substring(0, 8);
+        var time = (e.timestamp || '').substring(0, 19).replace('T', ' ');
+        var st = (e.outcome && e.outcome.status) || 'unknown';
+        var statusLabel = st.charAt(0).toUpperCase() + st.slice(1);
+        var threadHtml = '';
+        if (e.thread && e.thread.thread_name) {
+          threadHtml = '<span class=\"narrative-thread\">' + escapeHtml(e.thread.thread_name) + ' #' + (e.thread.position || 0) + '</span>';
+        }
+        var keywordsHtml = '';
+        if (e.keywords && e.keywords.length > 0) {
+          keywordsHtml = '<div class=\"narrative-keywords\">' +
+            e.keywords.map(function(k) { return '<span class=\"narrative-keyword\">' + escapeHtml(k) + '</span>'; }).join('') +
+            '</div>';
+        }
+        var delegationHtml = '';
+        if (e.delegation_chain && e.delegation_chain.length > 0) {
+          var agents = e.delegation_chain.map(function(d) {
+            return '<span class=\"agent-name\">' + escapeHtml(d.agent_human_name || d.agent) + '</span>';
+          }).join(' \\u2192 ');
+          delegationHtml = '<div class=\"narrative-delegation\">Delegated to: ' + agents + '</div>';
+        }
+        html += '<div class=\"narrative-entry\">' +
+          '<div class=\"narrative-header\">' +
+            '<span class=\"narrative-cycle\">' + escapeHtml(cycleShort) + '</span>' +
+            '<span class=\"narrative-time\">' + escapeHtml(time) + '</span>' +
+            '<span class=\"narrative-status ' + st + '\">' + statusLabel + '</span>' +
+            threadHtml +
+          '</div>' +
+          '<div class=\"narrative-summary\">' + escapeHtml(e.summary || '') + '</div>' +
+          keywordsHtml +
+          delegationHtml +
           '</div>';
+      } catch(err) {
+        html += '<div class=\"narrative-entry\" style=\"opacity:.5\">Error rendering entry ' + (e.cycle_id || '?') + ': ' + err.message + '</div>';
       }
-      var delegationHtml = '';
-      if (e.delegation_chain && e.delegation_chain.length > 0) {
-        var agents = e.delegation_chain.map(function(d) {
-          return '<span class=\"agent-name\">' + escapeHtml(d.agent_human_name || d.agent) + '</span>';
-        }).join(' \\u2192 ');
-        delegationHtml = '<div class=\"narrative-delegation\">Delegated to: ' + agents + '</div>';
-      }
-      html += '<div class=\"narrative-entry\">' +
-        '<div class=\"narrative-header\">' +
-          '<span class=\"narrative-cycle\">' + escapeHtml(cycleShort) + '</span>' +
-          '<span class=\"narrative-time\">' + escapeHtml(time) + '</span>' +
-          '<span class=\"narrative-status ' + st + '\">' + statusLabel + '</span>' +
-          threadHtml +
-        '</div>' +
-        '<div class=\"narrative-summary\">' + escapeHtml(e.summary || '') + '</div>' +
-        keywordsHtml +
-        delegationHtml +
-        '</div>';
     });
     narrativeContainer.innerHTML = html;
   }
@@ -1509,6 +1513,18 @@ fn ws_connect_js() -> String {
       statusEl.textContent = 'connected';
       statusDot.className = 'dot connected';
       reconnectDelay = 1000;
+      // Load data for the default active tab on connect
+      var activeTab = document.querySelector('.tab-btn.active');
+      if (activeTab) {
+        var tab = activeTab.getAttribute('data-tab');
+        if (tab === 'narrative') requestNarrativeData();
+        else if (tab === 'log') requestLogData();
+        else if (tab === 'scheduler') requestSchedulerData();
+        else if (tab === 'cycles') requestSchedulerCycles();
+        else if (tab === 'planner') requestPlannerData();
+        else if (tab === 'dprime') requestDprimeData();
+        else if (tab === 'dprime-config') requestDprimeConfig();
+      }
     };
 
     ws.onclose = function() {
@@ -1522,7 +1538,7 @@ fn ws_connect_js() -> String {
 
     ws.onmessage = function(evt) {
       var data;
-      try { data = JSON.parse(evt.data); } catch(e) { return; }
+      try { data = JSON.parse(evt.data); } catch(e) { console.error('WS parse error:', e.message, 'data length:', evt.data.length); return; }
       handleServerMessage(data);
     };
   }"
