@@ -23,7 +23,7 @@ pub fn hijack_probe_safe_response_returns_false_test() {
     False,
     False,
   )
-  |> should.be_false
+  |> should.equal(Ok(False))
 }
 
 pub fn hijack_probe_token_echoed_returns_true_test() {
@@ -38,7 +38,7 @@ pub fn hijack_probe_token_echoed_returns_true_test() {
     False,
     False,
   )
-  |> should.be_true
+  |> should.equal(Ok(True))
 }
 
 pub fn hijack_probe_token_embedded_in_text_returns_true_test() {
@@ -56,7 +56,7 @@ pub fn hijack_probe_token_embedded_in_text_returns_true_test() {
     False,
     False,
   )
-  |> should.be_true
+  |> should.equal(Ok(True))
 }
 
 pub fn hijack_probe_case_insensitive_detection_test() {
@@ -71,11 +71,11 @@ pub fn hijack_probe_case_insensitive_detection_test() {
     False,
     False,
   )
-  |> should.be_true
+  |> should.equal(Ok(True))
 }
 
-pub fn hijack_probe_fail_closed_on_error_test() {
-  // LLM error → fail closed → hijack detected
+pub fn hijack_probe_fail_open_on_error_test() {
+  // LLM error → fail open → Error(Nil) (probe inconclusive)
   let provider = mock.provider_with_error("API down")
   canary.run_hijack_probe(
     "test",
@@ -86,7 +86,7 @@ pub fn hijack_probe_fail_closed_on_error_test() {
     False,
     False,
   )
-  |> should.be_true
+  |> should.equal(Error(Nil))
 }
 
 // ---------------------------------------------------------------------------
@@ -105,7 +105,7 @@ pub fn leakage_probe_safe_response_returns_false_test() {
     False,
     False,
   )
-  |> should.be_false
+  |> should.equal(Ok(False))
 }
 
 pub fn leakage_probe_token_revealed_returns_true_test() {
@@ -120,7 +120,7 @@ pub fn leakage_probe_token_revealed_returns_true_test() {
     False,
     False,
   )
-  |> should.be_true
+  |> should.equal(Ok(True))
 }
 
 pub fn leakage_probe_exact_token_match_test() {
@@ -135,11 +135,11 @@ pub fn leakage_probe_exact_token_match_test() {
     False,
     False,
   )
-  |> should.be_true
+  |> should.equal(Ok(True))
 }
 
-pub fn leakage_probe_fail_closed_on_error_test() {
-  // LLM error → fail closed → leakage detected
+pub fn leakage_probe_fail_open_on_error_test() {
+  // LLM error → fail open → Error(Nil) (probe inconclusive)
   let provider = mock.provider_with_error("timeout")
   canary.run_leakage_probe(
     "test",
@@ -150,7 +150,7 @@ pub fn leakage_probe_fail_closed_on_error_test() {
     False,
     False,
   )
-  |> should.be_true
+  |> should.equal(Error(Nil))
 }
 
 // ---------------------------------------------------------------------------
@@ -173,6 +173,7 @@ pub fn run_probes_with_tokens_both_clean_test() {
     )
   result.hijack_detected |> should.be_false
   result.leakage_detected |> should.be_false
+  result.probe_failed |> should.be_false
   result.details |> should.equal("No issues detected")
 }
 
@@ -180,8 +181,6 @@ pub fn run_probes_with_tokens_hijack_detected_test() {
   // Provider echoes the hijack token but not the leakage token
   let provider =
     mock.provider_with_handler(fn(req) {
-      // The hijack probe includes the token in the user message as an override.
-      // We check if the request contains the hijack token to decide response.
       let has_hijack_token = case req.messages {
         [msg, ..] ->
           case msg {
@@ -190,9 +189,6 @@ pub fn run_probes_with_tokens_hijack_detected_test() {
         _ -> True
       }
       case has_hijack_token {
-        // Return the hijack token — both probes will see it, but only hijack
-        // detection uses case-insensitive matching on its own token.
-        // We need a smarter approach: return the hijack token text.
         True -> Ok(mock.text_response("hijack-tok-aaa"))
         False -> Ok(mock.text_response("SAFE"))
       }
@@ -208,9 +204,7 @@ pub fn run_probes_with_tokens_hijack_detected_test() {
       "hijack-tok-aaa",
       "leak-tok-bbb",
     )
-  // Hijack detected because response contains the hijack token
   result.hijack_detected |> should.be_true
-  // Leakage not detected because response does NOT contain leak-tok-bbb
   result.leakage_detected |> should.be_false
   result.details |> should.equal("Hijack detected")
 }
@@ -232,9 +226,7 @@ pub fn run_probes_with_tokens_leakage_detected_test() {
       "hijack-tok-aaa",
       "leak-tok-bbb",
     )
-  // Hijack not detected: "leak-tok-bbb" lowercased doesn't contain "hijack-tok-aaa"
   result.hijack_detected |> should.be_false
-  // Leakage detected: response contains the leakage token
   result.leakage_detected |> should.be_true
   result.details |> should.equal("Leakage detected")
 }
@@ -261,8 +253,8 @@ pub fn run_probes_with_tokens_both_detected_test() {
   result.details |> should.equal("Hijack and leakage detected")
 }
 
-pub fn run_probes_with_tokens_fail_closed_on_error_test() {
-  // LLM error → both probes fail closed
+pub fn run_probes_with_tokens_fail_open_on_error_test() {
+  // LLM error → probes fail open (no detection) but probe_failed is set
   let provider = mock.provider_with_error("network failure")
   let result =
     canary.run_probes_with_tokens(
@@ -275,9 +267,9 @@ pub fn run_probes_with_tokens_fail_closed_on_error_test() {
       "tok-a",
       "tok-b",
     )
-  result.hijack_detected |> should.be_true
-  result.leakage_detected |> should.be_true
-  result.details |> should.equal("Hijack and leakage detected")
+  result.hijack_detected |> should.be_false
+  result.leakage_detected |> should.be_false
+  result.probe_failed |> should.be_true
 }
 
 // ---------------------------------------------------------------------------
@@ -353,7 +345,7 @@ pub fn hijack_probe_safe_refusal_not_flagged_test() {
     False,
     False,
   )
-  |> should.be_false
+  |> should.equal(Ok(False))
 }
 
 pub fn hijack_probe_token_at_start_still_detected_test() {
@@ -369,7 +361,7 @@ pub fn hijack_probe_token_at_start_still_detected_test() {
     False,
     False,
   )
-  |> should.be_true
+  |> should.equal(Ok(True))
 }
 
 pub fn hijack_probe_refusal_without_token_still_safe_test() {
@@ -385,7 +377,7 @@ pub fn hijack_probe_refusal_without_token_still_safe_test() {
     False,
     False,
   )
-  |> should.be_false
+  |> should.equal(Ok(False))
 }
 
 pub fn hijack_probe_compliance_no_refusal_pattern_test() {
@@ -401,7 +393,7 @@ pub fn hijack_probe_compliance_no_refusal_pattern_test() {
     False,
     False,
   )
-  |> should.be_true
+  |> should.equal(Ok(True))
 }
 
 pub fn details_both_detected_pattern_test() {

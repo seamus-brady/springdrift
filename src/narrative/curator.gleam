@@ -22,7 +22,9 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import identity
+import narrative/housekeeper
 import narrative/librarian
+import narrative/meta_states
 import narrative/types as narrative_types
 import narrative/virtual_memory.{
   type CbrSlotEntry, type VirtualMemory, ScratchEntry,
@@ -58,12 +60,25 @@ pub type CycleContext {
     sandbox_enabled: Bool,
     /// Sandbox slot summary for sensorium display
     sandbox_slots: List(SandboxSlotSummary),
+    /// Meta-state: uncertainty (0.0–1.0), proportion of cycles without CBR hits
+    uncertainty: Float,
+    /// Meta-state: prediction error (0.0–1.0), ratio of failures to tool calls
+    prediction_error: Float,
+    /// Meta-state: whether session has enough data for meta-states
+    session_cycles: Int,
+    /// Current user input text for novelty computation
+    last_user_input: String,
   )
 }
 
 /// Simplified sandbox slot info for sensorium rendering.
 pub type SandboxSlotSummary {
   SandboxSlotSummary(slot_id: Int, status: String, host_port: Int)
+}
+
+/// Pre-computed meta-state values for sensorium vitals rendering.
+pub type MetaStateContext {
+  MetaStateContext(uncertainty: Float, prediction_error: Float, novelty: Float)
 }
 
 // ---------------------------------------------------------------------------
@@ -114,6 +129,8 @@ pub type CuratorMessage {
   SetScheduler(scheduler: Subject(scheduler_types.SchedulerMessage))
   /// Set the preamble budget in chars (called after Curator starts).
   SetPreambleBudget(chars: Int)
+  /// Set the Housekeeper subject (called after Housekeeper starts).
+  SetHousekeeper(housekeeper: Subject(housekeeper.HousekeeperMessage))
   /// Shutdown the Curator.
   Shutdown
 }
@@ -137,6 +154,7 @@ type CuratorState {
     agent_version: String,
     scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
     preamble_budget_chars: Int,
+    housekeeper: Option(Subject(housekeeper.HousekeeperMessage)),
   )
 }
 
@@ -194,6 +212,7 @@ pub fn start_with_identity(
         agent_version:,
         scheduler: None,
         preamble_budget_chars: 8000,
+        housekeeper: None,
       )
 
     slog.info("narrative/curator", "start", "Curator ready", None)
@@ -351,6 +370,14 @@ pub fn update_agent_health(
   process.send(curator, UpdateAgentHealth(health:))
 }
 
+/// Set the Housekeeper subject (fire-and-forget). Called after Housekeeper starts.
+pub fn set_housekeeper(
+  curator: Subject(CuratorMessage),
+  housekeeper: Subject(housekeeper.HousekeeperMessage),
+) -> Nil {
+  process.send(curator, SetHousekeeper(housekeeper:))
+}
+
 // ---------------------------------------------------------------------------
 // Message loop
 // ---------------------------------------------------------------------------
@@ -372,6 +399,9 @@ fn loop(state: CuratorState) -> Nil {
 
         SetPreambleBudget(chars:) ->
           loop(CuratorState(..state, preamble_budget_chars: chars))
+
+        SetHousekeeper(housekeeper:) ->
+          loop(CuratorState(..state, housekeeper: Some(housekeeper)))
 
         InjectContext(task:, reply_to:) -> {
           let enriched = do_inject_context(state, task)
@@ -447,8 +477,15 @@ fn loop(state: CuratorState) -> Nil {
         }
 
         BuildSystemPrompt(fallback_prompt:, context:, reply_to:) -> {
-          let prompt = do_build_system_prompt(state, fallback_prompt, context)
+          let #(prompt, budget_truncated) =
+            do_build_system_prompt(state, fallback_prompt, context)
           process.send(reply_to, prompt)
+          // When the preamble budget truncated memory slots, trigger
+          // an immediate CBR dedup via the Housekeeper (debounced there).
+          case budget_truncated, state.housekeeper {
+            True, Some(hk) -> process.send(hk, housekeeper.BudgetTriggeredDedup)
+            _, _ -> Nil
+          }
           loop(state)
         }
 
@@ -649,46 +686,50 @@ fn format_elapsed_since(iso_timestamp: String) -> String {
 // System prompt assembly from identity files
 // ---------------------------------------------------------------------------
 
+/// Returns #(prompt, budget_truncated) where budget_truncated is True when
+/// the preamble budget caused any memory slots to be truncated or cleared.
 fn do_build_system_prompt(
   state: CuratorState,
   fallback: String,
   context: Option(CycleContext),
-) -> String {
+) -> #(String, Bool) {
   let persona = identity.load_persona(state.identity_dirs)
   let template = identity.load_preamble_template(state.identity_dirs)
 
   case persona, template {
-    None, None -> fallback
+    None, None -> #(fallback, False)
     _, _ -> {
-      let rendered_preamble = case template {
-        None -> None
+      let #(rendered_preamble, truncated) = case template {
+        None -> #(None, False)
         Some(tmpl) -> {
-          let slots = build_preamble_slots(state, context)
+          let #(slots, was_truncated) = build_preamble_slots(state, context)
           let rendered = identity.render_preamble(tmpl, slots)
           case rendered {
-            "" -> None
-            text -> Some(text)
+            "" -> #(None, was_truncated)
+            text -> #(Some(text), was_truncated)
           }
         }
       }
-      case
+      let prompt = case
         identity.assemble_system_prompt(
           persona,
           rendered_preamble,
           state.memory_tag,
         )
       {
-        Some(prompt) -> prompt
+        Some(p) -> p
         None -> fallback
       }
+      #(prompt, truncated)
     }
   }
 }
 
+/// Returns #(budgeted_slots, was_truncated).
 fn build_preamble_slots(
   state: CuratorState,
   context: Option(CycleContext),
-) -> List(identity.SlotValue) {
+) -> #(List(identity.SlotValue), Bool) {
   // Query Librarian for counts
   let thread_count = librarian.get_thread_count(state.librarian)
   let fact_count = librarian.get_persistent_fact_count(state.librarian)
@@ -773,7 +814,9 @@ fn build_preamble_slots(
     identity.SlotValue(key: "agent_name", value: state.agent_name),
     identity.SlotValue(key: "agent_version", value: state.agent_version),
   ]
-  apply_preamble_budget(slots, state.preamble_budget_chars)
+  let budgeted = apply_preamble_budget(slots, state.preamble_budget_chars)
+  let was_truncated = budget_caused_truncation(slots, budgeted)
+  #(budgeted, was_truncated)
 }
 
 /// Apply a character budget to preamble slots. Slots are prioritized
@@ -810,6 +853,29 @@ pub fn apply_preamble_budget(
       }
     })
   budgeted
+}
+
+/// Check whether the budget caused any non-empty slot to lose content.
+/// Compares original slots against budgeted slots by key.
+pub fn budget_caused_truncation(
+  original: List(identity.SlotValue),
+  budgeted: List(identity.SlotValue),
+) -> Bool {
+  list.any(original, fn(orig) {
+    case orig.value {
+      // Already empty — not a truncation
+      "" -> False
+      _ -> {
+        // Find the same slot in the budgeted list
+        let budgeted_value = list.find(budgeted, fn(b) { b.key == orig.key })
+        case budgeted_value {
+          Ok(b) -> string.length(b.value) < string.length(orig.value)
+          // Slot missing entirely — treat as truncated
+          Error(_) -> True
+        }
+      }
+    }
+  })
 }
 
 fn assign_priorities(
@@ -889,6 +955,27 @@ fn build_sensorium(
       active_thread_name,
     )
   let schedule = render_sensorium_schedule(state.scheduler)
+  // Compute novelty from input and recent narrative keywords
+  let novelty = case context {
+    Some(ctx) -> {
+      let recent_keywords_lists = list.map(recent_entries, fn(e) { e.keywords })
+      meta_states.compute_novelty(ctx.last_user_input, recent_keywords_lists)
+    }
+    None -> 0.0
+  }
+  let meta_ctx = case context {
+    Some(ctx) ->
+      case ctx.session_cycles > 0 {
+        True ->
+          Some(MetaStateContext(
+            uncertainty: ctx.uncertainty,
+            prediction_error: ctx.prediction_error,
+            novelty:,
+          ))
+        False -> None
+      }
+    None -> None
+  }
   let vitals =
     render_sensorium_vitals(
       state.vm.constitution,
@@ -896,6 +983,7 @@ fn build_sensorium(
       agent_health,
       last_failure,
       state.scheduler,
+      meta_ctx,
     )
   let events = render_sensorium_events(sensory_events)
 
@@ -1028,6 +1116,7 @@ pub fn render_sensorium_vitals(
   agent_health: String,
   last_failure: String,
   scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
+  meta: Option(MetaStateContext),
 ) -> String {
   let health_attr = case agent_health {
     "" -> ""
@@ -1059,6 +1148,17 @@ pub fn render_sensorium_vitals(
       cycles_attr <> tokens_attr
     }
   }
+  let meta_attrs = case meta {
+    None -> ""
+    Some(m) ->
+      " uncertainty=\""
+      <> meta_states.format_2dp(m.uncertainty)
+      <> "\" prediction_error=\""
+      <> meta_states.format_2dp(m.prediction_error)
+      <> "\" novelty=\""
+      <> meta_states.format_2dp(m.novelty)
+      <> "\""
+  }
   "  <vitals cycles_today=\""
   <> int.to_string(constitution.today_cycles)
   <> "\" agents_active=\""
@@ -1067,6 +1167,7 @@ pub fn render_sensorium_vitals(
   <> health_attr
   <> failure_attr
   <> budget_attrs
+  <> meta_attrs
   <> "/>"
 }
 

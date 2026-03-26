@@ -61,11 +61,12 @@ src/
 ├── dprime/                    D' discrepancy-gated safety system
 │   ├── types.gleam            Feature, Forecast, GateDecision, GateResult, DprimeConfig/State
 │   ├── engine.gleam           Pure D' computation (importance weighting, scaling, gate decision)
-│   ├── scorer.gleam           LLM magnitude scoring with prompt building + JSON parsing
-│   ├── canary.gleam           Hijack + leakage probes (fail-closed, fresh tokens per request)
+│   ├── scorer.gleam           LLM magnitude scoring with prompt building + XStructor XML output
+│   ├── canary.gleam           Hijack + leakage probes (fail-open, fresh tokens per request)
 │   ├── gate.gleam             Three-layer H-CogAff orchestrator (reactive → deliberative → meta)
 │   ├── config.gleam           D' config loading from JSON, unified format (gates + agent overrides + meta + shared + deterministic)
 │   ├── deterministic.gleam    Deterministic pre-filter — regex rules, path/domain allowlists (no LLM calls)
+│   ├── decay.gleam            Confidence decay — half-life time-based degradation for facts and CBR
 │   ├── output_gate.gleam      Output quality gate — evaluates finished reports before delivery
 │   └── meta.gleam             History ring buffer, stall detection, threshold tightening
 │
@@ -320,6 +321,7 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `gui` | `--gui` | tui | GUI mode: `tui` (terminal) or `web` (browser on port 8080) |
 | `dprime_enabled` | `--dprime` / `--no-dprime` | True | Enable D' safety evaluation before tool dispatch |
 | `dprime_config` | `--dprime-config` | built-in defaults | Path to D' config JSON file |
+| `gate_timeout_ms` | — | 60000 | Gate evaluation timeout (ms) — fail-open after this delay |
 | `max_output_modifications` | — | 2 | Max iterations for output gate MODIFY loop |
 | `narrative_dir` | `--narrative-dir` | `.springdrift/memory/narrative` | Directory for narrative JSON-L files (narrative is always enabled) |
 | `archivist_model` | — | task_model | Model used by the Archivist for narrative generation |
@@ -430,9 +432,14 @@ builds an XML sensorium block with clock/situation/schedule/vitals sections, ren
 back to a plain system prompt when no identity files exist.
 
 **Archivist** (`narrative/archivist.gleam`) runs after each final reply as a
-fire-and-forget `spawn_unlinked` process. It makes a single LLM call to generate a
-`NarrativeEntry` and a `CbrCase` from the cycle's context, assigns a thread, appends
-to JSONL, and notifies the Librarian. Failures never affect the user.
+fire-and-forget `spawn_unlinked` process. Uses a two-phase Reflector/Curator pipeline
+(per ACE paper 2510.04618): Phase 1 (Reflection) makes a plain-text LLM call focused
+on honest assessment of what worked/failed. Phase 2 (Curation) takes the reflection
+and generates structured `NarrativeEntry` + `CbrCase` via XStructor. If Phase 1 fails,
+falls back to the original single-call approach. If Phase 2 fails after Phase 1
+succeeds, the reflection is preserved in logs. Assigns thread, category, provenance,
+and usage stats. Appends to JSONL and notifies the Librarian. Also updates CBR usage
+stats for any cases retrieved during the cycle. Failures never affect the user.
 
 ## Agent subsystem
 
@@ -548,22 +555,38 @@ used by the Curator for session preamble population.
 **CBR memory** — case-based reasoning in `cbr/types.gleam`, `cbr/log.gleam`, and
 `cbr/bridge.gleam`. Each `CbrCase` captures problem (intent, domain, entities,
 keywords), solution (approach, agents, tools, steps), outcome (status, confidence,
-assessment, pitfalls), source narrative ID, and optional profile hint. The Librarian
-actor indexes CBR cases in ETS alongside narrative entries. `cbr/bridge.gleam`
-provides `CaseBase` with inverted index and optional semantic embeddings. Retrieval
-uses a weighted sum of 4-5 signals: weighted field score (intent/domain match,
-keyword/entity Jaccard), inverted index overlap, recency, domain match, and optional
-embedding cosine similarity. Weights are configurable via `RetrievalWeights`; when
+assessment, pitfalls), source narrative ID, optional category, and optional usage
+stats. The Librarian actor indexes CBR cases in ETS alongside narrative entries.
+`cbr/bridge.gleam` provides `CaseBase` with inverted index and optional semantic
+embeddings. Retrieval uses a weighted sum of 6 signals: weighted field score
+(intent/domain match, keyword/entity Jaccard), inverted index overlap, recency,
+domain match, optional embedding cosine similarity, and utility score (from usage
+tracking). Default retrieval cap is K=4 cases (per Memento paper finding that more
+causes context pollution). Weights are configurable via `RetrievalWeights`; when
 embeddings are unavailable, embedding weight is redistributed to the other signals.
 `cbr/log.gleam` provides append-only JSON-L persistence with lenient decoders
 (null → defaults).
 
+**CBR self-improvement** — cases track their own utility via `CbrUsageStats`
+(retrieval_count, retrieval_success_count, helpful_count, harmful_count). When
+`recall_cases` returns cases, their IDs are recorded. The Archivist updates usage
+stats post-cycle based on outcome success/failure. Retrieval scoring blends a
+Laplace-smoothed utility score: `(successes + 1) / (retrievals + 2)`. Cases are
+typed by `CbrCategory` (Strategy, CodePattern, Troubleshooting, Pitfall,
+DomainKnowledge) — assigned deterministically by the Archivist based on outcome.
+The Curator organises injected cases by category in the system prompt.
+
 **Facts store** — key-value memory in `facts/types.gleam` and `facts/log.gleam`.
 `MemoryFact` has scope (Session/Persistent/Global), operation (Write/Delete/Superseded),
-confidence score, and supersedes chain. Facts use daily-rotated JSONL files
-(`YYYY-MM-DD-facts.jsonl`). The Librarian replays recent files at startup and migrates
-legacy `facts.jsonl` to the new format. The Librarian indexes facts in ETS and supports
-read/write/delete operations.
+confidence score, supersedes chain, and optional `FactProvenance` (source_cycle_id,
+source_tool, source_agent, derivation: DirectObservation/Synthesis/OperatorProvided/
+Unknown). Facts use daily-rotated JSONL files (`YYYY-MM-DD-facts.jsonl`). The Librarian
+replays recent files at startup and migrates legacy `facts.jsonl` to the new format.
+The Librarian indexes facts in ETS and supports read/write/delete operations.
+Fact confidence decays at read time via half-life formula:
+`confidence_t = confidence_0 * 2^(-age_days / half_life_days)` (configurable,
+default 30 days). Stored confidence is never mutated — decay is applied at query time.
+`dprime/decay.gleam` provides the pure decay functions.
 
 **Artifact store** — large content storage in `artifacts/types.gleam` and `artifacts/log.gleam`.
 `ArtifactRecord` holds metadata + content in daily JSONL files (`artifacts-YYYY-MM-DD.jsonl`).
@@ -604,7 +627,12 @@ contains four sections:
 3. `<schedule>` — `pending`/`overdue` counts + `<job>` elements (omitted when empty)
 4. `<vitals>` — `cycles_today`, `agents_active`, conditional `agent_health`,
    conditional `last_failure` (from narrative entries, replaces raw success_rate),
-   and optional `cycles_remaining`/`tokens_remaining` budget attrs
+   optional `cycles_remaining`/`tokens_remaining` budget attrs, and three canonical
+   meta-states: `uncertainty` (proportion of cycles without CBR hits), `prediction_error`
+   (tool failure + D' modification/rejection rate), `novelty` (keyword dissimilarity to
+   recent narrative entries). Meta-states are derived from session counters and Librarian
+   data — no LLM calls needed. Based on Sloman's H-CogAff meta-management layer and
+   the Dupoux/LeCun/Malik System M paper (2603.15381).
 
 Previously separate preamble slots (`session_status`, `last_session_date`,
 `today_cycles`, `today_success_rate`, `agent_health`) are now absorbed into the
@@ -651,12 +679,40 @@ format has five top-level keys:
 Backward compatible with the old `tool_gate`/`output_gate` dual-gate format and
 single-gate format — `load_unified` auto-detects and converts.
 
+**Input gate fast-accept** — the input gate uses a split evaluation path for
+performance. Since the operator is the user, the primary threat on user input is
+indirect injection (not the operator themselves). The flow is:
+1. Deterministic regex pre-filter → Block (reject, no LLM) / Escalate / Pass
+2. If Pass: canary probes (hijack + leakage, 2 LLM calls) → if detected, reject
+3. If canaries clean: fast-accept (no LLM scorer). Done.
+4. If Escalate: full LLM scorer evaluation (reactive + deliberative layers).
+
+This reduces the input gate from ~5 LLM calls to 2 (canaries only) for normal
+benign input. The tool gate does NOT get fast-accept — it always runs the full
+LLM scorer for non-exempt tools, because the threat there is a compromised agent
+acting on indirect injection via web content.
+
+**Canary probes** — `dprime/canary.gleam` runs hijack and leakage probes using
+fresh random tokens per request. Fail-open: LLM errors during probes are treated
+as inconclusive (not evidence of hijacking). Consecutive probe failures are tracked
+on `CognitiveState.consecutive_probe_failures` — at 3 consecutive failures, a
+`canary_probe_degraded` sensory event is emitted so the agent and operator know the
+safety probe LLM may be degraded. Counter resets on successful probe.
+
 **Output gate** — second D' evaluation point in `dprime/output_gate.gleam`. Evaluates
 finished reports for quality (unsourced claims, causal overreach, stale data) before
-delivery. Uses the same scoring infrastructure but with output-focused prompts. Bounded
-modification loop (max `max_output_modifications` iterations, default 2). The tool gate
-and output gate maintain separate `DprimeState` instances (gate state isolation) to
-prevent cross-contamination of history and thresholds.
+delivery. Uses `scorer.score_with_custom_prompt` with an output-specific prompt (not
+the generic input/tool scoring wrapper). Report text is truncated to 6000 chars for
+scoring to prevent exceeding the scorer's context window. Bounded modification loop
+(max `max_output_modifications` iterations, default 2). The tool gate and output gate
+maintain separate `DprimeState` instances (gate state isolation) to prevent
+cross-contamination of history and thresholds.
+
+**Gate timeout (BF-12)** — all gate evaluations have a configurable timeout
+(`gate_timeout_ms`, default 60000). If the scorer LLM hangs, a `GateTimeout`
+message fires via `send_after`. The output gate timeout delivers the report
+(fail-open) using `pending_output_reply` stored on `CognitiveState`. Late gate
+completions are ignored (status has already moved to Idle).
 
 **D' normalization** — BF-03 fix ensures all D' scores are normalized to [0,1] via
 min-max scaling before gate decisions. Raw importance-weighted sums are no longer

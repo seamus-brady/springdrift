@@ -322,6 +322,10 @@ fn run(cfg: AppConfig) -> Nil {
           cfg.cbr_embedding_weight,
           default_weights.embedding_weight,
         ),
+        utility_weight: option.unwrap(
+          cfg.cbr_utility_weight,
+          default_weights.utility_weight,
+        ),
       ),
       min_score: option.unwrap(cfg.cbr_min_score, 0.0),
       embed_fn:,
@@ -396,8 +400,12 @@ fn run(cfg: AppConfig) -> Nil {
         cfg.thread_pruning_days,
         hk_default.thread_pruning_days,
       ),
+      budget_dedup_debounce_ms: option.unwrap(
+        cfg.housekeeper_budget_dedup_debounce_ms,
+        hk_default.budget_dedup_debounce_ms,
+      ),
     )
-  case
+  let housekeeper_subj = case
     housekeeper.start(
       librarian_subj,
       narrative_dir,
@@ -405,8 +413,14 @@ fn run(cfg: AppConfig) -> Nil {
       housekeeper_config,
     )
   {
-    Ok(_subj) -> io.println("Housekeeper: started")
-    Error(_) -> io.println("Housekeeper: failed to start (non-critical)")
+    Ok(subj) -> {
+      io.println("Housekeeper: started")
+      option.Some(subj)
+    }
+    Error(_) -> {
+      io.println("Housekeeper: failed to start (non-critical)")
+      option.None
+    }
   }
 
   // Start cache and rate limiter actors for web tools
@@ -632,70 +646,69 @@ fn run(cfg: AppConfig) -> Nil {
     |> result.unwrap(how_to_content.builtin())
 
   let cognitive_subj = case
-    cognitive.start(
-      CognitiveConfig(
-        provider: p,
-        system:,
-        max_tokens:,
-        max_context_messages: cfg.max_context_messages,
-        agent_tools:,
-        initial_messages:,
-        registry: registry.new(),
-        verbose:,
-        notify:,
-        task_model:,
-        reasoning_model:,
-        input_dprime_state:,
-        tool_dprime_state: dprime_state,
-        output_dprime_state:,
-        meta_config: unified_dprime.meta,
-        narrative_dir:,
-        cbr_dir: paths.cbr_dir(),
-        archivist_model:,
-        archivist_max_tokens:,
-        librarian: lib,
-        write_anywhere:,
-        curator: option.Some(curator_subj),
-        agent_uuid: stable_identity.agent_uuid,
-        agent_name:,
-        session_since:,
-        retry_config:,
-        classify_timeout_ms:,
-        threading_config:,
-        memory_limits: tools_memory.MemoryLimits(
-          recall_max_entries:,
-          cbr_max_results:,
-        ),
-        input_queue_cap: option.unwrap(cfg.input_queue_cap, 10),
-        how_to_content: option.Some(how_to_content),
-        redact_secrets:,
-        planner_dir: paths.planner_dir(),
-        max_delegation_depth: option.unwrap(cfg.max_delegation_depth, 3),
-        sandbox_enabled: option.is_some(sandbox_mgr),
-        deterministic_config: case option.unwrap(cfg.dprime_enabled, True) {
-          True -> option.Some(unified_dprime.deterministic)
-          False -> option.None
-        },
-        fact_decay_half_life_days: option.unwrap(
-          cfg.fact_decay_half_life_days,
-          30,
-        ),
-        escalation_config: {
-          let esc_default = agent_cognitive_escalation.default_config()
-          agent_cognitive_escalation.EscalationConfig(
-            enabled: option.unwrap(cfg.escalation_enabled, esc_default.enabled),
-            tool_failure_threshold: option.unwrap(
-              cfg.escalation_tool_failure_threshold,
-              esc_default.tool_failure_threshold,
-            ),
-            safety_score_threshold: option.unwrap(
-              cfg.escalation_safety_score_threshold,
-              esc_default.safety_score_threshold,
-            ),
-          )
-        },
+    cognitive.start(CognitiveConfig(
+      provider: p,
+      system:,
+      max_tokens:,
+      max_context_messages: cfg.max_context_messages,
+      agent_tools:,
+      initial_messages:,
+      registry: registry.new(),
+      verbose:,
+      notify:,
+      task_model:,
+      reasoning_model:,
+      input_dprime_state:,
+      tool_dprime_state: dprime_state,
+      output_dprime_state:,
+      meta_config: unified_dprime.meta,
+      narrative_dir:,
+      cbr_dir: paths.cbr_dir(),
+      archivist_model:,
+      archivist_max_tokens:,
+      librarian: lib,
+      write_anywhere:,
+      curator: option.Some(curator_subj),
+      agent_uuid: stable_identity.agent_uuid,
+      agent_name:,
+      session_since:,
+      retry_config:,
+      classify_timeout_ms:,
+      threading_config:,
+      memory_limits: tools_memory.MemoryLimits(
+        recall_max_entries:,
+        cbr_max_results:,
       ),
-    )
+      input_queue_cap: option.unwrap(cfg.input_queue_cap, 10),
+      how_to_content: option.Some(how_to_content),
+      redact_secrets:,
+      planner_dir: paths.planner_dir(),
+      max_delegation_depth: option.unwrap(cfg.max_delegation_depth, 3),
+      sandbox_enabled: option.is_some(sandbox_mgr),
+      deterministic_config: case option.unwrap(cfg.dprime_enabled, True) {
+        True -> option.Some(unified_dprime.deterministic)
+        False -> option.None
+      },
+      fact_decay_half_life_days: option.unwrap(
+        cfg.fact_decay_half_life_days,
+        30,
+      ),
+      escalation_config: {
+        let esc_default = agent_cognitive_escalation.default_config()
+        agent_cognitive_escalation.EscalationConfig(
+          enabled: option.unwrap(cfg.escalation_enabled, esc_default.enabled),
+          tool_failure_threshold: option.unwrap(
+            cfg.escalation_tool_failure_threshold,
+            esc_default.tool_failure_threshold,
+          ),
+          safety_score_threshold: option.unwrap(
+            cfg.escalation_safety_score_threshold,
+            esc_default.safety_score_threshold,
+          ),
+        )
+      },
+      gate_timeout_ms: option.unwrap(cfg.gate_timeout_ms, 60_000),
+    ))
   {
     Ok(subj) -> subj
     Error(_) -> {
@@ -800,6 +813,12 @@ fn run(cfg: AppConfig) -> Nil {
   // Set preamble budget from config
   let preamble_budget = option.unwrap(cfg.preamble_budget_chars, 8000)
   curator.set_preamble_budget(curator_subj, preamble_budget)
+
+  // Wire housekeeper to curator for budget-triggered dedup
+  case housekeeper_subj {
+    option.Some(hk) -> curator.set_housekeeper(curator_subj, hk)
+    option.None -> Nil
+  }
 
   // Start Forecaster if enabled (needs cognitive_subj + librarian)
   case option.unwrap(cfg.forecaster_enabled, False) {

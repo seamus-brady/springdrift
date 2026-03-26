@@ -93,6 +93,7 @@ pub type AppConfig {
     housekeeper_cbr_days: Option(Int),
     housekeeper_dag_days: Option(Int),
     housekeeper_artifact_days: Option(Int),
+    housekeeper_budget_dedup_debounce_ms: Option(Int),
     // ── Retry ──
     retry_max_retries: Option(Int),
     retry_initial_delay_ms: Option(Int),
@@ -123,6 +124,7 @@ pub type AppConfig {
     cbr_recency_weight: Option(Float),
     cbr_domain_weight: Option(Float),
     cbr_embedding_weight: Option(Float),
+    cbr_utility_weight: Option(Float),
     cbr_min_score: Option(Float),
     // ── Housekeeping ──
     dedup_similarity: Option(Float),
@@ -191,6 +193,8 @@ pub type AppConfig {
     escalation_enabled: Option(Bool),
     escalation_tool_failure_threshold: Option(Int),
     escalation_safety_score_threshold: Option(Float),
+    // ── Gate timeout ──
+    gate_timeout_ms: Option(Int),
     // ── Forecaster ──
     forecaster_enabled: Option(Bool),
     forecaster_tick_ms: Option(Int),
@@ -264,6 +268,7 @@ pub fn default() -> AppConfig {
     housekeeper_cbr_days: None,
     housekeeper_dag_days: None,
     housekeeper_artifact_days: None,
+    housekeeper_budget_dedup_debounce_ms: None,
     retry_max_retries: None,
     retry_initial_delay_ms: None,
     retry_rate_limit_delay_ms: None,
@@ -289,6 +294,7 @@ pub fn default() -> AppConfig {
     cbr_recency_weight: None,
     cbr_domain_weight: None,
     cbr_embedding_weight: None,
+    cbr_utility_weight: None,
     cbr_min_score: None,
     dedup_similarity: None,
     pruning_confidence: None,
@@ -342,6 +348,7 @@ pub fn default() -> AppConfig {
     escalation_enabled: None,
     escalation_tool_failure_threshold: None,
     escalation_safety_score_threshold: None,
+    gate_timeout_ms: None,
     forecaster_enabled: None,
     forecaster_tick_ms: None,
     forecaster_replan_threshold: None,
@@ -503,6 +510,10 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       override_cfg.housekeeper_artifact_days,
       base.housekeeper_artifact_days,
     ),
+    housekeeper_budget_dedup_debounce_ms: option.or(
+      override_cfg.housekeeper_budget_dedup_debounce_ms,
+      base.housekeeper_budget_dedup_debounce_ms,
+    ),
     // Retry
     retry_max_retries: option.or(
       override_cfg.retry_max_retries,
@@ -607,6 +618,10 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     cbr_embedding_weight: option.or(
       override_cfg.cbr_embedding_weight,
       base.cbr_embedding_weight,
+    ),
+    cbr_utility_weight: option.or(
+      override_cfg.cbr_utility_weight,
+      base.cbr_utility_weight,
     ),
     cbr_min_score: option.or(override_cfg.cbr_min_score, base.cbr_min_score),
     // Housekeeping
@@ -814,6 +829,10 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     escalation_safety_score_threshold: option.or(
       override_cfg.escalation_safety_score_threshold,
       base.escalation_safety_score_threshold,
+    ),
+    gate_timeout_ms: option.or(
+      override_cfg.gate_timeout_ms,
+      base.gate_timeout_ms,
     ),
     forecaster_enabled: option.or(
       override_cfg.forecaster_enabled,
@@ -1214,6 +1233,9 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     housekeeper_artifact_days: get_toml_int(table, [
       "housekeeper", "artifact_days",
     ]),
+    housekeeper_budget_dedup_debounce_ms: get_toml_int(table, [
+      "housekeeper", "budget_dedup_debounce_ms",
+    ]),
     // ── [retry] ──
     retry_max_retries: get_toml_int(table, ["retry", "max_retries"]),
     retry_initial_delay_ms: get_toml_int(table, ["retry", "initial_delay_ms"]),
@@ -1257,6 +1279,7 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     cbr_recency_weight: get_toml_float(table, ["cbr", "recency_weight"]),
     cbr_domain_weight: get_toml_float(table, ["cbr", "domain_weight"]),
     cbr_embedding_weight: get_toml_float(table, ["cbr", "embedding_weight"]),
+    cbr_utility_weight: get_toml_float(table, ["cbr", "utility_weight"]),
     cbr_min_score: get_toml_float(table, ["cbr", "min_score"]),
     // ── [housekeeping] ──
     dedup_similarity: get_toml_float(table, ["housekeeping", "dedup_similarity"]),
@@ -1364,6 +1387,8 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     escalation_safety_score_threshold: get_toml_float(table, [
       "escalation", "safety_score_threshold",
     ]),
+    // ── [dprime] ──
+    gate_timeout_ms: get_toml_int(table, ["dprime", "gate_timeout_ms"]),
     // ── [forecaster] ──
     forecaster_enabled: get_toml_bool(table, ["forecaster", "enabled"]),
     forecaster_tick_ms: get_toml_int(table, ["forecaster", "tick_ms"]),
@@ -1407,7 +1432,8 @@ const known_keys = [
   "narrative", "agent", "log_retention_days", "log_max_file_bytes", "timeouts",
   "retry", "limits", "scoring", "housekeeping", "housekeeper", "cbr", "agents",
   "web", "services", "scheduler", "xstructor", "forecaster", "sandbox",
-  "delegation", "escalation", "vertex", "anthropic", "mistral", "local",
+  "delegation", "escalation", "dprime", "vertex", "anthropic", "mistral",
+  "local",
 ]
 
 const known_narrative_keys = [

@@ -20,6 +20,7 @@ import llm/types as llm_types
 import meta/types as meta_types
 import narrative/curator
 import narrative/librarian
+import narrative/meta_states
 import slog
 
 @external(erlang, "springdrift_ffi", "get_datetime")
@@ -48,6 +49,18 @@ pub fn proceed_with_model(
         dag_types.SchedulerCycle -> "scheduler"
         _ -> "user"
       }
+      let uncertainty =
+        meta_states.compute_uncertainty(
+          state.session_cycles,
+          state.session_cbr_hits,
+        )
+      let prediction_error =
+        meta_states.compute_prediction_error(
+          state.session_tool_calls,
+          state.session_tool_failures,
+          state.session_dprime_modifications,
+          state.session_dprime_rejections,
+        )
       let cycle_context =
         curator.CycleContext(
           input_source:,
@@ -59,6 +72,10 @@ pub fn proceed_with_model(
           active_delegations: dict.values(state.active_delegations),
           sandbox_enabled: state.config.sandbox_enabled,
           sandbox_slots: [],
+          uncertainty:,
+          prediction_error:,
+          session_cycles: state.session_cycles,
+          last_user_input: state.last_user_input,
         )
       let prompt =
         curator.build_system_prompt(cur, state.system, Some(cycle_context))
@@ -349,14 +366,31 @@ fn consume_meta_intervention(
           )
           let tighten = fn(ds: dprime_types.DprimeState) -> dprime_types.DprimeState {
             let cfg = ds.config
+            // Apply floor — never tighten below min thresholds
+            let new_modify =
+              float_max(
+                ds.current_modify_threshold *. factor,
+                cfg.min_modify_threshold,
+              )
+            let new_reject =
+              float_max(
+                ds.current_reject_threshold *. factor,
+                cfg.min_reject_threshold,
+              )
             dprime_types.DprimeState(
               ..ds,
-              current_modify_threshold: ds.current_modify_threshold *. factor,
-              current_reject_threshold: ds.current_reject_threshold *. factor,
+              current_modify_threshold: new_modify,
+              current_reject_threshold: new_reject,
               config: dprime_types.DprimeConfig(
                 ..cfg,
-                modify_threshold: cfg.modify_threshold *. factor,
-                reject_threshold: cfg.reject_threshold *. factor,
+                modify_threshold: float_max(
+                  cfg.modify_threshold *. factor,
+                  cfg.min_modify_threshold,
+                ),
+                reject_threshold: float_max(
+                  cfg.reject_threshold *. factor,
+                  cfg.min_reject_threshold,
+                ),
               ),
             )
           }
@@ -392,5 +426,12 @@ fn consume_meta_intervention(
         }
       }
     }
+  }
+}
+
+fn float_max(a: Float, b: Float) -> Float {
+  case a >. b {
+    True -> a
+    False -> b
   }
 }

@@ -1,4 +1,5 @@
 import agent/cognitive/llm as cognitive_llm
+import agent/cognitive/memory as cognitive_memory
 import agent/cognitive_state.{type CognitiveState, CognitiveState}
 import agent/types.{
   type CognitiveReply, CognitiveReply, Idle, PendingThink, SafetyGateNotice,
@@ -8,6 +9,7 @@ import agent/worker
 import cycle_log
 import dag/types as dag_types
 import dprime/audit as dprime_audit
+import dprime/canary
 import dprime/deterministic.{Blocked, Escalated, Pass}
 import dprime/gate
 import dprime/meta
@@ -364,6 +366,20 @@ pub fn handle_safety_gate_complete(
       score: result.dprime_score,
       explanation: result.explanation,
     )
+  // Increment session-level D' counters
+  let state = case result.decision {
+    dprime_types.Modify ->
+      CognitiveState(
+        ..state,
+        session_dprime_modifications: state.session_dprime_modifications + 1,
+      )
+    dprime_types.Reject ->
+      CognitiveState(
+        ..state,
+        session_dprime_rejections: state.session_dprime_rejections + 1,
+      )
+    dprime_types.Accept -> state
+  }
   let state =
     CognitiveState(
       ..state,
@@ -580,33 +596,156 @@ pub fn spawn_input_safety_gate(
   let provider = state.provider
   let scorer_model = state.task_model
   let verbose = state.verbose
-
-  // Instruction is the user's raw input
   let instruction = text
-
-  // Build context from recent messages (character-budget walker, all content types)
   let ctx = build_context_string(state.messages, 2000)
-
   let det_config = state.config.deterministic_config
   let redact_secrets = state.redact_secrets
+  let gate_timeout_ms = state.config.gate_timeout_ms
 
-  // TODO(BF-12): Gate processes have no timeout. If the LLM call inside
-  // gate.evaluate hangs, the cognitive loop waits forever. A timeout
-  // mechanism (e.g. process.send_after with a new message type) should be
-  // added to cancel stalled gate evaluations.
+  // BF-12: Gate timeout
+  let _ =
+    process.send_after(
+      self,
+      gate_timeout_ms,
+      types.GateTimeout(task_id: cycle_id, gate: "input"),
+    )
+
+  // Input gate flow: deterministic → canary → fast-accept (no LLM scorer).
+  // The LLM scorer only runs if the deterministic layer escalates.
+  // Rationale: the operator is the user, so the primary threat is indirect
+  // injection (via web content), not the operator's own input. Canaries
+  // detect actual hijacking; deterministic catches known-bad patterns.
   process.spawn_unlinked(fn() {
-    let result =
-      gate.evaluate_with_deterministic(
-        instruction,
-        ctx,
-        dprime_st,
-        provider,
-        scorer_model,
-        cycle_id,
-        verbose,
-        redact_secrets,
-        det_config,
-      )
+    // Step 1: Deterministic pre-filter
+    let det_result = case det_config {
+      Some(dc) -> deterministic.check_input(instruction, dc)
+      None -> Pass
+    }
+
+    let result = case det_result {
+      // Blocked — reject immediately, no LLM calls
+      Blocked(rule_id, _reason) -> {
+        slog.warn(
+          "cognitive",
+          "spawn_input_safety_gate",
+          "Deterministic block: rule " <> rule_id,
+          Some(cycle_id),
+        )
+        cycle_log.log_dprime_layer(
+          cycle_id,
+          "deterministic_input",
+          "reject",
+          1.0,
+          "Deterministic block: banned input pattern detected",
+        )
+        dprime_types.GateResult(
+          decision: dprime_types.Reject,
+          dprime_score: 1.0,
+          forecasts: [],
+          explanation: "Deterministic block: banned input pattern detected",
+          layer: dprime_types.Reactive,
+          canary_result: None,
+        )
+      }
+
+      // Escalated — suspicious pattern, run full LLM evaluation
+      Escalated(_rule_id, _det_context) -> {
+        slog.info(
+          "cognitive",
+          "spawn_input_safety_gate",
+          "Deterministic escalation — running full LLM evaluation",
+          Some(cycle_id),
+        )
+        gate.evaluate_with_deterministic(
+          instruction,
+          ctx,
+          dprime_st,
+          provider,
+          scorer_model,
+          cycle_id,
+          verbose,
+          redact_secrets,
+          det_config,
+        )
+      }
+
+      // Pass — run canaries only, then fast-accept (no LLM scorer)
+      Pass -> {
+        // Step 2: Canary probes (if enabled)
+        let canary_result = case dprime_st.config.canary_enabled {
+          True -> {
+            slog.debug(
+              "cognitive",
+              "spawn_input_safety_gate",
+              "Running canary probes",
+              Some(cycle_id),
+            )
+            let probe =
+              canary.run_probes(
+                instruction,
+                provider,
+                scorer_model,
+                cycle_id,
+                verbose,
+                redact_secrets,
+              )
+            cycle_log.log_dprime_canary(
+              cycle_id,
+              probe.hijack_detected,
+              probe.leakage_detected,
+              probe.details,
+            )
+            Some(probe)
+          }
+          False -> None
+        }
+
+        // Check canary results
+        case canary_result {
+          Some(probe) if probe.hijack_detected || probe.leakage_detected -> {
+            slog.warn(
+              "cognitive",
+              "spawn_input_safety_gate",
+              "Canary probe detected: " <> probe.details,
+              Some(cycle_id),
+            )
+            dprime_types.GateResult(
+              decision: dprime_types.Reject,
+              dprime_score: 1.0,
+              forecasts: [],
+              explanation: "Canary probe detected: " <> probe.details,
+              layer: dprime_types.Reactive,
+              canary_result:,
+            )
+          }
+          _ -> {
+            // Step 3: Fast-accept — deterministic clean + canaries clean/disabled
+            slog.debug(
+              "cognitive",
+              "spawn_input_safety_gate",
+              "Input gate fast-accept: deterministic clean, canaries clean",
+              Some(cycle_id),
+            )
+            cycle_log.log_dprime_layer(
+              cycle_id,
+              "input_gate",
+              "accept",
+              0.0,
+              "Fast-accept: deterministic clean, canaries clean",
+            )
+            dprime_types.GateResult(
+              decision: dprime_types.Accept,
+              dprime_score: 0.0,
+              forecasts: [],
+              explanation: "Fast-accept: deterministic clean, canaries clean",
+              layer: dprime_types.Reactive,
+              canary_result:,
+            )
+          }
+        }
+      }
+    }
+
     process.send(
       self,
       types.InputSafetyGateComplete(
@@ -635,6 +774,42 @@ pub fn handle_input_safety_gate_complete(
   text: String,
   reply_to: Subject(CognitiveReply),
 ) -> CognitiveState {
+  // Track canary probe failures for operator alerting
+  let state = case result.canary_result {
+    Some(probe) if probe.probe_failed -> {
+      let new_count = state.consecutive_probe_failures + 1
+      slog.warn(
+        "cognitive",
+        "handle_input_safety_gate_complete",
+        "Canary probe failed (consecutive: " <> int.to_string(new_count) <> ")",
+        Some(cycle_id),
+      )
+      let state = CognitiveState(..state, consecutive_probe_failures: new_count)
+      // Emit sensory event at threshold (3 consecutive failures)
+      case new_count >= 3 {
+        True -> {
+          process.send(
+            state.self,
+            types.QueuedSensoryEvent(event: types.SensoryEvent(
+              name: "canary_probe_degraded",
+              title: "Canary probes degraded",
+              body: "Canary probes have failed "
+                <> int.to_string(new_count)
+                <> " times consecutively — the safety probe LLM may be degraded",
+              fired_at: "",
+            )),
+          )
+          state
+        }
+        False -> state
+      }
+    }
+    Some(_) ->
+      // Probe succeeded — reset counter
+      CognitiveState(..state, consecutive_probe_failures: 0)
+    None -> state
+  }
+
   let decision_str = case result.decision {
     dprime_types.Accept -> "ACCEPT"
     dprime_types.Modify -> "MODIFY"
@@ -702,6 +877,20 @@ pub fn handle_input_safety_gate_complete(
       score: result.dprime_score,
       explanation: result.explanation,
     )
+  // Increment session-level D' counters for input gate
+  let state = case result.decision {
+    dprime_types.Modify ->
+      CognitiveState(
+        ..state,
+        session_dprime_modifications: state.session_dprime_modifications + 1,
+      )
+    dprime_types.Reject ->
+      CognitiveState(
+        ..state,
+        session_dprime_rejections: state.session_dprime_rejections + 1,
+      )
+    dprime_types.Accept -> state
+  }
   let state =
     CognitiveState(
       ..state,
@@ -930,10 +1119,17 @@ pub fn spawn_output_gate(
     |> option.unwrap(state.last_user_input)
   let det_config = state.config.deterministic_config
   let redact_secrets = state.redact_secrets
-  // TODO(BF-12): Gate processes have no timeout. If the LLM call inside
-  // output_gate.evaluate hangs, the cognitive loop waits forever. A timeout
-  // mechanism (e.g. process.send_after with a new message type) should be
-  // added to cancel stalled gate evaluations.
+  // BF-12: Gate timeout — if the scorer LLM hangs, send a synthetic Accept
+  // after gate_timeout_ms so the agent doesn't block forever. The gate process
+  // may still complete later, but by then the cognitive loop has moved to Idle
+  // so the late GateTimeout is ignored (status != Thinking(task_id)).
+  let gate_timeout_ms = state.config.gate_timeout_ms
+  let _ =
+    process.send_after(
+      self,
+      gate_timeout_ms,
+      types.GateTimeout(task_id:, gate: "output"),
+    )
   process.spawn_unlinked(fn() {
     let result =
       output_gate.evaluate_with_deterministic(
@@ -961,7 +1157,9 @@ pub fn spawn_output_gate(
   slog.info(
     "cognitive",
     "spawn_output_gate",
-    "Spawned output gate evaluation",
+    "Spawned output gate evaluation (timeout: "
+      <> int.to_string(gate_timeout_ms)
+      <> "ms)",
     state.cycle_id,
   )
   CognitiveState(
@@ -969,6 +1167,7 @@ pub fn spawn_output_gate(
     messages:,
     status: Thinking(task_id:),
     pending: dict.delete(state.pending, task_id),
+    pending_output_reply: Some(#(reply_to, report_text)),
   )
 }
 
@@ -981,6 +1180,8 @@ pub fn handle_output_gate_complete(
   modification_count: Int,
   reply_to: Subject(CognitiveReply),
 ) -> CognitiveState {
+  // Clear the pending output reply — the gate completed normally
+  let state = CognitiveState(..state, pending_output_reply: None)
   let record =
     dag_types.DprimeDecisionRecord(
       gate: "output",
@@ -1029,7 +1230,8 @@ pub fn handle_output_gate_complete(
       )
       let state = cognitive_state.apply_meta_observation(state, 0)
       let state = with_assistant_error(state, report_text)
-      CognitiveState(..state, status: Idle)
+      let new_state = CognitiveState(..state, status: Idle)
+      cognitive_memory.request_save(new_state, new_state.messages)
     }
     dprime_types.Modify -> {
       case modification_count >= max_modifications {
@@ -1050,7 +1252,8 @@ pub fn handle_output_gate_complete(
           )
           let state = cognitive_state.apply_meta_observation(state, 0)
           let state = with_assistant_error(state, full_text)
-          CognitiveState(..state, status: Idle)
+          let new_state = CognitiveState(..state, status: Idle)
+          cognitive_memory.request_save(new_state, new_state.messages)
         }
         False -> {
           slog.info(
@@ -1090,7 +1293,7 @@ pub fn handle_output_gate_complete(
                 reply_to:,
                 output_gate_count: modification_count + 1,
                 empty_retried: False,
-                node_type: dag_types.CognitiveCycle,
+                node_type: state.cycle_node_type,
               ),
             ),
           )
@@ -1116,7 +1319,56 @@ pub fn handle_output_gate_complete(
       )
       let state = cognitive_state.apply_meta_observation(state, 0)
       let state = with_assistant_error(state, agent_text)
-      CognitiveState(..state, status: Idle)
+      let new_state = CognitiveState(..state, status: Idle)
+      cognitive_memory.request_save(new_state, new_state.messages)
+    }
+  }
+}
+
+/// Handle a gate timeout — the spawned gate process didn't respond in time.
+/// Fail-open: deliver the report rather than blocking the agent forever.
+pub fn handle_gate_timeout(
+  state: CognitiveState,
+  task_id: String,
+  gate: String,
+) -> CognitiveState {
+  // Only act if we're still waiting — check if we're in Thinking state
+  // for this task. If the gate already completed, ignore the timeout.
+  case state.status {
+    Thinking(task_id: current_task_id) if current_task_id == task_id -> {
+      slog.warn(
+        "cognitive",
+        "handle_gate_timeout",
+        gate
+          <> " gate timed out (task "
+          <> task_id
+          <> ") — delivering report (fail-open)",
+        state.cycle_id,
+      )
+      // Use the stored pending_output_reply to deliver the report
+      case state.pending_output_reply {
+        Some(#(reply_to, report_text)) -> {
+          process.send(
+            reply_to,
+            CognitiveReply(
+              response: report_text,
+              model: state.model,
+              usage: None,
+            ),
+          )
+          let new_state =
+            CognitiveState(..state, status: Idle, pending_output_reply: None)
+          cognitive_memory.request_save(new_state, new_state.messages)
+        }
+        None -> {
+          // No pending output — just unblock
+          CognitiveState(..state, status: Idle)
+        }
+      }
+    }
+    _ -> {
+      // Gate already completed before timeout — ignore
+      state
     }
   }
 }

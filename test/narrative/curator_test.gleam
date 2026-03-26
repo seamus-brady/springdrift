@@ -292,6 +292,7 @@ pub fn curator_set_cbr_cases_test() {
       intent: "research",
       approach: "web search",
       score: 0.85,
+      category: "",
     ),
   ])
   process.sleep(50)
@@ -350,6 +351,7 @@ pub fn curator_all_vm_slots_populated_test() {
       intent: "research",
       approach: "web search",
       score: 0.9,
+      category: "",
     ),
   ])
   process.sleep(50)
@@ -571,7 +573,14 @@ pub fn render_sensorium_vitals_test() {
       agent_health: "All agents nominal",
     )
   let result =
-    curator.render_sensorium_vitals(constitution, 2, "", "", option.None)
+    curator.render_sensorium_vitals(
+      constitution,
+      2,
+      "",
+      "",
+      option.None,
+      option.None,
+    )
   should.be_true(string.contains(result, "cycles_today=\"5\""))
   should.be_true(string.contains(result, "agents_active=\"2\""))
   should.be_false(string.contains(result, "agent_health="))
@@ -593,6 +602,7 @@ pub fn render_sensorium_vitals_health_issue_test() {
       1,
       "researcher restarting",
       "",
+      option.None,
       option.None,
     )
   should.be_true(string.contains(
@@ -616,11 +626,74 @@ pub fn render_sensorium_vitals_with_failure_test() {
       "",
       "researcher timeout 2h ago",
       option.None,
+      option.None,
     )
   should.be_true(string.contains(
     result,
     "last_failure=\"researcher timeout 2h ago\"",
   ))
+}
+
+// ---------------------------------------------------------------------------
+// Budget truncation detection tests
+// ---------------------------------------------------------------------------
+
+pub fn budget_caused_truncation_no_truncation_test() {
+  let slots = [
+    identity.SlotValue(key: "a", value: "hello"),
+    identity.SlotValue(key: "b", value: "world"),
+  ]
+  // Same slots — no truncation
+  curator.budget_caused_truncation(slots, slots)
+  |> should.be_false
+}
+
+pub fn budget_caused_truncation_slot_cleared_test() {
+  let original = [
+    identity.SlotValue(key: "a", value: "hello"),
+    identity.SlotValue(key: "b", value: "world"),
+  ]
+  let budgeted = [
+    identity.SlotValue(key: "a", value: "hello"),
+    identity.SlotValue(key: "b", value: ""),
+  ]
+  curator.budget_caused_truncation(original, budgeted)
+  |> should.be_true
+}
+
+pub fn budget_caused_truncation_slot_shortened_test() {
+  let original = [
+    identity.SlotValue(key: "a", value: "hello world this is a long string"),
+  ]
+  let budgeted = [
+    identity.SlotValue(key: "a", value: "hello world"),
+  ]
+  curator.budget_caused_truncation(original, budgeted)
+  |> should.be_true
+}
+
+pub fn budget_caused_truncation_empty_original_not_truncated_test() {
+  let original = [
+    identity.SlotValue(key: "a", value: ""),
+    identity.SlotValue(key: "b", value: "hello"),
+  ]
+  let budgeted = [
+    identity.SlotValue(key: "a", value: ""),
+    identity.SlotValue(key: "b", value: "hello"),
+  ]
+  // Originally empty slot → not counted as truncation
+  curator.budget_caused_truncation(original, budgeted)
+  |> should.be_false
+}
+
+pub fn budget_caused_truncation_slot_missing_in_budgeted_test() {
+  let original = [
+    identity.SlotValue(key: "a", value: "hello"),
+  ]
+  let budgeted = []
+  // Slot gone entirely — treat as truncated
+  curator.budget_caused_truncation(original, budgeted)
+  |> should.be_true
 }
 
 // ---------------------------------------------------------------------------

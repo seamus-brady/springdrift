@@ -5,14 +5,16 @@
 //// as narrative/log.gleam.
 
 import cbr/types.{
-  type CbrCase, type CbrOutcome, type CbrProblem, type CbrSolution, CbrCase,
-  CbrOutcome, CbrProblem, CbrSolution,
+  type CbrCase, type CbrCategory, type CbrOutcome, type CbrProblem,
+  type CbrSolution, type CbrUsageStats, CbrCase, CbrOutcome, CbrProblem,
+  CbrSolution, CbrUsageStats, CodePattern, DomainKnowledge, Pitfall, Strategy,
+  Troubleshooting,
 }
 import gleam/dict
 import gleam/dynamic/decode
 import gleam/json
 import gleam/list
-import gleam/option.{Some}
+import gleam/option.{type Option, Some}
 import gleam/string
 import simplifile
 import slog
@@ -134,7 +136,78 @@ pub fn encode_case(c: CbrCase) -> json.Json {
       option.None -> json.null()
     }),
     #("redacted", json.bool(c.redacted)),
+    #("category", case c.category {
+      option.Some(cat) -> json.string(encode_category(cat))
+      option.None -> json.null()
+    }),
+    #("usage_stats", case c.usage_stats {
+      option.Some(stats) -> encode_usage_stats(stats)
+      option.None -> json.null()
+    }),
   ])
+}
+
+pub fn encode_category(cat: CbrCategory) -> String {
+  case cat {
+    Strategy -> "strategy"
+    CodePattern -> "code_pattern"
+    Troubleshooting -> "troubleshooting"
+    Pitfall -> "pitfall"
+    DomainKnowledge -> "domain_knowledge"
+  }
+}
+
+pub fn decode_category(s: String) -> Option(CbrCategory) {
+  case s {
+    "strategy" -> option.Some(Strategy)
+    "code_pattern" -> option.Some(CodePattern)
+    "troubleshooting" -> option.Some(Troubleshooting)
+    "pitfall" -> option.Some(Pitfall)
+    "domain_knowledge" -> option.Some(DomainKnowledge)
+    _ -> option.None
+  }
+}
+
+fn category_decoder() -> decode.Decoder(Option(CbrCategory)) {
+  decode.optional(decode.string)
+  |> decode.map(fn(opt) {
+    case opt {
+      option.Some(s) -> decode_category(s)
+      option.None -> option.None
+    }
+  })
+}
+
+pub fn encode_usage_stats(s: CbrUsageStats) -> json.Json {
+  json.object([
+    #("retrieval_count", json.int(s.retrieval_count)),
+    #("retrieval_success_count", json.int(s.retrieval_success_count)),
+    #("helpful_count", json.int(s.helpful_count)),
+    #("harmful_count", json.int(s.harmful_count)),
+  ])
+}
+
+fn usage_stats_decoder() -> decode.Decoder(Option(CbrUsageStats)) {
+  decode.optional({
+    use retrieval_count <- decode.optional_field(
+      "retrieval_count",
+      0,
+      decode.int,
+    )
+    use retrieval_success_count <- decode.optional_field(
+      "retrieval_success_count",
+      0,
+      decode.int,
+    )
+    use helpful_count <- decode.optional_field("helpful_count", 0, decode.int)
+    use harmful_count <- decode.optional_field("harmful_count", 0, decode.int)
+    decode.success(CbrUsageStats(
+      retrieval_count:,
+      retrieval_success_count:,
+      helpful_count:,
+      harmful_count:,
+    ))
+  })
 }
 
 fn encode_problem(p: CbrProblem) -> json.Json {
@@ -186,6 +259,16 @@ pub fn case_decoder() -> decode.Decoder(CbrCase) {
   )
   use profile <- decode.field("profile", decode.optional(decode.string))
   use redacted <- decode.optional_field("redacted", False, decode.bool)
+  use category <- decode.optional_field(
+    "category",
+    option.None,
+    category_decoder(),
+  )
+  use usage_stats <- decode.optional_field(
+    "usage_stats",
+    option.None,
+    usage_stats_decoder(),
+  )
   decode.success(CbrCase(
     case_id:,
     timestamp:,
@@ -196,6 +279,8 @@ pub fn case_decoder() -> decode.Decoder(CbrCase) {
     source_narrative_id:,
     profile:,
     redacted:,
+    category:,
+    usage_stats:,
   ))
 }
 

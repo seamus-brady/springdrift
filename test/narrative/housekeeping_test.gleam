@@ -44,6 +44,8 @@ fn make_case(
     source_narrative_id: "n-" <> id,
     profile: None,
     redacted: False,
+    category: None,
+    usage_stats: None,
   )
 }
 

@@ -60,6 +60,11 @@ write_anywhere = false
 # Path to D' config JSON (default: built-in)
 # dprime_config = "dprime.json"
 
+[dprime]
+# Timeout in ms for gate evaluation — if the scorer LLM hangs, fail-open
+# after this delay rather than blocking forever (default: 60000)
+# gate_timeout_ms = 60000
+
 # ── Agent identity ─────────────────────────────────────────────────────────
 
 [agent]
@@ -158,8 +163,9 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 # Max entries returned by recall_recent/recall_search (default: 20, max: 50)
 # recall_max_entries = 20
 
-# Max CBR cases returned by recall_cases (default: 5, max: 20)
-# cbr_max_results = 5
+# Max CBR cases returned by recall_cases (default: 4)
+# Memento (2508.16153) shows K=4 is optimal — more causes context pollution.
+# cbr_max_results = 4
 
 # Max results from web_search (DuckDuckGo) (default: 5, max: 10)
 # web_search_max_results = 5
@@ -228,6 +234,10 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 # When embeddings are unavailable, this weight is redistributed to other signals.
 # embedding_weight = 0.10
 
+# Weight for utility score from retrieval success tracking (default: 0.15)
+# Uses Laplace-smoothed retrieval success rate. Neutral (0.5) for cases with no data.
+# utility_weight = 0.15
+
 # Minimum weighted score to include a case in results — 0.0 returns all (default: 0.0)
 # min_score = 0.01
 
@@ -256,6 +266,11 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 
 # Days of artifact metadata to retain in ETS (default: 60)
 # artifact_days = 60
+
+# Minimum interval between budget-triggered dedup runs in ms (default: 1800000 = 30min)
+# When the preamble budget truncates memory slots, a CBR dedup is triggered
+# automatically — this debounce prevents it from running too frequently.
+# budget_dedup_debounce_ms = 1800000
 
 # ── Housekeeping ─────────────────────────────────────────────────────────────
 # Maintenance thresholds for CBR dedup, pruning, and fact management.

@@ -48,6 +48,8 @@ fn make_case(
     source_narrative_id: "cycle-" <> id,
     profile: None,
     redacted: False,
+    category: None,
+    usage_stats: None,
   )
 }
 
@@ -378,6 +380,8 @@ pub fn retain_case_with_empty_fields_test() {
       source_narrative_id: "",
       profile: None,
       redacted: False,
+      category: None,
+      usage_stats: None,
     )
 
   let base = bridge.retain_case(base, empty_case)
@@ -544,6 +548,7 @@ pub fn different_weights_affect_ranking_test() {
       recency_weight: 0.05,
       domain_weight: 0.05,
       embedding_weight: 0.0,
+      utility_weight: 0.0,
     )
   let field_results =
     bridge.retrieve_cases(base, query, metadata, field_heavy, 0.0)
@@ -558,6 +563,7 @@ pub fn different_weights_affect_ranking_test() {
       recency_weight: 0.9,
       domain_weight: 0.0,
       embedding_weight: 0.1,
+      utility_weight: 0.0,
     )
   let recency_results =
     bridge.retrieve_cases(base, query, metadata, recency_heavy, 0.0)

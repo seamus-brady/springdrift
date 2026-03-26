@@ -98,6 +98,8 @@ pub fn start(
         cycle_started_ms: 0,
         cycle_node_type: dag_types.CognitiveCycle,
         dprime_decisions: [],
+        pending_output_reply: None,
+        retrieved_case_ids: [],
         memory: MemoryContext(
           narrative_dir: cfg.narrative_dir,
           cbr_dir: cfg.cbr_dir,
@@ -127,6 +129,7 @@ pub fn start(
           deterministic_config: cfg.deterministic_config,
           fact_decay_half_life_days: cfg.fact_decay_half_life_days,
           escalation_config: cfg.escalation_config,
+          gate_timeout_ms: cfg.gate_timeout_ms,
         ),
         redact_secrets: cfg.redact_secrets,
         pending_sensory_events: [],
@@ -141,6 +144,13 @@ pub fn start(
           }
           None -> None
         },
+        session_tool_calls: 0,
+        session_tool_failures: 0,
+        session_dprime_modifications: 0,
+        session_dprime_rejections: 0,
+        session_cycles: 0,
+        session_cbr_hits: 0,
+        consecutive_probe_failures: 0,
       )
     process.send(setup, self)
     cognitive_loop(state)
@@ -206,6 +216,8 @@ fn handle_message(
       types.QueuedSensoryEvent(..) -> "QueuedSensoryEvent"
       types.ForecasterSuggestion(..) -> "ForecasterSuggestion"
       types.AgentProgress(..) -> "AgentProgress"
+      types.GetMessages(..) -> "GetMessages"
+      types.GateTimeout(..) -> "GateTimeout"
     },
     state.cycle_id,
   )
@@ -230,6 +242,12 @@ fn handle_message(
       let new_state = CognitiveState(..state, messages:, cycle_id: None)
       cognitive_memory.request_save(new_state, messages)
     }
+    types.GetMessages(reply_to:) -> {
+      process.send(reply_to, state.messages)
+      state
+    }
+    types.GateTimeout(task_id:, gate:) ->
+      cognitive_safety.handle_gate_timeout(state, task_id, gate)
     types.ClassifyComplete(cycle_id, complexity, text, reply_to) ->
       handle_classify_complete(state, cycle_id, complexity, text, reply_to)
     types.SafetyGateComplete(task_id, result, resp, calls, reply_to) ->
@@ -469,6 +487,9 @@ fn handle_user_input(
           cycle_started_ms: monotonic_now_ms(),
           cycle_node_type: dag_types.CognitiveCycle,
           dprime_decisions: [],
+          pending_output_reply: None,
+          retrieved_case_ids: [],
+          session_cycles: state.session_cycles + 1,
           // Reset D' iteration counters at cycle start so
           // per-cycle MODIFY budgets don't accumulate across cycles
           tool_dprime_state: option.map(
@@ -601,6 +622,9 @@ fn handle_scheduler_input(
           cycle_started_ms: monotonic_now_ms(),
           cycle_node_type: dag_types.SchedulerCycle,
           dprime_decisions: [],
+          pending_output_reply: None,
+          retrieved_case_ids: [],
+          session_cycles: state.session_cycles + 1,
           tool_dprime_state: option.map(
             state.tool_dprime_state,
             dprime_meta.reset_iterations,

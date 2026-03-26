@@ -114,6 +114,40 @@ pub fn find_prunable_cases(
 }
 
 // ---------------------------------------------------------------------------
+// CBR usage-based deprecation — harmful cases
+// ---------------------------------------------------------------------------
+
+/// Find CBR cases that usage stats indicate are harmful:
+/// - harmful_count > helpful_count * 2
+/// - retrieval_count > 5 (enough data to be confident)
+/// These are candidates for confidence reduction (deprecation).
+pub fn find_harmful_cases(cases: List(cbr_types.CbrCase)) -> List(PruneResult) {
+  list.filter_map(cases, fn(c) {
+    case c.usage_stats {
+      option.None -> Error(Nil)
+      option.Some(stats) -> {
+        let enough_data = stats.retrieval_count > 5
+        let is_harmful = stats.harmful_count > stats.helpful_count * 2
+        case enough_data && is_harmful {
+          True ->
+            Ok(PruneResult(
+              case_id: c.case_id,
+              reason: "harmful: "
+                <> string.inspect(stats.harmful_count)
+                <> " harmful vs "
+                <> string.inspect(stats.helpful_count)
+                <> " helpful over "
+                <> string.inspect(stats.retrieval_count)
+                <> " retrievals",
+            ))
+          False -> Error(Nil)
+        }
+      }
+    }
+  })
+}
+
+// ---------------------------------------------------------------------------
 // Fact conflict resolution
 // ---------------------------------------------------------------------------
 

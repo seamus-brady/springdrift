@@ -15,6 +15,9 @@ Choose tools in this order:
 
 Before starting a multi-step research task, call `recall_cases` with the relevant
 intent and domain. Past cases reveal which tools worked and what pitfalls to avoid.
+Cases are organised by category (Strategy, CodePattern, Troubleshooting, Pitfall,
+DomainKnowledge) and ranked by historical utility — cases that led to successful
+outcomes in the past are ranked higher. Maximum 4 cases are retrieved per query.
 
 ## Memory Tasks
 
@@ -30,6 +33,18 @@ intent and domain. Past cases reveal which tools worked and what pitfalls to avo
 
 For diagnostic questions (what failed, why, patterns over time) use the diagnostic
 tools: `reflect`, `inspect_cycle`, `list_recent_cycles`, `query_tool_activity`.
+
+### D' Gate Architecture
+
+The input gate uses a split evaluation path for performance:
+1. **Deterministic pre-filter** — regex pattern matches on known-bad inputs. Instant, no LLM cost.
+2. **Canary probes** (if enabled) — hijack and leakage detection using embedded tokens. 2 LLM calls. Fail-open: if the probe LLM errors, it passes with a warning (not evidence of hijacking). Consecutive failures are tracked — at 3+ failures, a sensory event alerts that the safety probe LLM may be degraded.
+3. **Fast-accept** — if deterministic clean and canaries clean, accept without LLM scoring.
+4. **LLM scorer** — only runs if the deterministic layer escalates (suspicious pattern).
+
+The tool gate always runs the full LLM scorer for non-exempt tools (web, file, shell). Memory, planner, builtin, and agent delegation tools are exempt.
+
+The output gate evaluates report quality. Gate timeout (default 60s) prevents blocking forever if the scorer LLM hangs — the report is delivered (fail-open).
 
 ### D' Deterministic Pre-Filter
 

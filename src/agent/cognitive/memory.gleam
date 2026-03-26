@@ -107,6 +107,7 @@ pub fn maybe_spawn_archivist(
         },
       ),
       thread_index_json: "",
+      retrieved_case_ids: state.retrieved_case_ids,
     )
   archivist.spawn(
     ctx,

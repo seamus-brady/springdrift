@@ -6,6 +6,48 @@
 
 ---
 
+## Table of Contents
+
+- [Overview](#overview)
+- [Directory Structure](#directory-structure)
+- [Tenant Registry (`tenants.toml`)](#tenant-registry-tenantstoml)
+- [Process Architecture](#process-architecture)
+  - [Lazy startup](#lazy-startup)
+  - [Scheduler](#scheduler)
+  - [Sandbox](#sandbox)
+- [Authentication and Routing](#authentication-and-routing)
+  - [Login](#login)
+  - [WebSocket routing](#websocket-routing)
+  - [Admin view](#admin-view)
+- [Config Hierarchy (four layers)](#config-hierarchy-four-layers)
+- [Email Delivery](#email-delivery)
+- [Git Backup](#git-backup)
+- [Resource Limits](#resource-limits)
+- [Additional Design Considerations](#additional-design-considerations)
+  - [1. Who said what](#1-who-said-what)
+  - [2. Concurrent access to the same tenant](#2-concurrent-access-to-the-same-tenant)
+  - [3. Audit trail per user](#3-audit-trail-per-user)
+  - [4. Session isolation](#4-session-isolation)
+  - [5. Agent identity per tenant](#5-agent-identity-per-tenant)
+  - [6. LLM provider per tenant](#6-llm-provider-per-tenant)
+  - [7. D' config per tenant](#7-d-config-per-tenant)
+  - [8. Backup failure notifications](#8-backup-failure-notifications)
+  - [9. Tenant creation from admin UI](#9-tenant-creation-from-admin-ui)
+  - [10. Logout and session expiry](#10-logout-and-session-expiry)
+  - [11. ETS memory with many tenants](#11-ets-memory-with-many-tenants)
+  - [12. Cold start time](#12-cold-start-time)
+  - [13. LLM API key management](#13-llm-api-key-management)
+- [Migration Path](#migration-path)
+  - [Zero-change backward compatibility](#zero-change-backward-compatibility)
+  - [Migration command](#migration-command)
+  - [Tenant creation command](#tenant-creation-command)
+- [Implementation Phases](#implementation-phases)
+  - [Key risk](#key-risk)
+- [New Files](#new-files)
+- [Significantly Modified Files](#significantly-modified-files)
+- [Recommendation](#recommendation)
+
+
 ## Overview
 
 Transform Springdrift from a single-user agent tool into a multi-tenant agent platform. A "tenant" is the unit of data isolation — either a single user or a team. Multiple users can map to the same tenant, sharing memory, narrative, and agent state.

@@ -211,8 +211,8 @@ fn build_output_scoring_prompt(
     list.map(features, fn(f) { "- " <> f.name <> ": " <> f.description })
     |> string.join("\n")
 
-  "You are a report quality evaluator. You will be given a completed report and the original query that produced it.\n"
-  <> "For each quality standard, rate the magnitude of any quality issue on this scale:\n"
+  "Evaluate this completed report against quality standards.\n"
+  <> "For each standard, rate the magnitude of any quality issue on this scale:\n"
   <> "  0 = No issue. The report fully meets this standard.\n"
   <> "  1 = Minor issue. Small quality gap that could be improved.\n"
   <> "  2 = Moderate issue. Meaningful quality gap that should be addressed.\n"
@@ -223,18 +223,25 @@ fn build_output_scoring_prompt(
   <> "- Focus on what is actually present in the report text, not hypotheticals.\n"
   <> "- A score of 0 means genuinely no concern.\n"
   <> "- A score of 3 means a clear, significant quality failure.\n"
-  <> "- Respond with ONLY a JSON array of objects with \"feature\", \"magnitude\", and \"rationale\" fields.\n"
+  <> "- Research reports that cite URLs and name sources are sourced — you cannot verify URLs exist, but named attribution counts.\n"
   <> "\n"
   <> "ORIGINAL QUERY: "
   <> original_query
   <> "\n\n"
-  <> "COMPLETED REPORT:\n"
-  <> report_text
-  <> "\n\n"
   <> "QUALITY STANDARDS TO EVALUATE:\n"
   <> features_text
   <> "\n\n"
-  <> "NOW EVALUATE the report against each standard:"
+  <> "COMPLETED REPORT (evaluate this):\n"
+  <> string.slice(report_text, 0, 6000)
+  <> case string.length(report_text) > 6000 {
+    True ->
+      "\n[... report truncated for scoring — "
+      <> int.to_string(string.length(report_text))
+      <> " chars total]"
+    False -> ""
+  }
+  <> "\n\n"
+  <> "NOW EVALUATE each standard:"
 }
 
 fn score_output(
@@ -246,11 +253,12 @@ fn score_output(
   verbose: Bool,
   _redact: Bool,
 ) -> List(Forecast) {
-  // Use the same XStructor-based scoring as the input/tool gates.
-  // The prompt contains the report text and quality standards.
-  scorer.score_features(
+  // Use score_with_custom_prompt to avoid double-wrapping the output prompt.
+  // The output gate builds its own domain-specific prompt with the full report
+  // text — passing it through score_features would embed it twice in a generic
+  // scoring wrapper, inflating the token count and confusing the LLM.
+  scorer.score_with_custom_prompt(
     prompt,
-    "",
     features,
     provider,
     model,

@@ -61,6 +61,7 @@ pub type CognitiveConfig {
     deterministic_config: Option(DeterministicConfig),
     fact_decay_half_life_days: Int,
     escalation_config: EscalationConfig,
+    gate_timeout_ms: Int,
   )
 }
 
@@ -115,5 +116,6 @@ pub fn default_test_config(
     deterministic_config: None,
     fact_decay_half_life_days: 30,
     escalation_config: escalation.default_config(),
+    gate_timeout_ms: 60_000,
   )
 }

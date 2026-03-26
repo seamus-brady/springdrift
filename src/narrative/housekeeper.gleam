@@ -18,6 +18,9 @@ import narrative/librarian.{type LibrarianMessage}
 import narrative/log as narrative_log
 import slog
 
+@external(erlang, "springdrift_ffi", "monotonic_now_ms")
+fn monotonic_now_ms() -> Int
+
 @external(erlang, "springdrift_ffi", "days_ago_date")
 fn days_ago_date(days: Int) -> String
 
@@ -42,6 +45,9 @@ pub type HousekeeperConfig {
     fact_confidence: Float,
     cbr_pruning_days: Int,
     thread_pruning_days: Int,
+    /// Minimum interval between budget-triggered dedup runs (ms).
+    /// Default: 1_800_000 (30 minutes).
+    budget_dedup_debounce_ms: Int,
   )
 }
 
@@ -59,6 +65,7 @@ pub fn default_config() -> HousekeeperConfig {
     fact_confidence: 0.7,
     cbr_pruning_days: 60,
     thread_pruning_days: 7,
+    budget_dedup_debounce_ms: 1_800_000,
   )
 }
 
@@ -71,6 +78,10 @@ pub type HousekeeperMessage {
   MediumTick
   LongTick
   RunAll(reply_to: Subject(HousekeeperReport))
+  /// Budget-triggered CBR dedup — sent by the Curator when preamble budget
+  /// truncates memory slots. Debounced: ignored if last budget-triggered
+  /// dedup ran less than budget_dedup_debounce_ms ago.
+  BudgetTriggeredDedup
   Shutdown
 }
 
@@ -127,6 +138,8 @@ type HousekeeperState {
     narrative_dir: String,
     facts_dir: String,
     config: HousekeeperConfig,
+    /// Monotonic timestamp (ms) of last budget-triggered dedup, for debounce.
+    last_budget_dedup_ms: Int,
   )
 }
 
@@ -147,7 +160,14 @@ pub fn start(
     process.send(setup, self)
 
     let state =
-      HousekeeperState(self:, librarian:, narrative_dir:, facts_dir:, config:)
+      HousekeeperState(
+        self:,
+        librarian:,
+        narrative_dir:,
+        facts_dir:,
+        config:,
+        last_budget_dedup_ms: 0,
+      )
 
     // Schedule initial ticks
     process.send_after(self, config.short_tick_ms, ShortTick)
@@ -266,6 +286,35 @@ fn loop(state: HousekeeperState) -> Nil {
           }
           process.send_after(state.self, state.config.long_tick_ms, LongTick)
           loop(state)
+        }
+
+        BudgetTriggeredDedup -> {
+          let now = monotonic_now_ms()
+          let elapsed = now - state.last_budget_dedup_ms
+          case elapsed >= state.config.budget_dedup_debounce_ms {
+            True -> {
+              let dedup = run_cbr_dedup(state)
+              let pruned = run_cbr_pruning(state)
+              case dedup + pruned > 0 {
+                True ->
+                  slog.info(
+                    "narrative/housekeeper",
+                    "budget_triggered_dedup",
+                    int.to_string(dedup)
+                      <> " cases deduplicated, "
+                      <> int.to_string(pruned)
+                      <> " cases pruned (budget pressure)",
+                    None,
+                  )
+                False -> Nil
+              }
+              loop(HousekeeperState(..state, last_budget_dedup_ms: now))
+            }
+            False -> {
+              // Debounce: too soon since last budget-triggered dedup
+              loop(state)
+            }
+          }
         }
 
         RunAll(reply_to:) -> {

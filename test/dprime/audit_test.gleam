@@ -26,6 +26,7 @@ fn test_gate_result() -> GateResult {
     canary_result: Some(types.ProbeResult(
       hijack_detected: False,
       leakage_detected: False,
+      probe_failed: False,
       details: "ok",
     )),
   )

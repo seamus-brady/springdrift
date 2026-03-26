@@ -9,7 +9,7 @@ import tools/memory
 
 const test_limits = memory.MemoryLimits(
   recall_max_entries: 50,
-  cbr_max_results: 20,
+  cbr_max_results: 4,
 )
 
 pub fn main() -> Nil {
