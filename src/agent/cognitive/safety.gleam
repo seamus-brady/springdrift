@@ -26,6 +26,7 @@ import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
+import llm/provider
 import llm/types as llm_types
 import normative/drift as normative_drift
 import normative/types as normative_types
@@ -615,11 +616,11 @@ pub fn spawn_input_safety_gate(
       types.GateTimeout(task_id: cycle_id, gate: "input"),
     )
 
-  // Input gate flow: deterministic → canary → fast-accept (no LLM scorer).
-  // The LLM scorer only runs if the deterministic layer escalates.
-  // Rationale: the operator is the user, so the primary threat is indirect
-  // injection (via web content), not the operator's own input. Canaries
-  // detect actual hijacking; deterministic catches known-bad patterns.
+  // Input gate strategy (same as output gate):
+  // - Interactive cycles: deterministic block + canary probes only.
+  //   Escalation is treated as pass — the operator is not a threat vector.
+  // - Autonomous cycles: escalation triggers full LLM evaluation.
+  let is_autonomous = state.cycle_node_type == dag_types.SchedulerCycle
   process.spawn_unlinked(fn() {
     // Step 1: Deterministic pre-filter
     let det_result = case det_config {
@@ -628,7 +629,7 @@ pub fn spawn_input_safety_gate(
     }
 
     let result = case det_result {
-      // Blocked — reject immediately, no LLM calls
+      // Blocked — reject immediately, no LLM calls (always, both modes)
       Blocked(rule_id, _reason) -> {
         slog.warn(
           "cognitive",
@@ -653,102 +654,63 @@ pub fn spawn_input_safety_gate(
         )
       }
 
-      // Escalated — suspicious pattern, run full LLM evaluation
+      // Escalated — suspicious pattern
       Escalated(_rule_id, _det_context) -> {
-        slog.info(
-          "cognitive",
-          "spawn_input_safety_gate",
-          "Deterministic escalation — running full LLM evaluation",
-          Some(cycle_id),
-        )
-        gate.evaluate_with_deterministic(
+        case is_autonomous {
+          // Autonomous: run full LLM evaluation (scheduler input may carry
+          // indirect injection from web content or external sources)
+          True -> {
+            slog.info(
+              "cognitive",
+              "spawn_input_safety_gate",
+              "Deterministic escalation — running full LLM evaluation (autonomous)",
+              Some(cycle_id),
+            )
+            gate.evaluate_with_deterministic(
+              instruction,
+              ctx,
+              dprime_st,
+              provider,
+              scorer_model,
+              cycle_id,
+              verbose,
+              redact_secrets,
+              det_config,
+            )
+          }
+          // Interactive: treat escalation as pass — operator is not a threat.
+          // Run canaries only (below), skip LLM scorer.
+          False -> {
+            slog.info(
+              "cognitive",
+              "spawn_input_safety_gate",
+              "Deterministic escalation — skipping LLM scorer (interactive, operator input)",
+              Some(cycle_id),
+            )
+            run_canaries_and_accept(
+              instruction,
+              dprime_st,
+              provider,
+              scorer_model,
+              cycle_id,
+              verbose,
+              redact_secrets,
+            )
+          }
+        }
+      }
+
+      // Pass — run canaries only, then fast-accept (no LLM scorer)
+      Pass ->
+        run_canaries_and_accept(
           instruction,
-          ctx,
           dprime_st,
           provider,
           scorer_model,
           cycle_id,
           verbose,
           redact_secrets,
-          det_config,
         )
-      }
-
-      // Pass — run canaries only, then fast-accept (no LLM scorer)
-      Pass -> {
-        // Step 2: Canary probes (if enabled)
-        let canary_result = case dprime_st.config.canary_enabled {
-          True -> {
-            slog.debug(
-              "cognitive",
-              "spawn_input_safety_gate",
-              "Running canary probes",
-              Some(cycle_id),
-            )
-            let probe =
-              canary.run_probes(
-                instruction,
-                provider,
-                scorer_model,
-                cycle_id,
-                verbose,
-                redact_secrets,
-              )
-            cycle_log.log_dprime_canary(
-              cycle_id,
-              probe.hijack_detected,
-              probe.leakage_detected,
-              probe.details,
-            )
-            Some(probe)
-          }
-          False -> None
-        }
-
-        // Check canary results
-        case canary_result {
-          Some(probe) if probe.hijack_detected || probe.leakage_detected -> {
-            slog.warn(
-              "cognitive",
-              "spawn_input_safety_gate",
-              "Canary probe detected: " <> probe.details,
-              Some(cycle_id),
-            )
-            dprime_types.GateResult(
-              decision: dprime_types.Reject,
-              dprime_score: 1.0,
-              forecasts: [],
-              explanation: "Canary probe detected: " <> probe.details,
-              layer: dprime_types.Reactive,
-              canary_result:,
-            )
-          }
-          _ -> {
-            // Step 3: Fast-accept — deterministic clean + canaries clean/disabled
-            slog.debug(
-              "cognitive",
-              "spawn_input_safety_gate",
-              "Input gate fast-accept: deterministic clean, canaries clean",
-              Some(cycle_id),
-            )
-            cycle_log.log_dprime_layer(
-              cycle_id,
-              "input_gate",
-              "accept",
-              0.0,
-              "Fast-accept: deterministic clean, canaries clean",
-            )
-            dprime_types.GateResult(
-              decision: dprime_types.Accept,
-              dprime_score: 0.0,
-              forecasts: [],
-              explanation: "Fast-accept: deterministic clean, canaries clean",
-              layer: dprime_types.Reactive,
-              canary_result:,
-            )
-          }
-        }
-      }
     }
 
     process.send(
@@ -768,6 +730,88 @@ pub fn spawn_input_safety_gate(
     cycle_id: Some(cycle_id),
     status: types.EvaluatingInputSafety(cycle_id:, model:, text:, reply_to:),
   )
+}
+
+/// Run canary probes and fast-accept if clean. Used by both the Pass and
+/// interactive Escalated paths in the input gate.
+fn run_canaries_and_accept(
+  instruction: String,
+  dprime_st: dprime_types.DprimeState,
+  provider: provider.Provider,
+  scorer_model: String,
+  cycle_id: String,
+  verbose: Bool,
+  redact_secrets: Bool,
+) -> dprime_types.GateResult {
+  let canary_result = case dprime_st.config.canary_enabled {
+    True -> {
+      slog.debug(
+        "cognitive",
+        "run_canaries_and_accept",
+        "Running canary probes",
+        Some(cycle_id),
+      )
+      let probe =
+        canary.run_probes(
+          instruction,
+          provider,
+          scorer_model,
+          cycle_id,
+          verbose,
+          redact_secrets,
+        )
+      cycle_log.log_dprime_canary(
+        cycle_id,
+        probe.hijack_detected,
+        probe.leakage_detected,
+        probe.details,
+      )
+      Some(probe)
+    }
+    False -> None
+  }
+
+  case canary_result {
+    Some(probe) if probe.hijack_detected || probe.leakage_detected -> {
+      slog.warn(
+        "cognitive",
+        "run_canaries_and_accept",
+        "Canary probe detected: " <> probe.details,
+        Some(cycle_id),
+      )
+      dprime_types.GateResult(
+        decision: dprime_types.Reject,
+        dprime_score: 1.0,
+        forecasts: [],
+        explanation: "Canary probe detected: " <> probe.details,
+        layer: dprime_types.Reactive,
+        canary_result:,
+      )
+    }
+    _ -> {
+      slog.debug(
+        "cognitive",
+        "run_canaries_and_accept",
+        "Input gate fast-accept: canaries clean",
+        Some(cycle_id),
+      )
+      cycle_log.log_dprime_layer(
+        cycle_id,
+        "input_gate",
+        "accept",
+        0.0,
+        "Fast-accept: canaries clean",
+      )
+      dprime_types.GateResult(
+        decision: dprime_types.Accept,
+        dprime_score: 0.0,
+        forecasts: [],
+        explanation: "Fast-accept: canaries clean",
+        layer: dprime_types.Reactive,
+        canary_result:,
+      )
+    }
+  }
 }
 
 /// Handle completion of the input-level D' safety gate.
@@ -1165,6 +1209,13 @@ pub fn check_deterministic_only(
         reply_to,
         CognitiveReply(response: reply_text, model: state.model, usage: None),
       )
+      // Spawn Archivist (fire-and-forget narrative + CBR generation)
+      cognitive_memory.maybe_spawn_archivist(
+        state,
+        reply_text,
+        state.model,
+        None,
+      )
       let state = cognitive_state.apply_meta_observation(state, 0)
       let state = with_assistant_error(state, reply_text)
       CognitiveState(..state, messages:, status: Idle)
@@ -1321,6 +1372,13 @@ pub fn handle_output_gate_complete(
         reply_to,
         CognitiveReply(response: report_text, model: state.model, usage: None),
       )
+      // Spawn Archivist (fire-and-forget narrative + CBR generation)
+      cognitive_memory.maybe_spawn_archivist(
+        state,
+        report_text,
+        state.model,
+        None,
+      )
       let state = cognitive_state.apply_meta_observation(state, 0)
       let state = with_assistant_error(state, report_text)
       let new_state = CognitiveState(..state, status: Idle)
@@ -1342,6 +1400,12 @@ pub fn handle_output_gate_complete(
           process.send(
             reply_to,
             CognitiveReply(response: full_text, model: state.model, usage: None),
+          )
+          cognitive_memory.maybe_spawn_archivist(
+            state,
+            full_text,
+            state.model,
+            None,
           )
           let state = cognitive_state.apply_meta_observation(state, 0)
           let state = with_assistant_error(state, full_text)

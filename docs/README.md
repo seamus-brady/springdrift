@@ -57,3 +57,5 @@ Design specs and proposals for planned work.
 - [SD Budget](future-plans/sd-budget.md) -- token and cost management
 - [SD Designer](future-plans/sd-designer.md) -- profile and config design tool
 - [SD Install](future-plans/sd-install.md) -- installation and deployment tooling
+- [Librarian ETS reconciliation](future-plans/librarian-ets-reconciliation.md) -- periodic cache-vs-disk sync for missed notifications
+- [Commitment tracker](future-plans/commitment-tracker.md) -- detect promises and reminders in output, create scheduled follow-ups

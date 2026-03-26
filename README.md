@@ -6,6 +6,15 @@ and restore at any point.
 
 Built in [Gleam](https://gleam.run) on the Erlang/OTP runtime.
 
+**Status:** Beta. In active development. Running in daily use. ~43,000 lines of Gleam
+across 120 source files, 1,414 tests passing. Core systems (cognitive loop,
+multi-agent delegation, D' safety gates, normative calculus, CBR memory,
+narrative threading, sensorium, scheduler, web GUI) are implemented and
+relatively stable. There are probably bugs though!
+
+See [docs/future-plans/](docs/future-plans/) for planned work
+including federation, learner ingestion, and metacognition reporting.
+
 ---
 
 ## Table of Contents
@@ -30,6 +39,9 @@ Built in [Gleam](https://gleam.run) on the Erlang/OTP runtime.
 - [Development](#development)
 - [Background reading](#background-reading)
 
+
+[Back to top](#springdrift)
+
 ---
 
 ## What it is
@@ -44,14 +56,9 @@ domain, and let it work. It learns from its own experience as it operates.
 Sub-agents (researcher, planner, coder, writer, observer) are its hands, not
 independent minds. One identity, one memory, one cognitive loop.
 
-Springdrift descends from seven years and approximately 50 prototypes --
-TallMountain AI (Stoic normative calculus), PromptBouncer (prompt injection
-defence), Meek (ReAct loops), and PaperWings (vector symbolic associative
-memory). It integrates classical cognitive science (Sloman, Beach, Schank,
-Bruner), Stoic virtue ethics (Becker), and contemporary agent research (ACE,
-System M, Memento, SOFAI-LM, CCA) into a single running system. See
-[docs/background/references.md](docs/background/references.md) for the full
-intellectual lineage.
+The system draws on classical cognitive science, Stoic philosophy, and
+contemporary agent research. The full theoretical lineage and paper-by-paper
+mapping is in [docs/background/references.md](docs/background/references.md).
 
 ### Design philosophy
 
@@ -82,6 +89,9 @@ The design principle is that trustworthy autonomy comes from character, not
 from rules. Rules tell you what you must not do. Character tells you who
 you are. An agent with character can navigate situations its rules never
 anticipated -- and explain its reasoning after the fact.
+
+
+[Back to top](#springdrift)
 
 ---
 
@@ -171,6 +181,9 @@ the weekend and the agent has filed bug reports against itself, classified its
 own failure modes, and started applying the lessons it learned. You don't
 debug the agent. You review its self-assessments.
 
+
+[Back to top](#springdrift)
+
 ---
 
 ## Why CBR and not RAG
@@ -192,6 +205,9 @@ query (per the Memento finding that more causes context pollution).
 
 This is not similarity search. It is experience-weighted pattern matching with
 a closed learning loop.
+
+
+[Back to top](#springdrift)
 
 ---
 
@@ -220,6 +236,9 @@ Over time, the agent accumulates domain knowledge: which approaches worked for
 which problems, which tools failed in which contexts, which sources were
 reliable. CBR utility scoring (Laplace-smoothed: `(successes + 1) /
 (retrievals + 2)`) reinforces what works and lets failures fade.
+
+
+[Back to top](#springdrift)
 
 ---
 
@@ -333,6 +352,9 @@ conduct is consistent with its character, and flags when it isn't. The
 concept is from Becker's *A New Stoicism* (1998) -- virtue as rational
 agency that follows the facts, including facts about its own behaviour.
 
+
+[Back to top](#springdrift)
+
 ---
 
 ## Safety -- D' and normative calculus
@@ -393,6 +415,9 @@ constraint or prohibition rates climb, or the same axiom fires repeatedly, the
 meta observer escalates to the operator. The system never auto-adjusts its own
 ethical commitments.
 
+
+[Back to top](#springdrift)
+
 ---
 
 ## Introspection
@@ -414,6 +439,9 @@ incorrect D' rejections), `complete_task_step`, `flag_risk`, `activate_task`
 `create_endeavour`, `add_task_to_endeavour`, and task/step management
 
 See also: [Sensorium](#sensorium) -- the agent's ambient self-awareness system.
+
+
+[Back to top](#springdrift)
 
 ---
 
@@ -465,6 +493,9 @@ vacuum between turns, aware only of the conversation history. Springdrift's
 agent knows what time it is, what it's working on, how well things are going,
 what's scheduled next, and whether its own subsystems are healthy -- every
 single cycle.
+
+
+[Back to top](#springdrift)
 
 ---
 
@@ -518,6 +549,9 @@ XML or exhausts its retry budget. Five call sites, all schema-validated. This
 is why the safety scores and memory entries are trustworthy -- they are
 structurally guaranteed to be well-formed.
 
+
+[Back to top](#springdrift)
+
 ---
 
 ## Agents
@@ -550,6 +584,9 @@ Skills follow the [agentskills.io](https://agentskills.io) open standard --
 YAML frontmatter with name/description, Markdown instruction body. The `how_to`
 tool serves the operator guide so the agent can orient itself.
 
+
+[Back to top](#springdrift)
+
 ---
 
 ## Interfaces
@@ -566,6 +603,9 @@ calculus status, and character spec. `gleam run -- --gui web` (default port
 `process.send_after`. Profiles define recurring tasks with delivery to file or
 webhook. Rate-limited (configurable cycles/hour, token budget/hour). Full output
 gate evaluation (LLM scorer + normative calculus) on autonomous deliveries.
+
+
+[Back to top](#springdrift)
 
 ---
 
@@ -606,6 +646,9 @@ The DAG tracks token usage per cycle (input + output). `reflect` shows daily
 totals. The sensorium displays remaining budget in `<vitals>`. The agent can
 see its own token consumption.
 
+
+[Back to top](#springdrift)
+
 ---
 
 ## Persistence and recovery
@@ -645,6 +688,9 @@ and the agent restarts with that state.
 Cycle log rewind restores the conversation to any previous cycle. The Librarian
 replays JSONL on startup to rebuild ETS indexes. Session files include version
 and staleness metadata.
+
+
+[Back to top](#springdrift)
 
 ---
 
@@ -691,6 +737,9 @@ mutable state, no locks. Following the
 [12-Factor Agents](https://github.com/humanlayer/12-factor-agents) design
 principles.
 
+
+[Back to top](#springdrift)
+
 ---
 
 ## Why Gleam on the BEAM
@@ -714,6 +763,9 @@ shared state is a prerequisite for correctness.
 **LLM compatibility.** Claude writes correct Gleam reliably. The language is
 small, consistent, and well-documented. Springdrift itself was largely built
 with Claude Code.
+
+
+[Back to top](#springdrift)
 
 ---
 
@@ -756,6 +808,9 @@ gleam run -- --resume
 
 DuckDuckGo web search requires no API key.
 
+
+[Back to top](#springdrift)
+
 ---
 
 ## Configuration
@@ -789,6 +844,9 @@ LLM providers: `anthropic`, `openai`, `openrouter`, `mistral`, `vertex`,
 See `.springdrift_example/config.toml` for the complete reference with every
 section and default value documented.
 
+
+[Back to top](#springdrift)
+
 ---
 
 ## Requirements
@@ -809,6 +867,9 @@ gleam test            # Run the test suite (1414 tests)
 gleam format          # Format all source files
 gleam run             # Run the application
 ```
+
+
+[Back to top](#springdrift)
 
 ---
 

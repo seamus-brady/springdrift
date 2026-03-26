@@ -336,19 +336,32 @@ fn ws_handler(
               mist.continue(state)
             }
             Ok(protocol.RequestNarrativeData) -> {
-              let entries = case state.librarian {
-                Some(l) -> librarian.load_all(l)
-                None -> narrative_log.load_all(state.narrative_dir)
+              // Always read from disk — ETS may be stale if entries were
+              // written by the Archivist but the Librarian notification was
+              // missed or delayed. Disk is the source of truth.
+              let all_entries = narrative_log.load_all(state.narrative_dir)
+              // Limit to most recent 50 entries to avoid oversized WebSocket frames
+              let entries = case list.length(all_entries) > 50 {
+                True -> list.take(list.reverse(all_entries), 50) |> list.reverse
+                False -> all_entries
               }
               let entries_json =
                 json.to_string(json.array(entries, narrative_log.encode_entry))
-              let _ =
-                mist.send_text_frame(
-                  conn,
-                  protocol.encode_server_message(protocol.NarrativeData(
-                    entries_json:,
-                  )),
-                )
+              let msg =
+                protocol.encode_server_message(protocol.NarrativeData(
+                  entries_json:,
+                ))
+              slog.info(
+                "web/gui",
+                "narrative",
+                "Sending "
+                  <> int.to_string(list.length(entries))
+                  <> " entries ("
+                  <> int.to_string(string.byte_size(msg))
+                  <> " bytes)",
+                None,
+              )
+              let _ = mist.send_text_frame(conn, msg)
               mist.continue(state)
             }
             Ok(protocol.RequestSchedulerData) -> {
