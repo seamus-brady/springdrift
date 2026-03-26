@@ -276,6 +276,12 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 # Days after which single-cycle threads with no signal are pruned (default: 7)
 # thread_pruning_days = 7
 
+# Half-life in days for fact confidence decay (default: 30)
+# fact_decay_half_life_days = 30
+
+# Half-life in days for CBR case confidence decay (default: 60)
+# cbr_decay_half_life_days = 60
+
 # ── Agent specifications ─────────────────────────────────────────────────────
 # Per-agent configuration. Profiles override these when active.
 
@@ -402,6 +408,20 @@ summary_schedule = "weekly"  # "weekly" or "monthly"
 [delegation]
 # Maximum delegation depth — how many levels deep agent chains can go (default: 3)
 # max_depth = 3
+
+# ── Escalation ────────────────────────────────────────────────────────────────
+# Mid-cycle model escalation: automatically switch from task_model to
+# reasoning_model when the cheap model encounters difficulties.
+
+[escalation]
+# Enable mid-cycle model escalation (default: true)
+# enabled = true
+
+# Number of tool failures in the current cycle before escalation (default: 2)
+# tool_failure_threshold = 2
+
+# Average D' score threshold for safety-triggered escalation (default: 0.4)
+# safety_score_threshold = 0.4
 
 # ── XStructor ────────────────────────────────────────────────────────────────
 # XML-schema-validated structured LLM output.

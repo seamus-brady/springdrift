@@ -24,7 +24,32 @@ pub type MemoryFact {
     supersedes: Option(String),
     confidence: Float,
     source: String,
+    provenance: Option(FactProvenance),
   )
+}
+
+// ---------------------------------------------------------------------------
+// Provenance — tracks how and where a fact was created
+// ---------------------------------------------------------------------------
+
+pub type FactProvenance {
+  FactProvenance(
+    source_cycle_id: String,
+    source_tool: String,
+    source_agent: String,
+    derivation: FactDerivation,
+  )
+}
+
+pub type FactDerivation {
+  /// From a tool result (web_search, fetch_url, etc.)
+  DirectObservation
+  /// Inferred or synthesised by the agent
+  Synthesis
+  /// Stated by the user/operator
+  OperatorProvided
+  /// Legacy or no provenance available
+  Unknown
 }
 
 // ---------------------------------------------------------------------------

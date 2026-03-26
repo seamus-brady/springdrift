@@ -1,3 +1,4 @@
+import agent/cognitive/escalation.{type EscalationConfig}
 import agent/registry.{type Registry}
 import agent/types.{type Notification}
 import dprime/deterministic.{type DeterministicConfig}
@@ -58,6 +59,8 @@ pub type CognitiveConfig {
     max_delegation_depth: Int,
     sandbox_enabled: Bool,
     deterministic_config: Option(DeterministicConfig),
+    fact_decay_half_life_days: Int,
+    escalation_config: EscalationConfig,
   )
 }
 
@@ -110,5 +113,7 @@ pub fn default_test_config(
     max_delegation_depth: 3,
     sandbox_enabled: False,
     deterministic_config: None,
+    fact_decay_half_life_days: 30,
+    escalation_config: escalation.default_config(),
   )
 }

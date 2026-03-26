@@ -59,6 +59,7 @@ pub type CbrConfig {
     weights: bridge.RetrievalWeights,
     min_score: Float,
     embed_fn: option.Option(fn(String) -> Result(List(Float), String)),
+    cbr_decay_half_life_days: Int,
   )
 }
 
@@ -67,6 +68,7 @@ pub fn default_cbr_config() -> CbrConfig {
     weights: bridge.default_weights(),
     min_score: 0.01,
     embed_fn: option.None,
+    cbr_decay_half_life_days: 60,
   )
 }
 
@@ -92,6 +94,9 @@ pub type PlannerTable
 
 @external(erlang, "springdrift_ffi", "days_between")
 fn days_between(date_a: String, date_b: String) -> Int
+
+@external(erlang, "springdrift_ffi", "get_date")
+fn get_date() -> String
 
 @external(erlang, "springdrift_ffi", "mailbox_size")
 fn get_mailbox_size() -> Int
@@ -1628,13 +1633,16 @@ fn loop(state: LibrarianState) -> Nil {
 
         RetrieveCases(query:, reply_to:) -> {
           let metadata = build_cbr_metadata(state)
+          let today = get_date()
           let results =
-            bridge.retrieve_cases(
+            bridge.retrieve_cases_with_decay(
               state.case_base,
               query,
               metadata,
               state.cbr_config.weights,
               state.cbr_config.min_score,
+              state.cbr_config.cbr_decay_half_life_days,
+              today,
             )
           process.send(reply_to, results)
           loop(state)

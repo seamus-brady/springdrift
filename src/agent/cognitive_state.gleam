@@ -1,3 +1,4 @@
+import agent/cognitive/escalation.{type EscalationConfig}
 import agent/registry.{type Registry}
 import agent/types.{
   type AgentCompletionRecord, type CognitiveMessage, type CognitiveStatus,
@@ -69,6 +70,8 @@ pub type RuntimeConfig {
     max_delegation_depth: Int,
     sandbox_enabled: Bool,
     deterministic_config: Option(DeterministicConfig),
+    fact_decay_half_life_days: Int,
+    escalation_config: EscalationConfig,
   )
 }
 

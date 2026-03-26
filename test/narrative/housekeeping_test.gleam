@@ -142,6 +142,7 @@ fn make_fact(
     supersedes: None,
     confidence: confidence,
     source: "test",
+    provenance: None,
   )
 }
 

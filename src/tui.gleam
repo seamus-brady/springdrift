@@ -366,6 +366,21 @@ fn handle_notification(
           notice: style.yellow("  Sandbox unavailable: " <> reason),
         ),
       )
+    agent_types.ModelEscalation(from_model:, to_model:, reason:) ->
+      continue_loop(
+        TuiState(
+          ..state,
+          notice: style.yellow(
+            "  Escalated: "
+            <> from_model
+            <> " -> "
+            <> to_model
+            <> " ("
+            <> reason
+            <> ")",
+          ),
+        ),
+      )
   }
 }
 

@@ -7,8 +7,10 @@
 //// all files chronologically, so later Writes override earlier entries.
 
 import facts/types.{
-  type FactOp, type FactScope, type MemoryFact, Clear, Ephemeral, MemoryFact,
-  Persistent, Session, Superseded, Write,
+  type FactDerivation, type FactOp, type FactProvenance, type FactScope,
+  type MemoryFact, Clear, DirectObservation, Ephemeral, FactProvenance,
+  MemoryFact, OperatorProvided, Persistent, Session, Superseded, Synthesis,
+  Unknown, Write,
 }
 import gleam/dynamic/decode
 import gleam/json
@@ -232,7 +234,30 @@ pub fn encode_fact(f: MemoryFact) -> json.Json {
     }),
     #("confidence", json.float(f.confidence)),
     #("source", json.string(f.source)),
+    #("provenance", encode_provenance(f.provenance)),
   ])
+}
+
+fn encode_provenance(prov: Option(FactProvenance)) -> json.Json {
+  case prov {
+    None -> json.null()
+    Some(p) ->
+      json.object([
+        #("source_cycle_id", json.string(p.source_cycle_id)),
+        #("source_tool", json.string(p.source_tool)),
+        #("source_agent", json.string(p.source_agent)),
+        #("derivation", json.string(encode_derivation(p.derivation))),
+      ])
+  }
+}
+
+fn encode_derivation(d: FactDerivation) -> String {
+  case d {
+    DirectObservation -> "direct_observation"
+    Synthesis -> "synthesis"
+    OperatorProvided -> "operator_provided"
+    Unknown -> "unknown"
+  }
 }
 
 fn encode_scope(scope: FactScope) -> String {
@@ -291,6 +316,11 @@ pub fn fact_decoder() -> decode.Decoder(MemoryFact) {
     "source",
     decode.optional(decode.string) |> decode.map(option.unwrap(_, "")),
   )
+  use provenance <- decode.optional_field(
+    "provenance",
+    None,
+    decode.optional(provenance_decoder()),
+  )
   decode.success(MemoryFact(
     schema_version:,
     fact_id:,
@@ -304,7 +334,43 @@ pub fn fact_decoder() -> decode.Decoder(MemoryFact) {
     supersedes:,
     confidence:,
     source:,
+    provenance:,
   ))
+}
+
+fn provenance_decoder() -> decode.Decoder(FactProvenance) {
+  use source_cycle_id <- decode.field(
+    "source_cycle_id",
+    decode.optional(decode.string) |> decode.map(option.unwrap(_, "")),
+  )
+  use source_tool <- decode.field(
+    "source_tool",
+    decode.optional(decode.string) |> decode.map(option.unwrap(_, "")),
+  )
+  use source_agent <- decode.field(
+    "source_agent",
+    decode.optional(decode.string) |> decode.map(option.unwrap(_, "")),
+  )
+  use derivation <- decode.field(
+    "derivation",
+    decode.optional(decode.string)
+      |> decode.map(fn(d) { decode_derivation(option.unwrap(d, "unknown")) }),
+  )
+  decode.success(FactProvenance(
+    source_cycle_id:,
+    source_tool:,
+    source_agent:,
+    derivation:,
+  ))
+}
+
+fn decode_derivation(d: String) -> FactDerivation {
+  case d {
+    "direct_observation" -> DirectObservation
+    "synthesis" -> Synthesis
+    "operator_provided" -> OperatorProvided
+    _ -> Unknown
+  }
 }
 
 fn decode_scope(s: String) -> FactScope {

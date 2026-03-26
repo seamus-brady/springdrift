@@ -40,6 +40,7 @@ fn make_fact(fact_id: String, key: String, value: String) -> MemoryFact {
     supersedes: None,
     confidence: 0.9,
     source: "cognitive_loop",
+    provenance: None,
   )
 }
 

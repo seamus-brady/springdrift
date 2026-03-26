@@ -11,6 +11,7 @@ import agent/types as agent_types
 import cbr/types as cbr_types
 import cycle_log
 import dag/types as dag_types
+import dprime/decay
 import facts/log as facts_log
 import facts/types as facts_types
 import gleam/dynamic/decode
@@ -402,7 +403,12 @@ pub fn is_memory_tool(name: String) -> Bool {
 
 /// Context for facts-based memory tools.
 pub type FactsContext {
-  FactsContext(facts_dir: String, cycle_id: String, agent_id: String)
+  FactsContext(
+    facts_dir: String,
+    cycle_id: String,
+    agent_id: String,
+    fact_decay_half_life_days: Int,
+  )
 }
 
 /// Registry entry for agent roster (avoids depending on registry module's opaque type).
@@ -895,6 +901,12 @@ fn run_memory_write(
               supersedes: None,
               confidence:,
               source: "memory_write_tool",
+              provenance: Some(facts_types.FactProvenance(
+                source_cycle_id: ctx.cycle_id,
+                source_tool: "memory_write",
+                source_agent: "cognitive",
+                derivation: facts_types.Synthesis,
+              )),
             )
 
           // Write to JSONL
@@ -946,9 +958,16 @@ fn run_memory_read(
             None -> Error(Nil)
           }
       }
+      let half_life = case facts_ctx {
+        Some(ctx) -> ctx.fact_decay_half_life_days
+        None -> 30
+      }
       case result {
         Ok(fact) ->
-          ToolSuccess(tool_use_id: call.id, content: format_fact(fact))
+          ToolSuccess(
+            tool_use_id: call.id,
+            content: format_fact(fact, half_life),
+          )
         Error(_) ->
           ToolSuccess(
             tool_use_id: call.id,
@@ -996,6 +1015,7 @@ fn run_memory_clear(
               supersedes: None,
               confidence: 0.0,
               source: "memory_clear_tool",
+              provenance: None,
             )
 
           facts_log.append(ctx.facts_dir, fact)
@@ -1045,6 +1065,10 @@ fn run_memory_query(
             None -> []
           }
       }
+      let half_life = case facts_ctx {
+        Some(ctx) -> ctx.fact_decay_half_life_days
+        None -> 30
+      }
       case facts {
         [] ->
           ToolSuccess(
@@ -1052,7 +1076,10 @@ fn run_memory_query(
             content: "No facts found matching '" <> keyword <> "'",
           )
         _ ->
-          ToolSuccess(tool_use_id: call.id, content: format_facts_list(facts))
+          ToolSuccess(
+            tool_use_id: call.id,
+            content: format_facts_list(facts, half_life),
+          )
       }
     }
   }
@@ -1552,29 +1579,71 @@ fn parse_scope(s: String) -> facts_types.FactScope {
   }
 }
 
-fn format_fact(f: facts_types.MemoryFact) -> String {
-  "key: "
-  <> f.key
-  <> "\nvalue: "
-  <> f.value
-  <> "\nscope: "
-  <> scope_to_string(f.scope)
-  <> "\nconfidence: "
-  <> float.to_string(f.confidence)
-  <> "\nsource: "
-  <> f.source
-  <> "\ntimestamp: "
-  <> f.timestamp
+fn format_fact(f: facts_types.MemoryFact, half_life_days: Int) -> String {
+  let effective_confidence =
+    decay.decay_fact_confidence(
+      f.confidence,
+      f.timestamp,
+      get_date(),
+      half_life_days,
+    )
+  let base =
+    "key: "
+    <> f.key
+    <> "\nvalue: "
+    <> f.value
+    <> "\nscope: "
+    <> scope_to_string(f.scope)
+    <> "\nconfidence: "
+    <> float.to_string(effective_confidence)
+    <> "\nsource: "
+    <> f.source
+    <> "\ntimestamp: "
+    <> f.timestamp
+  case f.provenance {
+    None -> base
+    Some(p) ->
+      base
+      <> "\n[source: cycle "
+      <> p.source_cycle_id
+      <> ", tool: "
+      <> p.source_tool
+      <> ", agent: "
+      <> p.source_agent
+      <> ", derivation: "
+      <> format_derivation(p.derivation)
+      <> "]"
+  }
 }
 
-fn format_facts_list(facts: List(facts_types.MemoryFact)) -> String {
+fn format_derivation(d: facts_types.FactDerivation) -> String {
+  case d {
+    facts_types.DirectObservation -> "direct_observation"
+    facts_types.Synthesis -> "synthesis"
+    facts_types.OperatorProvided -> "operator_provided"
+    facts_types.Unknown -> "unknown"
+  }
+}
+
+fn format_facts_list(
+  facts: List(facts_types.MemoryFact),
+  half_life_days: Int,
+) -> String {
+  let today = get_date()
   facts
   |> list.map(fn(f: facts_types.MemoryFact) {
+    let effective_confidence =
+      decay.decay_fact_confidence(
+        f.confidence,
+        f.timestamp,
+        today,
+        half_life_days,
+      )
     f.key
     <> " = "
     <> f.value
     <> " (confidence: "
-    <> float.to_string(f.confidence)
+    <> float.to_string(effective_confidence)
     <> ")"
   })
   |> string.join("\n")

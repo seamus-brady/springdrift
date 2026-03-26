@@ -1,3 +1,4 @@
+import agent/cognitive/escalation
 import agent/cognitive/llm as cognitive_llm
 import agent/cognitive_state.{type CognitiveState, CognitiveState}
 import agent/framework
@@ -5,9 +6,9 @@ import agent/registry
 import agent/types.{
   type AgentOutcome, type CognitiveReply, type DelegationProgress, AgentFailure,
   AgentQuestionSource, AgentSuccess, AgentTask, AgentWaiting, CognitiveQuestion,
-  CognitiveReply, DelegationInfo, Idle, OwnToolWaiting, PendingAgent,
-  PendingThink, QuestionForHuman, Thinking, ToolCalling, WaitingForAgents,
-  WaitingForUser,
+  CognitiveReply, DelegationInfo, Idle, ModelEscalation, OwnToolWaiting,
+  PendingAgent, PendingThink, QuestionForHuman, Thinking, ToolCalling,
+  WaitingForAgents, WaitingForUser,
 }
 import agent/worker
 import cycle_log
@@ -46,6 +47,56 @@ fn pending_node_type(
   case dict.get(state.pending, task_id) {
     Ok(PendingThink(node_type:, ..)) -> node_type
     _ -> dag_types.CognitiveCycle
+  }
+}
+
+/// Check if mid-cycle escalation from task_model to reasoning_model is needed.
+/// Only escalates when currently on task_model (not already on reasoning_model).
+/// Returns the state with model potentially upgraded and notification sent.
+fn maybe_escalate(state: CognitiveState) -> CognitiveState {
+  // Only escalate if currently on the cheap model
+  case state.model == state.task_model && state.model != state.reasoning_model {
+    False -> state
+    True -> {
+      // Count tool failures from cycle_tool_calls
+      let failure_count =
+        list.count(state.cycle_tool_calls, fn(tc) { !tc.success })
+      // Extract D' scores from dprime_decisions
+      let dprime_scores = list.map(state.dprime_decisions, fn(d) { d.score })
+      case
+        escalation.check_escalation(
+          failure_count,
+          dprime_scores,
+          state.config.escalation_config,
+        )
+      {
+        None -> state
+        Some(trigger) -> {
+          let reason = escalation.trigger_reason(trigger)
+          slog.info(
+            "cognitive",
+            "maybe_escalate",
+            "Mid-cycle escalation: "
+              <> state.task_model
+              <> " -> "
+              <> state.reasoning_model
+              <> " reason: "
+              <> reason,
+            state.cycle_id,
+          )
+          // Notify UI
+          process.send(
+            state.notify,
+            ModelEscalation(
+              from_model: state.task_model,
+              to_model: state.reasoning_model,
+              reason: reason,
+            ),
+          )
+          CognitiveState(..state, model: state.reasoning_model)
+        }
+      }
+    }
   }
 }
 
@@ -137,6 +188,7 @@ fn handle_memory_tools(
             facts_dir: paths.facts_dir(),
             cycle_id: cid,
             agent_id: "cognitive",
+            fact_decay_half_life_days: state.config.fact_decay_half_life_days,
           ))
         None -> None
       }
@@ -259,6 +311,8 @@ fn handle_memory_tools(
 
       let new_task_id = cycle_log.generate_uuid()
       let cycle_id = option.unwrap(state.cycle_id, new_task_id)
+      // Check for mid-cycle escalation before re-thinking
+      let state = maybe_escalate(state)
       let new_state =
         CognitiveState(
           ..state,
@@ -321,6 +375,8 @@ fn handle_memory_tools(
           let messages = list.append(state.messages, [assistant_msg, user_msg])
           let new_task_id = cycle_log.generate_uuid()
           let cycle_id = option.unwrap(state.cycle_id, new_task_id)
+          // Check for mid-cycle escalation before re-thinking
+          let state = maybe_escalate(state)
           let new_state =
             CognitiveState(
               ..state,
@@ -970,6 +1026,10 @@ pub fn handle_agent_complete(
 
           let new_task_id = cycle_log.generate_uuid()
           let cycle_id = option.unwrap(state.cycle_id, new_task_id)
+          // Check for mid-cycle escalation before re-thinking
+          let state = maybe_escalate(state)
+          let new_state_with_messages =
+            CognitiveState(..new_state_with_messages, model: state.model)
           let req =
             cognitive_llm.build_request(new_state_with_messages, messages)
           case state.verbose {

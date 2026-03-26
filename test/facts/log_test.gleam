@@ -41,6 +41,7 @@ fn make_fact(fact_id: String, key: String, value: String) -> MemoryFact {
     supersedes: None,
     confidence: 0.9,
     source: "cognitive_loop",
+    provenance: None,
   )
 }
 
@@ -226,4 +227,5 @@ pub fn lenient_decoder_null_fields_test() {
   decoded.supersedes |> should.equal(None)
   decoded.confidence |> should.equal(0.0)
   decoded.source |> should.equal("")
+  decoded.provenance |> should.equal(None)
 }

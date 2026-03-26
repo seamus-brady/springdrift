@@ -130,6 +130,8 @@ pub type AppConfig {
     fact_confidence: Option(Float),
     cbr_pruning_days: Option(Int),
     thread_pruning_days: Option(Int),
+    fact_decay_half_life_days: Option(Int),
+    cbr_decay_half_life_days: Option(Int),
     // ── Agent specs ──
     planner_max_tokens: Option(Int),
     planner_max_turns: Option(Int),
@@ -185,6 +187,10 @@ pub type AppConfig {
     local_reasoning_model: Option(String),
     // ── Delegation ──
     max_delegation_depth: Option(Int),
+    // ── Escalation ──
+    escalation_enabled: Option(Bool),
+    escalation_tool_failure_threshold: Option(Int),
+    escalation_safety_score_threshold: Option(Float),
     // ── Forecaster ──
     forecaster_enabled: Option(Bool),
     forecaster_tick_ms: Option(Int),
@@ -289,6 +295,8 @@ pub fn default() -> AppConfig {
     fact_confidence: None,
     cbr_pruning_days: None,
     thread_pruning_days: None,
+    fact_decay_half_life_days: None,
+    cbr_decay_half_life_days: None,
     planner_max_tokens: None,
     planner_max_turns: None,
     planner_max_errors: None,
@@ -331,6 +339,9 @@ pub fn default() -> AppConfig {
     local_task_model: None,
     local_reasoning_model: None,
     max_delegation_depth: None,
+    escalation_enabled: None,
+    escalation_tool_failure_threshold: None,
+    escalation_safety_score_threshold: None,
     forecaster_enabled: None,
     forecaster_tick_ms: None,
     forecaster_replan_threshold: None,
@@ -619,6 +630,14 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       override_cfg.thread_pruning_days,
       base.thread_pruning_days,
     ),
+    fact_decay_half_life_days: option.or(
+      override_cfg.fact_decay_half_life_days,
+      base.fact_decay_half_life_days,
+    ),
+    cbr_decay_half_life_days: option.or(
+      override_cfg.cbr_decay_half_life_days,
+      base.cbr_decay_half_life_days,
+    ),
     // Agent specs
     planner_max_tokens: option.or(
       override_cfg.planner_max_tokens,
@@ -783,6 +802,18 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     max_delegation_depth: option.or(
       override_cfg.max_delegation_depth,
       base.max_delegation_depth,
+    ),
+    escalation_enabled: option.or(
+      override_cfg.escalation_enabled,
+      base.escalation_enabled,
+    ),
+    escalation_tool_failure_threshold: option.or(
+      override_cfg.escalation_tool_failure_threshold,
+      base.escalation_tool_failure_threshold,
+    ),
+    escalation_safety_score_threshold: option.or(
+      override_cfg.escalation_safety_score_threshold,
+      base.escalation_safety_score_threshold,
     ),
     forecaster_enabled: option.or(
       override_cfg.forecaster_enabled,
@@ -1237,6 +1268,12 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     thread_pruning_days: get_toml_int(table, [
       "housekeeping", "thread_pruning_days",
     ]),
+    fact_decay_half_life_days: get_toml_int(table, [
+      "housekeeping", "fact_decay_half_life_days",
+    ]),
+    cbr_decay_half_life_days: get_toml_int(table, [
+      "housekeeping", "cbr_decay_half_life_days",
+    ]),
     // ── [agents.*] ──
     planner_max_tokens: get_toml_int(table, ["agents", "planner", "max_tokens"]),
     planner_max_turns: get_toml_int(table, ["agents", "planner", "max_turns"]),
@@ -1319,6 +1356,14 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     local_task_model: get_toml_str(table, ["local", "task_model"]),
     local_reasoning_model: get_toml_str(table, ["local", "reasoning_model"]),
     max_delegation_depth: get_toml_int(table, ["delegation", "max_depth"]),
+    // ── [escalation] ──
+    escalation_enabled: get_toml_bool(table, ["escalation", "enabled"]),
+    escalation_tool_failure_threshold: get_toml_int(table, [
+      "escalation", "tool_failure_threshold",
+    ]),
+    escalation_safety_score_threshold: get_toml_float(table, [
+      "escalation", "safety_score_threshold",
+    ]),
     // ── [forecaster] ──
     forecaster_enabled: get_toml_bool(table, ["forecaster", "enabled"]),
     forecaster_tick_ms: get_toml_int(table, ["forecaster", "tick_ms"]),
@@ -1362,7 +1407,7 @@ const known_keys = [
   "narrative", "agent", "log_retention_days", "log_max_file_bytes", "timeouts",
   "retry", "limits", "scoring", "housekeeping", "housekeeper", "cbr", "agents",
   "web", "services", "scheduler", "xstructor", "forecaster", "sandbox",
-  "delegation", "vertex", "anthropic", "mistral", "local",
+  "delegation", "escalation", "vertex", "anthropic", "mistral", "local",
 ]
 
 const known_narrative_keys = [
