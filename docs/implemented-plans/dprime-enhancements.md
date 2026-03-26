@@ -6,6 +6,30 @@
 
 ---
 
+## Table of Contents
+
+- [Academic References](#academic-references)
+  - [Confidence Note](#confidence-note)
+- [Enhancement 1: Confidence Decay on Facts and CBR Cases](#enhancement-1-confidence-decay-on-facts-and-cbr-cases)
+  - [Origin](#origin)
+  - [Current State in Springdrift](#current-state-in-springdrift)
+  - [Proposed Change](#proposed-change)
+  - [Implementation](#implementation)
+- [Enhancement 2: Provenance Tags on Facts](#enhancement-2-provenance-tags-on-facts)
+  - [Origin](#origin)
+  - [Current State in Springdrift](#current-state-in-springdrift)
+  - [Proposed Change](#proposed-change)
+  - [Impact on D' Output Gate](#impact-on-d-output-gate)
+  - [Implementation](#implementation)
+- [Enhancement 3: Formalised Escalation Criteria](#enhancement-3-formalised-escalation-criteria)
+  - [Origin](#origin)
+  - [Current State in Springdrift](#current-state-in-springdrift)
+  - [Proposed Change](#proposed-change)
+  - [Implementation](#implementation)
+- [Implementation Priority](#implementation-priority)
+- [Validation Against Source Papers](#validation-against-source-papers)
+
+
 ## Academic References
 
 | Paper | Authors | ArXiv | Key Contribution |

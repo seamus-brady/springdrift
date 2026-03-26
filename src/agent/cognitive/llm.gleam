@@ -366,14 +366,31 @@ fn consume_meta_intervention(
           )
           let tighten = fn(ds: dprime_types.DprimeState) -> dprime_types.DprimeState {
             let cfg = ds.config
+            // Apply floor — never tighten below min thresholds
+            let new_modify =
+              float_max(
+                ds.current_modify_threshold *. factor,
+                cfg.min_modify_threshold,
+              )
+            let new_reject =
+              float_max(
+                ds.current_reject_threshold *. factor,
+                cfg.min_reject_threshold,
+              )
             dprime_types.DprimeState(
               ..ds,
-              current_modify_threshold: ds.current_modify_threshold *. factor,
-              current_reject_threshold: ds.current_reject_threshold *. factor,
+              current_modify_threshold: new_modify,
+              current_reject_threshold: new_reject,
               config: dprime_types.DprimeConfig(
                 ..cfg,
-                modify_threshold: cfg.modify_threshold *. factor,
-                reject_threshold: cfg.reject_threshold *. factor,
+                modify_threshold: float_max(
+                  cfg.modify_threshold *. factor,
+                  cfg.min_modify_threshold,
+                ),
+                reject_threshold: float_max(
+                  cfg.reject_threshold *. factor,
+                  cfg.min_reject_threshold,
+                ),
               ),
             )
           }
@@ -409,5 +426,12 @@ fn consume_meta_intervention(
         }
       }
     }
+  }
+}
+
+fn float_max(a: Float, b: Float) -> Float {
+  case a >. b {
+    True -> a
+    False -> b
   }
 }

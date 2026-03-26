@@ -7,6 +7,44 @@
 
 ---
 
+## Table of Contents
+
+- [Academic References](#academic-references)
+  - [Theoretical Foundation](#theoretical-foundation)
+- [Enhancement 1: CBR Retrieval Tracking + Hit/Harm Counters](#enhancement-1-cbr-retrieval-tracking-hitharm-counters)
+  - [Origin](#origin)
+  - [Current State](#current-state)
+  - [Proposed Change](#proposed-change)
+  - [Implementation](#implementation)
+- [Enhancement 2: K=4 Retrieval Cap](#enhancement-2-k4-retrieval-cap)
+  - [Origin](#origin)
+  - [Current State](#current-state)
+  - [Proposed Change](#proposed-change)
+  - [Implementation](#implementation)
+- [Enhancement 3: CBR Case Categories](#enhancement-3-cbr-case-categories)
+  - [Origin](#origin)
+  - [Current State](#current-state)
+  - [Proposed Change](#proposed-change)
+  - [Implementation](#implementation)
+- [Enhancement 4: Split Archivist into Reflector + Curator Phases](#enhancement-4-split-archivist-into-reflector-curator-phases)
+  - [Origin](#origin)
+  - [Current State](#current-state)
+  - [Proposed Change](#proposed-change)
+  - [Implementation](#implementation)
+- [Enhancement 5: Budget-Triggered Housekeeping](#enhancement-5-budget-triggered-housekeeping)
+  - [Origin](#origin)
+  - [Current State](#current-state)
+  - [Proposed Change](#proposed-change)
+  - [Implementation](#implementation)
+- [Enhancement 6: Canonical Meta-States in Sensorium](#enhancement-6-canonical-meta-states-in-sensorium)
+  - [Origin](#origin)
+  - [Current State](#current-state)
+  - [Proposed Change](#proposed-change)
+  - [Implementation](#implementation)
+- [Implementation Priority](#implementation-priority)
+- [What This Does NOT Include](#what-this-does-not-include)
+
+
 ## Academic References
 
 | Paper | Authors | ArXiv | Key Contribution |
