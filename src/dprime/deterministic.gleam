@@ -1,8 +1,15 @@
 //// Deterministic pre-filter for D' safety gates.
 //// Pure-function module — no external calls at evaluation time.
-//// Runs regex-based rules against input/tool/output text and returns
-//// Block, Escalate, or Pass decisions without any LLM calls.
+////
+//// Three layers:
+////   1. Input normalisation (unicode confusables, whitespace, case)
+////   2. Structural injection detection (boundary + imperative + target)
+////   3. Configurable regex rules from dprime.json
+////
+//// The structural detector catches injection patterns that exact-match
+//// regex rules miss (synonym substitution, unicode evasion, encoding).
 
+import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
@@ -72,13 +79,31 @@ pub fn default_config() -> DeterministicConfig {
 // ---------------------------------------------------------------------------
 
 /// Check user/scheduler input text against input rules.
+/// Runs normalisation → structural detection → configurable regex rules.
 pub fn check_input(
   text: String,
   config: DeterministicConfig,
 ) -> DeterministicResult {
   case config.enabled {
     False -> Pass
-    True -> check_rules(text, config.input_rules)
+    True -> {
+      let normalised = normalise_input(text)
+      // Layer 1: Configurable regex rules (operator-defined, highest priority)
+      case check_rules(normalised, config.input_rules) {
+        Pass ->
+          // Layer 2: Structural injection detection (built-in)
+          case detect_structural_injection(normalised) {
+            Some(result) -> result
+            None ->
+              // Layer 3: Payload signature detection (built-in)
+              case detect_payload_signatures(text) {
+                Some(result) -> result
+                None -> Pass
+              }
+          }
+        other -> other
+      }
+    }
   }
 }
 
@@ -116,7 +141,241 @@ pub fn check_output(
 }
 
 // ---------------------------------------------------------------------------
-// Internal: rule matching
+// Layer 1: Input normalisation
+// ---------------------------------------------------------------------------
+
+/// Normalise input text to defeat evasion techniques.
+/// Lowercase, collapse whitespace, strip unicode confusables.
+pub fn normalise_input(text: String) -> String {
+  text
+  |> string.lowercase()
+  |> collapse_whitespace()
+  |> strip_confusables()
+}
+
+fn collapse_whitespace(text: String) -> String {
+  do_collapse_ws(text, False, "")
+}
+
+fn do_collapse_ws(text: String, last_was_space: Bool, acc: String) -> String {
+  case string.pop_grapheme(text) {
+    Error(_) -> acc
+    Ok(#(char, rest)) ->
+      case char == " " || char == "\t" {
+        True ->
+          case last_was_space {
+            True -> do_collapse_ws(rest, True, acc)
+            False -> do_collapse_ws(rest, True, acc <> " ")
+          }
+        False -> do_collapse_ws(rest, False, acc <> char)
+      }
+  }
+}
+
+fn strip_confusables(text: String) -> String {
+  text
+  |> string.replace("0", "o")
+  |> string.replace("1", "l")
+  |> string.replace("3", "e")
+  |> string.replace("@", "a")
+  |> string.replace("$", "s")
+  |> string.replace("\u{200B}", "")
+  |> string.replace("\u{200C}", "")
+  |> string.replace("\u{200D}", "")
+  |> string.replace("\u{FEFF}", "")
+  |> string.replace("\u{00AD}", "")
+}
+
+// ---------------------------------------------------------------------------
+// Layer 2: Structural injection detection
+// ---------------------------------------------------------------------------
+
+/// Detect injection by structure: boundary marker + imperative verb + system target.
+/// Returns Escalated (not Blocked) to avoid false positives on benign input.
+fn detect_structural_injection(
+  normalised_text: String,
+) -> Option(DeterministicResult) {
+  let score = compute_injection_score(normalised_text)
+  case score >= 6 {
+    True ->
+      Some(Blocked(
+        rule_id: "structural_injection",
+        reason: "Structural injection pattern detected (score: "
+          <> int.to_string(score)
+          <> ")",
+      ))
+    False ->
+      case score >= 4 {
+        True ->
+          Some(Escalated(
+            rule_id: "structural_injection",
+            context: "Suspicious structural pattern (score: "
+              <> int.to_string(score)
+              <> ")",
+          ))
+        False -> None
+      }
+  }
+}
+
+/// Compute a weighted injection score from structural signals.
+pub fn compute_injection_score(text: String) -> Int {
+  let boundary = has_boundary_marker(text)
+  let imperative = count_imperative_verbs(text)
+  let target = has_system_target(text)
+  let role_play = has_role_play_pattern(text)
+  let multi_instruction = has_multiple_instructions(text)
+
+  let score =
+    {
+      case boundary {
+        True -> 2
+        False -> 0
+      }
+    }
+    + { int.min(imperative, 2) * 2 }
+    + {
+      case target {
+        True -> 2
+        False -> 0
+      }
+    }
+    + {
+      case role_play {
+        True -> 3
+        False -> 0
+      }
+    }
+    + {
+      case multi_instruction {
+        True -> 1
+        False -> 0
+      }
+    }
+
+  score
+}
+
+fn has_boundary_marker(text: String) -> Bool {
+  list.any(boundary_markers(), fn(marker) { string.contains(text, marker) })
+}
+
+fn boundary_markers() -> List(String) {
+  [
+    "---", "###", "===", "***", "[inst]", "[/inst]", "<|system|>", "<|user|>",
+    "<|assistant|>", "system:", "user:", "assistant:", "\\n\\n", "```",
+  ]
+}
+
+fn count_imperative_verbs(text: String) -> Int {
+  list.count(imperative_verbs(), fn(verb) { string.contains(text, verb) })
+}
+
+fn imperative_verbs() -> List(String) {
+  [
+    "ignore", "disregard", "forget", "override", "bypass", "skip", "suppress",
+    "abandon", "discard", "dismiss", "overwrite", "replace", "reset", "clear",
+    "drop", "remove", "delete", "eliminate", "nullify", "violate", "break",
+    "escape", "circumvent", "evade",
+  ]
+}
+
+fn has_system_target(text: String) -> Bool {
+  list.any(system_targets(), fn(target) { string.contains(text, target) })
+}
+
+fn system_targets() -> List(String) {
+  [
+    "previous instructions", "prior instructions", "above instructions",
+    "earlier instructions", "prior directives", "original directives",
+    "system prompt", "initial prompt", "original prompt", "your instructions",
+    "your rules", "your guidelines", "your constraints", "your programming",
+    "your training", "safety rules", "safety guidelines", "safety constraints",
+    "content policy", "ethical guidelines", "no restrictions", "no rules",
+    "no constraints", "no limits", "without restrictions", "without safety",
+    "without constraints", "unrestricted", "unfiltered", "uncensored",
+  ]
+}
+
+fn has_role_play_pattern(text: String) -> Bool {
+  // "you are now X", "act as X", "pretend to be X", "become X"
+  // But NOT in mid-sentence context (check for line-start or boundary)
+  let patterns = [
+    "you are now ", "from now on you are ", "you are a ", "pretend to be ",
+    "pretend you are ", "pretend that you", "act as ", "behave as ", "become ",
+    "you must ", "you will now ", "you should now ", "new role:",
+    "new instructions:", "new persona:",
+  ]
+  list.any(patterns, fn(p) {
+    // Only match at start of text or after a boundary marker
+    string.starts_with(text, p)
+    || string.contains(text, "\n" <> p)
+    || string.contains(text, "---" <> p)
+    || string.contains(text, ". " <> p)
+  })
+}
+
+fn has_multiple_instructions(text: String) -> Bool {
+  // Multiple imperative sentences suggest an instruction sequence
+  let verbs_found = count_imperative_verbs(text)
+  verbs_found >= 3
+}
+
+// ---------------------------------------------------------------------------
+// Layer 3: Payload signature detection
+// ---------------------------------------------------------------------------
+
+/// Detect known payload structures (base64 blocks, encoded instructions, etc.)
+fn detect_payload_signatures(
+  original_text: String,
+) -> Option(DeterministicResult) {
+  // Check for base64 blocks (40+ chars of base64 alphabet)
+  case re_match_caseless(original_text, "[A-Za-z0-9+/]{40,}={0,2}") {
+    True ->
+      Some(Escalated(
+        rule_id: "payload_base64",
+        context: "Potential base64-encoded payload detected",
+      ))
+    False -> check_more_signatures(original_text)
+  }
+}
+
+fn check_more_signatures(text: String) -> Option(DeterministicResult) {
+  // Markdown code fence containing system-level keywords
+  case
+    re_match_caseless(
+      text,
+      "```[\\s\\S]*(?:system|ignore|override|bypass)[\\s\\S]*```",
+    )
+  {
+    True ->
+      Some(Escalated(
+        rule_id: "payload_code_fence",
+        context: "Code fence containing system-level keywords",
+      ))
+    False -> check_xml_injection(text)
+  }
+}
+
+fn check_xml_injection(text: String) -> Option(DeterministicResult) {
+  // XML/HTML tags that look like instruction injection
+  case
+    re_match_caseless(
+      text,
+      "<(?:system|instruction|prompt|override|inject)[^>]*>",
+    )
+  {
+    True ->
+      Some(Escalated(
+        rule_id: "payload_xml_injection",
+        context: "XML/HTML tag resembling instruction injection",
+      ))
+    False -> None
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Internal: rule matching (configurable regex from dprime.json)
 // ---------------------------------------------------------------------------
 
 /// Run a list of rules against text. Returns first Block, then first Escalate,

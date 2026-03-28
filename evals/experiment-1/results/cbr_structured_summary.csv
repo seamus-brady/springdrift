@@ -1,0 +1,5 @@
+config,n_cases,n_queries,precision_at_4,mrr
+full_weighted,40,6,0.5417,1.0000
+field_only,40,6,0.5000,1.0000
+index_only,40,6,0.6667,1.0000
+field_index_domain,40,6,0.5833,1.0000

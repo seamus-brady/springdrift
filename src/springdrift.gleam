@@ -648,7 +648,7 @@ fn run(cfg: AppConfig) -> Nil {
 
   // Load character spec for normative calculus (from identity directories)
   let normative_calculus_enabled =
-    option.unwrap(cfg.normative_calculus_enabled, False)
+    option.unwrap(cfg.normative_calculus_enabled, True)
   let character_spec = case normative_calculus_enabled {
     True -> normative_character.load_character(paths.default_identity_dirs())
     False -> option.None

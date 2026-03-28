@@ -82,12 +82,14 @@ summary_schedule = "weekly"
 # embedding_enabled = true
 # embedding_model = "nomic-embed-text"
 # embedding_base_url = "http://localhost:11434"
-# field_weight = 0.35
+# Weights tuned from experiment-3 ablation (must sum to 1.0).
+# When embeddings unavailable, embedding_weight is redistributed.
+# field_weight = 0.10
 # index_weight = 0.25
-# recency_weight = 0.15
-# domain_weight = 0.15
-# embedding_weight = 0.10
-# utility_weight = 0.15
+# recency_weight = 0.05
+# domain_weight = 0.10
+# embedding_weight = 0.40
+# utility_weight = 0.10
 # min_score = 0.01
 
 [scoring.threading]
@@ -100,7 +102,7 @@ summary_schedule = "weekly"
 
 [dprime]
 # gate_timeout_ms = 60000
-# normative_calculus_enabled = false
+# normative_calculus_enabled = true   # Enabled by default; requires identity/character.json
 
 [escalation]
 # enabled = true

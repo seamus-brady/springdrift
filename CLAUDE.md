@@ -331,7 +331,7 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `dprime_enabled` | `--dprime` / `--no-dprime` | True | Enable D' safety evaluation before tool dispatch |
 | `dprime_config` | `--dprime-config` | built-in defaults | Path to D' config JSON file |
 | `gate_timeout_ms` | — | 60000 | Gate evaluation timeout (ms) — fail-open after this delay |
-| `normative_calculus_enabled` | — | False | Enable Stoic normative calculus in output gate (requires character.json) |
+| `normative_calculus_enabled` | — | True | Stoic normative calculus in output gate (requires character.json) |
 | `max_output_modifications` | — | 2 | Max iterations for output gate MODIFY loop |
 | `narrative_dir` | `--narrative-dir` | `.springdrift/memory/narrative` | Directory for narrative JSON-L files (narrative is always enabled) |
 | `archivist_model` | — | task_model | Model used by the Archivist for narrative generation |
@@ -804,9 +804,10 @@ Every verdict includes a named axiom trail — the list of rules that fired duri
 resolution. This trail appears in the output gate explanation and cycle log,
 making decisions auditable and inspectable.
 
-Disabled by default (`normative_calculus_enabled = false` in `[dprime]` config
-section). When disabled, zero behaviour change — the output gate uses plain D'
-threshold comparison as before.
+Enabled by default (`normative_calculus_enabled = true`). Requires
+`identity/character.json` — if the character spec is missing, falls back to
+plain D' threshold comparison. Set `normative_calculus_enabled = false` in
+`[dprime]` to disable explicitly.
 
 **Meta observer** — Layer 3b post-cycle safety evaluation in `src/meta/`. Runs after
 each cognitive cycle completes, analyzing patterns across gate decisions. Detectors

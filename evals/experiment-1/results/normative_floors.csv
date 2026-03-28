@@ -1,0 +1,9 @@
+floor,verdict,rule_fired,pass
+floor_1,prohibited,floor_1_absolute_prohibition,True
+floor_2,prohibited,floor_2_superordinate_legal,True
+floor_3,prohibited,floor_3_dprime_reject,True
+floor_4,constrained,floor_4_catastrophic_superordinate,True
+floor_5,constrained,floor_5_multiple_coordinate,True
+floor_6,constrained,floor_6_dprime_modify,True
+floor_7,constrained,floor_7_mid_level_superordinate,True
+floor_8,flourishing,floor_8_flourishing,True

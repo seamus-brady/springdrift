@@ -1,0 +1,13 @@
+{"type":"summary","total_nps":84,"total_pairs":7056,"unique_rules_fired":8,"monotonicity_violations":0,"determinism_violations":0,"coverage":1.0}
+{"type":"rule_distribution","rule":"axiom_6.2_absolute_prohibition","count":56,"pct":0.7936507936507936}
+{"type":"rule_distribution","rule":"axiom_6.3_moral_priority","count":1040,"pct":14.739229024943311}
+{"type":"rule_distribution","rule":"axiom_6.4_moral_rank","count":26,"pct":0.36848072562358275}
+{"type":"rule_distribution","rule":"axiom_6.6_futility","count":3528,"pct":50.0}
+{"type":"rule_distribution","rule":"axiom_6.7_indifference","count":1176,"pct":16.666666666666668}
+{"type":"rule_distribution","rule":"equal_weight_coordinate","count":54,"pct":0.7653061224489796}
+{"type":"rule_distribution","rule":"user_level_dominant","count":1092,"pct":15.476190476190476}
+{"type":"rule_distribution","rule":"user_operator_dominant","count":84,"pct":1.1904761904761905}
+{"type":"severity_distribution","severity":"absolute","count":56,"pct":0.7936507936507936}
+{"type":"severity_distribution","severity":"coordinate","count":54,"pct":0.7653061224489796}
+{"type":"severity_distribution","severity":"no_conflict","count":5880,"pct":83.33333333333333}
+{"type":"severity_distribution","severity":"superordinate","count":1066,"pct":15.107709750566894}

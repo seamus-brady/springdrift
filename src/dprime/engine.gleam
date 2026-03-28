@@ -57,8 +57,9 @@ pub fn max_possible_score(features: List(Feature), tiers: Int) -> Int {
   list.fold(features, 0, fn(acc, f) { acc + feature_importance(f, tiers) * 3 })
 }
 
-/// Legacy scaling unit — kept for backward compatibility with tests.
-/// Prefer max_possible_score for correct normalization.
+/// DEPRECATED: Legacy scaling unit — mathematically incorrect for non-symmetric
+/// feature trees. Kept only for backward compatibility with existing tests.
+/// Use max_possible_score() for correct normalization.
 pub fn scaling_unit(tiers: Int) -> Int {
   pow3(tiers + 1)
 }

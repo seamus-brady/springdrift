@@ -839,11 +839,12 @@ fn encode_dprime_gate(record: DprimeGateRecord) -> json.Json {
 /// Build JSON for the normative calculus config panel in the web admin.
 /// Reads character.json from identity directories and config.toml for enabled flag.
 fn build_normative_config_json() -> String {
-  // Check if normative calculus is enabled by reading config
+  // Normative calculus is enabled by default (True).
+  // Only disabled if config explicitly says false.
   let enabled = case simplifile.read(paths.local_config()) {
     Ok(contents) ->
-      string.contains(contents, "normative_calculus_enabled = true")
-    Error(_) -> False
+      !string.contains(contents, "normative_calculus_enabled = false")
+    Error(_) -> True
   }
 
   let character =

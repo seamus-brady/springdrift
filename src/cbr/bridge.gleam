@@ -51,15 +51,17 @@ pub type RetrievalWeights {
   )
 }
 
-/// Default retrieval weights.
+/// Default retrieval weights. Must sum to 1.0.
+/// Tuned from experiment-3 ablation: index+embedding dominates.
+/// When embeddings unavailable, weights are renormalized automatically.
 pub fn default_weights() -> RetrievalWeights {
   RetrievalWeights(
-    field_weight: 0.35,
+    field_weight: 0.1,
     index_weight: 0.25,
-    recency_weight: 0.15,
-    domain_weight: 0.15,
-    embedding_weight: 0.1,
-    utility_weight: 0.15,
+    recency_weight: 0.05,
+    domain_weight: 0.1,
+    embedding_weight: 0.4,
+    utility_weight: 0.1,
   )
 }
 

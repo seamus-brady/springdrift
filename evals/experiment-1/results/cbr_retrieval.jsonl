@@ -1,0 +1,6 @@
+{"config":"full_6signal","n_cases":408,"n_queries":50,"mean_precision_at_4":0.49,"mean_mrr":0.4,"mean_recall_at_4":0.68,"queries_with_results":50,"queries_with_relevant":38}
+{"config":"field_only","n_cases":408,"n_queries":50,"mean_precision_at_4":0.35,"mean_mrr":0.3466666666666666,"mean_recall_at_4":0.48499999999999993,"queries_with_results":50,"queries_with_relevant":38}
+{"config":"index_only","n_cases":408,"n_queries":50,"mean_precision_at_4":0.235,"mean_mrr":0.2866666666666667,"mean_recall_at_4":0.3400000000000001,"queries_with_results":50,"queries_with_relevant":38}
+{"config":"recency_only","n_cases":408,"n_queries":50,"mean_precision_at_4":0.0,"mean_mrr":0.0,"mean_recall_at_4":0.0,"queries_with_results":50,"queries_with_relevant":38}
+{"config":"domain_only","n_cases":408,"n_queries":50,"mean_precision_at_4":0.545,"mean_mrr":0.67,"mean_recall_at_4":0.735,"queries_with_results":50,"queries_with_relevant":38}
+{"config":"field_index","n_cases":408,"n_queries":50,"mean_precision_at_4":0.35,"mean_mrr":0.345,"mean_recall_at_4":0.48666666666666664,"queries_with_results":50,"queries_with_relevant":38}

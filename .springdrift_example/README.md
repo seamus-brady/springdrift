@@ -61,8 +61,8 @@ session context:
 
 - **`character.json`** — character specification for the normative calculus. Defines
   the agent's virtues (named behavioural expressions) and highest endeavour (normative
-  propositions). Only loaded when `normative_calculus_enabled = true` in `[dprime]`
-  config. Controls how the output gate reasons about quality decisions using Stoic
+  propositions). Loaded by default (normative calculus is enabled by default).
+  Controls how the output gate reasons about quality decisions using Stoic
   virtue ethics — each gate verdict includes a named axiom trail. The operator
   controls strictness by choosing `required` (categorical) vs `ought` (advisory)
   operators on each proposition.
