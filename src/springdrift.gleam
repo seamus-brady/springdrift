@@ -10,6 +10,7 @@ import agents/observer
 import agents/planner
 import agents/researcher
 import agents/scheduler as scheduler_agent
+import backup/actor as backup_actor
 import cbr/bridge as cbr_bridge
 import config.{type AppConfig}
 import dot_env
@@ -888,6 +889,29 @@ fn run(cfg: AppConfig) -> Nil {
           )
       }
     }
+  }
+
+  // Start git backup actor (if enabled)
+  case option.unwrap(cfg.backup_enabled, True) {
+    True -> {
+      let backup_config =
+        backup_actor.BackupConfig(
+          enabled: True,
+          data_dir: paths.project_dir(),
+          mode: option.unwrap(cfg.backup_mode, "periodic"),
+          cycle_interval: 1,
+          periodic_interval_ms: option.unwrap(cfg.backup_interval_ms, 300_000),
+          remote_url: cfg.backup_remote_url,
+          branch: option.unwrap(cfg.backup_branch, "main"),
+          push_interval_ms: 3_600_000,
+        )
+      case backup_actor.start(backup_config) {
+        Ok(_) ->
+          io.println("Backup   : started (git, " <> backup_config.mode <> ")")
+        Error(e) -> io.println("Backup   : failed to start — " <> e)
+      }
+    }
+    False -> Nil
   }
 
   // Start GUI

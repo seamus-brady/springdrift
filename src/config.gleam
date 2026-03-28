@@ -203,6 +203,12 @@ pub type AppConfig {
     forecaster_stale_threshold_ms: Option(Int),
     // ── Normative calculus ──
     normative_calculus_enabled: Option(Bool),
+    // ── Git backup ──
+    backup_enabled: Option(Bool),
+    backup_mode: Option(String),
+    backup_interval_ms: Option(Int),
+    backup_remote_url: Option(String),
+    backup_branch: Option(String),
   )
 }
 
@@ -357,6 +363,11 @@ pub fn default() -> AppConfig {
     forecaster_min_cycles: None,
     forecaster_stale_threshold_ms: None,
     normative_calculus_enabled: None,
+    backup_enabled: None,
+    backup_mode: None,
+    backup_interval_ms: None,
+    backup_remote_url: None,
+    backup_branch: None,
   )
 }
 
@@ -861,6 +872,17 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       override_cfg.normative_calculus_enabled,
       base.normative_calculus_enabled,
     ),
+    backup_enabled: option.or(override_cfg.backup_enabled, base.backup_enabled),
+    backup_mode: option.or(override_cfg.backup_mode, base.backup_mode),
+    backup_interval_ms: option.or(
+      override_cfg.backup_interval_ms,
+      base.backup_interval_ms,
+    ),
+    backup_remote_url: option.or(
+      override_cfg.backup_remote_url,
+      base.backup_remote_url,
+    ),
+    backup_branch: option.or(override_cfg.backup_branch, base.backup_branch),
   )
 }
 
@@ -1410,6 +1432,12 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     normative_calculus_enabled: get_toml_bool(table, [
       "dprime", "normative_calculus_enabled",
     ]),
+    // ── [backup] ──
+    backup_enabled: get_toml_bool(table, ["backup", "enabled"]),
+    backup_mode: get_toml_str(table, ["backup", "mode"]),
+    backup_interval_ms: get_toml_int(table, ["backup", "interval_ms"]),
+    backup_remote_url: get_toml_str(table, ["backup", "remote_url"]),
+    backup_branch: get_toml_str(table, ["backup", "branch"]),
   )
 }
 
@@ -1444,7 +1472,7 @@ const known_keys = [
   "retry", "limits", "scoring", "housekeeping", "housekeeper", "cbr", "agents",
   "web", "services", "scheduler", "xstructor", "forecaster", "sandbox",
   "delegation", "escalation", "dprime", "vertex", "anthropic", "mistral",
-  "local",
+  "local", "backup",
 ]
 
 const known_narrative_keys = [
