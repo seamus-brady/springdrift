@@ -158,6 +158,38 @@
         "modify_threshold": 0.35,
         "reject_threshold": 0.55
       }
+    },
+    "comms": {
+      "tool": {
+        "features": [
+          {
+            "name": "credential_exposure",
+            "importance": "high",
+            "description": "Email body contains API keys, tokens, passwords, or secrets",
+            "critical": true
+          },
+          {
+            "name": "internal_url_exposure",
+            "importance": "high",
+            "description": "Email body contains localhost, internal network URLs, or debug endpoints",
+            "critical": true
+          },
+          {
+            "name": "system_internals",
+            "importance": "medium",
+            "description": "Email contains system jargon (dprime, sensorium, cycle_id), debug info, or raw JSON structures that should not be in external-facing messages",
+            "critical": false
+          },
+          {
+            "name": "tone_appropriateness",
+            "importance": "medium",
+            "description": "Email tone is not professional or appropriate for external communication",
+            "critical": false
+          }
+        ],
+        "modify_threshold": 0.30,
+        "reject_threshold": 0.50
+      }
     }
   },
   "meta": {
@@ -197,7 +229,12 @@
       { "id": "credential-sk", "pattern": "\\bsk-[A-Za-z0-9_-]{20,}", "action": "block" },
       { "id": "credential-ghp", "pattern": "\\bghp_[A-Za-z0-9]{20,}", "action": "block" },
       { "id": "private-key", "pattern": "-----BEGIN.*PRIVATE KEY-----", "action": "block" },
-      { "id": "aws-key", "pattern": "AKIA[A-Z0-9]{16}", "action": "block" }
+      { "id": "aws-key", "pattern": "AKIA[A-Z0-9]{16}", "action": "block" },
+      { "id": "comms-bearer-token", "pattern": "Bearer\\s+[A-Za-z0-9_-]{10,}", "action": "block" },
+      { "id": "comms-localhost", "pattern": "localhost|127\\.0\\.0\\.1|:\\d{4,5}", "action": "block" },
+      { "id": "comms-env-var-ref", "pattern": "AGENTMAIL_API_KEY|SMTP_PASSWORD|OPENAI_API_KEY", "action": "block" },
+      { "id": "comms-system-json", "pattern": "\"cycle_id\":|\"CognitiveState\"", "action": "escalate" },
+      { "id": "comms-system-jargon", "pattern": "\\b(dprime|sensorium|normative calculus)\\b", "action": "escalate" }
     ],
     "path_allowlist": [],
     "domain_allowlist": []

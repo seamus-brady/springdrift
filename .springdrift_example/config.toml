@@ -241,3 +241,24 @@ summary_schedule = "weekly"
 # replan_threshold = 0.55
 # min_cycles = 2
 # stale_threshold_ms = 1800000
+
+# ── Communications ──────────────────────────────────────────────────────────
+
+[comms]
+# Enable the communications agent (default: false)
+# enabled = false
+
+# AgentMail inbox ID (required when enabled)
+# inbox_id = ""
+
+# Env var holding the AgentMail API key (default: AGENTMAIL_API_KEY)
+# api_key_env = "AGENTMAIL_API_KEY"
+
+# Email addresses the agent is allowed to contact (hard allowlist)
+# allowed_recipients = []
+
+# Display name for outbound email (defaults to agent name)
+# from_name = ""
+
+# Max outbound emails per hour (default: 20)
+# max_outbound_per_hour = 20

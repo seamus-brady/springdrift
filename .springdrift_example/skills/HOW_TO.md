@@ -126,6 +126,22 @@ for drift — only the operator can tune the character spec or D' config.
 instructed to fix only the specific flagged issues while preserving all other content.
 It will not strip out unflagged content or add unnecessary hedging.
 
+## Communications Tasks
+
+To send email, use `agent_comms` delegation. Always call `list_contacts` first to
+verify the recipient is on the allowlist. Comms tools are NOT D'-exempt — they pass
+through the full D' tool gate with tighter thresholds (agent override).
+
+- **send_email**(to, subject, body) — send email via AgentMail. Recipient must be in
+  `comms_allowed_recipients` config (hard allowlist, checked before D' gate).
+- **list_contacts** — list allowed recipients from config
+- **check_inbox** — list recent messages in the inbox
+- **read_message**(message_id) — read full message content by ID
+
+Comms is disabled by default. Enable with `comms_enabled = true` in `[comms]` config
+and set `comms_inbox_id` to the AgentMail inbox ID. The `AGENTMAIL_API_KEY` env var
+must be set.
+
 ## Code Tasks
 
 1. Call `recall_cases(intent: "code")` for relevant past patterns
@@ -183,6 +199,7 @@ When verification fails, use `recall_cases` to check if this is a known pattern.
 - **agent_coder** — code writing, debugging, refactoring (builtin tools, max 10 turns)
 - **agent_writer** — long-form writing and structured reports (builtin tools, max 6 turns)
 - **agent_observer** — diagnostic memory examination (diagnostic memory tools, max 6 turns)
+- **agent_comms** — email send/receive via AgentMail (comms tools, max 6 turns, requires `comms_enabled`)
 
 ### Agent error surfacing
 
@@ -344,6 +361,7 @@ When a required API key is missing, fall back gracefully:
 - **Brave tools unavailable** (no `BRAVE_API_KEY`) → use `web_search` (DuckDuckGo, no key required)
 - **jina_reader unavailable** (no `JINA_API_KEY`) → use `fetch_url` as fallback
 - **Sandbox unavailable** (no podman) → coder uses `request_human_input` to ask user to run code
+- **Comms unavailable** (no `AGENTMAIL_API_KEY` or `comms_enabled = false`) → comms agent not loaded, email tools unavailable
 
 ## What to Avoid
 

@@ -209,6 +209,13 @@ pub type AppConfig {
     backup_interval_ms: Option(Int),
     backup_remote_url: Option(String),
     backup_branch: Option(String),
+    // ── Communications ──
+    comms_enabled: Option(Bool),
+    comms_inbox_id: Option(String),
+    comms_api_key_env: Option(String),
+    comms_allowed_recipients: Option(List(String)),
+    comms_from_name: Option(String),
+    comms_max_outbound_per_hour: Option(Int),
   )
 }
 
@@ -368,6 +375,12 @@ pub fn default() -> AppConfig {
     backup_interval_ms: None,
     backup_remote_url: None,
     backup_branch: None,
+    comms_enabled: None,
+    comms_inbox_id: None,
+    comms_api_key_env: None,
+    comms_allowed_recipients: None,
+    comms_from_name: None,
+    comms_max_outbound_per_hour: None,
   )
 }
 
@@ -883,6 +896,24 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       base.backup_remote_url,
     ),
     backup_branch: option.or(override_cfg.backup_branch, base.backup_branch),
+    comms_enabled: option.or(override_cfg.comms_enabled, base.comms_enabled),
+    comms_inbox_id: option.or(override_cfg.comms_inbox_id, base.comms_inbox_id),
+    comms_api_key_env: option.or(
+      override_cfg.comms_api_key_env,
+      base.comms_api_key_env,
+    ),
+    comms_allowed_recipients: option.or(
+      override_cfg.comms_allowed_recipients,
+      base.comms_allowed_recipients,
+    ),
+    comms_from_name: option.or(
+      override_cfg.comms_from_name,
+      base.comms_from_name,
+    ),
+    comms_max_outbound_per_hour: option.or(
+      override_cfg.comms_max_outbound_per_hour,
+      base.comms_max_outbound_per_hour,
+    ),
   )
 }
 
@@ -1438,6 +1469,17 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     backup_interval_ms: get_toml_int(table, ["backup", "interval_ms"]),
     backup_remote_url: get_toml_str(table, ["backup", "remote_url"]),
     backup_branch: get_toml_str(table, ["backup", "branch"]),
+    // ── [comms] ──
+    comms_enabled: get_toml_bool(table, ["comms", "enabled"]),
+    comms_inbox_id: get_toml_str(table, ["comms", "inbox_id"]),
+    comms_api_key_env: get_toml_str(table, ["comms", "api_key_env"]),
+    comms_allowed_recipients: get_toml_str_array(table, [
+      "comms", "allowed_recipients",
+    ]),
+    comms_from_name: get_toml_str(table, ["comms", "from_name"]),
+    comms_max_outbound_per_hour: get_toml_int(table, [
+      "comms", "max_outbound_per_hour",
+    ]),
   )
 }
 
@@ -1472,7 +1514,7 @@ const known_keys = [
   "retry", "limits", "scoring", "housekeeping", "housekeeper", "cbr", "agents",
   "web", "services", "scheduler", "xstructor", "forecaster", "sandbox",
   "delegation", "escalation", "dprime", "vertex", "anthropic", "mistral",
-  "local", "backup",
+  "local", "backup", "comms",
 ]
 
 const known_narrative_keys = [

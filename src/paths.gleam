@@ -116,6 +116,11 @@ pub fn schedule_dir() -> String {
   project_dir() <> "/memory/schedule"
 }
 
+/// Communications log directory: .springdrift/memory/comms/
+pub fn comms_dir() -> String {
+  project_dir() <> "/memory/comms"
+}
+
 /// XStructor schema directory: .springdrift/schemas/
 pub fn schemas_dir() -> String {
   project_dir() <> "/schemas"

@@ -56,7 +56,13 @@ src/
 │   ├── researcher.gleam       Research agent (web+artifacts+builtin, max_turns=8)
 │   ├── coder.gleam            Coding agent (builtin, max_turns=10)
 │   ├── writer.gleam           Writer agent (builtin, max_turns=6)
-│   └── observer.gleam         Observer agent (diagnostic memory tools, max_turns=6)
+│   ├── observer.gleam         Observer agent (diagnostic memory tools, max_turns=6)
+│   └── comms.gleam            Communications agent (comms tools, max_turns=6, max_context=20)
+│
+├── comms/                     Communications — email via AgentMail
+│   ├── types.gleam            CommsMessage, CommsChannel (Email), Direction, DeliveryStatus, CommsConfig
+│   ├── email.gleam            AgentMail HTTP client: send_message, list_messages, get_message
+│   └── log.gleam              JSONL persistence (YYYY-MM-DD-comms.jsonl) in .springdrift/memory/comms/
 │
 ├── dprime/                    D' discrepancy-gated safety system
 │   ├── types.gleam            Feature, Forecast, GateDecision, GateResult, DprimeConfig/State
@@ -133,6 +139,7 @@ src/
 ├── tools/how_to_content.gleam Default HOW_TO content (builtin fallback)
 ├── tools/web.gleam            Web tools: fetch_url, web_search
 ├── tools/artifacts.gleam      Artifact tools: store_result, retrieve_result (researcher agent)
+├── tools/comms.gleam          Comms tools: send_email, list_contacts, check_inbox, read_message + hard allowlist
 ├── tools/sandbox.gleam        Sandbox tools: run_code, serve, stop_serve, sandbox_status, workspace_ls, sandbox_exec
 │
 ├── sandbox/                   Local Podman sandbox
@@ -243,7 +250,7 @@ go through the centralised path functions.
 
 Current output directories:
 - `.springdrift/logs/` — system logs
-- `.springdrift/memory/` — narrative, CBR, facts, artifacts, planner, cycle-log
+- `.springdrift/memory/` — narrative, CBR, facts, artifacts, planner, comms, cycle-log
 - `.springdrift/schemas/` — compiled XSD schemas
 - `.springdrift/scheduler/outputs/` — scheduler report delivery
 
@@ -366,10 +373,16 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `vertex_project_id` | — | None | GCP project ID (required for vertex provider) |
 | `vertex_location` | — | "europe-west1" | GCP location / region |
 | `vertex_endpoint` | — | derived from location | Vertex AI endpoint hostname (e.g. `europe-west1-aiplatform.googleapis.com`) |
+| `comms_enabled` | — | False | Enable communications agent (email via AgentMail) |
+| `comms_inbox_id` | — | None | AgentMail inbox ID (required when comms enabled) |
+| `comms_api_key_env` | — | "AGENTMAIL_API_KEY" | Env var name for AgentMail API key |
+| `comms_allowed_recipients` | — | [] | Hard allowlist of permitted email recipients |
+| `comms_from_name` | — | agent_name | Display name on outbound emails |
+| `comms_max_outbound_per_hour` | — | 20 | Max outbound emails per rolling hour |
 
 ## Memory architecture
 
-The agent has eight memory stores, all backed by append-only JSON-L files and
+The agent has nine memory stores, all backed by append-only JSON-L files and
 indexed in ETS by the Librarian actor for fast queries.
 
 | Store | Location | Unit | Purpose |
@@ -382,6 +395,7 @@ indexed in ETS by the Librarian actor for fast queries.
 | Tasks | `.springdrift/memory/planner/YYYY-MM-DD-tasks.jsonl` | `PlannerTask` | Planned work with steps, dependencies, risks, forecast scores |
 | Endeavours | `.springdrift/memory/planner/YYYY-MM-DD-endeavours.jsonl` | `Endeavour` | Self-directed initiatives grouping multiple independent tasks |
 | DAG nodes | (in-memory ETS, populated from cycle log) | `CycleNode` | Operational telemetry: token counts, tool calls, D' gates, agent output per cycle |
+| Comms | `.springdrift/memory/comms/YYYY-MM-DD-comms.jsonl` | `CommsMessage` | Sent and received email messages with delivery status |
 
 **How they relate:** Narrative entries are the atomic record of each cycle. Threads
 group entries by topic using overlap scoring (location=3, domain=2, keyword=1;
@@ -435,6 +449,10 @@ At startup, the Librarian replays artifact metadata from disk (configurable via
 | `add_task_to_endeavour` | Endeavours | Associate a task with an endeavour |
 | `get_active_work` | Tasks+Endeavours | List active tasks and endeavours with progress |
 | `get_task_detail` | Tasks | Full task detail: steps, risks, forecast score, cycles |
+| `send_email` | Comms | Send email via AgentMail (hard allowlist + D' gate) |
+| `list_contacts` | Comms | List allowed recipients from config |
+| `check_inbox` | Comms | List recent messages in inbox |
+| `read_message` | Comms | Read full message content by ID |
 
 **Curator** (`narrative/curator.gleam`) assembles the system prompt from memory.
 On each `BuildSystemPrompt` message (with optional `CycleContext`) it loads identity
@@ -484,6 +502,7 @@ exposes this (and other system state) to the LLM.
 | Coder | builtin | 10 | unlimited | Permanent | Write and modify code, fix errors |
 | Writer | builtin | 6 | unlimited | Permanent | Draft and edit text |
 | Observer | diagnostic memory (10 tools) | 6 | 20 | Transient | Examine past activity, explain failures, identify patterns |
+| Comms | comms (4 tools) | 6 | 20 | Permanent | Send and receive email via AgentMail |
 
 **Structured output** — when an agent completes, the framework populates
 `AgentSuccess.structured_result` with typed `AgentFindings` based on the agent name
@@ -951,6 +970,25 @@ self-tick that evaluates active tasks using heuristic D' scoring (reuses
 (default 0.55), it sends a `QueuedSensoryEvent` to the cognitive loop. Enabled via
 `forecaster_enabled` config. Does not use the Scheduler — ticks independently.
 
+**Communications agent** — `agents/comms.gleam` + `comms/` + `tools/comms.gleam`.
+Email via AgentMail API (HTTP client in `comms/email.gleam`). Enabled via
+`comms_enabled` config (default: False). When enabled, the comms agent is added to
+`default_agent_specs` in `springdrift.gleam`. Four tools: `send_email`, `list_contacts`,
+`check_inbox`, `read_message`. Comms tools are NOT D'-exempt — they are
+external-facing and pass through the full tool gate. Three-layer safety:
+1. **Hard allowlist** — the tool executor checks `comms_allowed_recipients` before
+   any send. Recipients not on the list are rejected immediately, no LLM evaluation.
+2. **Deterministic rules** — 5 output rules in `dprime.json`: `comms-bearer-token`
+   (block), `comms-localhost` (block), `comms-env-var-ref` (block),
+   `comms-system-json` (escalate), `comms-system-jargon` (escalate).
+3. **Agent override** — `comms` agent has tighter D' thresholds (0.30 modify / 0.50
+   reject) with 4 features: `credential_exposure` (critical), `internal_url_exposure`
+   (critical), `system_internals` (medium), `tone_appropriateness` (medium).
+
+Messages persist as append-only JSONL in `.springdrift/memory/comms/YYYY-MM-DD-comms.jsonl`.
+`CommsConfig` on `AppConfig` carries `inbox_id`, `api_key_env` (env var name, default
+`AGENTMAIL_API_KEY`), `allowed_recipients`, `from_name`, and `max_outbound_per_hour`.
+
 ## Config file format
 
 `.springdrift/config.toml` (or `~/.config/springdrift/config.toml`). All fields are optional;
@@ -981,6 +1019,7 @@ The config is organized into these TOML sections:
 | `[services]` | External API base URLs (DuckDuckGo, Brave, Jina) |
 | `[sandbox]` | Local Podman sandbox: enabled, pool_size, memory, ports, image |
 | `[delegation]` | Agent delegation depth limits |
+| `[comms]` | Communications agent: enabled, inbox_id, api_key_env, allowed_recipients, rate limit |
 | `[vertex]` | Google Vertex AI provider: project_id, location, endpoint |
 
 Quick example (top-level fields only):

@@ -1565,7 +1565,9 @@ fn format_subtree(
     children ->
       "\n"
       <> string.join(
-        list.map(children, fn(child) { format_subtree(child, depth + 1, full, current_cycle_id) }),
+        list.map(children, fn(child) {
+          format_subtree(child, depth + 1, full, current_cycle_id)
+        }),
         "\n",
       )
   }
@@ -1955,8 +1957,7 @@ fn run_list_recent_cycles(
             _ -> {
               let lines =
                 list.map(nodes, fn(node: dag_types.CycleNode) {
-                  let outcome_str =
-                    format_node_outcome(node, current_cycle_id)
+                  let outcome_str = format_node_outcome(node, current_cycle_id)
                   let type_label = case node.parent_id {
                     None ->
                       case node.instance_name {

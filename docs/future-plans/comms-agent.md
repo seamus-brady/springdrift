@@ -1,8 +1,36 @@
 # Communications Agent — Specification
 
-**Status**: Planned
-**Date**: 2026-03-26
+**Status**: Phase 1 Implemented (Email via AgentMail)
+**Date**: 2026-03-26 (spec), 2026-03-28 (Phase 1 implementation)
 **Dependencies**: Multi-tenant (planned), Scheduler (implemented), D' safety system (implemented)
+
+---
+
+## Implementation Status
+
+**Phase 1 is complete.** Email sending and receiving via AgentMail HTTP API is
+implemented and working. The following are implemented:
+
+- `src/comms/types.gleam` — CommsMessage, CommsChannel (Email), Direction, DeliveryStatus, CommsConfig
+- `src/comms/email.gleam` — AgentMail HTTP client (send_message, list_messages, get_message)
+- `src/comms/log.gleam` — JSONL persistence in `.springdrift/memory/comms/`
+- `src/tools/comms.gleam` — 4 tools (send_email, list_contacts, check_inbox, read_message) with hard allowlist
+- `src/agents/comms.gleam` — Agent spec (max_turns=6, max_context=20, Permanent restart)
+- `src/config.gleam` — `[comms]` section with enabled, inbox_id, api_key_env, allowed_recipients, from_name, max_outbound_per_hour
+- `src/paths.gleam` — comms_dir() path
+- `.springdrift_example/dprime.json` — comms agent override (tighter thresholds) + 5 deterministic output rules
+- Three-layer D' safety: hard allowlist, deterministic rules, agent-specific LLM scoring
+
+**Deferred to future phases:**
+
+- WhatsApp channel support (Business API client, webhook inbound)
+- Inbound email polling (IMAP or AgentMail webhook)
+- Web GUI Conversations tab and operator send
+- Multi-tenant wiring (per-tenant channel config, isolation)
+- Channel routing (comms/router.gleam)
+- Message templates (comms/templates.gleam)
+- Scheduler integration for `delivery = "comms"`
+- Meta observer alert delivery via comms
 
 ---
 

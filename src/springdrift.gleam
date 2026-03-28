@@ -6,12 +6,14 @@ import agent/supervisor
 import agent/types as agent_types
 import agent_identity
 import agents/coder
+import agents/comms as comms_agent
 import agents/observer
 import agents/planner
 import agents/researcher
 import agents/scheduler as scheduler_agent
 import backup/actor as backup_actor
 import cbr/bridge as cbr_bridge
+import comms/types as comms_types
 import config.{type AppConfig}
 import dot_env
 import dprime/config as dprime_config_mod
@@ -1211,5 +1213,61 @@ fn default_agent_specs(
       redact_secrets: redact,
     ),
     agent_types.AgentSpec(..o_spec, redact_secrets: redact),
+    ..comms_specs(cfg, provider, task_model, delay, redact)
   ]
+}
+
+fn comms_specs(
+  cfg: AppConfig,
+  provider: Provider,
+  task_model: String,
+  delay: Int,
+  redact: Bool,
+) -> List(agent_types.AgentSpec) {
+  case option.unwrap(cfg.comms_enabled, False) {
+    False -> []
+    True -> {
+      let comms_config =
+        comms_types.CommsConfig(
+          enabled: True,
+          inbox_id: option.unwrap(cfg.comms_inbox_id, ""),
+          api_key_env: option.unwrap(cfg.comms_api_key_env, "AGENTMAIL_API_KEY"),
+          allowed_recipients: option.unwrap(cfg.comms_allowed_recipients, []),
+          from_name: option.unwrap(
+            cfg.comms_from_name,
+            option.unwrap(cfg.agent_name, "Agent"),
+          ),
+          max_outbound_per_hour: option.unwrap(
+            cfg.comms_max_outbound_per_hour,
+            20,
+          ),
+        )
+      case comms_config.inbox_id {
+        "" -> {
+          slog.warn(
+            "springdrift",
+            "comms_specs",
+            "comms_enabled=true but no comms_inbox_id configured — comms agent disabled",
+            option.None,
+          )
+          []
+        }
+        _ -> [
+          agent_types.AgentSpec(
+            ..comms_agent.spec(
+              provider,
+              task_model,
+              comms_config,
+              paths.comms_dir(),
+              option.unwrap(cfg.max_tokens, 2048),
+              option.unwrap(cfg.max_turns, 6),
+              option.unwrap(cfg.max_consecutive_errors, 2),
+            ),
+            inter_turn_delay_ms: delay,
+            redact_secrets: redact,
+          ),
+        ]
+      }
+    }
+  }
 }
