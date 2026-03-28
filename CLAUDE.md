@@ -1015,13 +1015,27 @@ CLI flags override config files. `--skills-dir` is repeatable and appends to the
 
 ```
 .springdrift/skills/
-└── my-skill/
-    └── SKILL.md
+├── self-diagnostic/      Observer: 7-step health check procedure
+├── delegation-strategy/  Cognitive: when and how to delegate to agents
+├── memory-management/    Cognitive + researcher + observer: which memory store for what
+├── planner-patterns/     Planner + cognitive: task decomposition patterns
+├── code-review/          Coder: sandbox patterns and common failure modes
+├── web-research/         Researcher + cognitive: web tool selection decision tree
+└── shell-sandbox/        Coder: Docker sandbox usage guide
 ```
 
 `SKILL.md` must open with `---`-fenced YAML frontmatter containing at least `name:`
-and `description:`. Everything after the closing `---` is the Markdown instruction
-body loaded by `read_skill`.
+and `description:`. Optional `agents:` field scopes the skill to specific agents
+(comma-separated). Skills without `agents:` are injected for all agents. The
+`skills.for_agent(all_skills, agent_name)` function filters at injection time.
+
+```yaml
+---
+name: web-research
+description: Search and extraction strategy
+agents: researcher, cognitive
+---
+```
 
 ## Documentation maintenance
 

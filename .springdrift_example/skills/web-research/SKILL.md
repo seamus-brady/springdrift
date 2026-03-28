@@ -1,6 +1,7 @@
 ---
 name: web-research
 description: Search and extraction strategy. Teaches the researcher which of the 8 web tools to use at each stage of a research cycle.
+agents: researcher, cognitive
 ---
 
 ## Web research tool selection

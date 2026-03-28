@@ -1,6 +1,7 @@
 ---
 name: shell-sandbox
 description: Run shell commands in a sandboxed Docker container with the project directory mounted at /workspace.
+agents: coder
 ---
 
 # Shell Sandbox

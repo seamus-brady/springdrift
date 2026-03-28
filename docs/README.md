@@ -29,6 +29,8 @@ Architecture and design documents for completed work.
 - [Web GUI enhancements](implemented-plans/web-gui-enhancements.md) -- admin dashboard, D' config panel, scheduler tabs
 - [Vertex AI adapter](implemented-plans/vertex-ai-adapter.md) -- Google Cloud rawPredict integration
 - [Housekeeper and redaction](implemented-plans/housekeeper-redaction.md) -- CBR dedup, pruning, fact conflict resolution, secret redaction
+- [Git backup and restore](implemented-plans/git-backup-restore.md) -- automated git backup, periodic commits, remote push
+- [Self-diagnostic skill](implemented-plans/self-diagnostic-skill.md) -- seven-step health check using existing introspection tools
 
 ## Future Plans
 
@@ -46,12 +48,10 @@ Design specs and proposals for planned work.
 - [Comms agent](future-plans/comms-agent.md) -- external communication capabilities
 - [External agent integration](future-plans/external-agent-integration.md) -- interop with other agent systems
 - [Multi-provider failover](future-plans/multi-provider-failover.md) -- automatic LLM provider switching
-- [Git backup and restore](future-plans/git-backup-restore.md) -- automated git persistence
 - [OAuth authentication](future-plans/oauth-authentication.md) -- web GUI authentication
 - [Web GUI v2](future-plans/web-gui-v2.md) -- next-generation web interface
 - [Skills management](future-plans/skills-management.md) -- skill discovery, versioning, sharing
 - [Provenance-aware output gate](future-plans/provenance-aware-output-gate.md) -- context-sensitive output evaluation
-- [Self-diagnostic skill](future-plans/self-diagnostic-skill.md) -- automated health checks
 - [Autonomous endeavours](future-plans/autonomous-endeavours.md) -- self-directed long-term goals
 - [SD Audit](future-plans/sd-audit.md) -- compliance and audit tooling
 - [SD Budget](future-plans/sd-budget.md) -- token and cost management

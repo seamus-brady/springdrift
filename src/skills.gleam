@@ -15,7 +15,13 @@ import slog
 // ---------------------------------------------------------------------------
 
 pub type SkillMeta {
-  SkillMeta(name: String, description: String, path: String)
+  SkillMeta(
+    name: String,
+    description: String,
+    path: String,
+    /// Agent names this skill is scoped to. Empty = all agents.
+    agents: List(String),
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -61,8 +67,10 @@ pub fn to_system_prompt_xml(skills: List(SkillMeta)) -> String {
 }
 
 /// Parse YAML frontmatter from a SKILL.md content string.
-/// Returns Ok(#(name, description)) or Error(Nil) if either required field is missing.
-pub fn parse_frontmatter(content: String) -> Result(#(String, String), Nil) {
+/// Returns Ok(#(name, description, agents)) or Error(Nil) if required fields missing.
+pub fn parse_frontmatter(
+  content: String,
+) -> Result(#(String, String, List(String)), Nil) {
   // Strip leading "---\n" fence if present
   let body = case string.starts_with(content, "---\n") {
     True -> string.drop_start(content, 4)
@@ -79,9 +87,31 @@ pub fn parse_frontmatter(content: String) -> Result(#(String, String), Nil) {
     |> list.filter_map(parse_kv_line)
 
   case list.key_find(pairs, "name"), list.key_find(pairs, "description") {
-    Ok(name), Ok(description) -> Ok(#(name, description))
+    Ok(name), Ok(description) -> {
+      let agents = case list.key_find(pairs, "agents") {
+        Ok(agents_str) ->
+          agents_str
+          |> string.split(",")
+          |> list.map(string.trim)
+          |> list.filter(fn(s) { s != "" })
+        Error(_) -> []
+      }
+      Ok(#(name, description, agents))
+    }
     _, _ -> Error(Nil)
   }
+}
+
+/// Filter skills to those scoped for a specific agent.
+/// Skills with empty agents list are included for all agents.
+pub fn for_agent(skills: List(SkillMeta), agent_name: String) -> List(SkillMeta) {
+  list.filter(skills, fn(s) {
+    case s.agents {
+      [] -> True
+      agents ->
+        list.contains(agents, agent_name) || list.contains(agents, "all")
+    }
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -112,8 +142,8 @@ fn discover_in_dir(dir: String) -> List(SkillMeta) {
           Ok(content) ->
             case parse_frontmatter(content) {
               Error(_) -> Error(Nil)
-              Ok(#(name, description)) ->
-                Ok(SkillMeta(name:, description:, path: skill_md_path))
+              Ok(#(name, description, agents)) ->
+                Ok(SkillMeta(name:, description:, path: skill_md_path, agents:))
             }
         }
       })

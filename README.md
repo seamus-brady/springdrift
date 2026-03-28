@@ -582,8 +582,12 @@ DuckDuckGo requires no API key. Optional Brave Search integration requires
 a `BRAVE_API_KEY`.
 
 Skills follow the [agentskills.io](https://agentskills.io) open standard --
-YAML frontmatter with name/description, Markdown instruction body. The `how_to`
-tool serves the operator guide so the agent can orient itself.
+YAML frontmatter with name/description/agents, Markdown instruction body.
+Skills are scoped to specific agents via the `agents:` field — the researcher
+gets web-research, the coder gets code-review, the observer gets
+self-diagnostic. Seven built-in skills cover delegation strategy, memory
+management, planning patterns, web research, code execution, sandbox usage,
+and self-diagnosis.
 
 
 [Back to top](#springdrift)
@@ -689,6 +693,26 @@ and the agent restarts with that state.
 Cycle log rewind restores the conversation to any previous cycle. The Librarian
 replays JSONL on startup to rebuild ETS indexes. Session files include version
 and staleness metadata.
+
+### Automated git backup
+
+Enabled by default. An OTP backup actor initialises a git repo inside
+`.springdrift/` and commits all state changes on a periodic timer (default
+every 5 minutes). Each commit captures the delta since the last — `git log`
+becomes a human-readable activity timeline.
+
+```toml
+[backup]
+# enabled = true                      # On by default
+# mode = "periodic"                   # "periodic" | "after_cycle" | "manual"
+# interval_ms = 300000                # 5 minutes
+remote_url = "git@github.com:org/springdrift-data.git"   # Recommended
+# branch = "main"
+```
+
+Without a remote, the actor logs a warning on every commit — a backup that
+only exists on the same disk as the data isn't a backup. Configure
+`remote_url` to push to GitHub, GitLab, or any git remote for offsite safety.
 
 
 [Back to top](#springdrift)
