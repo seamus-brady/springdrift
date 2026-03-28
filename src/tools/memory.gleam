@@ -63,6 +63,8 @@ pub fn is_dprime_exempt(name: String) -> Bool {
     | "reflect"
     | "inspect_cycle"
     | "list_recent_cycles"
+    | "review_recent"
+    | "detect_patterns"
     | "query_tool_activity"
     | "introspect"
     | "how_to" -> True
@@ -115,6 +117,8 @@ pub fn all() -> List(Tool) {
     query_tool_activity_tool(),
     introspect_tool(),
     list_recent_cycles_tool(),
+    review_recent_tool(),
+    detect_patterns_tool(),
     how_to_tool(),
     correct_case_tool(),
     annotate_case_tool(),
@@ -131,6 +135,8 @@ pub fn observer_tools() -> List(Tool) {
     reflect_tool(),
     inspect_cycle_tool(),
     list_recent_cycles_tool(),
+    review_recent_tool(),
+    detect_patterns_tool(),
     query_tool_activity_tool(),
     memory_trace_tool(),
     recall_recent_tool(),
@@ -357,6 +363,53 @@ fn list_recent_cycles_tool() -> Tool {
   |> tool.build()
 }
 
+fn review_recent_tool() -> Tool {
+  tool.new("review_recent")
+  |> tool.with_description(
+    "Structured self-review across recent cycles. Returns a compact summary of "
+    <> "each cycle: outcome, intent, domain, agents used, tool calls, D' decisions, "
+    <> "and token cost. Much faster than looping list_recent_cycles + inspect_cycle. "
+    <> "Use this to understand trends, diagnose repeated failures, or audit costs.",
+  )
+  |> tool.add_integer_param(
+    "count",
+    "Number of recent root cycles to review (default: 10, max: 20)",
+    False,
+  )
+  |> tool.add_string_param(
+    "filter_domain",
+    "Only include cycles in this domain (optional)",
+    False,
+  )
+  |> tool.add_string_param(
+    "filter_outcome",
+    "Only include cycles with this outcome: success, failure, or partial (optional)",
+    False,
+  )
+  |> tool.add_string_param(
+    "filter_agent",
+    "Only include cycles that delegated to this agent name (optional)",
+    False,
+  )
+  |> tool.build()
+}
+
+fn detect_patterns_tool() -> Tool {
+  tool.new("detect_patterns")
+  |> tool.with_description(
+    "Automated pattern detection across recent cycles. Scans for repeated failures "
+    <> "on the same domain, tool failure clusters, model escalation patterns, cost "
+    <> "outliers, and CBR retrieval misses. Returns a list of detected patterns with "
+    <> "severity and suggestions. Use this for operational self-diagnosis.",
+  )
+  |> tool.add_integer_param(
+    "window",
+    "Number of recent root cycles to analyze (default: 20, max: 50)",
+    False,
+  )
+  |> tool.build()
+}
+
 fn how_to_tool() -> Tool {
   tool.new("how_to")
   |> tool.with_description(
@@ -393,6 +446,8 @@ pub fn is_memory_tool(name: String) -> Bool {
   || name == "query_tool_activity"
   || name == "introspect"
   || name == "list_recent_cycles"
+  || name == "review_recent"
+  || name == "detect_patterns"
   || name == "how_to"
   || name == "correct_case"
   || name == "annotate_case"
@@ -528,6 +583,10 @@ pub fn execute_with_how_to(
   agent_mgmt: Option(AgentManagementContext),
 ) -> ToolResult {
   slog.debug("memory", "execute", "tool=" <> call.name, None)
+  let current_cycle_id = case introspect_ctx {
+    Some(ctx) -> ctx.current_cycle_id
+    None -> None
+  }
   case call.name {
     "recall_recent" ->
       run_recall_recent(call, narrative_dir, lib, limits.recall_max_entries)
@@ -540,11 +599,13 @@ pub fn execute_with_how_to(
     "memory_query_facts" -> run_memory_query(call, lib, facts_ctx)
     "memory_trace_fact" -> run_memory_trace(call, facts_ctx)
     "reflect" -> run_reflect(call, lib)
-    "inspect_cycle" -> run_inspect_cycle(call, lib)
+    "inspect_cycle" -> run_inspect_cycle(call, lib, current_cycle_id)
     "recall_cases" -> run_recall_cases(call, lib, limits.cbr_max_results)
     "query_tool_activity" -> run_query_tool_activity(call, lib)
     "introspect" -> run_introspect(call, introspect_ctx)
-    "list_recent_cycles" -> run_list_recent_cycles(call, lib)
+    "list_recent_cycles" -> run_list_recent_cycles(call, lib, current_cycle_id)
+    "review_recent" -> run_review_recent(call, lib, current_cycle_id)
+    "detect_patterns" -> run_detect_patterns(call, lib)
     "how_to" -> run_how_to(call, how_to_content)
     "correct_case" -> run_correct_case(call, lib)
     "annotate_case" -> run_annotate_case(call, lib)
@@ -1287,6 +1348,7 @@ fn format_day_stats(stats: dag_types.DayStats) -> String {
 fn run_inspect_cycle(
   call: ToolCall,
   lib: Option(Subject(LibrarianMessage)),
+  current_cycle_id: Option(String),
 ) -> ToolResult {
   case lib {
     None ->
@@ -1327,7 +1389,7 @@ fn run_inspect_cycle(
             Ok(Ok(subtree)) ->
               ToolSuccess(
                 tool_use_id: call.id,
-                content: format_subtree(subtree, 0, full),
+                content: format_subtree(subtree, 0, full, current_cycle_id),
               )
           }
         }
@@ -1336,7 +1398,30 @@ fn run_inspect_cycle(
   }
 }
 
-fn format_subtree(tree: dag_types.DagSubtree, depth: Int, full: Bool) -> String {
+/// Format a DAG node outcome, distinguishing "in-flight" (current cycle)
+/// from "pending" (stuck or not yet finalised).
+fn format_node_outcome(
+  node: dag_types.CycleNode,
+  current_cycle_id: Option(String),
+) -> String {
+  case node.outcome {
+    dag_types.NodeSuccess -> "success"
+    dag_types.NodePartial -> "partial"
+    dag_types.NodeFailure(reason:) -> "failure: " <> reason
+    dag_types.NodePending ->
+      case current_cycle_id {
+        Some(cid) if cid == node.cycle_id -> "in-flight"
+        _ -> "pending"
+      }
+  }
+}
+
+fn format_subtree(
+  tree: dag_types.DagSubtree,
+  depth: Int,
+  full: Bool,
+  current_cycle_id: Option(String),
+) -> String {
   let indent = string.repeat("  ", depth)
   let node = tree.root
   let type_str = case node.node_type {
@@ -1363,12 +1448,7 @@ fn format_subtree(tree: dag_types.DagSubtree, depth: Int, full: Bool) -> String 
       }
     dag_types.SchedulerCycle -> "scheduler"
   }
-  let outcome_str = case node.outcome {
-    dag_types.NodeSuccess -> "success"
-    dag_types.NodePartial -> "partial"
-    dag_types.NodeFailure(reason:) -> "failure: " <> reason
-    dag_types.NodePending -> "pending"
-  }
+  let outcome_str = format_node_outcome(node, current_cycle_id)
   let tools_str = case node.tool_calls {
     [] -> ""
     calls ->
@@ -1485,7 +1565,7 @@ fn format_subtree(tree: dag_types.DagSubtree, depth: Int, full: Bool) -> String 
     children ->
       "\n"
       <> string.join(
-        list.map(children, fn(child) { format_subtree(child, depth + 1, full) }),
+        list.map(children, fn(child) { format_subtree(child, depth + 1, full, current_cycle_id) }),
         "\n",
       )
   }
@@ -1829,6 +1909,7 @@ fn run_introspect(call: ToolCall, ctx: Option(IntrospectContext)) -> ToolResult 
 fn run_list_recent_cycles(
   call: ToolCall,
   lib: Option(Subject(LibrarianMessage)),
+  current_cycle_id: Option(String),
 ) -> ToolResult {
   case lib {
     None ->
@@ -1874,12 +1955,8 @@ fn run_list_recent_cycles(
             _ -> {
               let lines =
                 list.map(nodes, fn(node: dag_types.CycleNode) {
-                  let outcome_str = case node.outcome {
-                    dag_types.NodeSuccess -> "success"
-                    dag_types.NodePartial -> "partial"
-                    dag_types.NodeFailure(reason:) -> "failure: " <> reason
-                    dag_types.NodePending -> "pending"
-                  }
+                  let outcome_str =
+                    format_node_outcome(node, current_cycle_id)
                   let type_label = case node.parent_id {
                     None ->
                       case node.instance_name {
@@ -1957,6 +2034,569 @@ fn run_list_recent_cycles(
       }
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// review_recent — structured self-review across N recent cycles
+// ---------------------------------------------------------------------------
+
+/// Internal record for a reviewed cycle, used by both review_recent and
+/// detect_patterns.
+pub type CycleReview {
+  CycleReview(
+    cycle_id: String,
+    timestamp: String,
+    domain: String,
+    intent: String,
+    outcome: String,
+    confidence: Float,
+    agents: List(String),
+    tool_names: List(String),
+    tool_failures: List(String),
+    gates: List(dag_types.GateSummary),
+    tokens_in: Int,
+    tokens_out: Int,
+    model: String,
+    has_sources: Bool,
+  )
+}
+
+fn run_review_recent(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+  _current_cycle_id: Option(String),
+) -> ToolResult {
+  case lib {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "review_recent not available: Librarian not initialised",
+      )
+    Some(l) -> {
+      let decoder = {
+        use count <- decode.optional_field("count", 10, decode.int)
+        use filter_domain <- decode.optional_field(
+          "filter_domain",
+          "",
+          decode.string,
+        )
+        use filter_outcome <- decode.optional_field(
+          "filter_outcome",
+          "",
+          decode.string,
+        )
+        use filter_agent <- decode.optional_field(
+          "filter_agent",
+          "",
+          decode.string,
+        )
+        decode.success(#(count, filter_domain, filter_outcome, filter_agent))
+      }
+      let #(count, filter_domain, filter_outcome, filter_agent) = case
+        json.parse(call.input_json, decoder)
+      {
+        Ok(params) -> params
+        Error(_) -> #(10, "", "", "")
+      }
+      let clamped = int.min(20, int.max(1, count))
+      let reviews =
+        build_cycle_reviews(
+          l,
+          clamped,
+          filter_domain,
+          filter_outcome,
+          filter_agent,
+        )
+      case reviews {
+        [] ->
+          ToolSuccess(
+            tool_use_id: call.id,
+            content: "No matching cycles found.",
+          )
+        _ ->
+          ToolSuccess(
+            tool_use_id: call.id,
+            content: format_cycle_reviews(reviews),
+          )
+      }
+    }
+  }
+}
+
+/// Build CycleReview records by joining DAG roots with narrative entries.
+/// Queries today + previous days until we have enough cycles.
+pub fn build_cycle_reviews(
+  lib: Subject(LibrarianMessage),
+  count: Int,
+  filter_domain: String,
+  filter_outcome: String,
+  filter_agent: String,
+) -> List(CycleReview) {
+  // Query up to 7 days back to gather enough root cycles
+  let all_roots = gather_recent_roots(lib, count * 2, 7)
+  // Load narrative entries for all these cycle_ids
+  let cycle_ids = list.map(all_roots, fn(n) { n.cycle_id })
+  let entries = load_entries_by_ids(lib, cycle_ids)
+  // Join DAG nodes with narrative entries
+  let reviews =
+    list.filter_map(all_roots, fn(node) {
+      let entry =
+        list.find(entries, fn(e) { e.cycle_id == node.cycle_id })
+        |> option.from_result
+      case entry {
+        None -> Error(Nil)
+        Some(e) -> {
+          let agent_names = extract_agent_names(node)
+          Ok(CycleReview(
+            cycle_id: string.slice(node.cycle_id, 0, 8),
+            timestamp: node.timestamp,
+            domain: e.intent.domain,
+            intent: string.slice(e.intent.description, 0, 80),
+            outcome: outcome_to_string(e.outcome.status),
+            confidence: e.outcome.confidence,
+            agents: agent_names,
+            tool_names: list.map(node.tool_calls, fn(t) { t.name }),
+            tool_failures: list.filter_map(node.tool_calls, fn(t) {
+              case t.success {
+                True -> Error(Nil)
+                False -> Ok(t.name)
+              }
+            }),
+            gates: node.dprime_gates,
+            tokens_in: node.tokens_in,
+            tokens_out: node.tokens_out,
+            model: node.model,
+            has_sources: !list.is_empty(e.sources),
+          ))
+        }
+      }
+    })
+  // Apply filters
+  let filtered =
+    reviews
+    |> apply_domain_filter(filter_domain)
+    |> apply_outcome_filter(filter_outcome)
+    |> apply_agent_filter(filter_agent)
+  list.take(filtered, count)
+}
+
+fn gather_recent_roots(
+  lib: Subject(LibrarianMessage),
+  max: Int,
+  days_back: Int,
+) -> List(dag_types.CycleNode) {
+  do_gather_roots(lib, max, 0, days_back, [])
+}
+
+fn do_gather_roots(
+  lib: Subject(LibrarianMessage),
+  max: Int,
+  day_offset: Int,
+  max_days: Int,
+  acc: List(dag_types.CycleNode),
+) -> List(dag_types.CycleNode) {
+  case day_offset > max_days || list.length(acc) >= max {
+    True -> list.take(acc, max)
+    False -> {
+      let date = days_ago_date(day_offset)
+      let subj = process.new_subject()
+      process.send(lib, librarian.QueryDayRoots(date:, reply_to: subj))
+      let day_roots = case process.receive(subj, 5000) {
+        Ok(roots) -> roots
+        Error(_) -> []
+      }
+      // Roots come in chronological order; we want recent-first
+      let sorted =
+        list.sort(day_roots, fn(a, b) {
+          string.compare(b.timestamp, a.timestamp)
+        })
+      do_gather_roots(
+        lib,
+        max,
+        day_offset + 1,
+        max_days,
+        list.append(acc, sorted),
+      )
+    }
+  }
+}
+
+fn load_entries_by_ids(
+  lib: Subject(LibrarianMessage),
+  cycle_ids: List(String),
+) -> List(narrative_types.NarrativeEntry) {
+  let subj = process.new_subject()
+  process.send(lib, librarian.LoadByCycleIds(cycle_ids:, reply_to: subj))
+  case process.receive(subj, 5000) {
+    Ok(entries) -> entries
+    Error(_) -> []
+  }
+}
+
+fn extract_agent_names(node: dag_types.CycleNode) -> List(String) {
+  // Extract agent names from tool calls that look like agent delegations
+  list.filter_map(node.tool_calls, fn(t) {
+    case string.starts_with(t.name, "agent_") {
+      True -> Ok(string.drop_start(t.name, 6))
+      False -> Error(Nil)
+    }
+  })
+}
+
+fn outcome_to_string(status: narrative_types.OutcomeStatus) -> String {
+  case status {
+    narrative_types.Success -> "success"
+    narrative_types.Partial -> "partial"
+    narrative_types.Failure -> "failure"
+  }
+}
+
+fn apply_domain_filter(
+  reviews: List(CycleReview),
+  domain: String,
+) -> List(CycleReview) {
+  case domain {
+    "" -> reviews
+    d ->
+      list.filter(reviews, fn(r) {
+        string.lowercase(r.domain) == string.lowercase(d)
+      })
+  }
+}
+
+fn apply_outcome_filter(
+  reviews: List(CycleReview),
+  outcome: String,
+) -> List(CycleReview) {
+  case outcome {
+    "" -> reviews
+    o -> list.filter(reviews, fn(r) { r.outcome == o })
+  }
+}
+
+fn apply_agent_filter(
+  reviews: List(CycleReview),
+  agent: String,
+) -> List(CycleReview) {
+  case agent {
+    "" -> reviews
+    a ->
+      list.filter(reviews, fn(r) { list.any(r.agents, fn(name) { name == a }) })
+  }
+}
+
+fn format_cycle_reviews(reviews: List(CycleReview)) -> String {
+  let count = list.length(reviews)
+  let header = "## Review of " <> int.to_string(count) <> " recent cycles\n"
+  let lines =
+    list.map(reviews, fn(r) {
+      let gates_str = case r.gates {
+        [] -> ""
+        gs ->
+          " D'="
+          <> string.join(
+            list.map(gs, fn(g) { g.gate <> ":" <> g.decision }),
+            ",",
+          )
+      }
+      let agents_str = case r.agents {
+        [] -> ""
+        as_ -> " agents=" <> string.join(as_, ",")
+      }
+      let failures_str = case r.tool_failures {
+        [] -> ""
+        fs -> " FAILED=[" <> string.join(fs, ",") <> "]"
+      }
+      let source_str = case r.has_sources {
+        True -> " [sourced]"
+        False -> ""
+      }
+      "- "
+      <> r.cycle_id
+      <> " ["
+      <> r.timestamp
+      <> "] "
+      <> r.outcome
+      <> " ("
+      <> float.to_string(r.confidence)
+      <> ")"
+      <> " domain="
+      <> r.domain
+      <> agents_str
+      <> " tokens="
+      <> int.to_string(r.tokens_in + r.tokens_out)
+      <> " model="
+      <> r.model
+      <> gates_str
+      <> failures_str
+      <> source_str
+      <> "\n  "
+      <> r.intent
+    })
+  header <> string.join(lines, "\n")
+}
+
+// ---------------------------------------------------------------------------
+// detect_patterns — automated pattern detection across recent cycles
+// ---------------------------------------------------------------------------
+
+/// Detected pattern from cross-cycle analysis.
+pub type DetectedPattern {
+  DetectedPattern(
+    pattern_type: String,
+    severity: String,
+    description: String,
+    affected_cycles: List(String),
+    suggestion: String,
+  )
+}
+
+fn run_detect_patterns(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+) -> ToolResult {
+  case lib {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "detect_patterns not available: Librarian not initialised",
+      )
+    Some(l) -> {
+      let decoder = {
+        use window <- decode.optional_field("window", 20, decode.int)
+        decode.success(window)
+      }
+      let window = case json.parse(call.input_json, decoder) {
+        Ok(w) -> int.min(50, int.max(1, w))
+        Error(_) -> 20
+      }
+      let reviews = build_cycle_reviews(l, window, "", "", "")
+      let patterns = detect_all_patterns(reviews)
+      case patterns {
+        [] ->
+          ToolSuccess(
+            tool_use_id: call.id,
+            content: "No patterns detected across "
+              <> int.to_string(list.length(reviews))
+              <> " recent cycles.",
+          )
+        _ ->
+          ToolSuccess(
+            tool_use_id: call.id,
+            content: format_patterns(patterns, list.length(reviews)),
+          )
+      }
+    }
+  }
+}
+
+/// Run all pattern detectors over the cycle reviews.
+pub fn detect_all_patterns(reviews: List(CycleReview)) -> List(DetectedPattern) {
+  [
+    detect_repeated_failures(reviews),
+    detect_tool_failure_clusters(reviews),
+    detect_escalation_pattern(reviews),
+    detect_cost_outliers(reviews),
+    detect_cbr_misses(reviews),
+  ]
+  |> list.flatten
+}
+
+fn detect_repeated_failures(reviews: List(CycleReview)) -> List(DetectedPattern) {
+  // Group failures by domain, flag if 3+ in the window
+  let failures = list.filter(reviews, fn(r) { r.outcome == "failure" })
+  let domains =
+    list.map(failures, fn(r) { r.domain })
+    |> list.unique
+  list.filter_map(domains, fn(domain) {
+    let domain_failures = list.filter(failures, fn(r) { r.domain == domain })
+    case list.length(domain_failures) >= 3 {
+      True ->
+        Ok(DetectedPattern(
+          pattern_type: "repeated_failure",
+          severity: "warning",
+          description: int.to_string(list.length(domain_failures))
+            <> " failures in domain '"
+            <> domain
+            <> "'",
+          affected_cycles: list.map(domain_failures, fn(r) { r.cycle_id }),
+          suggestion: "Consider: is this domain unreliable? Check tools and sources for '"
+            <> domain
+            <> "'.",
+        ))
+      False -> Error(Nil)
+    }
+  })
+}
+
+fn detect_tool_failure_clusters(
+  reviews: List(CycleReview),
+) -> List(DetectedPattern) {
+  // Collect all tool calls and failures, flag tools with >20% failure rate
+  let all_tool_names =
+    list.flat_map(reviews, fn(r) { r.tool_names }) |> list.unique
+  list.filter_map(all_tool_names, fn(tool_name) {
+    let total =
+      list.count(reviews, fn(r) {
+        list.any(r.tool_names, fn(t) { t == tool_name })
+      })
+    let failed =
+      list.count(reviews, fn(r) {
+        list.any(r.tool_failures, fn(t) { t == tool_name })
+      })
+    case total >= 3 && int.to_float(failed) /. int.to_float(total) >. 0.2 {
+      True ->
+        Ok(DetectedPattern(
+          pattern_type: "tool_failure_cluster",
+          severity: "warning",
+          description: tool_name
+            <> " failed in "
+            <> int.to_string(failed)
+            <> "/"
+            <> int.to_string(total)
+            <> " cycles",
+          affected_cycles: list.filter_map(reviews, fn(r) {
+            case list.any(r.tool_failures, fn(t) { t == tool_name }) {
+              True -> Ok(r.cycle_id)
+              False -> Error(Nil)
+            }
+          }),
+          suggestion: "Check if '"
+            <> tool_name
+            <> "' has a systemic issue (timeouts, auth, rate limits).",
+        ))
+      False -> Error(Nil)
+    }
+  })
+}
+
+fn detect_escalation_pattern(
+  reviews: List(CycleReview),
+) -> List(DetectedPattern) {
+  // Flag if 5+ cycles used a different model than the most common
+  let models = list.map(reviews, fn(r) { r.model })
+  let unique_models = list.unique(models)
+  case list.length(unique_models) > 1 {
+    False -> []
+    True -> {
+      // Find most common model
+      let model_counts =
+        list.map(unique_models, fn(m) {
+          #(m, list.count(models, fn(x) { x == m }))
+        })
+        |> list.sort(fn(a, b) { int.compare(b.1, a.1) })
+      case model_counts {
+        [#(primary, _), #(secondary, secondary_count), ..] ->
+          case secondary_count >= 5 {
+            True -> [
+              DetectedPattern(
+                pattern_type: "escalation_pattern",
+                severity: "info",
+                description: int.to_string(secondary_count)
+                  <> " cycles escalated to "
+                  <> secondary
+                  <> " (primary: "
+                  <> primary
+                  <> ")",
+                affected_cycles: list.filter_map(reviews, fn(r) {
+                  case r.model == secondary {
+                    True -> Ok(r.cycle_id)
+                    False -> Error(Nil)
+                  }
+                }),
+                suggestion: "High escalation rate. Queries may be consistently complex, or the primary model may need upgrading.",
+              ),
+            ]
+            False -> []
+          }
+        _ -> []
+      }
+    }
+  }
+}
+
+fn detect_cost_outliers(reviews: List(CycleReview)) -> List(DetectedPattern) {
+  let total = list.length(reviews)
+  case total < 3 {
+    True -> []
+    False -> {
+      let costs = list.map(reviews, fn(r) { r.tokens_in + r.tokens_out })
+      let avg =
+        int.to_float(list.fold(costs, 0, int.add)) /. int.to_float(total)
+      let threshold = avg *. 3.0
+      let outliers =
+        list.filter(reviews, fn(r) {
+          int.to_float(r.tokens_in + r.tokens_out) >. threshold
+        })
+      case outliers {
+        [] -> []
+        _ -> [
+          DetectedPattern(
+            pattern_type: "cost_outlier",
+            severity: "info",
+            description: int.to_string(list.length(outliers))
+              <> " cycles used >3x average tokens (avg="
+              <> int.to_string(float.truncate(avg))
+              <> ")",
+            affected_cycles: list.map(outliers, fn(r) { r.cycle_id }),
+            suggestion: "Check if high-cost cycles are justified or if context is growing unbounded.",
+          ),
+        ]
+      }
+    }
+  }
+}
+
+fn detect_cbr_misses(reviews: List(CycleReview)) -> List(DetectedPattern) {
+  let total = list.length(reviews)
+  case total < 4 {
+    True -> []
+    False -> {
+      let without_sources = list.count(reviews, fn(r) { !r.has_sources })
+      let miss_rate = int.to_float(without_sources) /. int.to_float(total)
+      case miss_rate >=. 0.5 {
+        True -> [
+          DetectedPattern(
+            pattern_type: "cbr_miss",
+            severity: "warning",
+            description: int.to_string(without_sources)
+              <> "/"
+              <> int.to_string(total)
+              <> " cycles had no source references — operating without grounding",
+            affected_cycles: list.filter_map(reviews, fn(r) {
+              case r.has_sources {
+                False -> Ok(r.cycle_id)
+                True -> Error(Nil)
+              }
+            }),
+            suggestion: "High proportion of ungrounded cycles. CBR cases may need enrichment or sources may be failing.",
+          ),
+        ]
+        False -> []
+      }
+    }
+  }
+}
+
+fn format_patterns(patterns: List(DetectedPattern), window_size: Int) -> String {
+  let header =
+    "## Patterns detected across "
+    <> int.to_string(window_size)
+    <> " recent cycles\n\n"
+  let lines =
+    list.map(patterns, fn(p) {
+      "### ["
+      <> string.uppercase(p.severity)
+      <> "] "
+      <> p.pattern_type
+      <> "\n"
+      <> p.description
+      <> "\nCycles: "
+      <> string.join(p.affected_cycles, ", ")
+      <> "\nSuggestion: "
+      <> p.suggestion
+    })
+  header <> string.join(lines, "\n\n")
 }
 
 // ---------------------------------------------------------------------------

@@ -59,3 +59,4 @@ Design specs and proposals for planned work.
 - [SD Install](future-plans/sd-install.md) -- installation and deployment tooling
 - [Librarian ETS reconciliation](future-plans/librarian-ets-reconciliation.md) -- periodic cache-vs-disk sync for missed notifications
 - [Commitment tracker](future-plans/commitment-tracker.md) -- detect promises and reminders in output, create scheduled follow-ups
+- [Cross-cycle pattern detection](future-plans/cross-cycle-pattern-detection.md) -- review_recent tool, detect_patterns tool, sensorium performance summary

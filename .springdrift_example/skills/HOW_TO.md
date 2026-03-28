@@ -32,7 +32,18 @@ outcomes in the past are ranked higher. Maximum 4 cases are retrieved per query.
 - **introspect** — system constitution before complex multi-agent work
 
 For diagnostic questions (what failed, why, patterns over time) use the diagnostic
-tools: `reflect`, `inspect_cycle`, `list_recent_cycles`, `query_tool_activity`.
+tools: `reflect`, `inspect_cycle`, `list_recent_cycles`, `query_tool_activity`,
+`review_recent`, `detect_patterns`.
+
+- **review_recent**(count, filter_domain, filter_outcome, filter_agent) — structured
+  self-review across N recent cycles. Returns compact summary of each cycle: outcome,
+  intent, domain, agents used, tool calls, D' decisions, and token cost. Much faster
+  than looping `list_recent_cycles` + `inspect_cycle`. Optional filters by domain,
+  outcome (success/failure/partial), or agent name. Default 10 cycles, max 20.
+- **detect_patterns**(window) — automated pattern detection across recent cycles.
+  Scans for repeated failures on the same domain, tool failure clusters (>20% failure
+  rate), model escalation patterns, cost outliers (>3x average tokens), and CBR misses
+  (50%+ cycles without source references). Default window 20 cycles, max 50.
 
 ### D' Gate Architecture
 
@@ -203,7 +214,9 @@ away, who woke me, what's happening, is anything waiting, and is anything wrong?
 - **`<schedule>`** — `pending`/`overdue` counts with per-`<job>` detail (omitted when empty)
 - **`<vitals>`** — `cycles_today`, `agents_active`, conditional `agent_health` (only when
   non-nominal), conditional `last_failure` (from narrative), optional `cycles_remaining`
-  and `tokens_remaining` (scheduler budget)
+  and `tokens_remaining` (scheduler budget), performance summary: `success_rate` (0.0-1.0),
+  `recent_failures` (last 3 failure descriptions, omitted when empty), `cost_trend`
+  (stable/increasing/decreasing), `cbr_hit_rate` (proportion with source references)
 
 ### Using the sensorium
 
@@ -212,6 +225,9 @@ away, who woke me, what's happening, is anything waiting, and is anything wrong?
 - `agent_health` non-empty means an agent is degraded — do not delegate to it blindly
 - `last_failure` tells you what went wrong recently — adjust your approach
 - Low `cycles_remaining` or `tokens_remaining` means pace yourself
+- `success_rate` dropping below 0.5 means most recent work is failing — use `review_recent` or `detect_patterns` to diagnose
+- `cost_trend` of "increasing" means token usage is growing — check for looping agents or unbounded research
+- `cbr_hit_rate` near 0 means past cases are not being leveraged — call `recall_cases` more often
 
 ## Scheduler
 

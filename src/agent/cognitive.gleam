@@ -100,6 +100,7 @@ pub fn start(
         cycle_node_type: dag_types.CognitiveCycle,
         dprime_decisions: [],
         pending_output_reply: None,
+        pending_output_usage: None,
         retrieved_case_ids: [],
         memory: MemoryContext(
           narrative_dir: cfg.narrative_dir,
@@ -147,12 +148,6 @@ pub fn start(
           }
           None -> None
         },
-        session_tool_calls: 0,
-        session_tool_failures: 0,
-        session_dprime_modifications: 0,
-        session_dprime_rejections: 0,
-        session_cycles: 0,
-        session_cbr_hits: 0,
         consecutive_probe_failures: 0,
         drift_state: case cfg.normative_calculus_enabled {
           True -> Some(normative_drift.new(20))
@@ -495,8 +490,8 @@ fn handle_user_input(
           cycle_node_type: dag_types.CognitiveCycle,
           dprime_decisions: [],
           pending_output_reply: None,
+          pending_output_usage: None,
           retrieved_case_ids: [],
-          session_cycles: state.session_cycles + 1,
           // Reset D' iteration counters at cycle start so
           // per-cycle MODIFY budgets don't accumulate across cycles
           tool_dprime_state: option.map(
@@ -630,8 +625,8 @@ fn handle_scheduler_input(
           cycle_node_type: dag_types.SchedulerCycle,
           dprime_decisions: [],
           pending_output_reply: None,
+          pending_output_usage: None,
           retrieved_case_ids: [],
-          session_cycles: state.session_cycles + 1,
           tool_dprime_state: option.map(
             state.tool_dprime_state,
             dprime_meta.reset_iterations,
@@ -956,6 +951,9 @@ fn handle_think_complete(
               //   is the quality gate, don't destroy good output with false positives
               let is_autonomous =
                 state.cycle_node_type == dag_types.SchedulerCycle
+              // Stash LLM usage for DAG finalisation after gate completes
+              let state =
+                CognitiveState(..state, pending_output_usage: Some(resp.usage))
               case state.output_dprime_state, is_autonomous {
                 Some(output_state), True -> {
                   // Autonomous delivery — full output gate evaluation
@@ -977,6 +975,7 @@ fn handle_think_complete(
                     rt,
                     messages,
                     task_id,
+                    resp.usage,
                   )
                 }
                 None, _ -> {

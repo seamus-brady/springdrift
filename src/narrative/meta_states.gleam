@@ -1,52 +1,18 @@
-//// Meta-states — epistemic signals derived from session counters.
+//// Meta-states — epistemic signals for ambient self-awareness.
 ////
-//// Three signals: uncertainty, prediction_error, and novelty.
-//// All are pure computations over session counters or keyword sets.
-//// No LLM calls needed.
+//// Novelty measures how different the current input is from recent work.
+//// Pure computation over keyword sets — no LLM calls needed.
+////
+//// Note: uncertainty and prediction_error were removed in favour of
+//// history-backed PerformanceSummary signals (success_rate, cbr_hit_rate)
+//// computed from narrative entries in curator.gleam. Those signals span
+//// sessions and don't suffer from small-sample noise.
 
 import gleam/float
 import gleam/int
 import gleam/list
 import gleam/set
 import gleam/string
-
-/// Compute uncertainty: proportion of recent cycles with no CBR hits.
-/// Returns 0.0 when session_cycles == 0.
-/// Result clamped to [0.0, 1.0].
-pub fn compute_uncertainty(session_cycles: Int, session_cbr_hits: Int) -> Float {
-  case session_cycles > 0 {
-    False -> 0.0
-    True -> {
-      let hits = int.to_float(session_cbr_hits)
-      let total = int.to_float(session_cycles)
-      clamp(1.0 -. { hits /. total })
-    }
-  }
-}
-
-/// Compute prediction error: ratio of failures + D' interventions to total tool calls.
-/// Returns 0.0 when session_tool_calls == 0.
-/// Result clamped to [0.0, 1.0].
-pub fn compute_prediction_error(
-  session_tool_calls: Int,
-  session_tool_failures: Int,
-  session_dprime_modifications: Int,
-  session_dprime_rejections: Int,
-) -> Float {
-  case session_tool_calls > 0 {
-    False -> 0.0
-    True -> {
-      let errors =
-        int.to_float(
-          session_tool_failures
-          + session_dprime_modifications
-          + session_dprime_rejections,
-        )
-      let total = int.to_float(session_tool_calls)
-      clamp(errors /. total)
-    }
-  }
-}
 
 /// Compute novelty: 1.0 minus max Jaccard similarity between input keywords
 /// and each recent entry's keywords.

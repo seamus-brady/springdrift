@@ -296,30 +296,11 @@ fn handle_memory_tools(
   // Track recalled CBR case IDs for the Archivist feedback loop
   let recalled_ids =
     memory.extract_recalled_case_ids(memory_calls, memory_results)
-  let tool_count = list.length(new_summaries)
-  let failure_count = list.count(new_summaries, fn(s) { !s.success })
-  // Track CBR hits: if recall_cases returned results this cycle
-  let cbr_hit = case
-    list.any(memory_calls, fn(c) { c.name == "recall_cases" })
-    && list.any(memory_results, fn(r) {
-      case r {
-        llm_types.ToolResultContent(is_error: False, content: c, ..) ->
-          c != "[]" && c != "" && c != "No matching cases found."
-        _ -> False
-      }
-    })
-  {
-    True -> 1
-    False -> 0
-  }
   let state =
     CognitiveState(
       ..state,
       cycle_tool_calls: list.append(state.cycle_tool_calls, new_summaries),
       retrieved_case_ids: list.append(state.retrieved_case_ids, recalled_ids),
-      session_tool_calls: state.session_tool_calls + tool_count,
-      session_tool_failures: state.session_tool_failures + failure_count,
-      session_cbr_hits: state.session_cbr_hits + cbr_hit,
     )
 
   // If there are also agent calls, dispatch those with memory results as initial_results
@@ -689,8 +670,6 @@ fn do_dispatch_agents(
         ..state,
         messages:,
         cycle_tool_calls: list.append(state.cycle_tool_calls, agent_summaries),
-        session_tool_calls: state.session_tool_calls
-          + list.length(agent_summaries),
         active_delegations: new_delegations,
         status: WaitingForAgents(
           pending_ids:,

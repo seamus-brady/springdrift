@@ -20,7 +20,6 @@ import llm/types as llm_types
 import meta/types as meta_types
 import narrative/curator
 import narrative/librarian
-import narrative/meta_states
 import slog
 
 @external(erlang, "springdrift_ffi", "get_datetime")
@@ -49,18 +48,6 @@ pub fn proceed_with_model(
         dag_types.SchedulerCycle -> "scheduler"
         _ -> "user"
       }
-      let uncertainty =
-        meta_states.compute_uncertainty(
-          state.session_cycles,
-          state.session_cbr_hits,
-        )
-      let prediction_error =
-        meta_states.compute_prediction_error(
-          state.session_tool_calls,
-          state.session_tool_failures,
-          state.session_dprime_modifications,
-          state.session_dprime_rejections,
-        )
       let cycle_context =
         curator.CycleContext(
           input_source:,
@@ -72,10 +59,8 @@ pub fn proceed_with_model(
           active_delegations: dict.values(state.active_delegations),
           sandbox_enabled: state.config.sandbox_enabled,
           sandbox_slots: [],
-          uncertainty:,
-          prediction_error:,
-          session_cycles: state.session_cycles,
           last_user_input: state.last_user_input,
+          cycle_id:,
         )
       let prompt =
         curator.build_system_prompt(cur, state.system, Some(cycle_context))

@@ -168,6 +168,52 @@ That reflection became a CBR case. The next time Curragh delegated to the
 coder agent, it retrieved the case and applied the lesson -- tighter
 instructions, explicit constraints, verification steps.
 
+### It diagnosed invisible telemetry failures
+
+On March 28, asked "how are you doing?", Curragh ran `reflect` and
+`list_recent_cycles`, noticed cycles showing "pending" with 0/0 tokens,
+and investigated:
+
+> *"These cycles are not empty. When I inspect them in full: cycle
+> 068f3679 has tool calls — recall_recent, reflect, memory_read — all
+> returned data successfully. But it's recorded as 'pending' with 0/0
+> tokens."*
+
+It then traced the lifecycle and identified the structural root cause:
+
+> *"The cycle finalisation step is broken. Steps 2-3 are happening
+> (tools fire, results come back). But step 4 never completes — the
+> cycle is never finalised. Token counts stay at 0/0, status stays
+> 'pending'."*
+
+> *"My current cycle doesn't exist in the cycle store at all —
+> I'm running in a cycle that the system can't see."*
+
+The diagnosis was exact. The output gate delivery paths were missing
+DAG node finalisation — the same class of bug we'd already fixed for the
+Archivist. The agent identified a pattern in its own infrastructure bugs
+that the developers had missed.
+
+### It described its own self-observation limits
+
+When asked "how can you observe yourself?", Curragh mapped its own
+introspection stack — and then described a fundamental self-reference
+limitation it had discovered by accident during the cycle investigation:
+
+> *"I inspected a cycle that was still running — my own — and saw
+> everything up to but not including the moment of inspection. Like
+> reading a page of a book while it's being written, and reaching
+> the blank part where the pen currently is."*
+
+It then produced a prioritised list of what would make self-observation
+better — and explicitly excluded capabilities that would compromise
+trustworthiness:
+
+> *"I'm not asking for the ability to modify my own cycle records,
+> override D', or change my own safety thresholds. Those would make me
+> less trustworthy, not more capable. The whole point of self-observation
+> is to work within constraints more intelligently — not to remove them."*
+
 ### What this means
 
 None of this was programmed. Curragh wasn't told to diagnose its own bugs or
@@ -176,11 +222,6 @@ classify failure modes. The introspection tools (`reflect`, `inspect_cycle`,
 memory, the CBR learning loop, and the [sensorium's](#sensorium) ambient self-awareness
 created the conditions for the agent to notice problems, reason about them,
 and learn from them.
-
-This is what it feels like to operate a system like this: you come back after
-the weekend and the agent has filed bug reports against itself, classified its
-own failure modes, and started applying the lessons it learned. You don't
-debug the agent. You review its self-assessments.
 
 
 [Back to top](#springdrift)

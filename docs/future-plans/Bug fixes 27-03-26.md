@@ -1,4 +1,4 @@
-# Bug Fixes — 2026-03-26
+# Bug Fixes — 2026-03-26 / 2026-03-28
 
 ## Fixed
 
@@ -64,6 +64,25 @@ triggers only).
 
 **Fix:** Narrative tab now reads from disk directly (JSONL is source of truth).
 Capped at 50 most recent entries.
+
+### 8. Root cycle DAG nodes permanently "pending" with 0/0 tokens
+
+**Severity:** High — root cycles never finalised when D' gates active.
+Cycles appeared permanently "pending" with 0/0 tokens in `reflect`,
+`list_recent_cycles`, and `inspect_cycle`. The agent couldn't see its
+own cycle telemetry. Diagnosed by Curragh itself on March 28.
+
+**Root cause:** Same class of bug as the Archivist (#2) — the output gate
+delivery paths in `safety.gleam` (Accept, Modify-max, Reject,
+check_deterministic_only) were missing `UpdateNode` calls that the no-gate
+path in `cognitive.gleam` had. LLM usage data was also lost because
+`CognitiveReply` sent `usage: None` from all gate paths.
+
+**Fix:**
+- Added `pending_output_usage: Option(Usage)` to `CognitiveState`
+- Added `finalise_dag_node` helper in `safety.gleam`
+- Updated all 4 delivery paths to call `finalise_dag_node` and pass usage
+- Agent sub-cycles were unaffected (framework handles them separately)
 
 ## Acknowledged — Deferred
 

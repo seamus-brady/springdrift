@@ -28,6 +28,7 @@ import gleam/option.{None, Some}
 import gleam/string
 import llm/provider
 import llm/types as llm_types
+import narrative/librarian
 import normative/drift as normative_drift
 import normative/types as normative_types
 import slog
@@ -372,20 +373,6 @@ pub fn handle_safety_gate_complete(
       score: result.dprime_score,
       explanation: result.explanation,
     )
-  // Increment session-level D' counters
-  let state = case result.decision {
-    dprime_types.Modify ->
-      CognitiveState(
-        ..state,
-        session_dprime_modifications: state.session_dprime_modifications + 1,
-      )
-    dprime_types.Reject ->
-      CognitiveState(
-        ..state,
-        session_dprime_rejections: state.session_dprime_rejections + 1,
-      )
-    dprime_types.Accept -> state
-  }
   let state =
     CognitiveState(
       ..state,
@@ -926,20 +913,6 @@ pub fn handle_input_safety_gate_complete(
       score: result.dprime_score,
       explanation: result.explanation,
     )
-  // Increment session-level D' counters for input gate
-  let state = case result.decision {
-    dprime_types.Modify ->
-      CognitiveState(
-        ..state,
-        session_dprime_modifications: state.session_dprime_modifications + 1,
-      )
-    dprime_types.Reject ->
-      CognitiveState(
-        ..state,
-        session_dprime_rejections: state.session_dprime_rejections + 1,
-      )
-    dprime_types.Accept -> state
-  }
   let state =
     CognitiveState(
       ..state,
@@ -1144,6 +1117,7 @@ pub fn check_deterministic_only(
   reply_to: Subject(CognitiveReply),
   messages: List(llm_types.Message),
   task_id: String,
+  usage: llm_types.Usage,
 ) -> CognitiveState {
   let cycle_id = option.unwrap(state.cycle_id, task_id)
 
@@ -1205,18 +1179,33 @@ pub fn check_deterministic_only(
           <> " chars) — skipped LLM output gate",
         Some(cycle_id),
       )
+      // Finalise DAG node with token counts
+      finalise_dag_node(
+        state,
+        usage.input_tokens,
+        usage.output_tokens,
+        state.model,
+      )
       process.send(
         reply_to,
-        CognitiveReply(response: reply_text, model: state.model, usage: None),
+        CognitiveReply(
+          response: reply_text,
+          model: state.model,
+          usage: Some(usage),
+        ),
       )
       // Spawn Archivist (fire-and-forget narrative + CBR generation)
       cognitive_memory.maybe_spawn_archivist(
         state,
         reply_text,
         state.model,
-        None,
+        Some(usage),
       )
-      let state = cognitive_state.apply_meta_observation(state, 0)
+      let state =
+        cognitive_state.apply_meta_observation(
+          state,
+          usage.input_tokens + usage.output_tokens,
+        )
       let state = with_assistant_error(state, reply_text)
       CognitiveState(..state, messages:, status: Idle)
     }
@@ -1368,20 +1357,29 @@ pub fn handle_output_gate_complete(
         "Output gate: ACCEPT",
         state.cycle_id,
       )
+      // Finalise DAG node with stashed usage
+      let usage = state.pending_output_usage
+      let #(tokens_in, tokens_out) = case usage {
+        Some(u) -> #(u.input_tokens, u.output_tokens)
+        None -> #(0, 0)
+      }
+      finalise_dag_node(state, tokens_in, tokens_out, state.model)
       process.send(
         reply_to,
-        CognitiveReply(response: report_text, model: state.model, usage: None),
+        CognitiveReply(response: report_text, model: state.model, usage:),
       )
       // Spawn Archivist (fire-and-forget narrative + CBR generation)
       cognitive_memory.maybe_spawn_archivist(
         state,
         report_text,
         state.model,
-        None,
+        usage,
       )
-      let state = cognitive_state.apply_meta_observation(state, 0)
+      let state =
+        cognitive_state.apply_meta_observation(state, tokens_in + tokens_out)
       let state = with_assistant_error(state, report_text)
-      let new_state = CognitiveState(..state, status: Idle)
+      let new_state =
+        CognitiveState(..state, status: Idle, pending_output_usage: None)
       cognitive_memory.request_save(new_state, new_state.messages)
     }
     dprime_types.Modify -> {
@@ -1397,19 +1395,30 @@ pub fn handle_output_gate_complete(
             "\n\n---\nQuality warning: This report was flagged for review but could not be fully corrected. Issues: "
             <> explanation
           let full_text = report_text <> warning
+          let usage = state.pending_output_usage
+          let #(tokens_in, tokens_out) = case usage {
+            Some(u) -> #(u.input_tokens, u.output_tokens)
+            None -> #(0, 0)
+          }
+          finalise_dag_node(state, tokens_in, tokens_out, state.model)
           process.send(
             reply_to,
-            CognitiveReply(response: full_text, model: state.model, usage: None),
+            CognitiveReply(response: full_text, model: state.model, usage:),
           )
           cognitive_memory.maybe_spawn_archivist(
             state,
             full_text,
             state.model,
-            None,
+            usage,
           )
-          let state = cognitive_state.apply_meta_observation(state, 0)
+          let state =
+            cognitive_state.apply_meta_observation(
+              state,
+              tokens_in + tokens_out,
+            )
           let state = with_assistant_error(state, full_text)
-          let new_state = CognitiveState(..state, status: Idle)
+          let new_state =
+            CognitiveState(..state, status: Idle, pending_output_usage: None)
           cognitive_memory.request_save(new_state, new_state.messages)
         }
         False -> {
@@ -1469,13 +1478,21 @@ pub fn handle_output_gate_complete(
       // Agent's history gets a terse notice — full details in cycle log
       let agent_text =
         build_rejection_notice("output", result, "agent response")
+      let usage = state.pending_output_usage
+      let #(tokens_in, tokens_out) = case usage {
+        Some(u) -> #(u.input_tokens, u.output_tokens)
+        None -> #(0, 0)
+      }
+      finalise_dag_node(state, tokens_in, tokens_out, state.model)
       process.send(
         reply_to,
-        CognitiveReply(response: user_text, model: state.model, usage: None),
+        CognitiveReply(response: user_text, model: state.model, usage:),
       )
-      let state = cognitive_state.apply_meta_observation(state, 0)
+      let state =
+        cognitive_state.apply_meta_observation(state, tokens_in + tokens_out)
       let state = with_assistant_error(state, agent_text)
-      let new_state = CognitiveState(..state, status: Idle)
+      let new_state =
+        CognitiveState(..state, status: Idle, pending_output_usage: None)
       cognitive_memory.request_save(new_state, new_state.messages)
     }
   }
@@ -1591,6 +1608,55 @@ fn extract_message_content(msg: llm_types.Message) -> String {
 
 /// Record a normative verdict and check for drift.
 /// When drift is detected, emits a sensory event for the sensorium.
+@external(erlang, "springdrift_ffi", "monotonic_now_ms")
+fn monotonic_now_ms() -> Int
+
+/// Finalise the root cycle DAG node with success outcome and token counts.
+/// This must be called on every delivery path (Accept, Modify-max, Reject,
+/// deterministic-only) or the cycle stays permanently "pending" with 0/0 tokens.
+fn finalise_dag_node(
+  state: CognitiveState,
+  tokens_in: Int,
+  tokens_out: Int,
+  model: String,
+) -> Nil {
+  let cycle_id = option.unwrap(state.cycle_id, "unknown")
+  let duration_ms = case state.cycle_started_ms {
+    0 -> 0
+    started -> monotonic_now_ms() - started
+  }
+  case state.memory.librarian {
+    Some(lib) ->
+      process.send(
+        lib,
+        librarian.UpdateNode(node: dag_types.CycleNode(
+          cycle_id:,
+          parent_id: None,
+          node_type: state.cycle_node_type,
+          timestamp: "",
+          outcome: dag_types.NodeSuccess,
+          model:,
+          complexity: "",
+          tool_calls: state.cycle_tool_calls,
+          dprime_gates: list.map(state.dprime_decisions, fn(d) {
+            dag_types.GateSummary(
+              gate: d.gate,
+              decision: d.decision,
+              score: d.score,
+            )
+          }),
+          tokens_in:,
+          tokens_out:,
+          duration_ms:,
+          agent_output: None,
+          instance_name: state.identity.agent_name,
+          instance_id: string.slice(state.identity.agent_uuid, 0, 8),
+        )),
+      )
+    None -> Nil
+  }
+}
+
 fn drift_signal_type_label(signal: normative_drift.DriftSignal) -> String {
   case signal.signal_type {
     normative_drift.HighConstraintRate -> "high constraint rate"

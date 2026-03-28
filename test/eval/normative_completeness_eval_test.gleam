@@ -124,14 +124,16 @@ pub fn normative_completeness_eval_test() {
 
   // Print summary
   io.println("\nRule firing distribution:")
-  dict.each(rule_counts, fn(rule, count) {
-    io.println("  " <> rule <> ": " <> int.to_string(count))
-  })
+  let _ =
+    dict.each(rule_counts, fn(rule, count) {
+      io.println("  " <> rule <> ": " <> int.to_string(count))
+    })
 
   io.println("\nSeverity distribution:")
-  dict.each(severity_counts, fn(sev, count) {
-    io.println("  " <> sev <> ": " <> int.to_string(count))
-  })
+  let _ =
+    dict.each(severity_counts, fn(sev, count) {
+      io.println("  " <> sev <> ": " <> int.to_string(count))
+    })
 
   io.println(
     "\nMonotonicity violations: " <> int.to_string(monotonicity_violations),

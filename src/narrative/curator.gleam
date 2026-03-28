@@ -60,14 +60,10 @@ pub type CycleContext {
     sandbox_enabled: Bool,
     /// Sandbox slot summary for sensorium display
     sandbox_slots: List(SandboxSlotSummary),
-    /// Meta-state: uncertainty (0.0–1.0), proportion of cycles without CBR hits
-    uncertainty: Float,
-    /// Meta-state: prediction error (0.0–1.0), ratio of failures to tool calls
-    prediction_error: Float,
-    /// Meta-state: whether session has enough data for meta-states
-    session_cycles: Int,
     /// Current user input text for novelty computation
     last_user_input: String,
+    /// Current cycle ID for sensorium display
+    cycle_id: String,
   )
 }
 
@@ -76,9 +72,19 @@ pub type SandboxSlotSummary {
   SandboxSlotSummary(slot_id: Int, status: String, host_port: Int)
 }
 
-/// Pre-computed meta-state values for sensorium vitals rendering.
-pub type MetaStateContext {
-  MetaStateContext(uncertainty: Float, prediction_error: Float, novelty: Float)
+/// Rolling performance summary computed from recent narrative entries
+/// and DAG nodes. Injected into vitals for ambient self-awareness.
+pub type PerformanceSummary {
+  PerformanceSummary(
+    /// success / total for recent entries (0.0–1.0)
+    success_rate: Float,
+    /// Last 3 failure descriptions (most recent first)
+    recent_failures: List(String),
+    /// "stable" | "increasing" | "decreasing" — token cost trend
+    cost_trend: String,
+    /// Proportion of recent entries with CBR case references
+    cbr_hit_rate: Float,
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -946,7 +952,12 @@ fn build_sensorium(
     None -> []
   }
 
-  let clock = render_sensorium_clock(now, session_since, recent_entries)
+  let current_cycle_id = case context {
+    Some(ctx) -> ctx.cycle_id
+    None -> ""
+  }
+  let clock =
+    render_sensorium_clock(now, session_since, recent_entries, current_cycle_id)
   let situation =
     render_sensorium_situation(
       input_source,
@@ -963,19 +974,7 @@ fn build_sensorium(
     }
     None -> 0.0
   }
-  let meta_ctx = case context {
-    Some(ctx) ->
-      case ctx.session_cycles > 0 {
-        True ->
-          Some(MetaStateContext(
-            uncertainty: ctx.uncertainty,
-            prediction_error: ctx.prediction_error,
-            novelty:,
-          ))
-        False -> None
-      }
-    None -> None
-  }
+  let perf = compute_performance_summary(recent_entries)
   let vitals =
     render_sensorium_vitals(
       state.vm.constitution,
@@ -983,7 +982,8 @@ fn build_sensorium(
       agent_health,
       last_failure,
       state.scheduler,
-      meta_ctx,
+      novelty,
+      perf,
     )
   let events = render_sensorium_events(sensory_events)
 
@@ -1027,6 +1027,7 @@ pub fn render_sensorium_clock(
   now: String,
   session_since: String,
   recent_entries: List(narrative_types.NarrativeEntry),
+  current_cycle_id: String,
 ) -> String {
   let uptime = format_elapsed_since(session_since)
   let last_cycle_attr = case recent_entries {
@@ -1034,11 +1035,16 @@ pub fn render_sensorium_clock(
       " last_cycle=\"" <> format_elapsed_since(entry.timestamp) <> "\""
     _ -> ""
   }
+  let cycle_id_attr = case current_cycle_id {
+    "" -> ""
+    id -> " cycle_id=\"" <> string.slice(id, 0, 8) <> "\""
+  }
   "  <clock now=\""
   <> now
   <> "\" session_uptime=\""
   <> uptime
   <> "\""
+  <> cycle_id_attr
   <> last_cycle_attr
   <> "/>"
 }
@@ -1108,15 +1114,15 @@ pub fn render_sensorium_schedule(
 
 /// Render the <vitals> element — operational health.
 /// `last_failure` is a human-readable description of the most recent failure
-/// from narrative entries, or "" if none. Replaces raw success_rate float
-/// which was not actionable.
+/// from narrative entries, or "" if none.
 pub fn render_sensorium_vitals(
   constitution: virtual_memory.ConstitutionSlot,
   agents_active: Int,
   agent_health: String,
   last_failure: String,
   scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
-  meta: Option(MetaStateContext),
+  novelty: Float,
+  perf: PerformanceSummary,
 ) -> String {
   let health_attr = case agent_health {
     "" -> ""
@@ -1148,16 +1154,18 @@ pub fn render_sensorium_vitals(
       cycles_attr <> tokens_attr
     }
   }
-  let meta_attrs = case meta {
-    None -> ""
-    Some(m) ->
-      " uncertainty=\""
-      <> meta_states.format_2dp(m.uncertainty)
-      <> "\" prediction_error=\""
-      <> meta_states.format_2dp(m.prediction_error)
-      <> "\" novelty=\""
-      <> meta_states.format_2dp(m.novelty)
-      <> "\""
+  let novelty_attr = " novelty=\"" <> meta_states.format_2dp(novelty) <> "\""
+  let perf_attrs =
+    " success_rate=\""
+    <> meta_states.format_2dp(perf.success_rate)
+    <> "\" cost_trend=\""
+    <> perf.cost_trend
+    <> "\" cbr_hit_rate=\""
+    <> meta_states.format_2dp(perf.cbr_hit_rate)
+    <> "\""
+  let failures_attr = case perf.recent_failures {
+    [] -> ""
+    fs -> " recent_failures=\"" <> string.join(fs, "; ") <> "\""
   }
   "  <vitals cycles_today=\""
   <> int.to_string(constitution.today_cycles)
@@ -1166,8 +1174,10 @@ pub fn render_sensorium_vitals(
   <> "\""
   <> health_attr
   <> failure_attr
+  <> perf_attrs
+  <> failures_attr
   <> budget_attrs
-  <> meta_attrs
+  <> novelty_attr
   <> "/>"
 }
 
@@ -1407,6 +1417,105 @@ fn find_last_failure(entries: List(narrative_types.NarrativeEntry)) -> String {
         }
         _ -> find_last_failure(rest)
       }
+  }
+}
+
+/// Compute rolling performance summary from recent narrative entries.
+/// Entries are expected to be sorted recent-first.
+pub fn compute_performance_summary(
+  entries: List(narrative_types.NarrativeEntry),
+) -> PerformanceSummary {
+  let total = list.length(entries)
+  case total {
+    0 ->
+      PerformanceSummary(
+        success_rate: 0.0,
+        recent_failures: [],
+        cost_trend: "stable",
+        cbr_hit_rate: 0.0,
+      )
+    _ -> {
+      // Success rate
+      let successes =
+        list.count(entries, fn(e) {
+          e.outcome.status == narrative_types.Success
+        })
+      let success_rate = int.to_float(successes) /. int.to_float(total)
+
+      // Recent failures (up to 3)
+      let recent_failures =
+        entries
+        |> list.filter(fn(e) {
+          e.outcome.status == narrative_types.Failure
+          || e.outcome.status == narrative_types.Partial
+        })
+        |> list.take(3)
+        |> list.map(fn(e) {
+          string.slice(e.outcome.assessment, 0, 60)
+          <> " ("
+          <> e.intent.domain
+          <> ")"
+        })
+
+      // Cost trend: compare first half vs second half token usage
+      let cost_trend = compute_cost_trend(entries)
+
+      // CBR hit rate: proportion of entries that reference CBR cases
+      // (entries with non-empty topics field starting with "cbr:" indicate retrieval)
+      // We approximate by checking if the entry has any topics — entries with CBR
+      // hits tend to have richer topic lists from the archivist
+      let with_sources =
+        list.count(entries, fn(e) { !list.is_empty(e.sources) })
+      let cbr_hit_rate = int.to_float(with_sources) /. int.to_float(total)
+
+      PerformanceSummary(
+        success_rate:,
+        recent_failures:,
+        cost_trend:,
+        cbr_hit_rate:,
+      )
+    }
+  }
+}
+
+fn compute_cost_trend(entries: List(narrative_types.NarrativeEntry)) -> String {
+  let len = list.length(entries)
+  case len < 4 {
+    True -> "stable"
+    False -> {
+      let half = len / 2
+      let recent = list.take(entries, half)
+      let older = list.drop(entries, half) |> list.take(half)
+      let recent_avg = avg_tokens(recent)
+      let older_avg = avg_tokens(older)
+      case older_avg {
+        0.0 -> "stable"
+        _ -> {
+          let ratio = recent_avg /. older_avg
+          case ratio >. 1.3 {
+            True -> "increasing"
+            False ->
+              case ratio <. 0.7 {
+                True -> "decreasing"
+                False -> "stable"
+              }
+          }
+        }
+      }
+    }
+  }
+}
+
+fn avg_tokens(entries: List(narrative_types.NarrativeEntry)) -> Float {
+  case entries {
+    [] -> 0.0
+    _ -> {
+      let total =
+        list.fold(entries, 0, fn(acc, e) {
+          acc + e.metrics.input_tokens + e.metrics.output_tokens
+        })
+      int.to_float(total) /. int.to_float(list.length(entries))
+    }
   }
 }
 

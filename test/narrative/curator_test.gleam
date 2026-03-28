@@ -517,9 +517,11 @@ pub fn render_sensorium_clock_no_prior_test() {
       "2026-03-19T14:30:00",
       "2026-03-19T12:15:00",
       [],
+      "abc12345",
     )
   should.be_true(string.contains(result, "now=\"2026-03-19T14:30:00\""))
   should.be_true(string.contains(result, "session_uptime="))
+  should.be_true(string.contains(result, "cycle_id=\"abc12345\""))
   should.be_false(string.contains(result, "last_cycle="))
 }
 
@@ -532,6 +534,7 @@ pub fn render_sensorium_clock_with_elapsed_test() {
       "2026-03-19T14:30:00",
       "2026-03-19T12:00:00",
       entries,
+      "def67890",
     )
   should.be_true(string.contains(result, "now=\"2026-03-19T14:30:00\""))
   should.be_true(string.contains(result, "session_uptime="))
@@ -565,6 +568,15 @@ pub fn render_sensorium_schedule_empty_test() {
   result |> should.equal("")
 }
 
+fn empty_perf() -> curator.PerformanceSummary {
+  curator.PerformanceSummary(
+    success_rate: 0.0,
+    recent_failures: [],
+    cost_trend: "stable",
+    cbr_hit_rate: 0.0,
+  )
+}
+
 pub fn render_sensorium_vitals_test() {
   let constitution =
     virtual_memory.ConstitutionSlot(
@@ -579,14 +591,17 @@ pub fn render_sensorium_vitals_test() {
       "",
       "",
       option.None,
-      option.None,
+      0.0,
+      empty_perf(),
     )
   should.be_true(string.contains(result, "cycles_today=\"5\""))
   should.be_true(string.contains(result, "agents_active=\"2\""))
   should.be_false(string.contains(result, "agent_health="))
   should.be_false(string.contains(result, "last_failure="))
-  // success_rate removed — not actionable per agent feedback
-  should.be_false(string.contains(result, "success_rate"))
+  // Performance summary attrs present
+  should.be_true(string.contains(result, "success_rate=\"0.0\""))
+  should.be_true(string.contains(result, "cost_trend=\"stable\""))
+  should.be_true(string.contains(result, "cbr_hit_rate=\"0.0\""))
 }
 
 pub fn render_sensorium_vitals_health_issue_test() {
@@ -603,7 +618,8 @@ pub fn render_sensorium_vitals_health_issue_test() {
       "researcher restarting",
       "",
       option.None,
-      option.None,
+      0.0,
+      empty_perf(),
     )
   should.be_true(string.contains(
     result,
@@ -626,12 +642,134 @@ pub fn render_sensorium_vitals_with_failure_test() {
       "",
       "researcher timeout 2h ago",
       option.None,
-      option.None,
+      0.0,
+      empty_perf(),
     )
   should.be_true(string.contains(
     result,
     "last_failure=\"researcher timeout 2h ago\"",
   ))
+}
+
+pub fn render_sensorium_vitals_with_perf_test() {
+  let constitution =
+    virtual_memory.ConstitutionSlot(
+      today_cycles: 10,
+      today_success_rate: 0.8,
+      agent_health: "All agents nominal",
+    )
+  let perf =
+    curator.PerformanceSummary(
+      success_rate: 0.75,
+      recent_failures: ["timeout on fetch (weather)", "parse error (news)"],
+      cost_trend: "increasing",
+      cbr_hit_rate: 0.6,
+    )
+  let result =
+    curator.render_sensorium_vitals(
+      constitution,
+      3,
+      "",
+      "",
+      option.None,
+      0.0,
+      perf,
+    )
+  should.be_true(string.contains(result, "success_rate=\"0.75\""))
+  should.be_true(string.contains(result, "cost_trend=\"increasing\""))
+  should.be_true(string.contains(result, "cbr_hit_rate=\"0.6\""))
+  should.be_true(string.contains(result, "recent_failures=\""))
+  should.be_true(string.contains(result, "timeout on fetch (weather)"))
+  should.be_true(string.contains(result, "parse error (news)"))
+}
+
+// ---------------------------------------------------------------------------
+// compute_performance_summary tests
+// ---------------------------------------------------------------------------
+
+pub fn compute_performance_summary_empty_test() {
+  let perf = curator.compute_performance_summary([])
+  should.equal(perf.success_rate, 0.0)
+  should.equal(perf.recent_failures, [])
+  should.equal(perf.cost_trend, "stable")
+  should.equal(perf.cbr_hit_rate, 0.0)
+}
+
+pub fn compute_performance_summary_all_success_test() {
+  let entries = [
+    narrative_entry_stub("2026-03-28T10:00:00Z"),
+    narrative_entry_stub("2026-03-28T09:00:00Z"),
+  ]
+  let perf = curator.compute_performance_summary(entries)
+  should.equal(perf.success_rate, 1.0)
+  should.equal(perf.recent_failures, [])
+}
+
+pub fn compute_performance_summary_mixed_test() {
+  let success = narrative_entry_stub("2026-03-28T10:00:00Z")
+  let failure =
+    narrative_types.NarrativeEntry(
+      ..narrative_entry_stub("2026-03-28T09:00:00Z"),
+      outcome: narrative_types.Outcome(
+        status: narrative_types.Failure,
+        confidence: 0.5,
+        assessment: "web_search timed out",
+      ),
+      intent: narrative_types.Intent(
+        classification: narrative_types.Exploration,
+        description: "test",
+        domain: "weather",
+      ),
+    )
+  let entries = [success, failure]
+  let perf = curator.compute_performance_summary(entries)
+  should.equal(perf.success_rate, 0.5)
+  should.equal(list.length(perf.recent_failures), 1)
+  let assert [first_failure] = perf.recent_failures
+  should.be_true(string.contains(first_failure, "web_search timed out"))
+  should.be_true(string.contains(first_failure, "weather"))
+}
+
+pub fn compute_performance_summary_cost_trend_test() {
+  // 6 entries: first 3 (recent) have high tokens, last 3 (older) have low tokens
+  let high_entry =
+    narrative_types.NarrativeEntry(
+      ..narrative_entry_stub("2026-03-28T10:00:00Z"),
+      metrics: narrative_types.Metrics(
+        total_duration_ms: 0,
+        input_tokens: 5000,
+        output_tokens: 2000,
+        thinking_tokens: 0,
+        tool_calls: 0,
+        agent_delegations: 0,
+        dprime_evaluations: 0,
+        model_used: "",
+      ),
+    )
+  let low_entry =
+    narrative_types.NarrativeEntry(
+      ..narrative_entry_stub("2026-03-28T08:00:00Z"),
+      metrics: narrative_types.Metrics(
+        total_duration_ms: 0,
+        input_tokens: 1000,
+        output_tokens: 500,
+        thinking_tokens: 0,
+        tool_calls: 0,
+        agent_delegations: 0,
+        dprime_evaluations: 0,
+        model_used: "",
+      ),
+    )
+  let entries = [
+    high_entry,
+    high_entry,
+    high_entry,
+    low_entry,
+    low_entry,
+    low_entry,
+  ]
+  let perf = curator.compute_performance_summary(entries)
+  should.equal(perf.cost_trend, "increasing")
 }
 
 // ---------------------------------------------------------------------------

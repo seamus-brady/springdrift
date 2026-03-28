@@ -24,7 +24,7 @@ import gleam/int
 import gleam/io
 import gleam/json
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{None}
 import gleam/string
 import gleeunit
 import gleeunit/should

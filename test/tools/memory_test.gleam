@@ -22,7 +22,7 @@ pub fn main() -> Nil {
 
 pub fn memory_tools_defined_test() {
   let tools = memory.all()
-  tools |> list.length |> should.equal(21)
+  tools |> list.length |> should.equal(23)
 }
 
 pub fn recall_recent_tool_exists_test() {
@@ -768,7 +768,7 @@ pub fn how_to_unknown_topic_returns_full_guide_test() {
 
 pub fn observer_tools_count_test() {
   let tools = memory.observer_tools()
-  tools |> list.length |> should.equal(10)
+  tools |> list.length |> should.equal(12)
 }
 
 pub fn observer_tools_has_reflect_test() {
@@ -962,4 +962,163 @@ pub fn dprime_not_exempt_external_tools_test() {
   memory.is_dprime_exempt("sandbox_exec") |> should.be_false
   memory.is_dprime_exempt("write_file") |> should.be_false
   memory.is_dprime_exempt("request_human_input") |> should.be_false
+}
+
+// ---------------------------------------------------------------------------
+// review_recent + detect_patterns tools exist
+// ---------------------------------------------------------------------------
+
+pub fn review_recent_tool_exists_test() {
+  let names = list.map(memory.all(), fn(t) { t.name })
+  list.contains(names, "review_recent") |> should.be_true
+}
+
+pub fn detect_patterns_tool_exists_test() {
+  let names = list.map(memory.all(), fn(t) { t.name })
+  list.contains(names, "detect_patterns") |> should.be_true
+}
+
+pub fn review_recent_in_observer_tools_test() {
+  let names = list.map(memory.observer_tools(), fn(t) { t.name })
+  list.contains(names, "review_recent") |> should.be_true
+}
+
+pub fn detect_patterns_in_observer_tools_test() {
+  let names = list.map(memory.observer_tools(), fn(t) { t.name })
+  list.contains(names, "detect_patterns") |> should.be_true
+}
+
+pub fn review_recent_dprime_exempt_test() {
+  memory.is_dprime_exempt("review_recent") |> should.be_true
+}
+
+pub fn detect_patterns_dprime_exempt_test() {
+  memory.is_dprime_exempt("detect_patterns") |> should.be_true
+}
+
+// ---------------------------------------------------------------------------
+// detect_all_patterns (pure function tests)
+// ---------------------------------------------------------------------------
+
+fn make_review(
+  cycle_id: String,
+  domain: String,
+  outcome: String,
+  tokens: Int,
+  tool_names: List(String),
+  tool_failures: List(String),
+  model: String,
+  has_sources: Bool,
+) -> memory.CycleReview {
+  memory.CycleReview(
+    cycle_id:,
+    timestamp: "2026-03-28T10:00:00Z",
+    domain:,
+    intent: "test intent",
+    outcome:,
+    confidence: 0.9,
+    agents: [],
+    tool_names:,
+    tool_failures:,
+    gates: [],
+    tokens_in: tokens / 2,
+    tokens_out: tokens / 2,
+    model:,
+    has_sources:,
+  )
+}
+
+pub fn detect_patterns_empty_test() {
+  let patterns = memory.detect_all_patterns([])
+  should.equal(patterns, [])
+}
+
+pub fn detect_repeated_failure_pattern_test() {
+  // 3 failures in the same domain should trigger
+  let reviews = [
+    make_review("aaa", "weather", "failure", 1000, [], [], "haiku", True),
+    make_review("bbb", "weather", "failure", 1000, [], [], "haiku", True),
+    make_review("ccc", "weather", "failure", 1000, [], [], "haiku", True),
+    make_review("ddd", "news", "success", 1000, [], [], "haiku", True),
+  ]
+  let patterns = memory.detect_all_patterns(reviews)
+  let repeated =
+    list.filter(patterns, fn(p) { p.pattern_type == "repeated_failure" })
+  should.equal(list.length(repeated), 1)
+  let assert [p] = repeated
+  should.be_true(string.contains(p.description, "weather"))
+  should.equal(p.severity, "warning")
+}
+
+pub fn detect_no_repeated_failure_under_threshold_test() {
+  // 2 failures in the same domain should NOT trigger
+  let reviews = [
+    make_review("aaa", "weather", "failure", 1000, [], [], "haiku", True),
+    make_review("bbb", "weather", "failure", 1000, [], [], "haiku", True),
+    make_review("ccc", "weather", "success", 1000, [], [], "haiku", True),
+  ]
+  let patterns = memory.detect_all_patterns(reviews)
+  let repeated =
+    list.filter(patterns, fn(p) { p.pattern_type == "repeated_failure" })
+  should.equal(list.length(repeated), 0)
+}
+
+pub fn detect_tool_failure_cluster_test() {
+  // Tool with >20% failure rate across 3+ cycles
+  let reviews = [
+    make_review(
+      "aaa",
+      "d",
+      "success",
+      1000,
+      ["web_search"],
+      ["web_search"],
+      "h",
+      True,
+    ),
+    make_review("bbb", "d", "success", 1000, ["web_search"], [], "h", True),
+    make_review(
+      "ccc",
+      "d",
+      "success",
+      1000,
+      ["web_search"],
+      ["web_search"],
+      "h",
+      True,
+    ),
+    make_review("ddd", "d", "success", 1000, ["web_search"], [], "h", True),
+  ]
+  let patterns = memory.detect_all_patterns(reviews)
+  let clusters =
+    list.filter(patterns, fn(p) { p.pattern_type == "tool_failure_cluster" })
+  // 2/4 = 50% > 20% → should trigger
+  should.equal(list.length(clusters), 1)
+}
+
+pub fn detect_cost_outlier_test() {
+  // One cycle with 3x+ average tokens
+  let reviews = [
+    make_review("aaa", "d", "success", 1000, [], [], "h", True),
+    make_review("bbb", "d", "success", 1000, [], [], "h", True),
+    make_review("ccc", "d", "success", 1000, [], [], "h", True),
+    make_review("ddd", "d", "success", 20_000, [], [], "h", True),
+  ]
+  let patterns = memory.detect_all_patterns(reviews)
+  let outliers =
+    list.filter(patterns, fn(p) { p.pattern_type == "cost_outlier" })
+  should.equal(list.length(outliers), 1)
+}
+
+pub fn detect_cbr_miss_test() {
+  // 3/4 cycles without sources → 75% miss rate
+  let reviews = [
+    make_review("aaa", "d", "success", 1000, [], [], "h", False),
+    make_review("bbb", "d", "success", 1000, [], [], "h", False),
+    make_review("ccc", "d", "success", 1000, [], [], "h", False),
+    make_review("ddd", "d", "success", 1000, [], [], "h", True),
+  ]
+  let patterns = memory.detect_all_patterns(reviews)
+  let misses = list.filter(patterns, fn(p) { p.pattern_type == "cbr_miss" })
+  should.equal(list.length(misses), 1)
 }

@@ -140,15 +140,10 @@ pub type CognitiveState {
     meta_state: Option(meta_types.MetaState),
     // --- Output gate pending reply (cleared on delivery) ---
     pending_output_reply: Option(#(Subject(CognitiveReply), String)),
+    // --- LLM usage from the think worker, stashed while output gate runs ---
+    pending_output_usage: Option(llm_types.Usage),
     // --- CBR retrieval tracking (cleared each cycle) ---
     retrieved_case_ids: List(String),
-    // --- Session-level meta-state counters (reset on restart) ---
-    session_tool_calls: Int,
-    session_tool_failures: Int,
-    session_dprime_modifications: Int,
-    session_dprime_rejections: Int,
-    session_cycles: Int,
-    session_cbr_hits: Int,
     // --- Canary probe failure tracking ---
     consecutive_probe_failures: Int,
     // --- Normative calculus drift tracking ---

@@ -402,7 +402,7 @@ and DAG nodes. Messages: `QueryDayRoots`, `QueryDayStats`, `QueryNodeWithDescend
 At startup, the Librarian replays artifact metadata from disk (configurable via
 `librarian_max_days`, default 30).
 
-**Memory tools** (14 tools in `tools/memory.gleam`) plus **artifact tools** (2 tools in `tools/artifacts.gleam`):
+**Memory tools** (16 tools in `tools/memory.gleam`) plus **artifact tools** (2 tools in `tools/artifacts.gleam`):
 
 | Tool | Store | Purpose |
 |---|---|---|
@@ -421,6 +421,8 @@ At startup, the Librarian replays artifact metadata from disk (configurable via
 | `inspect_cycle` | DAG | Drill into a specific cycle tree with tool calls and agent output |
 | `list_recent_cycles` | DAG | Discover cycle IDs for a date (feed into `inspect_cycle`) |
 | `query_tool_activity` | DAG | Per-tool usage stats for a date |
+| `review_recent` | DAG + Narrative | Structured self-review across N recent cycles with filtering |
+| `detect_patterns` | DAG + Narrative | Automated pattern detection: repeated failures, tool clusters, cost outliers |
 | `introspect` | All | Perceive system state: identity, agent roster, D' config, cycle ID |
 | `how_to` | HOW_TO.md | Operator guide: tool selection heuristics, degradation paths |
 | `cancel_agent` | Registry | Stop a running agent delegation by name |
@@ -625,8 +627,8 @@ FACTS EXIST). `assemble_system_prompt` combines persona + rendered preamble in c
 queries Librarian for thread/fact/case counts, renders preamble slots, and assembles
 the final system prompt. `CycleContext` is an ephemeral record constructed by the
 cognitive loop each cycle carrying `input_source` ("user"/"scheduler"), `queue_depth`,
-`session_since`, `agents_active`, and `message_count` — data the Curator can't derive
-itself.
+`session_since`, `agents_active`, `message_count`, and `novelty` (Float, per-input
+keyword dissimilarity) — data the Curator can't derive itself.
 
 `build_sensorium` assembles a self-describing XML `{{sensorium}}` slot — the agent's
 ambient perception block injected at every cycle start (no tool calls needed). It
@@ -637,12 +639,18 @@ contains four sections:
 3. `<schedule>` — `pending`/`overdue` counts + `<job>` elements (omitted when empty)
 4. `<vitals>` — `cycles_today`, `agents_active`, conditional `agent_health`,
    conditional `last_failure` (from narrative entries, replaces raw success_rate),
-   optional `cycles_remaining`/`tokens_remaining` budget attrs, and three canonical
-   meta-states: `uncertainty` (proportion of cycles without CBR hits), `prediction_error`
-   (tool failure + D' modification/rejection rate), `novelty` (keyword dissimilarity to
-   recent narrative entries). Meta-states are derived from session counters and Librarian
-   data — no LLM calls needed. Based on Sloman's H-CogAff meta-management layer and
-   the Dupoux/LeCun/Malik System M paper (2603.15381).
+   optional `cycles_remaining`/`tokens_remaining` budget attrs, performance summary
+   attributes (`success_rate` 0.0-1.0, `recent_failures` semicolon-separated last 3
+   failure descriptions omitted when empty, `cost_trend` stable/increasing/decreasing,
+   `cbr_hit_rate` proportion of entries with source references), and a `novelty`
+   signal (keyword dissimilarity to recent narrative entries, computed per-input from
+   Jaccard similarity). Performance summary (`PerformanceSummary`) is computed by
+   `compute_performance_summary` in `narrative/curator.gleam` from recent narrative
+   entries — these are history-backed signals that span sessions (not reset on restart).
+   `novelty` is the only remaining per-cycle meta-state signal, passed directly as a
+   `Float` parameter to `render_sensorium_vitals`. No LLM calls needed. Based on
+   Sloman's H-CogAff meta-management layer and the Dupoux/LeCun/Malik System M paper
+   (2603.15381).
 
 Previously separate preamble slots (`session_status`, `last_session_date`,
 `today_cycles`, `today_success_rate`, `agent_health`) are now absorbed into the
