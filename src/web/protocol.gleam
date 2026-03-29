@@ -33,6 +33,7 @@ pub type ClientMessage {
   RequestPlannerData
   RequestDprimeData
   RequestDprimeConfig
+  RequestCommsData
 }
 
 pub type ServerMessage {
@@ -52,6 +53,7 @@ pub type ServerMessage {
   DprimeData(gates_json: String)
   DprimeConfigData(config_json: String)
   SessionHistory(messages_json: String)
+  CommsData(messages_json: String)
 }
 
 pub type CycleDataJson {
@@ -95,6 +97,7 @@ pub fn decode_client_message(json_string: String) -> Result(ClientMessage, Nil) 
       "request_planner_data" -> decode.success(RequestPlannerData)
       "request_dprime_data" -> decode.success(RequestDprimeData)
       "request_dprime_config" -> decode.success(RequestDprimeConfig)
+      "request_comms_data" -> decode.success(RequestCommsData)
       _ -> decode.failure(UserMessage(""), "Unknown client message type")
     }
   }
@@ -220,6 +223,8 @@ pub fn encode_server_message(msg: ServerMessage) -> String {
 
     SessionHistory(messages_json:) ->
       "{\"type\":\"session_history\",\"messages\":" <> messages_json <> "}"
+    CommsData(messages_json:) ->
+      "{\"type\":\"comms_data\",\"messages\":" <> messages_json <> "}"
   }
 }
 

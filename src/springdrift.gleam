@@ -13,6 +13,8 @@ import agents/researcher
 import agents/scheduler as scheduler_agent
 import backup/actor as backup_actor
 import cbr/bridge as cbr_bridge
+import comms/email as comms_email
+import comms/poller as comms_poller
 import comms/types as comms_types
 import config.{type AppConfig}
 import dot_env
@@ -916,6 +918,50 @@ fn run(cfg: AppConfig) -> Nil {
     False -> Nil
   }
 
+  // Start comms inbox poller (if comms enabled and inbox resolved)
+  // Reuse the same resolution logic as comms_specs
+  case option.unwrap(cfg.comms_enabled, True) {
+    True -> {
+      let poller_api_key_env =
+        option.unwrap(cfg.comms_api_key_env, "AGENTMAIL_API_KEY")
+      let poller_from = option.unwrap(cfg.comms_from_address, "")
+      let poller_inbox_id = case option.unwrap(cfg.comms_inbox_id, "") {
+        "" ->
+          case poller_from {
+            "" -> ""
+            addr ->
+              case comms_email.resolve_inbox_id(poller_api_key_env, addr) {
+                Ok(id) -> id
+                Error(_) -> ""
+              }
+          }
+        id -> id
+      }
+      case poller_inbox_id {
+        "" -> Nil
+        _ -> {
+          let poll_config =
+            comms_poller.PollerConfig(
+              inbox_id: poller_inbox_id,
+              api_key_env: poller_api_key_env,
+              poll_interval_ms: option.unwrap(
+                cfg.comms_poll_interval_ms,
+                60_000,
+              ),
+              from_address: poller_from,
+            )
+          let _poller = comms_poller.start(poll_config, cognitive_subj)
+          io.println(
+            "Comms    : inbox poller started ("
+            <> int.to_string(poll_config.poll_interval_ms / 1000)
+            <> "s interval)",
+          )
+        }
+      }
+    }
+    False -> Nil
+  }
+
   // Start GUI
   let tui_input_limit = option.unwrap(cfg.tui_input_limit, 102_400)
   let ws_max_bytes = option.unwrap(cfg.websocket_max_bytes, 1_048_576)
@@ -1227,12 +1273,34 @@ fn comms_specs(
   case option.unwrap(cfg.comms_enabled, True) {
     False -> []
     True -> {
+      let api_key_env =
+        option.unwrap(cfg.comms_api_key_env, "AGENTMAIL_API_KEY")
+      let from_address = option.unwrap(cfg.comms_from_address, "")
+      // Resolve inbox_id: use config if set, otherwise look up by from_address
+      let inbox_id = case option.unwrap(cfg.comms_inbox_id, "") {
+        "" ->
+          case from_address {
+            "" -> ""
+            addr ->
+              case comms_email.resolve_inbox_id(api_key_env, addr) {
+                Ok(id) -> {
+                  io.println("Comms    : resolved inbox_id for " <> addr)
+                  id
+                }
+                Error(reason) -> {
+                  io.println("Comms    : failed to resolve inbox — " <> reason)
+                  ""
+                }
+              }
+          }
+        configured_id -> configured_id
+      }
       let comms_config =
         comms_types.CommsConfig(
           enabled: True,
-          inbox_id: option.unwrap(cfg.comms_inbox_id, ""),
-          api_key_env: option.unwrap(cfg.comms_api_key_env, "AGENTMAIL_API_KEY"),
-          from_address: option.unwrap(cfg.comms_from_address, ""),
+          inbox_id:,
+          api_key_env:,
+          from_address:,
           allowed_recipients: option.unwrap(cfg.comms_allowed_recipients, []),
           from_name: option.unwrap(
             cfg.comms_from_name,
@@ -1248,7 +1316,7 @@ fn comms_specs(
           slog.warn(
             "springdrift",
             "comms_specs",
-            "comms_enabled=true but no comms_inbox_id configured — comms agent disabled",
+            "comms_enabled=true but no inbox_id (set from_address or inbox_id) — comms agent disabled",
             option.None,
           )
           []

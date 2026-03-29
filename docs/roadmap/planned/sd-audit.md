@@ -556,7 +556,7 @@ SD Audit uses lenient parsing — unknown fields are ignored, missing optional f
 
 ## Relationship to Empirical Evaluation
 
-The empirical evaluation plan (`docs/future-plans/empirical-evaluation.md`) describes seven evaluations that need runtime data. SD Audit provides the data extraction layer:
+The empirical evaluation plan (`docs/roadmap/empirical-evaluation.md`) describes seven evaluations that need runtime data. SD Audit provides the data extraction layer:
 
 | Evaluation | SD Audit Command |
 |---|---|

@@ -1,7 +1,7 @@
 # Communications Agent — Specification
 
-**Status**: Phase 1 Implemented (Email via AgentMail)
-**Date**: 2026-03-26 (spec), 2026-03-28 (Phase 1 implementation)
+**Status**: Phase 1-3 Implemented (Email via AgentMail + Web Admin Tab + Inbox Poller)
+**Date**: 2026-03-26 (spec), 2026-03-28 (Phase 1), 2026-03-29 (Phase 2-3, bug fixes)
 **Dependencies**: Multi-tenant (planned), Scheduler (implemented), D' safety system (implemented)
 
 ---
@@ -20,12 +20,21 @@ implemented and working. The following are implemented:
 - `src/paths.gleam` — comms_dir() path
 - `.springdrift_example/dprime.json` — comms agent override (tighter thresholds) + 5 deterministic output rules
 - Three-layer D' safety: hard allowlist, deterministic rules, agent-specific LLM scoring
+- Web admin Comms tab (table of sent/received messages from JSONL log, last 7 days)
+- Bug fixes: FFI function name (get_datetime not get_timestamp), AgentMail response decoders (to field is array, lenient optional_field decoders)
+- D' input gate fix: interactive input now skips structural injection heuristics (operator may paste technical content about safety systems)
+- `src/comms/poller.gleam` — OTP inbox polling actor (60s default, configurable)
+- Poller seeds seen_ids from JSONL on startup (no duplicate processing after restart)
+- Poller routes inbound email as SchedulerInput (not UserInput) so agent distinguishes email from operator
+- Comms tab deduplicates by message_id
+- Auto-resolve inbox_id from from_address via AgentMail list inboxes API (no manual UUID needed)
+- `comms_from_address` and `comms_poll_interval_ms` config fields added
+- Comms enabled by default (disabled if no from_address or API key)
 
 **Deferred to future phases:**
 
 - WhatsApp channel support (Business API client, webhook inbound)
-- Inbound email polling (IMAP or AgentMail webhook)
-- Web GUI Conversations tab and operator send
+- Web GUI operator send (compose and send from admin)
 - Multi-tenant wiring (per-tenant channel config, isolation)
 - Channel routing (comms/router.gleam)
 - Message templates (comms/templates.gleam)

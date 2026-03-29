@@ -285,13 +285,13 @@ Result: ACCEPT
 
 | Spec | Relationship |
 |---|---|
-| [D' Safety Overhaul](../implemented-plans/dprime-safety-overhaul.md) | Output gate is the evaluation point; provenance enriches its context |
-| [D' Enhancements](../implemented-plans/dprime-enhancements.md) | Fact provenance (Enhancement 2) provides the data model |
-| [CBR Retrieval System](../implemented-plans/cbr-retrieval-system.md) | CBR cases with category and usage stats as provenance evidence |
-| [Prime Narrative Memory](../implemented-plans/prime-narrative-memory.md) | Artifact store and Librarian provide the query layer |
+| [D' Safety Overhaul](../roadmap/implemented/dprime-safety-overhaul.md) | Output gate is the evaluation point; provenance enriches its context |
+| [D' Enhancements](../roadmap/implemented/dprime-enhancements.md) | Fact provenance (Enhancement 2) provides the data model |
+| [CBR Retrieval System](../roadmap/implemented/cbr-retrieval-system.md) | CBR cases with category and usage stats as provenance evidence |
+| [Prime Narrative Memory](../roadmap/implemented/prime-narrative-memory.md) | Artifact store and Librarian provide the query layer |
 | [Knowledge Management](knowledge-management.md) | Study-cycle provenance for knowledge-sourced claims |
 | [Remembrancer](remembrancer.md) | Restored confidence on re-verified facts feeds into provenance quality |
-| [Web Research Tools](../implemented-plans/web-research-tools.md) | Researcher agent creates the artifacts and facts that provenance checks against |
+| [Web Research Tools](../roadmap/implemented/web-research-tools.md) | Researcher agent creates the artifacts and facts that provenance checks against |
 
 ---
 

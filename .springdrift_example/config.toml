@@ -265,3 +265,6 @@ summary_schedule = "weekly"
 
 # Max outbound emails per hour (default: 20)
 # max_outbound_per_hour = 20
+
+# Inbox poll interval in milliseconds (default: 60000 = 1 minute)
+# poll_interval_ms = 60000

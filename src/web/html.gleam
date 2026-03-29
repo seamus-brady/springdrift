@@ -296,6 +296,7 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
   <button class=\"tab-btn\" data-tab=\"planner\">Planner</button>
   <button class=\"tab-btn\" data-tab=\"dprime\">D' Safety</button>
   <button class=\"tab-btn\" data-tab=\"dprime-config\">D' Config</button>
+  <button class=\"tab-btn\" data-tab=\"comms\">Comms</button>
 </div>
 <div id=\"content-area\">
   <div id=\"narrative-tab\" class=\"tab-content active\">
@@ -345,6 +346,10 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
     <button class=\"refresh-btn\" id=\"dprime-config-refresh\">Refresh</button>
     <div id=\"dprime-config-container\">Loading D' configuration...</div>
   </div>
+  <div id=\"comms-tab\" class=\"tab-content\">
+    <button class=\"refresh-btn\" id=\"comms-refresh\">Refresh</button>
+    <div id=\"comms-container\"><table class=\"admin-table\"><thead><tr><th>Time</th><th>Dir</th><th>From</th><th>To</th><th>Subject</th><th>Status</th></tr></thead><tbody id=\"comms-body\"><tr><td colspan=\"6\" style=\"text-align:center;opacity:.5\">Loading...</td></tr></tbody></table></div>
+  </div>
 </div>
 </div>
 </div>
@@ -373,6 +378,7 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
       else if (tab === 'planner') requestPlannerData();
       else if (tab === 'dprime') requestDprimeData();
       else if (tab === 'dprime-config') requestDprimeConfig();
+      else if (tab === 'comms') requestCommsData();
     });
   });
 
@@ -383,6 +389,7 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
   document.getElementById('planner-refresh').addEventListener('click', requestPlannerData);
   document.getElementById('dprime-refresh').addEventListener('click', requestDprimeData);
   document.getElementById('dprime-config-refresh').addEventListener('click', requestDprimeConfig);
+  document.getElementById('comms-refresh').addEventListener('click', requestCommsData);
 
   function requestLogData() {
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -426,6 +433,12 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
     }
   }
 
+  function requestCommsData() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'request_comms_data' }));
+    }
+  }
+
   function dprimeScoreColor(score) {
     if (score < 0.35) return '#248a3d';
     if (score <= 0.55) return '#c77c00';
@@ -458,6 +471,28 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
         '<td><span class=\"dprime-gate-badge dprime-gate-' + escapeHtml(g.gate) + '\">' + escapeHtml(g.gate) + '</span></td>' +
         '<td>' + dprimeDecisionBadge(g.decision) + '</td>' +
         '<td style=\"color:' + scoreColor + ';font-weight:600\">' + g.score.toFixed(3) + '</td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  function renderCommsMessages(messages) {
+    var body = document.getElementById('comms-body');
+    if (!messages || messages.length === 0) {
+      body.innerHTML = '<tr><td colspan=\"6\" style=\"text-align:center;opacity:.5\">No messages</td></tr>';
+      return;
+    }
+    body.innerHTML = messages.map(function(m) {
+      var time = (m.timestamp || '').substring(0, 16).replace('T', ' ');
+      var dir = m.direction === 'outbound' ? '&#8599;' : '&#8601;';
+      var dirColor = m.direction === 'outbound' ? '#248a3d' : '#007aff';
+      var statusColor = m.status === 'sent' || m.status === 'delivered' ? '#248a3d' : m.status === 'pending' ? '#c77c00' : '#d70015';
+      return '<tr>' +
+        '<td style=\"white-space:nowrap\">' + escapeHtml(time) + '</td>' +
+        '<td style=\"color:' + dirColor + ';font-size:1.2em;text-align:center\">' + dir + '</td>' +
+        '<td>' + escapeHtml(m.from || '') + '</td>' +
+        '<td>' + escapeHtml(m.to || '') + '</td>' +
+        '<td>' + escapeHtml(m.subject || '') + '</td>' +
+        '<td style=\"color:' + statusColor + '\">' + escapeHtml(m.status || '') + '</td>' +
         '</tr>';
     }).join('');
   }
@@ -776,6 +811,9 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
         break;
       case 'dprime_config_data':
         renderDprimeConfig(data.config);
+        break;
+      case 'comms_data':
+        renderCommsMessages(data.messages);
         break;
       case 'notification':
         if (data.kind === 'safety') {

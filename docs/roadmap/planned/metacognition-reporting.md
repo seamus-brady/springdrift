@@ -1,5 +1,18 @@
 # Metacognition Reporting — Design Spec
 
+**Status**: Partially Addressed
+**Date**: 2026-03-26
+
+> **Note (2026-03-29):** The cross-cycle pattern detection work (now in
+> implemented-plans) partially addresses this spec. `review_recent` provides
+> structured cross-cycle review, `detect_patterns` automates pattern detection
+> (repeated failures, tool clusters, cost outliers, CBR misses), and the
+> sensorium performance summary (`success_rate`, `cost_trend`, `cbr_hit_rate`,
+> `recent_failures`, `novelty`) provides ambient self-awareness every cycle.
+> The session-scoped meta-states (`uncertainty`, `prediction_error`) were removed
+> as redundant. What remains unbuilt: persistent D' decision aggregation,
+> normative calculus drift persistence across sessions, and an operator dashboard.
+
 ## Problem
 
 Springdrift has three layers of metacognition that generate valuable signal but

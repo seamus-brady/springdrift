@@ -6,6 +6,7 @@
 import gleam/dynamic/decode
 import gleam/int
 import gleam/json
+import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import slog
@@ -131,8 +132,8 @@ pub fn send_message(
 
 fn decode_send_result(body: String) -> Result(SendResult, String) {
   let decoder = {
-    use message_id <- decode.field("message_id", decode.string)
-    use thread_id <- decode.field("thread_id", decode.string)
+    use message_id <- decode.optional_field("message_id", "", decode.string)
+    use thread_id <- decode.optional_field("thread_id", "", decode.string)
     decode.success(SendResult(message_id:, thread_id:))
   }
   case json.parse(body, decoder) {
@@ -186,10 +187,11 @@ pub fn list_messages(
 
 fn decode_message_list(body: String) -> Result(List(InboxMessage), String) {
   let msg_decoder = {
-    use message_id <- decode.field("message_id", decode.string)
-    use thread_id <- decode.field("thread_id", decode.string)
+    use message_id <- decode.optional_field("message_id", "", decode.string)
+    use thread_id <- decode.optional_field("thread_id", "", decode.string)
     use from <- decode.optional_field("from", "", decode.string)
-    use to <- decode.optional_field("to", "", decode.string)
+    // AgentMail returns "to" as an array of strings
+    use to_list <- decode.optional_field("to", [], decode.list(decode.string))
     use subject <- decode.optional_field("subject", "", decode.string)
     use preview <- decode.optional_field("preview", "", decode.string)
     use timestamp <- decode.optional_field("timestamp", "", decode.string)
@@ -197,14 +199,18 @@ fn decode_message_list(body: String) -> Result(List(InboxMessage), String) {
       message_id:,
       thread_id:,
       from:,
-      to:,
+      to: string.join(to_list, ", "),
       subject:,
       preview:,
       timestamp:,
     ))
   }
   let decoder = {
-    use messages <- decode.field("messages", decode.list(msg_decoder))
+    use messages <- decode.optional_field(
+      "messages",
+      [],
+      decode.list(msg_decoder),
+    )
     decode.success(messages)
   }
   case json.parse(body, decoder) {
@@ -249,10 +255,11 @@ pub fn get_message(
 
 fn decode_full_message(body: String) -> Result(FullMessage, String) {
   let decoder = {
-    use message_id <- decode.field("message_id", decode.string)
-    use thread_id <- decode.field("thread_id", decode.string)
+    use message_id <- decode.optional_field("message_id", "", decode.string)
+    use thread_id <- decode.optional_field("thread_id", "", decode.string)
     use from <- decode.optional_field("from", "", decode.string)
-    use to <- decode.optional_field("to", "", decode.string)
+    // AgentMail returns "to" as an array of strings
+    use to_list <- decode.optional_field("to", [], decode.list(decode.string))
     use subject <- decode.optional_field("subject", "", decode.string)
     use text <- decode.optional_field("text", "", decode.string)
     use html <- decode.optional_field("html", "", decode.string)
@@ -261,7 +268,7 @@ fn decode_full_message(body: String) -> Result(FullMessage, String) {
       message_id:,
       thread_id:,
       from:,
-      to:,
+      to: string.join(to_list, ", "),
       subject:,
       text:,
       html:,
@@ -270,7 +277,8 @@ fn decode_full_message(body: String) -> Result(FullMessage, String) {
   }
   case json.parse(body, decoder) {
     Ok(msg) -> Ok(msg)
-    Error(_) -> Error("Failed to decode message")
+    Error(_) ->
+      Error("Failed to decode message: " <> string.slice(body, 0, 200))
   }
 }
 
@@ -283,6 +291,64 @@ fn auth_headers(api_key: String) -> List(#(String, String)) {
     #("Authorization", "Bearer " <> api_key),
     #("Content-Type", "application/json"),
   ]
+}
+
+/// Resolve an inbox_id from an email address by listing inboxes and matching.
+/// Returns the inbox_id string, or Error if not found.
+pub fn resolve_inbox_id(
+  api_key_env: String,
+  email_address: String,
+) -> Result(String, String) {
+  case get_env(api_key_env) {
+    Error(_) -> Error(api_key_env <> " not set")
+    Ok(api_key) -> {
+      let url = api_base <> "/inboxes?limit=50"
+      let headers = auth_headers(api_key)
+      case http_get_with_headers(url, headers) {
+        Error(reason) -> Error("HTTP error: " <> reason)
+        Ok(#(status, resp_body)) ->
+          case status >= 200 && status < 300 {
+            True -> find_inbox_by_email(resp_body, email_address)
+            False ->
+              Error(
+                "AgentMail API error "
+                <> int.to_string(status)
+                <> ": "
+                <> string.slice(resp_body, 0, 200),
+              )
+          }
+      }
+    }
+  }
+}
+
+fn find_inbox_by_email(
+  body: String,
+  target_email: String,
+) -> Result(String, String) {
+  let inbox_decoder = {
+    use inbox_id <- decode.optional_field("inbox_id", "", decode.string)
+    use email <- decode.optional_field("email", "", decode.string)
+    decode.success(#(inbox_id, email))
+  }
+  let decoder = {
+    use inboxes <- decode.optional_field(
+      "inboxes",
+      [],
+      decode.list(inbox_decoder),
+    )
+    decode.success(inboxes)
+  }
+  case json.parse(body, decoder) {
+    Error(_) -> Error("Failed to decode inbox list")
+    Ok(inboxes) -> {
+      let target = string.lowercase(string.trim(target_email))
+      case list.find(inboxes, fn(pair) { string.lowercase(pair.1) == target }) {
+        Ok(#(inbox_id, _)) -> Ok(inbox_id)
+        Error(_) -> Error("No inbox found for " <> target_email)
+      }
+    }
+  }
 }
 
 /// Check if the AgentMail API key is configured.

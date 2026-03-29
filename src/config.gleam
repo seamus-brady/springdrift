@@ -217,6 +217,7 @@ pub type AppConfig {
     comms_allowed_recipients: Option(List(String)),
     comms_from_name: Option(String),
     comms_max_outbound_per_hour: Option(Int),
+    comms_poll_interval_ms: Option(Int),
   )
 }
 
@@ -383,6 +384,7 @@ pub fn default() -> AppConfig {
     comms_allowed_recipients: None,
     comms_from_name: None,
     comms_max_outbound_per_hour: None,
+    comms_poll_interval_ms: None,
   )
 }
 
@@ -919,6 +921,10 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     comms_max_outbound_per_hour: option.or(
       override_cfg.comms_max_outbound_per_hour,
       base.comms_max_outbound_per_hour,
+    ),
+    comms_poll_interval_ms: option.or(
+      override_cfg.comms_poll_interval_ms,
+      base.comms_poll_interval_ms,
     ),
   )
 }
@@ -1487,6 +1493,7 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     comms_max_outbound_per_hour: get_toml_int(table, [
       "comms", "max_outbound_per_hour",
     ]),
+    comms_poll_interval_ms: get_toml_int(table, ["comms", "poll_interval_ms"]),
   )
 }
 

@@ -504,9 +504,9 @@ Knowledge sources uploaded by the operator are scoped to the tenant they're logg
 | [SD Designer](sd-designer.md) | Domain presets may include starter knowledge sources (e.g. legal domain preseeded with key statutes) |
 | [Multi-Tenant](multi-tenant.md) | Per-tenant knowledge directory isolation |
 | [External Agent Integration](external-agent-integration.md) | Federated documents arrive as knowledge sources |
-| [CBR Retrieval System](../implemented-plans/cbr-retrieval-system.md) | Study cycles produce DomainKnowledge CBR cases |
-| [Fact Provenance](../implemented-plans/dprime-enhancements.md) | All study-derived facts tagged with source document provenance |
-| [Confidence Decay](../implemented-plans/dprime-enhancements.md) | Study-derived facts decay like all facts; Remembrancer can restore confidence on re-verification |
+| [CBR Retrieval System](../roadmap/implemented/cbr-retrieval-system.md) | Study cycles produce DomainKnowledge CBR cases |
+| [Fact Provenance](../roadmap/implemented/dprime-enhancements.md) | All study-derived facts tagged with source document provenance |
+| [Confidence Decay](../roadmap/implemented/dprime-enhancements.md) | Study-derived facts decay like all facts; Remembrancer can restore confidence on re-verification |
 | [Self-Diagnostic Skill](self-diagnostic-skill.md) | Diagnostic can check knowledge base health (stale sources, missing studies) |
 
 ---

@@ -1,6 +1,8 @@
 //// Web chat GUI — HTTP server + WebSocket bridge to the cognitive loop.
 
 import agent/types as agent_types
+import comms/log as comms_log
+import comms/types as comms_types
 import cycle_log
 import dag/types as dag_types
 import gleam/bytes_tree
@@ -11,6 +13,7 @@ import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/set
 import gleam/string
 import llm/types.{type Message, Assistant, TextContent, User}
 import mist.{type Connection, type ResponseData}
@@ -504,6 +507,49 @@ fn ws_handler(
                   conn,
                   protocol.encode_server_message(protocol.DprimeConfigData(
                     config_json:,
+                  )),
+                )
+              mist.continue(state)
+            }
+            Ok(protocol.RequestCommsData) -> {
+              let raw_messages = comms_log.load_recent(paths.comms_dir(), 7)
+              // Deduplicate by message_id (poller bug may have created dupes)
+              let messages =
+                list.fold(raw_messages, #([], set.new()), fn(acc, m) {
+                  case set.contains(acc.1, m.message_id) {
+                    True -> acc
+                    False -> #([m, ..acc.0], set.insert(acc.1, m.message_id))
+                  }
+                }).0
+                |> list.reverse
+              let messages_json =
+                json.to_string(
+                  json.array(messages, fn(m) {
+                    json.object([
+                      #("message_id", json.string(m.message_id)),
+                      #("direction", case m.direction {
+                        comms_types.Outbound -> json.string("outbound")
+                        comms_types.Inbound -> json.string("inbound")
+                      }),
+                      #("from", json.string(m.from)),
+                      #("to", json.string(m.to)),
+                      #("subject", json.string(m.subject)),
+                      #("body", json.string(string.slice(m.body_text, 0, 200))),
+                      #("timestamp", json.string(m.timestamp)),
+                      #("status", case m.status {
+                        comms_types.Sent -> json.string("sent")
+                        comms_types.Delivered -> json.string("delivered")
+                        comms_types.Failed(r) -> json.string("failed: " <> r)
+                        comms_types.Pending -> json.string("pending")
+                      }),
+                    ])
+                  }),
+                )
+              let _ =
+                mist.send_text_frame(
+                  conn,
+                  protocol.encode_server_message(protocol.CommsData(
+                    messages_json:,
                   )),
                 )
               mist.continue(state)

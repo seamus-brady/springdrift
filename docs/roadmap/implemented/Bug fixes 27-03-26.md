@@ -84,6 +84,58 @@ path in `cognitive.gleam` had. LLM usage data was also lost because
 - Updated all 4 delivery paths to call `finalise_dag_node` and pass usage
 - Agent sub-cycles were unaffected (framework handles them separately)
 
+### 8b. Input gate structural injection false positive on operator content
+
+**Severity:** High — operator pasting README text (which discusses injection
+detection) triggered deterministic structural injection block at score 1.0.
+The README contained boundary markers (---), imperative verbs (ignore,
+override), and system targets (safety rules, previous instructions) — all
+describing what the system defends against, not actual injection.
+
+**Root cause:** `detect_structural_injection` and `detect_payload_signatures`
+are heuristic detectors designed for untrusted external content. They
+false-positive heavily on technical documentation about the system itself.
+
+**Fix:** Added `check_input_interactive` to `dprime/deterministic.gleam`.
+Interactive input runs only configured regex rules (operator-defined).
+Structural injection heuristics and payload signature detection are skipped.
+Autonomous (scheduler) input still gets the full check.
+
+### 8c. Comms agent worker crash — undefined FFI function
+
+**Severity:** Medium — `get_timestamp` FFI function didn't exist (correct
+name is `get_datetime`). Worker crashed after successful email send.
+
+**Fix:** Changed FFI reference from `get_timestamp` to `get_datetime`.
+
+### 8d. Comms agent inbox decode errors
+
+**Severity:** Medium — AgentMail returns `to` as an array of strings, not a
+single string. Strict `decode.field` on `message_id`/`thread_id` failed
+when fields were missing or null.
+
+**Fix:** All decoders made lenient with `optional_field`. `to` decoded as
+`List(String)` and joined. `cycle_id` uses `decode.optional(decode.string)`
+for null handling.
+
+### 8e. Comms poller creating duplicate entries
+
+**Severity:** Medium — poller re-processed same messages every tick because
+it only tracked the last seen ID, not all seen IDs. On restart, seen set
+was empty so everything re-processed.
+
+**Fix:** Track `seen_ids` as `Set(String)` capped at 200. Seed from JSONL
+on startup. Web admin comms tab deduplicates by message_id.
+
+### 8f. Comms inbox_id required manual lookup
+
+**Severity:** Low (UX) — users had to find their AgentMail inbox UUID from
+the dashboard. Config `inbox_id` field was confusing.
+
+**Fix:** Added `resolve_inbox_id` to `comms/email.gleam` — lists inboxes
+and matches by email address. Resolved automatically at startup from
+`from_address`. Manual `inbox_id` still works as override.
+
 ## Acknowledged — Deferred
 
 ### 8. Legacy scaling_unit function mathematically incorrect

@@ -1,8 +1,33 @@
 # SD Install — VPS Deployment Script
 
-**Status**: Planned
-**Date**: 2026-03-26
-**Dependencies**: SD Designer (planned)
+**Status**: Partially Implemented
+**Date**: 2026-03-26 (spec), 2026-03-29 (setup scripts)
+**Dependencies**: SD Designer (planned, deferred — setup scripts handle config interactively)
+
+---
+
+## Implementation Status
+
+**Two setup scripts implemented** in `scripts/`:
+
+- `scripts/setup-macos.sh` — Homebrew-based, writes `.env`, no systemd
+- `scripts/setup-linux.sh` — apt-based, writes `/etc/springdrift/env`, systemd service
+
+Both scripts handle:
+- Dependency installation (Erlang/OTP, Gleam, optional Podman/Ollama)
+- Interactive config prompts (agent name, provider, API keys, optional services)
+- Config generation (`.springdrift/config.toml` from prompts)
+- API key management (env file, not in config)
+- Auto-generated `SPRINGDRIFT_WEB_TOKEN`
+- Build verification
+
+**Deferred from original spec:**
+- One-line curl install (requires hosting)
+- SD Designer integration (interactive prompts replace it for now)
+- Python tooling (SD Audit, SD Budget — not yet built)
+- TLS/certbot setup
+- Upgrade script
+- RHEL/Rocky support
 
 ---
 

@@ -12,7 +12,7 @@ multi-agent delegation, D' safety gates, normative calculus, CBR memory,
 narrative threading, sensorium, scheduler, comms, web GUI) are implemented
 and relatively stable. There are probably bugs though!
 
-See [docs/future-plans/](docs/future-plans/) for planned work
+See [docs/roadmap/](docs/roadmap/) for planned work
 including federation, learner ingestion, and metacognition reporting.
 
 ---
@@ -795,7 +795,7 @@ only exists on the same disk as the data isn't a backup. Configure
 cognitive loop (OTP process)
 ├── query classifier (simple -> task model, complex -> reasoning model)
 ├── multi-agent supervisor (OTP supervision tree)
-│   ├── planner, researcher, coder, writer, observer
+│   ├── planner, researcher, coder, writer, comms, observer, scheduler
 │   └── restart strategies: Permanent, Transient, Temporary
 ├── D' safety gates
 │   ├── input gate (deterministic + canary + fast-accept)
@@ -807,7 +807,7 @@ cognitive loop (OTP process)
 │   ├── Librarian (ETS query layer over all stores)
 │   ├── Curator (system prompt assembly, sensorium, virtual context window)
 │   └── Archivist (post-cycle narrative + CBR generation)
-├── tools (~30 tools: memory, web, files, sandbox, planner, diagnostics)
+├── tools (~35 tools: memory, web, files, sandbox, planner, comms, diagnostics)
 ├── scheduler (BEAM-native send_after tick loop, rate-limited)
 └── XStructor (XML schema validation for all structured LLM output)
 ```
@@ -825,6 +825,7 @@ cognitive loop (OTP process)
 | Scheduler | App | BEAM-native tick loop via `send_after` |
 | Forecaster | App | Self-ticking plan health evaluator (optional) |
 | Sandbox manager | App | Podman container pool with health checks |
+| Inbox poller | App | AgentMail inbox polling, routes to cognitive loop |
 | TUI / Web server | App | Render, input, notification dispatch |
 
 All cross-process communication uses typed `Subject(T)` channels. No shared
@@ -866,25 +867,52 @@ with Claude Code.
 
 ## Getting started
 
+### Quick setup (recommended)
+
+```bash
+git clone https://github.com/seamus-brady/springdrift
+cd springdrift
+
+# macOS
+bash scripts/setup-macos.sh
+
+# Linux (Ubuntu/Debian)
+bash scripts/setup-linux.sh
+```
+
+The setup script installs dependencies (Erlang/OTP, Gleam, optionally Podman
+and Ollama), asks a few questions (agent name, API keys, optional features),
+generates your config, initialises the git backup repo, and verifies the
+build. Takes about 5 minutes. Have a private GitHub/GitLab repo ready if you
+want offsite backup of agent memory.
+
+### Manual setup
+
 ```bash
 git clone https://github.com/seamus-brady/springdrift
 cd springdrift
 gleam build
 
-# Set your API key (at least one provider required)
-export ANTHROPIC_API_KEY=sk-ant-...
-
-# Copy example config
+# Copy example config and edit
 cp -r .springdrift_example .springdrift
+# Edit .springdrift/config.toml with your provider and agent name
 
-# Edit config with your provider and models
-# vim .springdrift/config.toml
+# Set API keys
+export ANTHROPIC_API_KEY=sk-ant-...
+export SPRINGDRIFT_WEB_TOKEN=$(openssl rand -hex 24)
 
-# Run (terminal TUI)
+# Run
+gleam run
+```
+
+### Running
+
+```bash
+# Web GUI (default, on port 8080)
 gleam run
 
-# Run (web GUI on port 8080)
-gleam run -- --gui web
+# Terminal TUI
+gleam run -- --gui tui
 
 # Resume previous session
 gleam run -- --resume
@@ -892,16 +920,18 @@ gleam run -- --resume
 
 ### API keys
 
-| Provider | Environment variable | Required for |
+| Key | Environment variable | Required? |
 |---|---|---|
-| Anthropic | `ANTHROPIC_API_KEY` | Default LLM provider |
-| OpenAI / OpenRouter | `OPENAI_API_KEY` | Alternative LLM provider |
-| Mistral | `MISTRAL_API_KEY` | Alternative LLM provider |
-| Google Vertex AI | GCP service account JSON | EU data residency |
-| Brave Search | `BRAVE_API_KEY` | Optional enhanced web search |
-| Ollama | (local, no key) | CBR semantic embeddings (recommended) |
+| Anthropic | `ANTHROPIC_API_KEY` | Yes (default provider) |
+| Brave Search | `BRAVE_API_KEY` | Optional — better web search |
+| Jina Reader | `JINA_API_KEY` | Optional — better URL extraction |
+| AgentMail | `AGENTMAIL_API_KEY` | Optional — email send/receive |
+| Web GUI auth | `SPRINGDRIFT_WEB_TOKEN` | Recommended — secures the web GUI |
+| Mistral | `MISTRAL_API_KEY` | If using Mistral provider |
+| Google Vertex | GCP service account JSON | If using Vertex provider |
+| Ollama | (local, no key) | Optional — CBR semantic embeddings |
 
-DuckDuckGo web search requires no API key.
+DuckDuckGo web search requires no API key and is always available.
 
 
 [Back to top](#springdrift)
@@ -948,17 +978,24 @@ section and default value documented.
 
 - Erlang/OTP 27+
 - Gleam 1.9+
-- An API key for at least one LLM provider
-- Podman (recommended -- code execution sandbox; coder agent falls back to
+- Git (required -- agent memory is backed up to a git repo; optionally
+  push to a private remote for offsite backup)
+- An API key for at least one LLM provider (Anthropic recommended)
+- Brave Search API key (recommended -- significantly better web search than
+  DuckDuckGo; free tier at https://brave.com/search/api/ covers normal usage)
+- Jina Reader API key (recommended -- cleaner URL extraction; free tier at
+  https://jina.ai/reader/)
+- Podman (optional -- code execution sandbox; coder agent falls back to
   asking the operator to run code manually without it)
-- Ollama (recommended -- semantic embeddings for CBR retrieval; the system
-  works without it but retrieval quality is significantly reduced)
+- Ollama (optional -- semantic embeddings for CBR retrieval; the system
+  works without it but retrieval quality is reduced)
+- AgentMail account (optional -- email send/receive; free at https://agentmail.to)
 
 ## Development
 
 ```sh
 gleam build           # Compile (must be warning-free)
-gleam test            # Run the test suite (1414 tests)
+gleam test            # Run the test suite (1430 tests)
 gleam format          # Format all source files
 gleam run             # Run the application
 ```

@@ -432,7 +432,7 @@ dprime_tax_pct = 8
 | [Comms Agent](comms-agent.md) | Budget alerts via email/WhatsApp |
 | [Self-Diagnostic Skill](self-diagnostic-skill.md) | Diagnostic checks budget health |
 | [SD Audit](sd-audit.md) | Same source data, different analysis (audit vs cost) |
-| [Escalation Criteria](../implemented-plans/dprime-enhancements.md) | Budget-aware escalation could prefer task_model when budget is low |
+| [Escalation Criteria](../roadmap/implemented/dprime-enhancements.md) | Budget-aware escalation could prefer task_model when budget is low |
 | [Web GUI v2](web-gui-v2.md) | Budget section in admin dashboard |
 
 ## Implementation Order

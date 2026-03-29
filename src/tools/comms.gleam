@@ -26,7 +26,7 @@ import slog
 // FFI
 // ---------------------------------------------------------------------------
 
-@external(erlang, "springdrift_ffi", "get_timestamp")
+@external(erlang, "springdrift_ffi", "get_datetime")
 fn get_timestamp() -> String
 
 // ---------------------------------------------------------------------------
