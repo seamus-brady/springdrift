@@ -230,14 +230,25 @@ trustworthiness:
 > less trustworthy, not more capable. The whole point of self-observation
 > is to work within constraints more intelligently — not to remove them."*
 
+### It connected a conversation to an email — across channels, hours apart
+
+On March 29, the operator sent Curragh a humorous email. Curragh replied
+via email referencing a conversation from that morning's web GUI session.
+Nobody told it to check its memory. Nobody told it the email was from the
+same person it had been chatting with. The narrative memory, the comms
+agent, and the session preamble created the conditions for the agent to
+recognise the context and respond naturally — like a colleague who remembers
+what you talked about earlier.
+
 ### What this means
 
-None of this was programmed. Curragh wasn't told to diagnose its own bugs or
-classify failure modes. The introspection tools (`reflect`, `inspect_cycle`,
-`list_recent_cycles`, `query_tool_activity`, the observer agent), the narrative
-memory, the CBR learning loop, and the [sensorium's](#sensorium) ambient self-awareness
+None of this was programmed. Curragh wasn't told to diagnose its own bugs,
+classify failure modes, or connect conversations across channels. The
+introspection tools (`reflect`, `inspect_cycle`, `review_recent`,
+`detect_patterns`, the observer agent), the narrative memory, the CBR learning
+loop, the comms agent, and the [sensorium's](#sensorium) ambient self-awareness
 created the conditions for the agent to notice problems, reason about them,
-and learn from them.
+learn from them, and communicate naturally.
 
 
 [Back to top](#springdrift)
