@@ -1224,7 +1224,7 @@ fn comms_specs(
   delay: Int,
   redact: Bool,
 ) -> List(agent_types.AgentSpec) {
-  case option.unwrap(cfg.comms_enabled, False) {
+  case option.unwrap(cfg.comms_enabled, True) {
     False -> []
     True -> {
       let comms_config =
@@ -1232,6 +1232,7 @@ fn comms_specs(
           enabled: True,
           inbox_id: option.unwrap(cfg.comms_inbox_id, ""),
           api_key_env: option.unwrap(cfg.comms_api_key_env, "AGENTMAIL_API_KEY"),
+          from_address: option.unwrap(cfg.comms_from_address, ""),
           allowed_recipients: option.unwrap(cfg.comms_allowed_recipients, []),
           from_name: option.unwrap(
             cfg.comms_from_name,

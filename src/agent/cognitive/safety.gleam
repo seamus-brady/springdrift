@@ -603,15 +603,21 @@ pub fn spawn_input_safety_gate(
       types.GateTimeout(task_id: cycle_id, gate: "input"),
     )
 
-  // Input gate strategy (same as output gate):
-  // - Interactive cycles: deterministic block + canary probes only.
-  //   Escalation is treated as pass — the operator is not a threat vector.
-  // - Autonomous cycles: escalation triggers full LLM evaluation.
+  // Input gate strategy:
+  // - Interactive cycles: configured regex rules only (no structural/payload
+  //   heuristics — operator may legitimately paste technical content about
+  //   safety systems). Escalation treated as pass. Canary probes run.
+  // - Autonomous cycles: full deterministic check (regex + structural +
+  //   payload) + escalation triggers full LLM evaluation.
   let is_autonomous = state.cycle_node_type == dag_types.SchedulerCycle
   process.spawn_unlinked(fn() {
     // Step 1: Deterministic pre-filter
     let det_result = case det_config {
-      Some(dc) -> deterministic.check_input(instruction, dc)
+      Some(dc) ->
+        case is_autonomous {
+          True -> deterministic.check_input(instruction, dc)
+          False -> deterministic.check_input_interactive(instruction, dc)
+        }
       None -> Pass
     }
 

@@ -213,6 +213,7 @@ pub type AppConfig {
     comms_enabled: Option(Bool),
     comms_inbox_id: Option(String),
     comms_api_key_env: Option(String),
+    comms_from_address: Option(String),
     comms_allowed_recipients: Option(List(String)),
     comms_from_name: Option(String),
     comms_max_outbound_per_hour: Option(Int),
@@ -378,6 +379,7 @@ pub fn default() -> AppConfig {
     comms_enabled: None,
     comms_inbox_id: None,
     comms_api_key_env: None,
+    comms_from_address: None,
     comms_allowed_recipients: None,
     comms_from_name: None,
     comms_max_outbound_per_hour: None,
@@ -901,6 +903,10 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     comms_api_key_env: option.or(
       override_cfg.comms_api_key_env,
       base.comms_api_key_env,
+    ),
+    comms_from_address: option.or(
+      override_cfg.comms_from_address,
+      base.comms_from_address,
     ),
     comms_allowed_recipients: option.or(
       override_cfg.comms_allowed_recipients,
@@ -1473,6 +1479,7 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     comms_enabled: get_toml_bool(table, ["comms", "enabled"]),
     comms_inbox_id: get_toml_str(table, ["comms", "inbox_id"]),
     comms_api_key_env: get_toml_str(table, ["comms", "api_key_env"]),
+    comms_from_address: get_toml_str(table, ["comms", "from_address"]),
     comms_allowed_recipients: get_toml_str_array(table, [
       "comms", "allowed_recipients",
     ]),

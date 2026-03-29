@@ -78,8 +78,9 @@ pub fn default_config() -> DeterministicConfig {
 // Public check functions
 // ---------------------------------------------------------------------------
 
-/// Check user/scheduler input text against input rules.
-/// Runs normalisation → structural detection → configurable regex rules.
+/// Check user/scheduler input text against all layers.
+/// Runs normalisation → configurable regex → structural detection → payload signatures.
+/// Use this for autonomous (scheduler) input where content may be untrusted.
 pub fn check_input(
   text: String,
   config: DeterministicConfig,
@@ -103,6 +104,24 @@ pub fn check_input(
           }
         other -> other
       }
+    }
+  }
+}
+
+/// Check interactive (operator) input against configured regex rules only.
+/// Skips structural injection and payload signature detection — the operator
+/// is trusted, and their input may legitimately contain technical content
+/// about safety systems, injection patterns, etc. that would false-positive
+/// on the heuristic detectors.
+pub fn check_input_interactive(
+  text: String,
+  config: DeterministicConfig,
+) -> DeterministicResult {
+  case config.enabled {
+    False -> Pass
+    True -> {
+      let normalised = normalise_input(text)
+      check_rules(normalised, config.input_rules)
     }
   }
 }

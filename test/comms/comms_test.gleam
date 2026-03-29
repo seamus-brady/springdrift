@@ -37,6 +37,7 @@ fn test_config() -> comms_types.CommsConfig {
     enabled: True,
     inbox_id: "test-inbox-123",
     api_key_env: "AGENTMAIL_API_KEY",
+    from_address: "test@agentmail.io",
     allowed_recipients: ["alice@example.com", "bob@example.com"],
     from_name: "Test Agent",
     max_outbound_per_hour: 20,

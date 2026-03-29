@@ -55,6 +55,7 @@ pub type CommsConfig {
     enabled: Bool,
     inbox_id: String,
     api_key_env: String,
+    from_address: String,
     allowed_recipients: List(String),
     from_name: String,
     max_outbound_per_hour: Int,

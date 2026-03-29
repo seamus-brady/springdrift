@@ -245,14 +245,17 @@ summary_schedule = "weekly"
 # ── Communications ──────────────────────────────────────────────────────────
 
 [comms]
-# Enable the communications agent (default: false)
-# enabled = false
+# Enable the communications agent (default: true)
+# enabled = true
 
 # AgentMail inbox ID (required when enabled)
 # inbox_id = ""
 
 # Env var holding the AgentMail API key (default: AGENTMAIL_API_KEY)
 # api_key_env = "AGENTMAIL_API_KEY"
+
+# Agent's email address (for display/logging)
+# from_address = ""
 
 # Email addresses the agent is allowed to contact (hard allowlist)
 # allowed_recipients = []

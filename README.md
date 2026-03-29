@@ -6,11 +6,11 @@ and restore at any point.
 
 Built in [Gleam](https://gleam.run) on the Erlang/OTP runtime.
 
-**Status:** Beta. In active development. Running in daily use. ~43,000 lines of Gleam
-across 120 source files, 1,414 tests passing. Core systems (cognitive loop,
+**Status:** Beta. In active development. Running in daily use. ~45,000 lines of Gleam
+across 125+ source files, 1,430 tests passing. Core systems (cognitive loop,
 multi-agent delegation, D' safety gates, normative calculus, CBR memory,
-narrative threading, sensorium, scheduler, web GUI) are implemented and
-relatively stable. There are probably bugs though!
+narrative threading, sensorium, scheduler, comms, web GUI) are implemented
+and relatively stable. There are probably bugs though!
 
 See [docs/future-plans/](docs/future-plans/) for planned work
 including federation, learner ingestion, and metacognition reporting.
@@ -47,15 +47,26 @@ including federation, learner ingestion, and metacognition reporting.
 
 ## What it is
 
-Springdrift is a cognitive agent platform. It retains what it learns, reasons
-about safety using virtue ethics, and gets measurably better at its job over
-weeks and months of operation. It runs interactively with an operator or
-autonomously on a schedule.
+Springdrift is the operating system for an autonomous agent. It gives an LLM a
+persistent identity, a memory that accumulates across sessions, a character that
+produces principled refusals with explanations, and a complete audit trail of
+every decision it makes. It runs interactively with an operator or autonomously
+on a schedule, and it gets measurably better at its job over weeks and months of
+operation.
 
 It is not a framework. It is the agent. You give it a character, point it at a
 domain, and let it work. It learns from its own experience as it operates.
-Sub-agents (researcher, planner, coder, writer, observer) are its hands, not
-independent minds. One identity, one memory, one cognitive loop.
+Sub-agents (researcher, planner, coder, writer, comms, observer) are its hands,
+not independent minds. One identity, one memory, one cognitive loop.
+
+What makes it different from other agent systems is legibility. You know where
+you stand with it. Its behaviour is predictable from its values, not just from
+its instructions. When it refuses something, it cites the specific axiom. When
+it makes a mistake, it records what went wrong and retrieves that lesson next
+time. When its conduct drifts from its character, it escalates to the operator
+rather than silently adjusting. Every safety evaluation, every memory operation,
+every delegation decision is logged in append-only JSONL that you can back up to
+git and restore at any point.
 
 The system draws on classical cognitive science, Stoic philosophy, and
 contemporary agent research. The full theoretical lineage and paper-by-paper
@@ -85,6 +96,11 @@ Springdrift implements this. A running instance has:
 - **Self-governance** -- virtue drift detection monitors whether the agent's
   conduct remains consistent with its character. When it drifts, it
   escalates to the operator rather than silently adjusting.
+- **Experiential learning** -- every cycle produces a narrative entry and a
+  case-based reasoning case. The agent accumulates institutional knowledge:
+  which approaches worked for which problems, which tools failed in which
+  contexts, which sources were reliable. This isn't prompt engineering. It's
+  a memory that compounds.
 
 The design principle is that trustworthy autonomy comes from character, not
 from rules. Rules tell you what you must not do. Character tells you who
@@ -332,13 +348,14 @@ repeated rejections, high false positive rates, virtue drift). Produces
 interventions: inject caution, tighten gates, force cooldown, or escalate
 to operator.
 
-**3c -- Ambient self-perception (sensorium).** Continuous: three epistemic
-meta-states -- uncertainty (proportion of cycles without CBR hits),
-prediction error (tool failure + safety modification rate), and novelty
-(keyword dissimilarity to recent work). These are injected into the
-[sensorium](#sensorium) every cycle so the agent perceives its own
-cognitive state without making tool calls. Derived from the System M paper
-(Dupoux, LeCun, Malik; arXiv 2603.15381).
+**3c -- Ambient self-perception (sensorium).** Continuous: a performance
+summary computed from narrative history (success rate, cost trend, CBR hit
+rate, recent failures) plus a per-input novelty signal (keyword dissimilarity
+to recent work). These are injected into the [sensorium](#sensorium) every
+cycle so the agent perceives its own cognitive state without making tool
+calls. The performance signals span sessions and survive restarts -- they're
+computed from the narrative log, not from ephemeral session counters. Derived
+from the System M paper (Dupoux, LeCun, Malik; arXiv 2603.15381).
 
 ### The CBR learning lifecycle
 
@@ -514,21 +531,24 @@ it's always there, like peripheral vision. It contains:
 - **Events** -- sensory events accumulated since last cycle (forecaster
   replan suggestions, virtue drift signals, probe degradation warnings).
 
-Three canonical **meta-states** are computed from session counters and
-injected as vitals attributes (following the System M paper, arXiv 2603.15381):
+A **performance summary** is computed from narrative history every cycle
+and injected as vitals attributes:
 
-- **Uncertainty** -- proportion of cycles without CBR hits. High uncertainty
-  means the agent is operating in unfamiliar territory.
-- **Prediction error** -- tool failure rate combined with D'
-  modification/rejection rate. High prediction error means the agent's actions
-  are not going as expected.
+- **Success rate** -- proportion of recent cycles that succeeded. Spans
+  sessions, computed from the narrative log rather than ephemeral counters.
+- **Cost trend** -- whether token usage is stable, increasing, or decreasing
+  compared to recent history.
+- **CBR hit rate** -- proportion of recent cycles with source references.
+  Low hit rate means the agent is operating without grounding from past
+  experience.
+- **Recent failures** -- the last three failure descriptions with domains,
+  so the agent can see patterns without calling a tool.
 - **Novelty** -- keyword dissimilarity between the current input and recent
   narrative entries. High novelty means this is a new kind of request.
+  (Following the System M paper, arXiv 2603.15381.)
 
-These three signals give the agent a continuous sense of how well it
-understands its current situation -- without making a single tool call or
-LLM query. The meta-states are derived from counters the system already
-maintains.
+These signals give the agent a continuous sense of how well it understands
+its current situation -- without making a single tool call or LLM query.
 
 No other agent framework provides this. Most agents operate in a perceptual
 vacuum between turns, aware only of the conversation history. Springdrift's
@@ -543,7 +563,7 @@ single cycle.
 
 ## Memory
 
-Seven memory stores, all backed by append-only JSONL and indexed in ETS by
+Eight memory stores, all backed by append-only JSONL and indexed in ETS by
 the Librarian actor:
 
 ```
@@ -554,6 +574,7 @@ Librarian (ETS query layer)
 ├── CBR cases            problem -> solution -> outcome (utility-scored, outcome-weighted)
 ├── Artifacts            large content on disk (web pages, extractions, 50KB truncation)
 ├── Tasks + Endeavours   planned work with steps, risks, forecast scores
+├── Comms log            sent and received emails (audit trail, JSONL)
 └── DAG nodes            operational telemetry (tokens, tools, gates, agent output)
 ```
 
@@ -607,7 +628,8 @@ process with its own react loop, tool set, and context window.
 | Researcher | web + artifacts + builtin | 8 | Gather information via search and extraction |
 | Coder | sandbox + builtin | 10 | Write and execute code in isolated Podman containers |
 | Writer | builtin | 6 | Draft and edit text |
-| Observer | diagnostic memory (10 tools) | 6 | Examine past activity, explain failures, identify patterns |
+| Comms | email (AgentMail) | 6 | Send and receive email to allowed recipients |
+| Observer | diagnostic memory (12 tools) | 6 | Examine past activity, explain failures, identify patterns |
 
 Agents are supervised with configurable restart strategies (Permanent, Transient,
 Temporary). When an agent completes, it returns structured findings (sources,
@@ -617,6 +639,13 @@ surfaced both in the result and in the [sensorium's](#sensorium) agent health vi
 The **sandbox** provides isolated Podman containers for code execution with two
 modes: `run_code` (scripts) and `serve` (long-lived processes with port
 forwarding). Deterministic port allocation, health checks, workspace isolation.
+
+The **comms agent** sends and receives email via AgentMail. Outbound email
+passes through three independent safety layers: a hard recipient allowlist
+(not D'-bypassable), deterministic regex rules (credential patterns, internal
+URLs, system internals), and LLM-scored D' features with tighter thresholds
+than default. Disabled by default; enable in `[comms]` config with an inbox
+ID and API key.
 
 Web tools: `web_search` (DuckDuckGo, no API key), `fetch_url` (HTTP GET).
 DuckDuckGo requires no API key. Optional Brave Search integration requires
