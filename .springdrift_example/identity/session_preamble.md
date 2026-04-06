@@ -1,4 +1,8 @@
 {{sensorium}}
+Affect: {{affect_reading}} [OMIT IF EMPTY]
+
+Recent conversation:
+{{recent_narrative}} [OMIT IF EMPTY]
 
 Active threads: {{active_thread_count}} [OMIT IF ZERO]
 {{active_threads}} [OMIT IF EMPTY]
