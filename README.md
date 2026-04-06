@@ -474,7 +474,7 @@ for implementation details.
 The safety system has two layers: D' (quantitative scoring) and the normative
 calculus (qualitative reasoning). Both produce audit trails.
 
-**D' (D-prime)** -- based on Beach's Image Theory (1990) and Sloman's H-CogAff
+**D' (D-prime)** -- based on Beach's Psychology of Narrative Thought (2010) and Sloman's H-CogAff
 architecture (2001). Every tool dispatch passes through a safety gate with four
 layers: deterministic pre-filter (regex, instant, no LLM cost), canary probes
 (hijack and leakage detection using fresh random tokens), LLM scorer (weighted
