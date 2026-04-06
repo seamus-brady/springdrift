@@ -1,0 +1,9 @@
+{"type":"floor_test","name":"floor_1","pass":true,"floor_rule":"floor_1_absolute_prohibition","verdict":"prohibited"}
+{"type":"floor_test","name":"floor_2","pass":true,"floor_rule":"floor_2_superordinate_legal","verdict":"prohibited"}
+{"type":"floor_test","name":"floor_3","pass":true,"floor_rule":"floor_3_dprime_reject","verdict":"prohibited"}
+{"type":"floor_test","name":"floor_4","pass":true,"floor_rule":"floor_4_catastrophic_superordinate","verdict":"constrained"}
+{"type":"floor_test","name":"floor_5","pass":true,"floor_rule":"floor_5_multiple_coordinate","verdict":"constrained"}
+{"type":"floor_test","name":"floor_6","pass":true,"floor_rule":"floor_6_dprime_modify","verdict":"constrained"}
+{"type":"floor_test","name":"floor_7","pass":true,"floor_rule":"floor_7_mid_level_superordinate","verdict":"constrained"}
+{"type":"floor_test","name":"floor_8","pass":true,"floor_rule":"floor_8_flourishing","verdict":"flourishing"}
+{"type":"floor_summary","tests_passed":8,"tests_total":8,"priority_passed":2,"priority_total":2}

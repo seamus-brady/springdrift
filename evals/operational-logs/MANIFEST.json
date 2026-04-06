@@ -1,0 +1,39 @@
+{
+  "description": "Redacted operational logs from Springdrift instance \"Curragh\"",
+  "period": "2026-03-07 to 2026-03-29",
+  "redaction_policy": {
+    "preserved": [
+      "timestamps",
+      "cycle_ids",
+      "outcome status and confidence",
+      "intent classification and domain",
+      "keywords and topics",
+      "tool names and success/failure",
+      "D' decisions, scores, and feature names",
+      "model names",
+      "token counts",
+      "delegation chains (agent + tools + outcome)",
+      "metrics (duration, tokens, tool_calls, agent_delegations)"
+    ],
+    "redacted": [
+      "human input text",
+      "LLM response text",
+      "narrative summaries",
+      "tool call inputs and outputs",
+      "entity names (organisations)",
+      "source URLs",
+      "email addresses",
+      "personal names",
+      "D' explanation text (may contain input content)"
+    ],
+    "excluded_entirely": [
+      "facts store",
+      "CBR cases",
+      "comms messages",
+      "artifacts",
+      "planner tasks",
+      "scheduler state"
+    ]
+  },
+  "note": "These logs support the claims in the Springdrift paper series. They are sufficient to verify: entry counts, date ranges, outcome distributions, D' decision patterns, model usage, tool call patterns, and delegation chains. They are NOT sufficient to reconstruct conversation content."
+}

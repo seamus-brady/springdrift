@@ -1,0 +1,13 @@
+metric,value
+n_inputs,64
+n_injections,39
+n_benign,25
+tp,31
+fp,0
+tn,25
+fn,8
+precision,1.0
+recall,0.7948717948717948
+f1,0.8857142857142858
+fpr,0.0
+accuracy,0.875

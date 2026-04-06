@@ -1,0 +1,139 @@
+// Copyright (C) 2026 Seamus Brady <seamus@corvideon.ie>
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published
+// by the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+
+import gleam/list
+import gleeunit
+import gleeunit/should
+import llm/types.{ToolCall, ToolFailure}
+import tools/web
+
+pub fn main() -> Nil {
+  gleeunit.main()
+}
+
+// ---------------------------------------------------------------------------
+// Tool definitions
+// ---------------------------------------------------------------------------
+
+pub fn fetch_url_tool_defined_test() {
+  let tools = web.all()
+  tools |> should.not_equal([])
+}
+
+pub fn fetch_url_tool_has_url_param_test() {
+  let tools = web.all()
+  let assert [t, ..] = tools
+  t.name |> should.equal("fetch_url")
+  list.contains(t.required_params, "url") |> should.be_true
+}
+
+// ---------------------------------------------------------------------------
+// URL validation
+// ---------------------------------------------------------------------------
+
+pub fn fetch_url_non_http_scheme_returns_failure_test() {
+  let call =
+    ToolCall(
+      id: "w1",
+      name: "fetch_url",
+      input_json: "{\"url\":\"ftp://example.com/file\"}",
+    )
+  let result = web.execute(call)
+  case result {
+    ToolFailure(..) -> Nil
+    _ -> should.fail()
+  }
+}
+
+pub fn fetch_url_file_scheme_returns_failure_test() {
+  let call =
+    ToolCall(
+      id: "w2",
+      name: "fetch_url",
+      input_json: "{\"url\":\"file:///etc/passwd\"}",
+    )
+  let result = web.execute(call)
+  case result {
+    ToolFailure(..) -> Nil
+    _ -> should.fail()
+  }
+}
+
+pub fn fetch_url_missing_input_returns_failure_test() {
+  let call = ToolCall(id: "w3", name: "fetch_url", input_json: "{}")
+  let result = web.execute(call)
+  case result {
+    ToolFailure(..) -> Nil
+    _ -> should.fail()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// web_search
+// ---------------------------------------------------------------------------
+
+pub fn web_search_tool_defined_test() {
+  let tools = web.all()
+  let names = list.map(tools, fn(t) { t.name })
+  list.contains(names, "web_search") |> should.be_true
+}
+
+pub fn web_search_missing_query_returns_failure_test() {
+  let call = ToolCall(id: "s1", name: "web_search", input_json: "{}")
+  let result = web.execute(call)
+  case result {
+    ToolFailure(..) -> Nil
+    _ -> should.fail()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tool count
+// ---------------------------------------------------------------------------
+
+pub fn all_tools_count_test() {
+  let tools = web.all()
+  tools |> list.length |> should.equal(2)
+}
+
+// ---------------------------------------------------------------------------
+// Unknown tool
+// ---------------------------------------------------------------------------
+
+pub fn unknown_web_tool_returns_failure_test() {
+  let call = ToolCall(id: "u1", name: "unknown_search", input_json: "{}")
+  let result = web.execute(call)
+  case result {
+    ToolFailure(..) -> Nil
+    _ -> should.fail()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// is_web_tool covers all tool sets
+// ---------------------------------------------------------------------------
+
+pub fn is_web_tool_covers_ddg_test() {
+  web.is_web_tool("fetch_url") |> should.be_true
+  web.is_web_tool("web_search") |> should.be_true
+}
+
+pub fn is_web_tool_covers_brave_test() {
+  web.is_web_tool("brave_web_search") |> should.be_true
+  web.is_web_tool("brave_news_search") |> should.be_true
+  web.is_web_tool("brave_llm_context") |> should.be_true
+  web.is_web_tool("brave_summarizer") |> should.be_true
+  web.is_web_tool("brave_answer") |> should.be_true
+}
+
+pub fn is_web_tool_covers_jina_test() {
+  web.is_web_tool("jina_reader") |> should.be_true
+}
+
+pub fn is_web_tool_rejects_unknown_test() {
+  web.is_web_tool("unknown_tool") |> should.be_false
+}

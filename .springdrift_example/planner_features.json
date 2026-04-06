@@ -1,0 +1,35 @@
+{
+  "features": [
+    {
+      "name": "step_completion_rate",
+      "importance": "high",
+      "description": "Are steps finishing at expected velocity?",
+      "critical": true
+    },
+    {
+      "name": "dependency_health",
+      "importance": "high",
+      "description": "Are there blocked dependencies?",
+      "critical": true
+    },
+    {
+      "name": "complexity_drift",
+      "importance": "medium",
+      "description": "Has observed complexity exceeded planned complexity?",
+      "critical": false
+    },
+    {
+      "name": "risk_materialization",
+      "importance": "medium",
+      "description": "Have predicted risks come true?",
+      "critical": false
+    },
+    {
+      "name": "scope_creep",
+      "importance": "low",
+      "description": "Are unexpected steps accumulating?",
+      "critical": false
+    }
+  ],
+  "replan_threshold": 0.55
+}

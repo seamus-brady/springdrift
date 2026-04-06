@@ -1,0 +1,755 @@
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:09:25","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:09:25","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:09:25","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:09:25","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:09:25","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:09:25","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:09:25","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:09:25","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:09:25","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:09:25","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:09:25","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:10:37","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:10:37","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:10:37","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:10:37","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:10:37","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:10:37","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:10:37","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:10:37","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:10:37","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:10:37","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:10:37","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:11:06","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:11:06","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:11:06","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:11:06","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:11:06","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:11:06","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:11:06","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:11:06","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:11:06","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:11:06","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:11:06","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:11:23","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:11:23","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:11:23","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:11:23","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:11:23","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:11:23","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:11:23","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:11:23","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:11:23","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:11:23","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:11:23","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"type":"human_input","cycle_id":"40886c5c-f8ff-4f5e-8075-36b56423899c","parent_cycle_id":null,"timestamp":"2026-03-08T09:25:35","text":"[REDACTED]","text_length":12}
+{"cycle_id":"40886c5c-f8ff-4f5e-8075-36b56423899c","timestamp":"2026-03-08T09:25:36","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"40886c5c-f8ff-4f5e-8075-36b56423899c","timestamp":"2026-03-08T09:25:36","model":"mistral-small-latest","stop_reason":"end_turn","input_tokens":788,"output_tokens":10,"content":"[REDACTED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:40:05","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:40:05","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:40:05","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:40:05","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:40:05","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:40:05","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:40:05","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:40:05","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:40:05","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:40:06","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:40:06","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"type":"human_input","cycle_id":"f170fa38-3e53-4895-a34c-b02086241b7b","parent_cycle_id":null,"timestamp":"2026-03-08T09:43:40","text":"[REDACTED]","text_length":5}
+{"cycle_id":"f170fa38-3e53-4895-a34c-b02086241b7b","timestamp":"2026-03-08T09:43:40","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"f170fa38-3e53-4895-a34c-b02086241b7b","timestamp":"2026-03-08T09:43:41","model":"mistral-small-latest","stop_reason":"end_turn","input_tokens":858,"output_tokens":81,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"6d09c83f-5cbc-4315-a91b-c2392dfbeb78","parent_cycle_id":null,"timestamp":"2026-03-08T09:47:06","text":"[REDACTED]","text_length":5}
+{"cycle_id":"6d09c83f-5cbc-4315-a91b-c2392dfbeb78","timestamp":"2026-03-08T09:47:07","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"6d09c83f-5cbc-4315-a91b-c2392dfbeb78","timestamp":"2026-03-08T09:47:08","model":"mistral-small-latest","stop_reason":"end_turn","input_tokens":870,"output_tokens":10,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"d709bd8c-4d86-4484-95b1-4203dd377d15","parent_cycle_id":null,"timestamp":"2026-03-08T09:47:12","text":"[REDACTED]","text_length":12}
+{"cycle_id":"d709bd8c-4d86-4484-95b1-4203dd377d15","timestamp":"2026-03-08T09:47:13","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"d709bd8c-4d86-4484-95b1-4203dd377d15","timestamp":"2026-03-08T09:47:13","model":"mistral-small-latest","stop_reason":"end_turn","input_tokens":886,"output_tokens":52,"content":"[REDACTED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:57:39","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:57:39","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:57:39","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:57:39","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:57:39","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:57:39","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:57:39","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:57:39","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:57:39","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:57:39","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T09:57:39","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:02:14","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:02:14","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:02:14","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:02:14","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:02:14","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:02:14","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:02:14","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:02:14","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:02:14","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:02:14","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:02:14","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:03:56","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:03:56","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:03:56","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:03:56","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:03:56","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:03:56","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:03:56","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:03:56","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:03:56","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:03:56","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:03:56","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:04:24","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:04:24","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:04:24","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:04:24","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:04:24","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:04:24","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:04:24","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:04:24","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:04:24","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:04:24","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:04:24","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:07:49","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:07:49","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:07:49","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:07:49","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:07:49","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:07:49","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:07:49","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:07:49","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:07:49","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:07:49","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:07:49","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:12:26","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:12:26","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:12:26","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:12:26","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:12:26","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:12:26","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:12:26","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:12:26","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:12:26","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:12:26","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:12:26","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:14:02","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:14:02","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:14:02","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:14:02","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:14:02","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:14:02","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:14:02","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:14:02","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:14:02","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:14:02","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:14:02","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:14:23","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:14:23","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:14:23","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:14:23","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:14:23","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:14:23","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:14:23","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:14:23","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:14:23","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:14:23","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:14:23","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:16:21","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:16:21","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:16:21","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:16:21","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:16:21","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:16:21","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:16:21","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:16:21","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:16:21","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:16:21","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:16:21","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:26:47","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:26:47","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:26:47","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:26:47","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:26:47","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:26:47","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:26:47","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:26:47","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:26:47","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:26:47","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:26:47","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:29:14","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:29:14","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:29:14","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:29:14","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:29:14","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:29:14","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:29:14","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:29:14","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:29:14","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:29:14","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:29:14","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:31:34","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:31:34","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:31:34","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:31:34","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:31:34","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:31:34","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:31:34","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:31:34","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:31:34","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:31:35","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:31:35","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:33:40","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:33:40","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:33:40","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:33:40","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:33:40","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:33:40","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:33:40","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:33:40","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:33:40","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:33:40","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:33:40","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:35:43","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:35:43","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:35:43","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:35:43","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:35:43","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:35:43","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:35:43","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:35:43","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:35:43","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:35:43","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:35:43","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:39:30","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:39:30","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:39:30","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:39:30","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:39:30","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:39:30","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:39:30","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:39:30","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:39:30","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:39:30","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:39:30","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:40:15","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:40:15","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:40:15","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:40:15","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:40:15","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:40:15","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:40:15","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:40:15","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:40:15","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:40:15","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:40:15","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:40:31","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:40:31","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:40:31","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:40:31","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:40:31","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:40:31","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:40:31","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:40:31","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:40:31","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:40:31","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:40:31","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:41:07","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:41:07","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:41:07","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:41:07","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:41:07","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:41:07","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:41:07","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:41:07","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:41:07","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:41:07","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:41:07","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:41:35","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:41:35","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:41:35","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:41:35","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:41:35","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:41:35","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:41:35","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:41:35","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:41:35","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:41:35","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:41:35","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:05","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:05","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:05","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:05","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:05","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:05","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:05","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:05","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:05","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:05","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:05","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:19","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:19","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:19","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:19","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:19","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:19","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:19","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:19","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:19","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:19","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:19","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:49","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:49","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:49","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:49","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:49","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:49","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:49","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:49","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:49","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:49","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:42:49","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:07","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:07","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:07","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:07","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:07","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:07","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:07","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:07","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:07","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:07","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:07","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:21","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:21","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:21","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:21","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:21","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:21","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:21","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:21","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:21","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:21","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:21","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:57","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:57","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:57","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:57","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:57","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:57","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:57","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:57","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:57","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:57","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:47:57","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:48:58","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:48:58","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:48:58","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:48:58","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:48:58","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:48:58","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:48:58","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:48:58","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:48:58","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:48:58","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:48:58","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:52:31","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:52:31","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:52:31","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:52:31","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:52:31","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:52:31","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:52:31","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:52:31","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:52:31","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:52:31","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:52:31","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:54:35","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:54:35","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:54:35","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:54:35","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:54:35","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:54:35","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:54:35","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:54:35","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:54:35","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:54:36","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:54:36","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:59:15","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:59:15","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:59:16","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:59:16","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:59:16","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:59:16","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:59:16","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:59:16","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:59:16","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:59:16","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T10:59:16","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T11:00:29","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T11:00:29","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T11:00:29","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T11:00:29","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T11:00:29","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T11:00:29","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T11:00:29","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T11:00:29","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T11:00:29","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T11:00:29","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T11:00:29","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T11:12:07","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T11:12:07","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T11:12:07","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T11:12:07","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T11:12:07","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T11:12:07","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T11:12:07","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T11:12:07","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T11:12:07","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T11:12:07","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T11:12:07","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"type":"human_input","cycle_id":"909417a8-e0f2-43d1-aa9b-542af1d5b533","parent_cycle_id":null,"timestamp":"2026-03-08T12:20:28","text":"[REDACTED]","text_length":12}
+{"cycle_id":"909417a8-e0f2-43d1-aa9b-542af1d5b533","timestamp":"2026-03-08T12:20:28","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"909417a8-e0f2-43d1-aa9b-542af1d5b533","timestamp":"2026-03-08T12:20:29","model":"mistral-small-latest","stop_reason":"end_turn","input_tokens":1404,"output_tokens":10,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"d6fb1bdb-6fa9-4b4b-bc9f-c9daa3ee221e","parent_cycle_id":null,"timestamp":"2026-03-08T12:32:19","text":"[REDACTED]","text_length":34}
+{"cycle_id":"d6fb1bdb-6fa9-4b4b-bc9f-c9daa3ee221e","timestamp":"2026-03-08T12:32:19","type":"classification","complexity":"complex","suggested_model":"mistral-large-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"d6fb1bdb-6fa9-4b4b-bc9f-c9daa3ee221e","timestamp":"2026-03-08T12:32:27","model":"mistral-large-latest","stop_reason":"end_turn","input_tokens":1424,"output_tokens":418,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"54ed15c7-6d31-4960-b055-b34477ddcde1","parent_cycle_id":null,"timestamp":"2026-03-08T12:32:52","text":"[REDACTED]","text_length":30}
+{"cycle_id":"54ed15c7-6d31-4960-b055-b34477ddcde1","timestamp":"2026-03-08T12:32:53","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"54ed15c7-6d31-4960-b055-b34477ddcde1","timestamp":"2026-03-08T12:32:53","model":"mistral-small-latest","stop_reason":"tool_use","input_tokens":1851,"output_tokens":14,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"54ed15c7-6d31-4960-b055-b34477ddcde1","timestamp":"2026-03-08T12:32:54","model":"mistral-small-latest","stop_reason":"end_turn","input_tokens":3410,"output_tokens":225,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"6ad6e7d6-6f1c-4dad-aa85-e37b4d4a9045","parent_cycle_id":null,"timestamp":"2026-03-08T12:33:09","text":"[REDACTED]","text_length":26}
+{"cycle_id":"6ad6e7d6-6f1c-4dad-aa85-e37b4d4a9045","timestamp":"2026-03-08T12:33:09","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"6ad6e7d6-6f1c-4dad-aa85-e37b4d4a9045","timestamp":"2026-03-08T12:33:10","model":"mistral-small-latest","stop_reason":"end_turn","input_tokens":3643,"output_tokens":85,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"b9f238db-b946-46b1-b182-e2ff8e3860fd","parent_cycle_id":null,"timestamp":"2026-03-08T12:33:27","text":"[REDACTED]","text_length":35}
+{"cycle_id":"b9f238db-b946-46b1-b182-e2ff8e3860fd","timestamp":"2026-03-08T12:33:27","type":"classification","complexity":"complex","suggested_model":"mistral-large-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"b9f238db-b946-46b1-b182-e2ff8e3860fd","timestamp":"2026-03-08T12:33:32","model":"mistral-large-latest","stop_reason":"end_turn","input_tokens":3724,"output_tokens":270,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"67f6e3ca-8797-4a3a-9320-8642ac855f16","parent_cycle_id":null,"timestamp":"2026-03-08T12:33:47","text":"[REDACTED]","text_length":8}
+{"cycle_id":"67f6e3ca-8797-4a3a-9320-8642ac855f16","timestamp":"2026-03-08T12:33:48","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"67f6e3ca-8797-4a3a-9320-8642ac855f16","timestamp":"2026-03-08T12:33:48","model":"mistral-small-latest","stop_reason":"tool_use","input_tokens":4013,"output_tokens":14,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"67f6e3ca-8797-4a3a-9320-8642ac855f16","timestamp":"2026-03-08T12:33:49","model":"mistral-small-latest","stop_reason":"end_turn","input_tokens":4051,"output_tokens":29,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"6db00f47-e321-4696-ba19-699008e8fd60","parent_cycle_id":null,"timestamp":"2026-03-08T12:34:02","text":"[REDACTED]","text_length":30}
+{"cycle_id":"6db00f47-e321-4696-ba19-699008e8fd60","timestamp":"2026-03-08T12:34:03","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"6db00f47-e321-4696-ba19-699008e8fd60","timestamp":"2026-03-08T12:34:04","model":"mistral-small-latest","stop_reason":"tool_use","input_tokens":4090,"output_tokens":48,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"6db00f47-e321-4696-ba19-699008e8fd60","timestamp":"2026-03-08T12:34:04","model":"mistral-small-latest","stop_reason":"end_turn","input_tokens":4159,"output_tokens":33,"content":"[REDACTED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:49:15","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:49:15","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:49:15","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:49:15","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:49:15","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:49:15","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:49:15","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:49:15","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:49:15","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:49:15","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:49:15","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:50:03","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:50:03","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:50:03","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:50:03","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:50:03","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:50:03","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:50:03","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:50:03","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:50:03","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:50:03","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:50:03","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:50:30","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:50:30","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:50:30","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:50:30","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:50:30","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:50:30","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:50:30","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:50:30","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:50:30","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:50:30","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:50:30","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:53:26","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:53:26","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:53:26","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:53:26","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:53:26","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:53:26","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:53:26","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:53:26","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:53:26","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:53:27","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:53:27","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:54:16","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:54:16","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:54:16","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:54:16","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:54:16","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:54:16","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:54:16","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:54:16","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:54:16","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:54:16","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:54:16","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:57:30","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:57:30","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:57:30","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:57:30","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:57:30","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:57:30","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:57:30","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:57:30","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:57:30","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:57:31","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T12:57:31","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:00:03","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:00:03","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:00:03","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:00:03","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:00:03","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:00:03","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:00:03","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:00:03","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:00:03","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:00:03","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:00:03","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:46:56","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:46:56","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:46:56","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:46:56","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:46:56","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:46:56","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:46:56","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:46:56","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:46:56","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:46:56","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:46:56","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"type":"human_input","cycle_id":"5023fe38-5e6c-40f7-8f35-a97b626c8dbb","parent_cycle_id":null,"timestamp":"2026-03-08T13:51:01","text":"[REDACTED]","text_length":5}
+{"cycle_id":"5023fe38-5e6c-40f7-8f35-a97b626c8dbb","timestamp":"2026-03-08T13:51:02","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"5023fe38-5e6c-40f7-8f35-a97b626c8dbb","timestamp":"2026-03-08T13:51:02","model":"mistral-small-latest","stop_reason":"end_turn","input_tokens":1402,"output_tokens":10,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"d2e211cb-b8ed-41f6-aa05-52cc345b7642","parent_cycle_id":null,"timestamp":"2026-03-08T13:51:07","text":"[REDACTED]","text_length":12}
+{"cycle_id":"d2e211cb-b8ed-41f6-aa05-52cc345b7642","timestamp":"2026-03-08T13:51:07","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"d2e211cb-b8ed-41f6-aa05-52cc345b7642","timestamp":"2026-03-08T13:51:08","model":"mistral-small-latest","stop_reason":"tool_use","input_tokens":1418,"output_tokens":16,"content":"[REDACTED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:54:54","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:54:54","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:54:54","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:54:54","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:54:54","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:54:54","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:54:54","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:54:54","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:54:54","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:54:54","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T13:54:54","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"type":"human_input","cycle_id":"0ec3fbd2-d297-4f00-ad2b-dcd1967d29e7","parent_cycle_id":null,"timestamp":"2026-03-08T14:12:00","text":"[REDACTED]","text_length":5}
+{"cycle_id":"0ec3fbd2-d297-4f00-ad2b-dcd1967d29e7","timestamp":"2026-03-08T14:12:01","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"0ec3fbd2-d297-4f00-ad2b-dcd1967d29e7","timestamp":"2026-03-08T14:12:01","model":"mistral-small-latest","stop_reason":"end_turn","input_tokens":1402,"output_tokens":10,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"ee2ba5d4-b594-43bb-a501-8056c5515b8a","parent_cycle_id":null,"timestamp":"2026-03-08T14:12:09","text":"[REDACTED]","text_length":14}
+{"cycle_id":"ee2ba5d4-b594-43bb-a501-8056c5515b8a","timestamp":"2026-03-08T14:12:09","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"ee2ba5d4-b594-43bb-a501-8056c5515b8a","timestamp":"2026-03-08T14:12:09","model":"mistral-small-latest","stop_reason":"end_turn","input_tokens":1419,"output_tokens":23,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"59b381d6-45e9-413d-aeb5-3fee638eedaa","parent_cycle_id":null,"timestamp":"2026-03-08T14:12:15","text":"[REDACTED]","text_length":12}
+{"cycle_id":"59b381d6-45e9-413d-aeb5-3fee638eedaa","timestamp":"2026-03-08T14:12:15","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"59b381d6-45e9-413d-aeb5-3fee638eedaa","timestamp":"2026-03-08T14:12:16","model":"mistral-small-latest","stop_reason":"end_turn","input_tokens":1448,"output_tokens":23,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"15c1b60d-9c2d-4f91-bebc-569fce8d3be3","parent_cycle_id":null,"timestamp":"2026-03-08T14:12:28","text":"[REDACTED]","text_length":21}
+{"cycle_id":"15c1b60d-9c2d-4f91-bebc-569fce8d3be3","timestamp":"2026-03-08T14:12:29","type":"classification","complexity":"complex","suggested_model":"mistral-large-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"15c1b60d-9c2d-4f91-bebc-569fce8d3be3","timestamp":"2026-03-08T14:12:39","model":"mistral-large-latest","stop_reason":"end_turn","input_tokens":1478,"output_tokens":455,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"bd0203c8-027a-427e-844e-5ee9571fe0b0","parent_cycle_id":null,"timestamp":"2026-03-08T14:13:08","text":"[REDACTED]","text_length":44}
+{"cycle_id":"bd0203c8-027a-427e-844e-5ee9571fe0b0","timestamp":"2026-03-08T14:13:09","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"bd0203c8-027a-427e-844e-5ee9571fe0b0","timestamp":"2026-03-08T14:13:09","model":"mistral-small-latest","stop_reason":"tool_use","input_tokens":1945,"output_tokens":14,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"bd0203c8-027a-427e-844e-5ee9571fe0b0","timestamp":"2026-03-08T14:13:10","model":"mistral-small-latest","stop_reason":"end_turn","input_tokens":3508,"output_tokens":163,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"611db6b0-358e-491b-8f42-f212ba759d9f","parent_cycle_id":null,"timestamp":"2026-03-08T14:13:31","text":"[REDACTED]","text_length":47}
+{"cycle_id":"611db6b0-358e-491b-8f42-f212ba759d9f","timestamp":"2026-03-08T14:13:32","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"611db6b0-358e-491b-8f42-f212ba759d9f","timestamp":"2026-03-08T14:13:32","model":"mistral-small-latest","stop_reason":"end_turn","input_tokens":3686,"output_tokens":36,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"1890500f-c09f-40e4-b4f8-9cdec50dbf6a","parent_cycle_id":null,"timestamp":"2026-03-08T14:13:50","text":"[REDACTED]","text_length":42}
+{"cycle_id":"1890500f-c09f-40e4-b4f8-9cdec50dbf6a","timestamp":"2026-03-08T14:13:51","type":"classification","complexity":"complex","suggested_model":"mistral-large-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"1890500f-c09f-40e4-b4f8-9cdec50dbf6a","timestamp":"2026-03-08T14:13:51","model":"mistral-large-latest","stop_reason":"tool_use","input_tokens":3712,"output_tokens":15,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"1890500f-c09f-40e4-b4f8-9cdec50dbf6a","timestamp":"2026-03-08T14:14:16","model":"mistral-large-latest","stop_reason":"end_turn","input_tokens":3740,"output_tokens":1047,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"ea418815-e1db-44d7-ab42-6d8768320ea5","parent_cycle_id":null,"timestamp":"2026-03-08T14:15:04","text":"[REDACTED]","text_length":33}
+{"cycle_id":"ea418815-e1db-44d7-ab42-6d8768320ea5","timestamp":"2026-03-08T14:15:05","type":"classification","complexity":"complex","suggested_model":"mistral-large-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"ea418815-e1db-44d7-ab42-6d8768320ea5","timestamp":"2026-03-08T14:15:20","model":"mistral-large-latest","stop_reason":"tool_use","input_tokens":4797,"output_tokens":1053,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"ea418815-e1db-44d7-ab42-6d8768320ea5","timestamp":"2026-03-08T14:15:22","model":"mistral-large-latest","stop_reason":"end_turn","input_tokens":6808,"output_tokens":57,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"8905e56b-d245-431b-8d23-55c9d577e4f1","parent_cycle_id":null,"timestamp":"2026-03-08T14:16:54","text":"[REDACTED]","text_length":48}
+{"cycle_id":"8905e56b-d245-431b-8d23-55c9d577e4f1","timestamp":"2026-03-08T14:16:55","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"8905e56b-d245-431b-8d23-55c9d577e4f1","timestamp":"2026-03-08T14:16:55","model":"mistral-small-latest","stop_reason":"tool_use","input_tokens":1410,"output_tokens":14,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"8905e56b-d245-431b-8d23-55c9d577e4f1","timestamp":"2026-03-08T14:16:56","model":"mistral-small-latest","stop_reason":"end_turn","input_tokens":1448,"output_tokens":28,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"6373810c-214f-43a3-bf9a-16500fd14a9b","parent_cycle_id":null,"timestamp":"2026-03-08T14:17:00","text":"[REDACTED]","text_length":3}
+{"cycle_id":"6373810c-214f-43a3-bf9a-16500fd14a9b","timestamp":"2026-03-08T14:17:00","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"6373810c-214f-43a3-bf9a-16500fd14a9b","timestamp":"2026-03-08T14:17:00","model":"mistral-small-latest","stop_reason":"tool_use","input_tokens":1479,"output_tokens":14,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"6373810c-214f-43a3-bf9a-16500fd14a9b","timestamp":"2026-03-08T14:17:06","model":"mistral-small-latest","stop_reason":"end_turn","input_tokens":2465,"output_tokens":903,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"fae24ac0-2c79-43c2-a599-a82a623bb425","parent_cycle_id":null,"timestamp":"2026-03-08T14:17:23","text":"[REDACTED]","text_length":35}
+{"cycle_id":"fae24ac0-2c79-43c2-a599-a82a623bb425","timestamp":"2026-03-08T14:17:23","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"fae24ac0-2c79-43c2-a599-a82a623bb425","timestamp":"2026-03-08T14:17:24","model":"mistral-small-latest","stop_reason":"end_turn","input_tokens":3378,"output_tokens":51,"content":"[REDACTED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T14:20:55","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T14:20:55","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T14:20:55","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T14:20:55","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T14:20:55","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T14:20:55","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T14:20:55","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T14:20:55","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T14:20:55","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T14:20:55","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T14:20:55","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T14:26:25","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T14:26:25","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T14:26:25","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T14:26:25","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T14:26:25","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T14:26:25","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T14:26:25","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T14:26:25","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T14:26:25","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T14:26:25","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T14:26:25","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"type":"human_input","cycle_id":"72a75d9b-8ba8-4b7b-95af-200d27516514","parent_cycle_id":null,"timestamp":"2026-03-08T14:26:33","text":"[REDACTED]","text_length":23}
+{"cycle_id":"72a75d9b-8ba8-4b7b-95af-200d27516514","timestamp":"2026-03-08T14:26:33","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"72a75d9b-8ba8-4b7b-95af-200d27516514","timestamp":"2026-03-08T14:26:34","model":"mistral-small-latest","stop_reason":"end_turn","input_tokens":3437,"output_tokens":41,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"4be564fa-b946-4c53-839d-757a71eead3a","parent_cycle_id":null,"timestamp":"2026-03-08T14:26:57","text":"[REDACTED]","text_length":40}
+{"cycle_id":"4be564fa-b946-4c53-839d-757a71eead3a","timestamp":"2026-03-08T14:26:57","type":"classification","complexity":"complex","suggested_model":"mistral-large-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"4be564fa-b946-4c53-839d-757a71eead3a","timestamp":"2026-03-08T14:26:59","model":"mistral-large-latest","stop_reason":"tool_use","input_tokens":3461,"output_tokens":70,"content":"[REDACTED]"}
+{"type":"tool_call","cycle_id":"2090d142-1878-4155-bbee-a0ba24cae2af","timestamp":"2026-03-08T14:26:59","tool_use_id":"DlVe1mxgf","name":"web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"2090d142-1878-4155-bbee-a0ba24cae2af","timestamp":"2026-03-08T14:26:59","tool_use_id":"DlVe1mxgf","success":false,"content":"[REDACTED]","content_length":24}
+{"type":"tool_call","cycle_id":"2090d142-1878-4155-bbee-a0ba24cae2af","timestamp":"2026-03-08T14:27:00","tool_use_id":"b0mlkmaxw","name":"web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"2090d142-1878-4155-bbee-a0ba24cae2af","timestamp":"2026-03-08T14:27:00","tool_use_id":"b0mlkmaxw","success":false,"content":"[REDACTED]","content_length":24}
+{"type":"tool_call","cycle_id":"2090d142-1878-4155-bbee-a0ba24cae2af","timestamp":"2026-03-08T14:27:00","tool_use_id":"M9pG8Z9i1","name":"fetch_url","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"2090d142-1878-4155-bbee-a0ba24cae2af","timestamp":"2026-03-08T14:27:00","tool_use_id":"M9pG8Z9i1","success":true,"content":"[REDACTED]","content_length":51200}
+{"type":"llm_response","cycle_id":"4be564fa-b946-4c53-839d-757a71eead3a","timestamp":"2026-03-08T14:27:21","model":"mistral-large-latest","stop_reason":"end_turn","input_tokens":4443,"output_tokens":951,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"c0c73acb-5f6d-4fd9-a675-b4bc2f68babd","parent_cycle_id":null,"timestamp":"2026-03-08T14:27:42","text":"[REDACTED]","text_length":41}
+{"cycle_id":"c0c73acb-5f6d-4fd9-a675-b4bc2f68babd","timestamp":"2026-03-08T14:27:42","type":"classification","complexity":"complex","suggested_model":"mistral-large-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"c0c73acb-5f6d-4fd9-a675-b4bc2f68babd","timestamp":"2026-03-08T14:27:54","model":"mistral-large-latest","stop_reason":"tool_use","input_tokens":5404,"output_tokens":996,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"c0c73acb-5f6d-4fd9-a675-b4bc2f68babd","timestamp":"2026-03-08T14:27:56","model":"mistral-large-latest","stop_reason":"end_turn","input_tokens":7317,"output_tokens":48,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"09e405ae-ea80-47f9-8826-937b0fb02867","parent_cycle_id":null,"timestamp":"2026-03-08T14:28:13","text":"[REDACTED]","text_length":56}
+{"cycle_id":"09e405ae-ea80-47f9-8826-937b0fb02867","timestamp":"2026-03-08T14:28:13","type":"classification","complexity":"complex","suggested_model":"mistral-large-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"09e405ae-ea80-47f9-8826-937b0fb02867","timestamp":"2026-03-08T14:28:14","model":"mistral-large-latest","stop_reason":"tool_use","input_tokens":7381,"output_tokens":13,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"09e405ae-ea80-47f9-8826-937b0fb02867","timestamp":"2026-03-08T14:28:17","model":"mistral-large-latest","stop_reason":"end_turn","input_tokens":9267,"output_tokens":127,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"78fb4c46-973e-4bae-8ff3-d5c9ab8ec92b","parent_cycle_id":null,"timestamp":"2026-03-08T14:28:53","text":"[REDACTED]","text_length":73}
+{"cycle_id":"78fb4c46-973e-4bae-8ff3-d5c9ab8ec92b","timestamp":"2026-03-08T14:28:53","type":"classification","complexity":"complex","suggested_model":"mistral-large-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"78fb4c46-973e-4bae-8ff3-d5c9ab8ec92b","timestamp":"2026-03-08T14:29:01","model":"mistral-large-latest","stop_reason":"tool_use","input_tokens":9411,"output_tokens":239,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"78fb4c46-973e-4bae-8ff3-d5c9ab8ec92b","timestamp":"2026-03-08T14:30:40","model":"mistral-large-latest","stop_reason":"end_turn","input_tokens":10114,"output_tokens":1681,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"3dde003b-4450-4b2f-9d55-03a59841b8a2","parent_cycle_id":null,"timestamp":"2026-03-08T14:33:48","text":"[REDACTED]","text_length":23}
+{"cycle_id":"3dde003b-4450-4b2f-9d55-03a59841b8a2","timestamp":"2026-03-08T14:33:49","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"3dde003b-4450-4b2f-9d55-03a59841b8a2","timestamp":"2026-03-08T14:33:55","model":"mistral-small-latest","stop_reason":"tool_use","input_tokens":11895,"output_tokens":1525,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"3dde003b-4450-4b2f-9d55-03a59841b8a2","timestamp":"2026-03-08T14:33:55","model":"mistral-small-latest","stop_reason":"end_turn","input_tokens":13446,"output_tokens":42,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"a763b83b-f17e-4754-887c-ebc65d572799","parent_cycle_id":null,"timestamp":"2026-03-08T14:34:07","text":"[REDACTED]","text_length":30}
+{"cycle_id":"a763b83b-f17e-4754-887c-ebc65d572799","timestamp":"2026-03-08T14:34:07","type":"classification","complexity":"complex","suggested_model":"mistral-large-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"a763b83b-f17e-4754-887c-ebc65d572799","timestamp":"2026-03-08T14:34:33","model":"mistral-large-latest","stop_reason":"tool_use","input_tokens":13384,"output_tokens":1799,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"a763b83b-f17e-4754-887c-ebc65d572799","timestamp":"2026-03-08T14:34:36","model":"mistral-large-latest","stop_reason":"end_turn","input_tokens":16851,"output_tokens":62,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"6cea34c1-3be4-48dc-a8ef-b0a742beebad","parent_cycle_id":null,"timestamp":"2026-03-08T14:35:34","text":"[REDACTED]","text_length":36}
+{"cycle_id":"6cea34c1-3be4-48dc-a8ef-b0a742beebad","timestamp":"2026-03-08T14:35:35","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"6cea34c1-3be4-48dc-a8ef-b0a742beebad","timestamp":"2026-03-08T14:35:37","model":"mistral-small-latest","stop_reason":"end_turn","input_tokens":17053,"output_tokens":194,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"75c6abfe-b669-4e8c-a4b1-5beda50f8dad","parent_cycle_id":null,"timestamp":"2026-03-08T14:36:08","text":"[REDACTED]","text_length":16}
+{"cycle_id":"75c6abfe-b669-4e8c-a4b1-5beda50f8dad","timestamp":"2026-03-08T14:36:08","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"75c6abfe-b669-4e8c-a4b1-5beda50f8dad","timestamp":"2026-03-08T14:36:09","model":"mistral-small-latest","stop_reason":"tool_use","input_tokens":17254,"output_tokens":17,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"75c6abfe-b669-4e8c-a4b1-5beda50f8dad","timestamp":"2026-03-08T14:36:15","model":"mistral-small-latest","stop_reason":"end_turn","input_tokens":18236,"output_tokens":928,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"20a2a3dc-e2a3-410e-9844-35100e8862d0","parent_cycle_id":null,"timestamp":"2026-03-08T14:36:45","text":"[REDACTED]","text_length":31}
+{"cycle_id":"20a2a3dc-e2a3-410e-9844-35100e8862d0","timestamp":"2026-03-08T14:36:45","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"20a2a3dc-e2a3-410e-9844-35100e8862d0","timestamp":"2026-03-08T14:36:46","model":"mistral-small-latest","stop_reason":"tool_use","input_tokens":19173,"output_tokens":14,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"20a2a3dc-e2a3-410e-9844-35100e8862d0","timestamp":"2026-03-08T14:36:49","model":"mistral-small-latest","stop_reason":"end_turn","input_tokens":20738,"output_tokens":288,"content":"[REDACTED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T18:51:52","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T18:51:52","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T18:51:52","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T18:51:52","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T18:51:52","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T18:51:52","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T18:51:52","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T18:51:52","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T18:51:52","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T18:51:52","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T18:51:52","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"type":"human_input","cycle_id":"c279d27e-ee5d-4494-95ad-59dcc88128cd","parent_cycle_id":null,"timestamp":"2026-03-08T18:58:13","text":"[REDACTED]","text_length":17}
+{"cycle_id":"c279d27e-ee5d-4494-95ad-59dcc88128cd","timestamp":"2026-03-08T18:58:14","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"c279d27e-ee5d-4494-95ad-59dcc88128cd","timestamp":"2026-03-08T18:58:15","model":"mistral-small-latest","stop_reason":"end_turn","input_tokens":21033,"output_tokens":44,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"95bd4e96-f31d-4faa-9090-4b861f59b605","parent_cycle_id":null,"timestamp":"2026-03-08T18:58:39","text":"[REDACTED]","text_length":23}
+{"cycle_id":"95bd4e96-f31d-4faa-9090-4b861f59b605","timestamp":"2026-03-08T18:58:40","type":"classification","complexity":"complex","suggested_model":"mistral-large-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"95bd4e96-f31d-4faa-9090-4b861f59b605","timestamp":"2026-03-08T18:58:48","model":"mistral-large-latest","stop_reason":"end_turn","input_tokens":20921,"output_tokens":299,"content":"[REDACTED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T18:59:16","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T18:59:16","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T18:59:16","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T18:59:16","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T18:59:16","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T18:59:16","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T18:59:16","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T18:59:16","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T18:59:16","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T18:59:17","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T18:59:17","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"type":"human_input","cycle_id":"1b2bc5d6-f698-4135-a676-dcc5428bed05","parent_cycle_id":null,"timestamp":"2026-03-08T18:59:28","text":"[REDACTED]","text_length":73}
+{"cycle_id":"1b2bc5d6-f698-4135-a676-dcc5428bed05","timestamp":"2026-03-08T18:59:28","type":"classification","complexity":"complex","suggested_model":"mistral-large-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"1b2bc5d6-f698-4135-a676-dcc5428bed05","timestamp":"2026-03-08T18:59:54","model":"mistral-large-latest","stop_reason":"end_turn","input_tokens":21239,"output_tokens":929,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"9a52b100-5f1a-4191-aead-18c8826baf80","parent_cycle_id":null,"timestamp":"2026-03-08T19:01:01","text":"[REDACTED]","text_length":110}
+{"cycle_id":"9a52b100-5f1a-4191-aead-18c8826baf80","timestamp":"2026-03-08T19:01:02","type":"classification","complexity":"complex","suggested_model":"mistral-large-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"9a52b100-5f1a-4191-aead-18c8826baf80","timestamp":"2026-03-08T19:01:32","model":"mistral-large-latest","stop_reason":"end_turn","input_tokens":22195,"output_tokens":1096,"content":"[REDACTED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:01:48","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:01:48","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:01:48","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:01:48","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:01:48","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:01:48","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:01:48","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:01:48","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:01:48","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:01:48","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:01:48","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"type":"human_input","cycle_id":"a48abfb9-f5ee-44eb-96f5-03db3d1eb5a0","parent_cycle_id":null,"timestamp":"2026-03-08T19:02:22","text":"[REDACTED]","text_length":105}
+{"cycle_id":"a48abfb9-f5ee-44eb-96f5-03db3d1eb5a0","timestamp":"2026-03-08T19:02:23","type":"classification","complexity":"complex","suggested_model":"mistral-large-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"a48abfb9-f5ee-44eb-96f5-03db3d1eb5a0","timestamp":"2026-03-08T19:02:53","model":"mistral-large-latest","stop_reason":"end_turn","input_tokens":23317,"output_tokens":1094,"content":"[REDACTED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:03:00","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:03:00","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:03:00","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:03:00","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:03:00","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:03:00","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:03:00","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:03:00","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:03:00","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:03:00","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:03:00","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:18:18","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:18:18","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:18:18","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:18:18","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:18:18","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:18:18","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:18:18","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:18:18","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:18:18","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:18:18","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:18:18","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:20:14","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:20:14","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:20:14","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:20:14","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:20:14","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:20:14","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:20:14","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:20:14","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:20:14","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:20:14","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:20:14","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:22:52","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:22:52","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:22:52","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:22:52","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:22:52","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:22:52","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:22:52","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:22:52","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:22:52","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:22:52","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T19:22:52","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T22:03:37","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T22:03:37","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T22:03:37","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T22:03:37","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T22:03:37","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T22:03:37","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T22:03:37","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T22:03:37","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T22:03:37","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T22:03:37","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T22:03:37","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T22:08:04","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T22:08:04","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T22:08:04","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T22:08:04","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T22:08:04","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T22:08:04","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T22:08:04","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T22:08:04","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T22:08:04","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T22:08:05","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-08T22:08:05","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}

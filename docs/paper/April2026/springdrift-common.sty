@@ -1,0 +1,71 @@
+% Springdrift paper series — shared preamble
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{hyperref}
+\usepackage{natbib}
+\usepackage{booktabs}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{parskip}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usetikzlibrary{arrows.meta,positioning,shapes.geometric,fit,backgrounds,calc}
+
+% Springdrift colour palette
+\definecolor{sdgreen}{RGB}{36,138,61}
+\definecolor{sdblue}{RGB}{0,122,255}
+\definecolor{sdorange}{RGB}{199,124,0}
+\definecolor{sdred}{RGB}{215,0,21}
+\definecolor{sdgray}{RGB}{142,142,147}
+\definecolor{sdbg}{RGB}{26,26,26}
+\definecolor{sdlightbg}{RGB}{245,245,245}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{sdlightbg},
+  frame=single,
+  breaklines=true,
+  columns=fullflexible,
+  xleftmargin=2em,
+  framexleftmargin=1.5em,
+}
+
+% Consistent box style for architecture diagrams
+\tikzset{
+  sdbox/.style={draw, rounded corners=3pt, minimum width=2.8cm, minimum height=0.8cm,
+                font={\small}, align=center, fill=white, line width=0.5pt},
+  sdactor/.style={sdbox, fill=sdlightbg},
+  sdstore/.style={sdbox, fill=blue!5, draw=sdblue!60},
+  sdsafety/.style={sdbox, fill=red!5, draw=sdred!60},
+  sdagent/.style={sdbox, fill=green!5, draw=sdgreen!60},
+  sdarrow/.style={-{Stealth[length=5pt]}, line width=0.5pt},
+  sdlabel/.style={font={\scriptsize}, text=sdgray},
+}
+
+% System map paragraph (use in each paper's intro)
+\newcommand{\springdriftsystemmap}[1]{%
+\smallskip\noindent\textit{System context.}
+Springdrift consists of three core subsystems: (i)~a persistent, auditable runtime with append-only memory and supervised execution; (ii)~a case-based memory layer for experiential learning with hybrid retrieval; and (iii)~a deterministic normative decision layer for safety evaluation with auditable axiom trails. These subsystems share a common architectural substrate described across a series of companion papers. This paper focuses on~#1.
+\smallskip
+}
+
+% Anchoring statement (use in each paper)
+\newcommand{\springdriftanchoring}{%
+\smallskip\noindent\textit{Scope.}
+The goal of this work is not to optimise benchmark performance, but to explore the design space of long-lived, inspectable agent systems. We treat the system as an engineering artefact and report its observed behaviour under deployment. All code, evaluation artefacts, and redacted operational logs are available in the repository.
+\smallskip
+}
+
+% Springdrift series footer
+\newcommand{\springdriftseries}{%
+  \vspace{1em}
+  \noindent\rule{\textwidth}{0.4pt}
+  {\small\textit{Springdrift Paper Series.} Code, data, and evaluations:
+  \url{https://github.com/seamus-brady/springdrift}}
+}

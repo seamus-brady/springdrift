@@ -1,0 +1,972 @@
+//// Web chat GUI — HTTP server + WebSocket bridge to the cognitive loop.
+
+// Copyright (C) 2026 Seamus Brady <seamus@corvideon.ie>
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published
+// by the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+
+import affect/store as affect_store
+import affect/types as affect_types
+import agent/types as agent_types
+import comms/log as comms_log
+import comms/types as comms_types
+import dag/types as dag_types
+import gleam/bytes_tree
+import gleam/erlang/process.{type Selector, type Subject}
+import gleam/http/request.{type Request}
+import gleam/http/response.{type Response}
+import gleam/int
+import gleam/json
+import gleam/list
+import gleam/option.{type Option, None, Some}
+import gleam/set
+import gleam/string
+import llm/types.{type Message, Assistant, TextContent, User}
+import mist.{type Connection, type ResponseData}
+import narrative/librarian.{type LibrarianMessage}
+import narrative/log as narrative_log
+import normative/character as normative_character
+import paths
+import planner/types as planner_types
+import scheduler/types as scheduler_types
+import simplifile
+import slog
+import web/auth
+import web/html
+import web/protocol
+
+// ---------------------------------------------------------------------------
+// Custom WebSocket message type
+// ---------------------------------------------------------------------------
+
+type WsMsg {
+  GotReply(agent_types.CognitiveReply)
+  GotNotification(agent_types.Notification)
+  SendHistory(String)
+}
+
+// ---------------------------------------------------------------------------
+// Notification relay — main process forwards to per-connection subjects
+// ---------------------------------------------------------------------------
+
+type RelayMsg {
+  Register(Subject(agent_types.Notification))
+  Unregister(Subject(agent_types.Notification))
+}
+
+type ForwardMsg {
+  FwdNotification(agent_types.Notification)
+  FwdRelay(RelayMsg)
+}
+
+// ---------------------------------------------------------------------------
+// Per-connection state
+// ---------------------------------------------------------------------------
+
+type WsState {
+  WsState(
+    cognitive: Subject(agent_types.CognitiveMessage),
+    reply_subject: Subject(agent_types.CognitiveReply),
+    notify_subject: Subject(agent_types.Notification),
+    relay: Subject(RelayMsg),
+    narrative_dir: String,
+    librarian: Option(Subject(LibrarianMessage)),
+    scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
+    ws_max_bytes: Int,
+  )
+}
+
+// ---------------------------------------------------------------------------
+// FFI
+// ---------------------------------------------------------------------------
+
+@external(erlang, "springdrift_ffi", "get_env")
+fn get_env(name: String) -> Result(String, Nil)
+
+// ---------------------------------------------------------------------------
+// Auth helpers
+// ---------------------------------------------------------------------------
+
+fn get_auth_token() -> Option(String) {
+  case get_env("SPRINGDRIFT_WEB_TOKEN") {
+    Ok(token) -> Some(token)
+    Error(_) -> None
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+pub fn start(
+  cognitive: Subject(agent_types.CognitiveMessage),
+  notify: Subject(agent_types.Notification),
+  _provider_name: String,
+  _task_model: String,
+  _reasoning_model: String,
+  initial_messages: List(Message),
+  port: Int,
+  narrative_dir: String,
+  lib: Option(Subject(LibrarianMessage)),
+  agent_name: String,
+  agent_version: String,
+  ws_max_bytes: Int,
+  scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
+) -> Nil {
+  let auth_token = get_auth_token()
+  let relay: Subject(RelayMsg) = process.new_subject()
+  slog.info(
+    "gui",
+    "start",
+    "Starting web GUI on port " <> int.to_string(port),
+    None,
+  )
+  let assert Ok(_) =
+    fn(req: Request(Connection)) -> Response(ResponseData) {
+      handle_request(
+        req,
+        cognitive,
+        relay,
+        initial_messages,
+        narrative_dir,
+        auth_token,
+        lib,
+        agent_name,
+        agent_version,
+        ws_max_bytes,
+        scheduler,
+      )
+    }
+    |> mist.new
+    |> mist.port(port)
+    |> mist.start
+
+  // Run forwarding loop — receives from `notify` and broadcasts to all
+  // registered WebSocket connections
+  forward_loop(notify, relay, [])
+}
+
+// ---------------------------------------------------------------------------
+// HTTP request handler
+// ---------------------------------------------------------------------------
+
+fn handle_request(
+  req: Request(Connection),
+  cognitive: Subject(agent_types.CognitiveMessage),
+  relay: Subject(RelayMsg),
+  initial_messages: List(Message),
+  narrative_dir: String,
+  auth_token: Option(String),
+  lib: Option(Subject(LibrarianMessage)),
+  agent_name: String,
+  agent_version: String,
+  ws_max_bytes: Int,
+  scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
+) -> Response(ResponseData) {
+  case auth.check_auth(req, auth_token) {
+    False ->
+      response.new(401)
+      |> response.set_body(
+        mist.Bytes(bytes_tree.from_string(
+          "Unauthorized — provide token via ?token= query parameter or Authorization: Bearer header",
+        )),
+      )
+    True ->
+      case request.path_segments(req) {
+        // Root redirects to /chat
+        [] ->
+          response.new(302)
+          |> response.set_header("location", "/chat")
+          |> response.set_body(mist.Bytes(bytes_tree.new()))
+
+        // Chat page
+        ["chat"] ->
+          response.new(200)
+          |> response.set_header("content-type", "text/html; charset=utf-8")
+          |> response.set_body(
+            mist.Bytes(
+              bytes_tree.from_string(html.chat_page(agent_name, agent_version)),
+            ),
+          )
+
+        // Admin page (narrative + log)
+        ["admin"] ->
+          response.new(200)
+          |> response.set_header("content-type", "text/html; charset=utf-8")
+          |> response.set_body(
+            mist.Bytes(
+              bytes_tree.from_string(html.admin_page(agent_name, agent_version)),
+            ),
+          )
+
+        // WebSocket upgrade
+        ["ws"] ->
+          mist.websocket(
+            request: req,
+            on_init: fn(_conn) {
+              ws_on_init(
+                cognitive,
+                relay,
+                initial_messages,
+                narrative_dir,
+                lib,
+                ws_max_bytes,
+                scheduler,
+              )
+            },
+            on_close: fn(state) {
+              process.send(state.relay, Unregister(state.notify_subject))
+            },
+            handler: ws_handler,
+          )
+
+        // 404 for everything else
+        _ ->
+          response.new(404)
+          |> response.set_body(mist.Bytes(bytes_tree.new()))
+      }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// WebSocket lifecycle
+// ---------------------------------------------------------------------------
+
+fn ws_on_init(
+  cognitive: Subject(agent_types.CognitiveMessage),
+  relay: Subject(RelayMsg),
+  initial_messages: List(Message),
+  narrative_dir: String,
+  lib: Option(Subject(LibrarianMessage)),
+  ws_max_bytes: Int,
+  scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
+) -> #(WsState, option.Option(Selector(WsMsg))) {
+  // Create per-connection subjects (owned by this WebSocket handler process)
+  let reply_subject: Subject(agent_types.CognitiveReply) = process.new_subject()
+  let notify_subject: Subject(agent_types.Notification) = process.new_subject()
+
+  // Register with the relay so the main process forwards notifications here
+  process.send(relay, Register(notify_subject))
+
+  // Channel for sending session history on connect
+  let history_subject: Subject(String) = process.new_subject()
+
+  // Build selector that bridges cognitive replies + notifications + history into WsMsg
+  let selector: Selector(WsMsg) =
+    process.new_selector()
+    |> process.select_map(reply_subject, fn(cr) { GotReply(cr) })
+    |> process.select_map(notify_subject, fn(n) { GotNotification(n) })
+    |> process.select_map(history_subject, fn(h) { SendHistory(h) })
+
+  let state =
+    WsState(
+      cognitive:,
+      reply_subject:,
+      notify_subject:,
+      relay:,
+      narrative_dir:,
+      librarian: lib,
+      scheduler:,
+      ws_max_bytes:,
+    )
+
+  // Send a startup greeting if the conversation is empty
+  process.spawn_unlinked(fn() {
+    process.sleep(100)
+    let msg_subject: Subject(List(Message)) = process.new_subject()
+    process.send(cognitive, agent_types.GetMessages(reply_to: msg_subject))
+    let selector =
+      process.new_selector()
+      |> process.select(msg_subject)
+    case process.selector_receive(selector, 2000) {
+      Ok([]) | Error(_) ->
+        process.send(
+          cognitive,
+          agent_types.UserInput(
+            text: "[Session started. Greet the operator briefly — one or two sentences. Mention anything notable from your sensorium.]",
+            reply_to: reply_subject,
+          ),
+        )
+      Ok(_) -> Nil
+    }
+  })
+
+  // Query live messages from the cognitive loop (not the static boot snapshot)
+  process.spawn_unlinked(fn() {
+    process.sleep(50)
+    let msg_subject: Subject(List(Message)) = process.new_subject()
+    process.send(cognitive, agent_types.GetMessages(reply_to: msg_subject))
+    let selector =
+      process.new_selector()
+      |> process.select(msg_subject)
+    // Wait up to 2s for cognitive loop to respond
+    let live_messages = case process.selector_receive(selector, 2000) {
+      Ok(msgs) -> msgs
+      Error(_) -> initial_messages
+    }
+    let messages_json =
+      json.to_string(
+        json.array(live_messages, fn(msg) {
+          let role = case msg.role {
+            User -> "user"
+            Assistant -> "assistant"
+          }
+          json.object([
+            #("role", json.string(role)),
+            #("text", json.string(extract_text(msg))),
+          ])
+        }),
+      )
+    process.send(history_subject, messages_json)
+  })
+
+  #(state, Some(selector))
+}
+
+fn ws_handler(
+  state: WsState,
+  message: mist.WebsocketMessage(WsMsg),
+  conn: mist.WebsocketConnection,
+) -> mist.Next(WsState, WsMsg) {
+  case message {
+    // Client sent a text frame
+    mist.Text(json_str) -> {
+      case string.byte_size(json_str) > state.ws_max_bytes {
+        True -> mist.continue(state)
+        False ->
+          case protocol.decode_client_message(json_str) {
+            Ok(protocol.UserMessage(text:)) -> {
+              // Send thinking indicator
+              let _ =
+                mist.send_text_frame(
+                  conn,
+                  protocol.encode_server_message(protocol.Thinking),
+                )
+              // Dispatch to cognitive loop
+              process.send(
+                state.cognitive,
+                agent_types.UserInput(text:, reply_to: state.reply_subject),
+              )
+              mist.continue(state)
+            }
+            Ok(protocol.UserAnswer(text:)) -> {
+              process.send(
+                state.cognitive,
+                agent_types.UserAnswer(answer: text),
+              )
+              mist.continue(state)
+            }
+            Ok(protocol.RequestLogData) -> {
+              let entries = slog.load_entries()
+              let _ =
+                mist.send_text_frame(
+                  conn,
+                  protocol.encode_server_message(protocol.LogData(entries:)),
+                )
+              mist.continue(state)
+            }
+            Ok(protocol.RequestNarrativeData) -> {
+              // Always read from disk — ETS may be stale if entries were
+              // written by the Archivist but the Librarian notification was
+              // missed or delayed. Disk is the source of truth.
+              let all_entries = narrative_log.load_all(state.narrative_dir)
+              // Limit to most recent 50 entries to avoid oversized WebSocket frames
+              let entries = case list.length(all_entries) > 50 {
+                True -> list.take(list.reverse(all_entries), 50) |> list.reverse
+                False -> all_entries
+              }
+              let entries_json =
+                json.to_string(json.array(entries, narrative_log.encode_entry))
+              let msg =
+                protocol.encode_server_message(protocol.NarrativeData(
+                  entries_json:,
+                ))
+              slog.info(
+                "web/gui",
+                "narrative",
+                "Sending "
+                  <> int.to_string(list.length(entries))
+                  <> " entries ("
+                  <> int.to_string(string.byte_size(msg))
+                  <> " bytes)",
+                None,
+              )
+              let _ = mist.send_text_frame(conn, msg)
+              mist.continue(state)
+            }
+            Ok(protocol.RequestSchedulerData) -> {
+              case state.scheduler {
+                Some(sched) -> {
+                  let status_subj = process.new_subject()
+                  process.send(
+                    sched,
+                    scheduler_types.GetStatus(reply_to: status_subj),
+                  )
+                  case process.receive(status_subj, 2000) {
+                    Ok(jobs) -> {
+                      let jobs_json =
+                        json.to_string(json.array(
+                          jobs,
+                          scheduler_types.encode_job,
+                        ))
+                      let _ =
+                        mist.send_text_frame(
+                          conn,
+                          protocol.encode_server_message(protocol.SchedulerData(
+                            jobs_json:,
+                          )),
+                        )
+                      Nil
+                    }
+                    Error(_) -> Nil
+                  }
+                }
+                None -> Nil
+              }
+              mist.continue(state)
+            }
+            Ok(protocol.RequestSchedulerCycles) -> {
+              case state.librarian {
+                Some(lib) -> {
+                  let reply_subj = process.new_subject()
+                  process.send(
+                    lib,
+                    librarian.QuerySchedulerCycles(
+                      date: get_today_date(),
+                      reply_to: reply_subj,
+                    ),
+                  )
+                  case process.receive(reply_subj, 2000) {
+                    Ok(cycles) -> {
+                      let cycles_json =
+                        json.to_string(json.array(cycles, encode_cycle_node))
+                      let _ =
+                        mist.send_text_frame(
+                          conn,
+                          protocol.encode_server_message(
+                            protocol.SchedulerCyclesData(cycles_json:),
+                          ),
+                        )
+                      Nil
+                    }
+                    Error(_) -> Nil
+                  }
+                }
+                None -> Nil
+              }
+              mist.continue(state)
+            }
+            Ok(protocol.RequestPlannerData) -> {
+              case state.librarian {
+                Some(lib) -> {
+                  let tasks = librarian.get_active_tasks(lib)
+                  let endeavours = librarian.get_all_endeavours(lib)
+                  let tasks_json =
+                    json.to_string(json.array(tasks, encode_planner_task))
+                  let endeavours_json =
+                    json.to_string(json.array(endeavours, encode_endeavour))
+                  let _ =
+                    mist.send_text_frame(
+                      conn,
+                      protocol.encode_server_message(protocol.PlannerData(
+                        tasks_json:,
+                        endeavours_json:,
+                      )),
+                    )
+                  Nil
+                }
+                None -> Nil
+              }
+              mist.continue(state)
+            }
+            Ok(protocol.RequestDprimeData) -> {
+              case state.librarian {
+                Some(lib) -> {
+                  let reply_subj = process.new_subject()
+                  process.send(
+                    lib,
+                    librarian.QueryDayAll(
+                      date: get_today_date(),
+                      reply_to: reply_subj,
+                    ),
+                  )
+                  case process.receive(reply_subj, 2000) {
+                    Ok(nodes) -> {
+                      let gates_json =
+                        json.to_string(json.array(
+                          extract_dprime_gates(nodes),
+                          encode_dprime_gate,
+                        ))
+                      let _ =
+                        mist.send_text_frame(
+                          conn,
+                          protocol.encode_server_message(protocol.DprimeData(
+                            gates_json:,
+                          )),
+                        )
+                      Nil
+                    }
+                    Error(_) -> Nil
+                  }
+                }
+                None -> Nil
+              }
+              mist.continue(state)
+            }
+            Ok(protocol.RequestDprimeConfig) -> {
+              // Read dprime.json directly from disk
+              let base_json = case simplifile.read(".springdrift/dprime.json") {
+                Ok(contents) -> contents
+                Error(_) -> "{\"error\":\"dprime.json not found\"}"
+              }
+              // Append normative calculus status from character.json
+              let nc_json = build_normative_config_json()
+              let config_json = case string.ends_with(base_json, "}") {
+                True ->
+                  string.drop_end(base_json, 1)
+                  <> ",\"normative_calculus\":"
+                  <> nc_json
+                  <> "}"
+                False -> base_json
+              }
+              let _ =
+                mist.send_text_frame(
+                  conn,
+                  protocol.encode_server_message(protocol.DprimeConfigData(
+                    config_json:,
+                  )),
+                )
+              mist.continue(state)
+            }
+            Ok(protocol.RequestCommsData) -> {
+              let raw_messages = comms_log.load_recent(paths.comms_dir(), 7)
+              // Deduplicate by message_id (poller bug may have created dupes)
+              let messages =
+                list.fold(raw_messages, #([], set.new()), fn(acc, m) {
+                  case set.contains(acc.1, m.message_id) {
+                    True -> acc
+                    False -> #([m, ..acc.0], set.insert(acc.1, m.message_id))
+                  }
+                }).0
+                |> list.reverse
+              let messages_json =
+                json.to_string(
+                  json.array(messages, fn(m) {
+                    json.object([
+                      #("message_id", json.string(m.message_id)),
+                      #("direction", case m.direction {
+                        comms_types.Outbound -> json.string("outbound")
+                        comms_types.Inbound -> json.string("inbound")
+                      }),
+                      #("from", json.string(m.from)),
+                      #("to", json.string(m.to)),
+                      #("subject", json.string(m.subject)),
+                      #("body", json.string(string.slice(m.body_text, 0, 200))),
+                      #("timestamp", json.string(m.timestamp)),
+                      #("status", case m.status {
+                        comms_types.Sent -> json.string("sent")
+                        comms_types.Delivered -> json.string("delivered")
+                        comms_types.Failed(r) -> json.string("failed: " <> r)
+                        comms_types.Pending -> json.string("pending")
+                      }),
+                    ])
+                  }),
+                )
+              let _ =
+                mist.send_text_frame(
+                  conn,
+                  protocol.encode_server_message(protocol.CommsData(
+                    messages_json:,
+                  )),
+                )
+              mist.continue(state)
+            }
+            Ok(protocol.RequestAffectData) -> {
+              let snapshots = affect_store.load_recent(paths.affect_dir(), 50)
+              let snapshots_json =
+                json.to_string(json.array(
+                  snapshots,
+                  affect_types.encode_snapshot,
+                ))
+              let _ =
+                mist.send_text_frame(
+                  conn,
+                  protocol.encode_server_message(protocol.AffectData(
+                    snapshots_json:,
+                  )),
+                )
+              mist.continue(state)
+            }
+            Ok(protocol.RequestRewind(index: _)) -> {
+              // Rewind is no longer supported — agent starts fresh each session
+              let _ =
+                mist.send_text_frame(
+                  conn,
+                  protocol.encode_server_message(protocol.AssistantMessage(
+                    text: "[Rewind not available — agent starts fresh each session. Use recall_recent to check history.]",
+                    model: "system",
+                    usage: None,
+                  )),
+                )
+              mist.continue(state)
+            }
+            Error(_) -> mist.continue(state)
+          }
+      }
+    }
+
+    // Cognitive reply arrived via selector
+    mist.Custom(GotReply(reply)) -> {
+      let msg =
+        protocol.AssistantMessage(
+          text: reply.response,
+          model: reply.model,
+          usage: reply.usage,
+        )
+      let _ = mist.send_text_frame(conn, protocol.encode_server_message(msg))
+      mist.continue(state)
+    }
+
+    // Notification arrived via selector
+    mist.Custom(GotNotification(notification)) -> {
+      let server_msg = notification_to_server_message(notification)
+      let _ =
+        mist.send_text_frame(conn, protocol.encode_server_message(server_msg))
+      mist.continue(state)
+    }
+
+    // Session history on connect
+    mist.Custom(SendHistory(messages_json)) -> {
+      let _ =
+        mist.send_text_frame(
+          conn,
+          protocol.encode_server_message(protocol.SessionHistory(messages_json:)),
+        )
+      mist.continue(state)
+    }
+
+    // Binary frames ignored
+    mist.Binary(_) -> mist.continue(state)
+
+    // Connection closed
+    mist.Closed | mist.Shutdown -> mist.stop()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Notification forwarding loop
+// ---------------------------------------------------------------------------
+
+/// Runs in the main process. Receives notifications from the cognitive loop
+/// (via `notify`) and broadcasts them to all registered WebSocket connections.
+fn forward_loop(
+  notify: Subject(agent_types.Notification),
+  relay: Subject(RelayMsg),
+  connections: List(Subject(agent_types.Notification)),
+) -> Nil {
+  let selector =
+    process.new_selector()
+    |> process.select_map(notify, fn(n) { FwdNotification(n) })
+    |> process.select_map(relay, fn(r) { FwdRelay(r) })
+
+  // Block until a message arrives (infinite timeout)
+  let msg = process.selector_receive_forever(selector)
+  case msg {
+    FwdNotification(notification) -> {
+      list.each(connections, fn(conn_subj) {
+        process.send(conn_subj, notification)
+      })
+      forward_loop(notify, relay, connections)
+    }
+    FwdRelay(Register(subj)) -> {
+      forward_loop(notify, relay, [subj, ..connections])
+    }
+    FwdRelay(Unregister(subj)) -> {
+      forward_loop(notify, relay, list.filter(connections, fn(s) { s != subj }))
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+fn notification_to_server_message(
+  notification: agent_types.Notification,
+) -> protocol.ServerMessage {
+  case notification {
+    agent_types.QuestionForHuman(question:, source:) -> {
+      let source_str = case source {
+        agent_types.CognitiveQuestion -> protocol.cognitive_source()
+        agent_types.AgentQuestionSource(agent:) -> protocol.agent_source(agent)
+      }
+      protocol.Question(text: question, source: source_str)
+    }
+    agent_types.ToolCalling(name:) -> protocol.ToolNotification(name:)
+    agent_types.SaveWarning(message:) -> protocol.SaveNotification(message:)
+    agent_types.SafetyGateNotice(decision:, score:, explanation:) ->
+      protocol.SafetyNotification(decision:, score:, explanation:)
+    agent_types.AgentLifecycleNotice(event_type:, agent_name:) ->
+      protocol.ToolNotification(name: agent_name <> " " <> event_type)
+    agent_types.InputQueued(position:, queue_size:) ->
+      protocol.QueueNotification(position:, queue_size:)
+    agent_types.InputQueueFull(queue_cap:) ->
+      protocol.QueueFullNotification(queue_cap:)
+    agent_types.SchedulerReminder(name: _, title:, body: _) ->
+      protocol.ToolNotification(name: "reminder: " <> title)
+    agent_types.SchedulerJobStarted(name:, kind:) ->
+      protocol.ToolNotification(
+        name: "scheduler:" <> name <> " (" <> kind <> ")",
+      )
+    agent_types.SchedulerJobCompleted(name:, result_preview: _) ->
+      protocol.ToolNotification(name: "scheduler:" <> name <> " done")
+    agent_types.SchedulerJobFailed(name:, reason:) ->
+      protocol.ToolNotification(
+        name: "scheduler:" <> name <> " failed: " <> reason,
+      )
+    agent_types.PlannerNotification(task_id:, title:, action:) ->
+      protocol.ToolNotification(
+        name: "planner:" <> task_id <> " " <> action <> " — " <> title,
+      )
+    agent_types.SandboxStarted(pool_size:, port_range:) ->
+      protocol.ToolNotification(
+        name: "sandbox:started pool="
+        <> int.to_string(pool_size)
+        <> " ports="
+        <> port_range,
+      )
+    agent_types.SandboxContainerFailed(slot:, reason:) ->
+      protocol.ToolNotification(
+        name: "sandbox:slot " <> int.to_string(slot) <> " failed: " <> reason,
+      )
+    agent_types.SandboxUnavailable(reason:) ->
+      protocol.ToolNotification(name: "sandbox:unavailable " <> reason)
+    agent_types.ModelEscalation(from_model:, to_model:, reason:) ->
+      protocol.SafetyNotification(
+        decision: "ESCALATED",
+        score: 0.0,
+        explanation: from_model <> " -> " <> to_model <> ": " <> reason,
+      )
+  }
+}
+
+@external(erlang, "springdrift_ffi", "get_date")
+fn get_today_date() -> String
+
+fn encode_cycle_node(node: dag_types.CycleNode) -> json.Json {
+  json.object([
+    #("cycle_id", json.string(node.cycle_id)),
+    #("timestamp", json.string(node.timestamp)),
+    #(
+      "node_type",
+      json.string(case node.node_type {
+        dag_types.CognitiveCycle -> "cognitive"
+        dag_types.AgentCycle -> "agent"
+        dag_types.SchedulerCycle -> "scheduler"
+      }),
+    ),
+    #(
+      "outcome",
+      json.string(case node.outcome {
+        dag_types.NodeSuccess -> "success"
+        dag_types.NodePartial -> "partial"
+        dag_types.NodeFailure(reason:) -> "failure: " <> reason
+        dag_types.NodePending -> "pending"
+      }),
+    ),
+    #("model", json.string(node.model)),
+    #("tool_call_count", json.int(list.length(node.tool_calls))),
+    #("tokens_in", json.int(node.tokens_in)),
+    #("tokens_out", json.int(node.tokens_out)),
+    #("duration_ms", json.int(node.duration_ms)),
+  ])
+}
+
+fn extract_text(msg: Message) -> String {
+  list.filter_map(msg.content, fn(block) {
+    case block {
+      TextContent(text:) -> Ok(text)
+      _ -> Error(Nil)
+    }
+  })
+  |> list.first
+  |> option.from_result
+  |> option.unwrap("")
+}
+
+fn encode_planner_task(task: planner_types.PlannerTask) -> json.Json {
+  let completed_steps =
+    list.filter(task.plan_steps, fn(s) { s.status == planner_types.Complete })
+  let total_steps = list.length(task.plan_steps)
+  let completed_count = list.length(completed_steps)
+  json.object([
+    #("task_id", json.string(task.task_id)),
+    #("title", json.string(task.title)),
+    #("status", json.string(encode_task_status(task.status))),
+    #("complexity", json.string(task.complexity)),
+    #("steps_completed", json.int(completed_count)),
+    #("steps_total", json.int(total_steps)),
+    #("forecast_score", case task.forecast_score {
+      Some(s) -> json.float(s)
+      None -> json.null()
+    }),
+    #("endeavour_id", case task.endeavour_id {
+      Some(id) -> json.string(id)
+      None -> json.null()
+    }),
+    #("cycle_count", json.int(list.length(task.cycle_ids))),
+    #(
+      "steps",
+      json.array(task.plan_steps, fn(s) {
+        json.object([
+          #("index", json.int(s.index)),
+          #("description", json.string(s.description)),
+          #("status", json.string(encode_task_status(s.status))),
+          #("completed_at", case s.completed_at {
+            Some(at) -> json.string(at)
+            None -> json.null()
+          }),
+        ])
+      }),
+    ),
+    #("description", json.string(task.description)),
+    #("created_at", json.string(task.created_at)),
+    #("risks", json.array(task.risks, json.string)),
+    #("materialised_risks", json.array(task.materialised_risks, json.string)),
+  ])
+}
+
+fn encode_task_status(status: planner_types.TaskStatus) -> String {
+  case status {
+    planner_types.Pending -> "pending"
+    planner_types.Active -> "active"
+    planner_types.Complete -> "complete"
+    planner_types.Failed -> "failed"
+    planner_types.Abandoned -> "abandoned"
+  }
+}
+
+fn encode_endeavour(endeavour: planner_types.Endeavour) -> json.Json {
+  json.object([
+    #("endeavour_id", json.string(endeavour.endeavour_id)),
+    #("title", json.string(endeavour.title)),
+    #("description", json.string(endeavour.description)),
+    #(
+      "status",
+      json.string(case endeavour.status {
+        planner_types.Open -> "open"
+        planner_types.Draft -> "draft"
+        planner_types.EndeavourActive -> "active"
+        planner_types.EndeavourBlocked -> "blocked"
+        planner_types.OnHold -> "on_hold"
+        planner_types.EndeavourComplete -> "complete"
+        planner_types.EndeavourFailed -> "failed"
+        planner_types.EndeavourAbandoned -> "abandoned"
+      }),
+    ),
+    #("task_ids", json.array(endeavour.task_ids, json.string)),
+    #("task_count", json.int(list.length(endeavour.task_ids))),
+    #("created_at", json.string(endeavour.created_at)),
+    #("updated_at", json.string(endeavour.updated_at)),
+  ])
+}
+
+// ---------------------------------------------------------------------------
+// D' gate data extraction
+// ---------------------------------------------------------------------------
+
+type DprimeGateRecord {
+  DprimeGateRecord(
+    cycle_id: String,
+    timestamp: String,
+    node_type: String,
+    gate: String,
+    decision: String,
+    score: Float,
+  )
+}
+
+fn extract_dprime_gates(
+  nodes: List(dag_types.CycleNode),
+) -> List(DprimeGateRecord) {
+  list.flat_map(nodes, fn(node) {
+    let nt = case node.node_type {
+      dag_types.CognitiveCycle -> "cognitive"
+      dag_types.AgentCycle -> "agent"
+      dag_types.SchedulerCycle -> "scheduler"
+    }
+    list.map(node.dprime_gates, fn(g) {
+      DprimeGateRecord(
+        cycle_id: node.cycle_id,
+        timestamp: node.timestamp,
+        node_type: nt,
+        gate: g.gate,
+        decision: g.decision,
+        score: g.score,
+      )
+    })
+  })
+}
+
+fn encode_dprime_gate(record: DprimeGateRecord) -> json.Json {
+  json.object([
+    #("cycle_id", json.string(record.cycle_id)),
+    #("timestamp", json.string(record.timestamp)),
+    #("node_type", json.string(record.node_type)),
+    #("gate", json.string(record.gate)),
+    #("decision", json.string(record.decision)),
+    #("score", json.float(record.score)),
+  ])
+}
+
+/// Build JSON for the normative calculus config panel in the web admin.
+/// Reads character.json from identity directories and config.toml for enabled flag.
+fn build_normative_config_json() -> String {
+  // Normative calculus is enabled by default (True).
+  // Only disabled if config explicitly says false.
+  let enabled = case simplifile.read(paths.local_config()) {
+    Ok(contents) ->
+      !string.contains(contents, "normative_calculus_enabled = false")
+    Error(_) -> True
+  }
+
+  let character =
+    normative_character.load_character(paths.default_identity_dirs())
+
+  case character {
+    Some(spec) -> {
+      let endeavours =
+        list.map(spec.highest_endeavour, fn(np) {
+          json.object([
+            #(
+              "level",
+              json.string(normative_character.level_to_string(np.level)),
+            ),
+            #(
+              "operator",
+              json.string(normative_character.operator_to_string(np.operator)),
+            ),
+            #("description", json.string(np.description)),
+          ])
+        })
+      json.to_string(
+        json.object([
+          #("enabled", json.bool(enabled)),
+          #("character_loaded", json.bool(True)),
+          #("virtue_count", json.int(list.length(spec.virtues))),
+          #("endeavour_count", json.int(list.length(spec.highest_endeavour))),
+          #("endeavours", json.array(endeavours, fn(x) { x })),
+        ]),
+      )
+    }
+    None ->
+      json.to_string(
+        json.object([
+          #("enabled", json.bool(enabled)),
+          #("character_loaded", json.bool(False)),
+        ]),
+      )
+  }
+}

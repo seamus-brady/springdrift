@@ -1,0 +1,329 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Springdrift — example config.toml
+# Copy to .springdrift/config.toml and customise.
+# All fields are optional — defaults (shown in comments) are applied at startup.
+# CLI flags always override config file values.
+#
+# IMPORTANT: bare keys (provider, max_tokens, gui, etc.) MUST appear before
+# any [section] header. TOML assigns bare keys to the section above them.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Provider and models ──────────────────────────────────────────────────────
+# "anthropic" | "vertex" | "openrouter" | "openai" | "mistral" | "local" | "mock"
+provider = "mock"
+
+# Top-level model overrides (apply regardless of provider — prefer per-provider sections)
+# task_model = "claude-haiku-4-5-20251001"
+# reasoning_model = "claude-opus-4-6"
+
+# ── Behaviour ────────────────────────────────────────────────────────────────
+max_tokens = 2048            # Max output tokens per LLM call
+max_turns = 5                # React-loop iterations per message
+max_consecutive_errors = 3   # Tool failures before abort
+# max_context_messages = 100 # Sliding-window cap on context messages (default: unlimited)
+gui = "web"                  # "tui" (terminal) or "web" (browser on port 8080)
+
+# ── Logging ──────────────────────────────────────────────────────────────────
+log_verbose = false
+write_anywhere = false
+# log_retention_days = 30
+# log_max_file_bytes = 10485760
+# skills_dirs = ["/path/to/my/skills"]
+
+# ── D' safety ────────────────────────────────────────────────────────────────
+# dprime_enabled = true
+# dprime_config = "dprime.json"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sections below. Order doesn't matter for [sections].
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Identity ─────────────────────────────────────────────────────────────────
+
+[agent]
+name = "Nemo"                # Substituted into {{agent_name}} in identity/persona.md
+version = "Springdrift Mk-3"
+
+# ── Provider-specific models ─────────────────────────────────────────────────
+# Only the active provider's section is used at runtime.
+
+[anthropic]
+# task_model = "claude-haiku-4-5-20251001"
+# reasoning_model = "claude-opus-4-6"
+# thinking_budget_tokens = 10000  # Extended thinking token budget for reasoning model (default: none)
+
+[vertex]
+# project_id = "my-gcp-project"
+# location = "europe-west1"
+# endpoint = "europe-west1-aiplatform.googleapis.com"
+# task_model = "claude-haiku-4-5"
+# reasoning_model = "claude-opus-4-6"
+
+[mistral]
+# task_model = "mistral-small-latest"
+# reasoning_model = "mistral-large-latest"
+
+[local]
+# task_model = "smollm3-3b"
+# reasoning_model = "smollm3-3b"
+
+# ── Memory ───────────────────────────────────────────────────────────────────
+
+[narrative]
+threading = true
+summaries = false
+summary_schedule = "weekly"
+# max_days = 30
+# archivist_model = ""
+# archivist_max_tokens = 4096
+# redact_secrets = true
+# preamble_budget_chars = 8000
+
+[cbr]
+# embedding_enabled = true
+# embedding_model = "nomic-embed-text"
+# embedding_base_url = "http://localhost:11434"
+# Weights tuned from experiment-3 ablation (must sum to 1.0).
+# When embeddings unavailable, embedding_weight is redistributed.
+# field_weight = 0.10
+# index_weight = 0.25
+# recency_weight = 0.05
+# domain_weight = 0.10
+# embedding_weight = 0.40
+# utility_weight = 0.10
+# min_score = 0.01
+
+[scoring.threading]
+# location_weight = 3
+# domain_weight = 2
+# keyword_weight = 1
+# threshold = 3
+
+# ── Safety ───────────────────────────────────────────────────────────────────
+
+[dprime]
+# gate_timeout_ms = 60000
+# normative_calculus_enabled = true   # Enabled by default; requires identity/character.json
+
+[escalation]
+# enabled = true
+# tool_failure_threshold = 2
+# safety_score_threshold = 0.4
+
+# ── Agents ───────────────────────────────────────────────────────────────────
+
+[agents.planner]
+# max_tokens = 2048
+# max_turns = 5
+# max_errors = 2
+
+[agents.project_manager]
+# max_tokens = 2048
+# max_turns = 15
+# max_errors = 3
+
+[agents.researcher]
+# max_tokens = 2048
+# max_turns = 8
+# max_errors = 3
+# max_context_messages = 30
+
+[agents.coder]
+# max_tokens = 4096
+# max_turns = 10
+# max_errors = 3
+
+[agents.writer]
+# max_tokens = 4096
+# max_turns = 5
+# max_errors = 2
+
+[agents.scheduler]
+# max_tokens = 1024
+# max_turns = 4
+# max_errors = 2
+
+[delegation]
+# max_depth = 3                  # Max agent delegation depth (default: 3)
+# team_max_members = 5           # Max agents per team (default: 5)
+# team_token_budget = 200000     # Max tokens across all team members + synthesis (default: 200000)
+# team_max_debate_rounds = 3     # Max debate rounds for DebateAndConsensus (default: 3)
+
+# ── Teams ────────────────────────────────────────────────────────────────────
+# Define agent teams as [teams.<name>] sections. Each team appears as a
+# tool (team_<name>) that the cognitive loop can call.
+# Strategies: "parallel_merge", "pipeline", "debate", "lead"
+# Members: array of [agent_name, role, perspective] triples
+
+# [teams.research_review]
+# description = "Research team with peer review"
+# members = [
+#   ["researcher", "Lead Researcher", "Find and verify information"],
+#   ["observer", "Reviewer", "Check methodology and sources"],
+# ]
+# strategy = "parallel_merge"
+# # synthesis_model = "claude-sonnet-4-6"  # Optional, defaults to task_model
+
+# [teams.deep_analysis]
+# description = "Multi-perspective analysis team"
+# members = [
+#   ["researcher", "Analyst", "Gather primary data"],
+#   ["writer", "Synthesiser", "Produce structured report"],
+# ]
+# strategy = "pipeline"
+
+# ── Sandbox ──────────────────────────────────────────────────────────────────
+
+[sandbox]
+# enabled = true
+# pool_size = 2
+# memory_mb = 512
+# cpus = "1"
+# image = "python:3.12-slim"
+# exec_timeout_ms = 60000
+# port_base = 10000
+# port_stride = 100
+# ports_per_slot = 5
+# auto_machine = true
+
+# ── Scheduler ────────────────────────────────────────────────────────────────
+
+[scheduler]
+# max_autonomous_cycles_per_hour = 20
+# autonomous_token_budget_per_hour = 500000
+
+# ── Web GUI ──────────────────────────────────────────────────────────────────
+
+[web]
+# port = 8080
+
+# ── External services ────────────────────────────────────────────────────────
+
+[services]
+# duckduckgo_url = "https://html.duckduckgo.com/html/"
+# brave_search_base_url = "https://api.search.brave.com"
+# brave_answers_base_url = "https://api.search.brave.com"
+# jina_reader_base_url = "https://r.jina.ai/"
+
+# ── Timeouts (ms) ────────────────────────────────────────────────────────────
+
+[timeouts]
+# llm_request_ms = 300000
+# classify_ms = 10000
+# inter_turn_delay_ms = 200
+# startup_ms = 5000
+# librarian_startup_ms = 30000
+# scheduler_job_ms = 300000
+# restart_window_ms = 60000
+# scheduler_stuck_ms = 600000
+# scheduler_tool_ms = 5000
+
+# ── Retry ────────────────────────────────────────────────────────────────────
+
+[retry]
+# max_retries = 3
+# initial_delay_ms = 500
+# rate_limit_delay_ms = 5000
+# overload_delay_ms = 2000
+# max_delay_ms = 60000
+
+# ── Size limits ──────────────────────────────────────────────────────────────
+
+[limits]
+# max_artifact_chars = 50000
+# max_fetch_chars = 50000
+# tui_input_limit = 102400
+# websocket_max_bytes = 1048576
+# recall_max_entries = 20
+# cbr_max_results = 4
+# web_search_max_results = 5
+# input_queue_cap = 10
+
+# ── Maintenance ──────────────────────────────────────────────────────────────
+
+[housekeeper]
+# short_tick_ms = 21600000
+# medium_tick_ms = 43200000
+# long_tick_ms = 86400000
+# narrative_days = 90
+# cbr_days = 180
+# dag_days = 30
+# artifact_days = 60
+# budget_dedup_debounce_ms = 1800000
+
+[housekeeping]
+# dedup_similarity = 0.92
+# pruning_confidence = 0.3
+# fact_confidence = 0.7
+# cbr_pruning_days = 60
+# thread_pruning_days = 7
+# fact_decay_half_life_days = 30
+# cbr_decay_half_life_days = 60
+
+# ── XStructor ────────────────────────────────────────────────────────────────
+
+[xstructor]
+# max_retries = 3
+
+# ── Forecaster ───────────────────────────────────────────────────────────────
+
+[forecaster]
+# enabled = false
+# tick_ms = 300000
+# replan_threshold = 0.55
+# min_cycles = 2
+# stale_threshold_ms = 1800000
+# features_path = "planner_features.json"   # Relative to .springdrift/. Agent adjusts per-endeavour.
+
+# ── Appraisal ──────────────────────────────────────────────────────────────
+
+[appraisal]
+# model = ""                           # defaults to task_model
+# max_tokens = 4096
+# min_complexity = "medium"            # minimum task complexity for pre-mortem ("simple", "medium", "complex")
+# min_steps = 3                        # minimum task steps for pre-mortem
+
+# ── Affect ───────────────────────────────────────────────────────────────────
+
+[affect]
+# enabled = true                      # Whether affect monitoring is active (default: true)
+# history_window = 20                 # Cycles to consider for affect computation (default: 20)
+
+# ── Communications ──────────────────────────────────────────────────────────
+
+[comms]
+# Enable the communications agent (default: true)
+# enabled = true
+
+# AgentMail inbox ID (required when enabled)
+# inbox_id = ""
+
+# Env var holding the AgentMail API key (default: AGENTMAIL_API_KEY)
+# api_key_env = "AGENTMAIL_API_KEY"
+
+# Agent's email address (for display/logging)
+# from_address = ""
+
+# Email addresses the agent is allowed to contact (hard allowlist)
+# allowed_recipients = []
+
+# Display name for outbound email (defaults to agent name)
+# from_name = ""
+
+# Max outbound emails per hour (default: 20)
+# max_outbound_per_hour = 20
+
+# Inbox poll interval in milliseconds (default: 60000 = 1 minute)
+# poll_interval_ms = 60000
+
+# ── Backup ──────────────────────────────────────────────────────────────────
+# Git-backed state backup. Initialises a git repo inside .springdrift/ and
+# commits all state changes periodically. Without a remote, the backup only
+# exists on the same disk as the data — configure remote_url for offsite safety.
+
+[backup]
+# enabled = true                      # Enable git backup (default: true)
+# mode = "periodic"                   # "periodic" | "after_cycle" | "manual"
+# interval_ms = 300000                # Commit interval in ms (default: 300000 = 5 minutes)
+# remote_url = ""                     # Git remote URL (recommended — e.g. git@github.com:org/data.git)
+# branch = "main"                     # Branch name (default: main)

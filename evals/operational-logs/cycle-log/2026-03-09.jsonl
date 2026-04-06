@@ -1,0 +1,145 @@
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T07:42:28","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T07:42:28","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T07:42:28","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T07:42:28","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T07:42:28","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T07:42:28","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T07:42:28","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T07:42:28","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T07:42:28","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T07:42:28","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T07:42:28","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"type":"human_input","cycle_id":"79577d80-cc32-40db-9080-3ee5e219d861","parent_cycle_id":null,"timestamp":"2026-03-09T07:48:39","text":"[REDACTED]","text_length":5}
+{"cycle_id":"79577d80-cc32-40db-9080-3ee5e219d861","timestamp":"2026-03-09T07:48:40","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"79577d80-cc32-40db-9080-3ee5e219d861","timestamp":"2026-03-09T07:48:40","model":"mistral-small-latest","stop_reason":"end_turn","input_tokens":1402,"output_tokens":10,"content":"[REDACTED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:10:00","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:10:00","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:10:00","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:10:00","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:10:00","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:10:00","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:10:00","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:10:00","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:10:00","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:10:00","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:10:00","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:10:40","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:10:40","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:10:40","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:10:40","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:10:40","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:10:40","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:10:40","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:10:40","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:10:40","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:10:40","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:10:40","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:12:41","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:12:41","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:12:41","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:12:41","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:12:41","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:12:41","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:12:41","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:12:41","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:12:41","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:12:42","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-09T08:12:42","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"type":"human_input","cycle_id":"a4da6a93-e4c1-4a26-914c-047237ebdc80","parent_cycle_id":null,"timestamp":"2026-03-09T08:42:45","text":"[REDACTED]","text_length":5}
+{"cycle_id":"a4da6a93-e4c1-4a26-914c-047237ebdc80","timestamp":"2026-03-09T08:42:46","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"a4da6a93-e4c1-4a26-914c-047237ebdc80","timestamp":"2026-03-09T08:42:46","model":"mistral-small-latest","stop_reason":"end_turn","input_tokens":1637,"output_tokens":10,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"72d62038-04e7-417e-8591-3ba58ce81bdc","parent_cycle_id":null,"timestamp":"2026-03-09T08:42:56","text":"[REDACTED]","text_length":43}
+{"cycle_id":"72d62038-04e7-417e-8591-3ba58ce81bdc","timestamp":"2026-03-09T08:42:56","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"72d62038-04e7-417e-8591-3ba58ce81bdc","timestamp":"2026-03-09T08:42:56","model":"mistral-small-latest","stop_reason":"tool_use","input_tokens":1659,"output_tokens":14,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"72d62038-04e7-417e-8591-3ba58ce81bdc","timestamp":"2026-03-09T08:42:57","model":"mistral-small-latest","stop_reason":"end_turn","input_tokens":1699,"output_tokens":29,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"4785abb0-5308-48ce-a741-98aa7c1bbb6e","parent_cycle_id":null,"timestamp":"2026-03-09T08:43:04","text":"[REDACTED]","text_length":10}
+{"cycle_id":"4785abb0-5308-48ce-a741-98aa7c1bbb6e","timestamp":"2026-03-09T08:43:04","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"4785abb0-5308-48ce-a741-98aa7c1bbb6e","timestamp":"2026-03-09T08:43:04","model":"mistral-small-latest","stop_reason":"tool_use","input_tokens":1733,"output_tokens":14,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"4785abb0-5308-48ce-a741-98aa7c1bbb6e","timestamp":"2026-03-09T08:43:05","model":"mistral-small-latest","stop_reason":"end_turn","input_tokens":3908,"output_tokens":53,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"77ef94c8-a53b-44d3-b6a4-418bccb1a788","parent_cycle_id":null,"timestamp":"2026-03-09T09:50:27","text":"[REDACTED]","text_length":49}
+{"cycle_id":"77ef94c8-a53b-44d3-b6a4-418bccb1a788","timestamp":"2026-03-09T09:50:28","type":"classification","complexity":"complex","suggested_model":"mistral-large-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"77ef94c8-a53b-44d3-b6a4-418bccb1a788","timestamp":"2026-03-09T09:50:29","model":"mistral-large-latest","stop_reason":"tool_use","input_tokens":3940,"output_tokens":22,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"77ef94c8-a53b-44d3-b6a4-418bccb1a788","timestamp":"2026-03-09T09:50:31","model":"mistral-large-latest","stop_reason":"end_turn","input_tokens":5131,"output_tokens":120,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"1929f9ff-d078-41e1-8a76-f472257b7b08","parent_cycle_id":null,"timestamp":"2026-03-09T14:14:37","text":"[REDACTED]","text_length":84}
+{"cycle_id":"1929f9ff-d078-41e1-8a76-f472257b7b08","timestamp":"2026-03-09T14:14:38","type":"classification","complexity":"complex","suggested_model":"mistral-large-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"1929f9ff-d078-41e1-8a76-f472257b7b08","timestamp":"2026-03-09T14:14:42","model":"mistral-large-latest","stop_reason":"end_turn","input_tokens":5272,"output_tokens":213,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"d7d55477-0d5e-49e0-b5d1-65961100481d","parent_cycle_id":null,"timestamp":"2026-03-09T19:28:09","text":"[REDACTED]","text_length":39}
+{"cycle_id":"d7d55477-0d5e-49e0-b5d1-65961100481d","timestamp":"2026-03-09T19:28:09","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"d7d55477-0d5e-49e0-b5d1-65961100481d","timestamp":"2026-03-09T19:28:10","model":"mistral-small-latest","stop_reason":"end_turn","input_tokens":5542,"output_tokens":42,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"5681349a-233a-4563-b4b2-a4a15ba9818f","parent_cycle_id":null,"timestamp":"2026-03-09T19:28:18","text":"[REDACTED]","text_length":11}
+{"cycle_id":"5681349a-233a-4563-b4b2-a4a15ba9818f","timestamp":"2026-03-09T19:28:19","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"5681349a-233a-4563-b4b2-a4a15ba9818f","timestamp":"2026-03-09T19:28:19","model":"mistral-small-latest","stop_reason":"end_turn","input_tokens":5588,"output_tokens":38,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"d8c2dac9-df94-4bb2-b502-a8e822b4672f","parent_cycle_id":null,"timestamp":"2026-03-09T19:28:24","text":"[REDACTED]","text_length":7}
+{"cycle_id":"d8c2dac9-df94-4bb2-b502-a8e822b4672f","timestamp":"2026-03-09T19:28:25","type":"classification","complexity":"simple","suggested_model":"mistral-small-latest","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"d8c2dac9-df94-4bb2-b502-a8e822b4672f","timestamp":"2026-03-09T19:28:25","model":"mistral-small-latest","stop_reason":"end_turn","input_tokens":5631,"output_tokens":63,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"fcc6f28b-8cbd-45dd-9539-947cc6d8a375","parent_cycle_id":null,"timestamp":"2026-03-09T19:30:39","text":"[REDACTED]","text_length":31}
+{"cycle_id":"fcc6f28b-8cbd-45dd-9539-947cc6d8a375","timestamp":"2026-03-09T19:30:40","type":"classification","complexity":"simple","suggested_model":"claude-haiku-4-5-20251001","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"fcc6f28b-8cbd-45dd-9539-947cc6d8a375","timestamp":"2026-03-09T19:30:41","model":"claude-haiku-4-5-20251001","stop_reason":"tool_use","input_tokens":2108,"output_tokens":66,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"fcc6f28b-8cbd-45dd-9539-947cc6d8a375","timestamp":"2026-03-09T19:30:43","model":"claude-haiku-4-5-20251001","stop_reason":"end_turn","input_tokens":2194,"output_tokens":133,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"18367ef4-563c-4bf6-9d5d-bc06ef8c126e","parent_cycle_id":null,"timestamp":"2026-03-09T21:21:14","text":"[REDACTED]","text_length":29}
+{"cycle_id":"18367ef4-563c-4bf6-9d5d-bc06ef8c126e","timestamp":"2026-03-09T21:21:15","type":"classification","complexity":"simple","suggested_model":"claude-haiku-4-5-20251001","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"18367ef4-563c-4bf6-9d5d-bc06ef8c126e","timestamp":"2026-03-09T21:21:16","model":"claude-haiku-4-5-20251001","stop_reason":"tool_use","input_tokens":2335,"output_tokens":172,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"18367ef4-563c-4bf6-9d5d-bc06ef8c126e","timestamp":"2026-03-09T21:21:21","model":"claude-haiku-4-5-20251001","stop_reason":"end_turn","input_tokens":17421,"output_tokens":309,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"112e1128-4bbd-4124-8995-90c9494f19d2","parent_cycle_id":null,"timestamp":"2026-03-09T21:21:44","text":"[REDACTED]","text_length":22}
+{"cycle_id":"112e1128-4bbd-4124-8995-90c9494f19d2","timestamp":"2026-03-09T21:21:44","type":"classification","complexity":"simple","suggested_model":"claude-haiku-4-5-20251001","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"112e1128-4bbd-4124-8995-90c9494f19d2","timestamp":"2026-03-09T21:21:47","model":"claude-haiku-4-5-20251001","stop_reason":"tool_use","input_tokens":17739,"output_tokens":283,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"112e1128-4bbd-4124-8995-90c9494f19d2","timestamp":"2026-03-09T21:21:50","model":"claude-haiku-4-5-20251001","stop_reason":"tool_use","input_tokens":18829,"output_tokens":165,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"112e1128-4bbd-4124-8995-90c9494f19d2","timestamp":"2026-03-09T21:21:51","model":"claude-haiku-4-5-20251001","stop_reason":"tool_use","input_tokens":19119,"output_tokens":160,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"112e1128-4bbd-4124-8995-90c9494f19d2","timestamp":"2026-03-09T21:21:56","model":"claude-haiku-4-5-20251001","stop_reason":"end_turn","input_tokens":19374,"output_tokens":256,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"097c4fa7-3ef4-4610-9641-2295908205a3","parent_cycle_id":null,"timestamp":"2026-03-09T21:22:22","text":"[REDACTED]","text_length":40}
+{"cycle_id":"097c4fa7-3ef4-4610-9641-2295908205a3","timestamp":"2026-03-09T21:22:23","type":"classification","complexity":"complex","suggested_model":"claude-opus-4-6","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"097c4fa7-3ef4-4610-9641-2295908205a3","timestamp":"2026-03-09T21:22:30","model":"claude-opus-4-6","stop_reason":"tool_use","input_tokens":19643,"output_tokens":541,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"097c4fa7-3ef4-4610-9641-2295908205a3","timestamp":"2026-03-09T21:22:44","model":"claude-opus-4-6","stop_reason":"end_turn","input_tokens":25620,"output_tokens":557,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"5090ee9c-eab5-4632-8cfa-8fff215238c4","parent_cycle_id":null,"timestamp":"2026-03-09T21:23:16","text":"[REDACTED]","text_length":28}
+{"cycle_id":"5090ee9c-eab5-4632-8cfa-8fff215238c4","timestamp":"2026-03-09T21:23:17","type":"classification","complexity":"simple","suggested_model":"claude-haiku-4-5-20251001","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"5090ee9c-eab5-4632-8cfa-8fff215238c4","timestamp":"2026-03-09T21:23:22","model":"claude-haiku-4-5-20251001","stop_reason":"end_turn","input_tokens":26186,"output_tokens":367,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"a81d654f-cf56-4786-b289-00537d7897fa","parent_cycle_id":null,"timestamp":"2026-03-09T21:23:53","text":"[REDACTED]","text_length":24}
+{"cycle_id":"a81d654f-cf56-4786-b289-00537d7897fa","timestamp":"2026-03-09T21:23:54","type":"classification","complexity":"complex","suggested_model":"claude-opus-4-6","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"a81d654f-cf56-4786-b289-00537d7897fa","timestamp":"2026-03-09T21:24:07","model":"claude-opus-4-6","stop_reason":"end_turn","input_tokens":26562,"output_tokens":367,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"2bcfae3d-8681-4feb-ab14-0f6189b6d370","parent_cycle_id":null,"timestamp":"2026-03-09T21:24:59","text":"[REDACTED]","text_length":35}
+{"cycle_id":"2bcfae3d-8681-4feb-ab14-0f6189b6d370","timestamp":"2026-03-09T21:25:00","type":"classification","complexity":"simple","suggested_model":"claude-haiku-4-5-20251001","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"2bcfae3d-8681-4feb-ab14-0f6189b6d370","timestamp":"2026-03-09T21:25:05","model":"claude-haiku-4-5-20251001","stop_reason":"end_turn","input_tokens":26942,"output_tokens":308,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"88b31e63-2e4a-46d6-861d-be2d4fbc013c","parent_cycle_id":null,"timestamp":"2026-03-09T21:25:30","text":"[REDACTED]","text_length":59}
+{"cycle_id":"88b31e63-2e4a-46d6-861d-be2d4fbc013c","timestamp":"2026-03-09T21:25:31","type":"classification","complexity":"complex","suggested_model":"claude-opus-4-6","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"88b31e63-2e4a-46d6-861d-be2d4fbc013c","timestamp":"2026-03-09T21:25:41","model":"claude-opus-4-6","stop_reason":"tool_use","input_tokens":27270,"output_tokens":369,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"88b31e63-2e4a-46d6-861d-be2d4fbc013c","timestamp":"2026-03-09T21:25:45","model":"claude-opus-4-6","stop_reason":"end_turn","input_tokens":27711,"output_tokens":38,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"4afc21d1-9b18-4f58-a902-4fb4deef3a81","parent_cycle_id":null,"timestamp":"2026-03-09T21:26:44","text":"[REDACTED]","text_length":203}
+{"cycle_id":"4afc21d1-9b18-4f58-a902-4fb4deef3a81","timestamp":"2026-03-09T21:26:45","type":"classification","complexity":"complex","suggested_model":"claude-opus-4-6","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"4afc21d1-9b18-4f58-a902-4fb4deef3a81","timestamp":"2026-03-09T21:26:58","model":"claude-opus-4-6","stop_reason":"tool_use","input_tokens":27801,"output_tokens":489,"content":"[REDACTED]"}
+{"type":"llm_error","cycle_id":"4afc21d1-9b18-4f58-a902-4fb4deef3a81","timestamp":"2026-03-09T21:27:03","error":"Rate limited: This request would exceed your organ... [TRUNCATED]"}
+{"type":"llm_error","cycle_id":"4afc21d1-9b18-4f58-a902-4fb4deef3a81","timestamp":"2026-03-09T21:27:03","error":"Falling back from claude-opus-4-6 to claude-haiku-4-5-20251001"}
+{"type":"llm_response","cycle_id":"4afc21d1-9b18-4f58-a902-4fb4deef3a81","timestamp":"2026-03-09T21:27:05","model":"claude-haiku-4-5-20251001","stop_reason":"end_turn","input_tokens":28385,"output_tokens":38,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"5134b9b8-0988-49e4-a48e-7af18f6b922f","parent_cycle_id":null,"timestamp":"2026-03-09T21:27:53","text":"[REDACTED]","text_length":117}
+{"cycle_id":"5134b9b8-0988-49e4-a48e-7af18f6b922f","timestamp":"2026-03-09T21:27:54","type":"classification","complexity":"complex","suggested_model":"claude-opus-4-6","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"5134b9b8-0988-49e4-a48e-7af18f6b922f","timestamp":"2026-03-09T21:28:08","model":"claude-opus-4-6","stop_reason":"end_turn","input_tokens":28459,"output_tokens":389,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"bca84747-7c66-4551-96c8-c17a8efab8ec","parent_cycle_id":null,"timestamp":"2026-03-09T21:29:44","text":"[REDACTED]","text_length":90}
+{"cycle_id":"bca84747-7c66-4551-96c8-c17a8efab8ec","timestamp":"2026-03-09T21:29:45","type":"classification","complexity":"complex","suggested_model":"claude-opus-4-6","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"bca84747-7c66-4551-96c8-c17a8efab8ec","timestamp":"2026-03-09T21:29:52","model":"claude-opus-4-6","stop_reason":"tool_use","input_tokens":28874,"output_tokens":240,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"bca84747-7c66-4551-96c8-c17a8efab8ec","timestamp":"2026-03-09T21:30:29","model":"claude-opus-4-6","stop_reason":"end_turn","input_tokens":31173,"output_tokens":461,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"e4cc9292-ac40-4d06-9dfc-f779147d47f3","parent_cycle_id":null,"timestamp":"2026-03-09T21:31:46","text":"[REDACTED]","text_length":149}
+{"cycle_id":"e4cc9292-ac40-4d06-9dfc-f779147d47f3","timestamp":"2026-03-09T21:31:47","type":"classification","complexity":"complex","suggested_model":"claude-opus-4-6","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"e4cc9292-ac40-4d06-9dfc-f779147d47f3","timestamp":"2026-03-09T21:31:58","model":"claude-opus-4-6","stop_reason":"tool_use","input_tokens":31671,"output_tokens":375,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"e4cc9292-ac40-4d06-9dfc-f779147d47f3","timestamp":"2026-03-09T21:32:02","model":"claude-opus-4-6","stop_reason":"end_turn","input_tokens":32140,"output_tokens":69,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"d5343da3-fba8-4e67-9f1e-0d01486639a3","parent_cycle_id":null,"timestamp":"2026-03-09T21:32:35","text":"[REDACTED]","text_length":128}
+{"cycle_id":"d5343da3-fba8-4e67-9f1e-0d01486639a3","timestamp":"2026-03-09T21:32:35","type":"classification","complexity":"complex","suggested_model":"claude-opus-4-6","prompted_user":false,"user_confirmed":null}
+{"type":"llm_error","cycle_id":"d5343da3-fba8-4e67-9f1e-0d01486639a3","timestamp":"2026-03-09T21:32:41","error":"Rate limited: This request would exceed your organ... [TRUNCATED]"}
+{"type":"llm_error","cycle_id":"d5343da3-fba8-4e67-9f1e-0d01486639a3","timestamp":"2026-03-09T21:32:41","error":"Falling back from claude-opus-4-6 to claude-haiku-4-5-20251001"}
+{"type":"llm_response","cycle_id":"d5343da3-fba8-4e67-9f1e-0d01486639a3","timestamp":"2026-03-09T21:32:48","model":"claude-haiku-4-5-20251001","stop_reason":"tool_use","input_tokens":32240,"output_tokens":463,"content":"[REDACTED]"}
+{"type":"llm_error","cycle_id":"d5343da3-fba8-4e67-9f1e-0d01486639a3","timestamp":"2026-03-09T21:32:53","error":"Rate limited: This request would exceed your organ... [TRUNCATED]"}
+{"type":"llm_error","cycle_id":"d5343da3-fba8-4e67-9f1e-0d01486639a3","timestamp":"2026-03-09T21:32:53","error":"Falling back from claude-opus-4-6 to claude-haiku-4-5-20251001"}
+{"type":"llm_response","cycle_id":"d5343da3-fba8-4e67-9f1e-0d01486639a3","timestamp":"2026-03-09T21:32:55","model":"claude-haiku-4-5-20251001","stop_reason":"end_turn","input_tokens":32786,"output_tokens":49,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"8984c92b-dd0d-4b80-b3dc-2fcc75b55a46","parent_cycle_id":null,"timestamp":"2026-03-09T21:36:18","text":"[REDACTED]","text_length":189}
+{"cycle_id":"8984c92b-dd0d-4b80-b3dc-2fcc75b55a46","timestamp":"2026-03-09T21:36:19","type":"classification","complexity":"complex","suggested_model":"claude-opus-4-6","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"8984c92b-dd0d-4b80-b3dc-2fcc75b55a46","timestamp":"2026-03-09T21:36:32","model":"claude-opus-4-6","stop_reason":"tool_use","input_tokens":32882,"output_tokens":501,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"8984c92b-dd0d-4b80-b3dc-2fcc75b55a46","timestamp":"2026-03-09T21:36:37","model":"claude-opus-4-6","stop_reason":"end_turn","input_tokens":33481,"output_tokens":80,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"f72eee88-2577-4eef-9861-cd8c198e430e","parent_cycle_id":null,"timestamp":"2026-03-09T21:37:15","text":"[REDACTED]","text_length":89}
+{"cycle_id":"f72eee88-2577-4eef-9861-cd8c198e430e","timestamp":"2026-03-09T21:37:16","type":"classification","complexity":"simple","suggested_model":"claude-haiku-4-5-20251001","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"f72eee88-2577-4eef-9861-cd8c198e430e","timestamp":"2026-03-09T21:37:21","model":"claude-haiku-4-5-20251001","stop_reason":"tool_use","input_tokens":33585,"output_tokens":347,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"f72eee88-2577-4eef-9861-cd8c198e430e","timestamp":"2026-03-09T21:37:23","model":"claude-haiku-4-5-20251001","stop_reason":"end_turn","input_tokens":34022,"output_tokens":34,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"3fb7a97d-8ec2-450e-b955-5a28611888a8","parent_cycle_id":null,"timestamp":"2026-03-09T21:38:35","text":"[REDACTED]","text_length":89}
+{"cycle_id":"3fb7a97d-8ec2-450e-b955-5a28611888a8","timestamp":"2026-03-09T21:38:36","type":"classification","complexity":"complex","suggested_model":"claude-opus-4-6","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"3fb7a97d-8ec2-450e-b955-5a28611888a8","timestamp":"2026-03-09T21:38:47","model":"claude-opus-4-6","stop_reason":"tool_use","input_tokens":34083,"output_tokens":369,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"3fb7a97d-8ec2-450e-b955-5a28611888a8","timestamp":"2026-03-09T21:38:51","model":"claude-opus-4-6","stop_reason":"end_turn","input_tokens":34554,"output_tokens":78,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"698025bc-ecee-49a6-9364-6ad081ad47bc","parent_cycle_id":null,"timestamp":"2026-03-09T21:39:31","text":"[REDACTED]","text_length":23}
+{"cycle_id":"698025bc-ecee-49a6-9364-6ad081ad47bc","timestamp":"2026-03-09T21:39:32","type":"classification","complexity":"simple","suggested_model":"claude-haiku-4-5-20251001","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"698025bc-ecee-49a6-9364-6ad081ad47bc","timestamp":"2026-03-09T21:39:34","model":"claude-haiku-4-5-20251001","stop_reason":"end_turn","input_tokens":34641,"output_tokens":64,"content":"[REDACTED]"}

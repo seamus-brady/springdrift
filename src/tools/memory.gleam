@@ -1,0 +1,3252 @@
+//// Memory tools — query the narrative log for past research cycles,
+//// and manage semantic facts in the facts store.
+////
+//// These tools let the cognitive loop interrogate its own memory:
+//// what it worked on yesterday, last week, or for a specific topic.
+//// The facts tools (memory_write, memory_read, memory_clear_key,
+//// memory_query_facts, memory_trace_fact) let the loop explicitly
+//// manage its working memory.
+
+// Copyright (C) 2026 Seamus Brady <seamus@corvideon.ie>
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published
+// by the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+
+import affect/store as affect_store
+import affect/types as affect_types
+import agent/types as agent_types
+import cbr/types as cbr_types
+import cycle_log
+import dag/types as dag_types
+import dprime/decay
+import facts/log as facts_log
+import facts/types as facts_types
+import gleam/dynamic/decode
+import gleam/erlang/process.{type Subject}
+import gleam/float
+
+import gleam/int
+import gleam/json
+import gleam/list
+import gleam/option.{type Option, None, Some}
+import gleam/string
+import llm/tool
+import llm/types.{
+  type Tool, type ToolCall, type ToolResult, ToolFailure, ToolSuccess,
+}
+import meta/log as meta_log
+import meta/types as meta_types
+import narrative/librarian.{type LibrarianMessage}
+import narrative/log as narrative_log
+import narrative/types as narrative_types
+import paths
+import slog
+
+// ---------------------------------------------------------------------------
+// FFI
+// ---------------------------------------------------------------------------
+
+@external(erlang, "springdrift_ffi", "get_date")
+fn get_date() -> String
+
+@external(erlang, "springdrift_ffi", "days_ago_date")
+fn days_ago_date(days: Int) -> String
+
+// ---------------------------------------------------------------------------
+// Tool definitions
+// ---------------------------------------------------------------------------
+
+/// Check if a tool is exempt from D' tool gate evaluation.
+/// Memory tools are internal system operations — read-only queries,
+/// fact management, diagnostic inspection, and safety feedback.
+/// They cannot exfiltrate data, modify files, or access the network.
+/// Gating them causes false positives and blocks the safety feedback loop.
+pub fn is_dprime_exempt(name: String) -> Bool {
+  case name {
+    // Read-only queries
+    "recall_recent"
+    | "recall_search"
+    | "recall_threads"
+    | "recall_cases"
+    | "reflect"
+    | "inspect_cycle"
+    | "list_recent_cycles"
+    | "review_recent"
+    | "detect_patterns"
+    | "query_tool_activity"
+    | "introspect"
+    | "how_to" -> True
+    // Fact management (internal key-value store)
+    "memory_write"
+    | "memory_read"
+    | "memory_clear_key"
+    | "memory_query_facts"
+    | "memory_trace_fact" -> True
+    // CBR case management (internal)
+    "correct_case"
+    | "annotate_case"
+    | "suppress_case"
+    | "unsuppress_case"
+    | "boost_case" -> True
+    // Planner tools (internal task tracking)
+    "complete_task_step"
+    | "flag_risk"
+    | "activate_task"
+    | "abandon_task"
+    | "create_endeavour"
+    | "add_task_to_endeavour"
+    | "get_active_work"
+    | "get_task_detail" -> True
+    // Affect history (internal read-only)
+    "list_affect_history" -> True
+    // Safety feedback — MUST be exempt to avoid chicken-and-egg blocking
+    "report_false_positive" -> True
+    // Agent management
+    "cancel_agent" -> True
+    // Built-in tools
+    "calculator" | "get_current_datetime" | "read_skill" -> True
+    // Agent and team delegations — sub-agents have their own D' gates on
+    // tool calls, so gating the delegation itself is double-counting.
+    // Team orchestrators coordinate member agents who each go through D'.
+    _ -> string.starts_with(name, "agent_") || string.starts_with(name, "team_")
+  }
+}
+
+/// Tools available on the cognitive loop. Diagnostic/forensic tools and CBR
+/// curation have moved to the Observer agent. Heavy planner operations have
+/// moved to the Planner agent. This keeps the cognitive loop's tool set lean.
+pub fn all() -> List(Tool) {
+  [
+    recall_recent_tool(),
+    recall_search_tool(),
+    recall_threads_tool(),
+    recall_cases_tool(),
+    memory_write_tool(),
+    memory_read_tool(),
+    memory_clear_tool(),
+    memory_query_tool(),
+    reflect_tool(),
+    introspect_tool(),
+    how_to_tool(),
+    cancel_agent_tool(),
+    list_affect_history_tool(),
+  ]
+}
+
+/// Tools for the Observer agent — diagnostic, forensic, and CBR curation tools.
+/// These moved from the cognitive loop to reduce its tool count.
+pub fn observer_tools() -> List(Tool) {
+  [
+    // Diagnostic / forensic
+    reflect_tool(),
+    inspect_cycle_tool(),
+    list_recent_cycles_tool(),
+    review_recent_tool(),
+    detect_patterns_tool(),
+    query_tool_activity_tool(),
+    introspect_tool(),
+    // Memory read (Observer can search memory for investigation)
+    recall_recent_tool(),
+    recall_search_tool(),
+    recall_threads_tool(),
+    recall_cases_tool(),
+    memory_trace_tool(),
+    // CBR curation
+    correct_case_tool(),
+    annotate_case_tool(),
+    suppress_case_tool(),
+    unsuppress_case_tool(),
+    boost_case_tool(),
+    // Safety feedback
+    report_false_positive_tool(),
+  ]
+}
+
+fn recall_recent_tool() -> Tool {
+  tool.new("recall_recent")
+  |> tool.with_description(
+    "Recall recent narrative entries from memory. Returns summaries of what the system worked on during a time period. Use this to understand recent activity, check what happened yesterday, or review the past week's work.",
+  )
+  |> tool.add_enum_param(
+    "period",
+    "Time period to recall",
+    ["today", "yesterday", "this_week", "last_week", "last_30_days"],
+    True,
+  )
+  |> tool.add_integer_param(
+    "max_entries",
+    "Maximum number of entries to return (default 20, max 50)",
+    False,
+  )
+  |> tool.build()
+}
+
+fn recall_search_tool() -> Tool {
+  tool.new("recall_search")
+  |> tool.with_description(
+    "Search narrative memory by keyword. Matches against entry summaries and keywords. Use this to find past research on a specific topic, entity, or domain.",
+  )
+  |> tool.add_string_param(
+    "query",
+    "Search term to match against summaries and keywords",
+    True,
+  )
+  |> tool.add_integer_param(
+    "max_entries",
+    "Maximum number of entries to return (default 20, max 50)",
+    False,
+  )
+  |> tool.build()
+}
+
+fn recall_threads_tool() -> Tool {
+  tool.new("recall_threads")
+  |> tool.with_description(
+    "List active research threads from narrative memory. Each thread is an ongoing line of investigation that groups related research cycles. Shows thread name, cycle count, domains, locations, keywords, and last activity.",
+  )
+  |> tool.build()
+}
+
+fn memory_write_tool() -> Tool {
+  tool.new("memory_write")
+  |> tool.with_description(
+    "Store a fact in memory. Persistent facts survive session restarts. "
+    <> "Session facts are cleared when the session ends. "
+    <> "Ephemeral facts are cleared at the end of the current cycle.",
+  )
+  |> tool.add_string_param(
+    "key",
+    "Unique key for the fact (e.g. 'dublin_rent', 'user_preference_format')",
+    True,
+  )
+  |> tool.add_string_param("value", "The fact value to store", True)
+  |> tool.add_enum_param(
+    "scope",
+    "Memory scope",
+    ["persistent", "session", "ephemeral"],
+    True,
+  )
+  |> tool.add_number_param(
+    "confidence",
+    "Confidence in the fact (0.0 to 1.0)",
+    True,
+  )
+  |> tool.build()
+}
+
+fn memory_read_tool() -> Tool {
+  tool.new("memory_read")
+  |> tool.with_description(
+    "Read the current value of a fact by key. Returns the latest non-superseded value.",
+  )
+  |> tool.add_string_param("key", "The key to look up", True)
+  |> tool.build()
+}
+
+fn memory_clear_tool() -> Tool {
+  tool.new("memory_clear_key")
+  |> tool.with_description(
+    "Remove a fact from memory by key. The fact history is preserved for auditing.",
+  )
+  |> tool.add_string_param("key", "The key to clear", True)
+  |> tool.build()
+}
+
+fn memory_query_tool() -> Tool {
+  tool.new("memory_query_facts")
+  |> tool.with_description(
+    "Search memory for facts matching a keyword. Searches both keys and values.",
+  )
+  |> tool.add_string_param(
+    "keyword",
+    "Search term to match against fact keys and values",
+    True,
+  )
+  |> tool.build()
+}
+
+fn memory_trace_tool() -> Tool {
+  tool.new("memory_trace_fact")
+  |> tool.with_description(
+    "Show the full history of a key, including all versions, supersessions, and clears. "
+    <> "Useful for understanding how a fact changed over time.",
+  )
+  |> tool.add_string_param("key", "The key to trace", True)
+  |> tool.build()
+}
+
+fn reflect_tool() -> Tool {
+  tool.new("reflect")
+  |> tool.with_description(
+    "Reflect on past activity. Returns aggregated stats for a date: total cycles, "
+    <> "success/failure counts, token usage, models used, and D' gate decisions. "
+    <> "Use this to understand how a day of work went, spot patterns, or review efficiency.",
+  )
+  |> tool.add_string_param(
+    "date",
+    "Date to reflect on in YYYY-MM-DD format (default: today)",
+    False,
+  )
+  |> tool.build()
+}
+
+fn recall_cases_tool() -> Tool {
+  tool.new("recall_cases")
+  |> tool.with_description(
+    "Search for similar past cases from Case-Based Reasoning memory. Returns matching cases showing the problem summary, approach taken, outcome status, and pitfalls encountered. Use this to learn from past experience before tackling a similar task.",
+  )
+  |> tool.add_string_param(
+    "intent",
+    "Intent to match against past cases (e.g. 'research', 'summarise')",
+    False,
+  )
+  |> tool.add_string_param(
+    "domain",
+    "Domain to match (e.g. 'technology', 'finance')",
+    False,
+  )
+  |> tool.add_string_param(
+    "keywords",
+    "Comma-separated keywords to match against case keywords",
+    False,
+  )
+  |> tool.add_integer_param(
+    "max_results",
+    "Maximum number of results to return (default 5)",
+    False,
+  )
+  |> tool.build()
+}
+
+fn inspect_cycle_tool() -> Tool {
+  tool.new("inspect_cycle")
+  |> tool.with_description(
+    "Inspect a specific cycle by its ID. Returns the full cycle tree: the root cognitive "
+    <> "cycle and all agent sub-cycles, including tool calls, D' gate decisions, token "
+    <> "counts, and agent outputs. Set detail to 'full' to include tool call inputs and "
+    <> "outputs — useful for debugging what a sub-agent actually did.",
+  )
+  |> tool.add_string_param("cycle_id", "The cycle ID to inspect", True)
+  |> tool.add_string_param(
+    "detail",
+    "Level of detail: 'summary' (default) or 'full' (includes tool inputs/outputs)",
+    False,
+  )
+  |> tool.build()
+}
+
+fn query_tool_activity_tool() -> Tool {
+  tool.new("query_tool_activity")
+  |> tool.with_description(
+    "Query tool usage activity for a given date. Returns per-tool stats showing how many "
+    <> "times each tool was called, how many succeeded or failed, and which cycles used it. "
+    <> "Use this to understand what tools agents have been using and spot failure patterns.",
+  )
+  |> tool.add_string_param("date", "Date to query in YYYY-MM-DD format", True)
+  |> tool.build()
+}
+
+fn introspect_tool() -> Tool {
+  tool.new("introspect")
+  |> tool.with_description(
+    "Perceive your current constitution: identity, agent roster and status, "
+    <> "available tool categories, memory state, today's performance, and "
+    <> "D' safety config. Call before complex multi-agent tasks to confirm "
+    <> "readiness, or after failures to understand system state.",
+  )
+  |> tool.build()
+}
+
+fn list_recent_cycles_tool() -> Tool {
+  tool.new("list_recent_cycles")
+  |> tool.with_description(
+    "List recent cycle IDs for a given date. Returns cycle IDs that can be passed "
+    <> "to inspect_cycle for detailed analysis. Use this to discover which cycles "
+    <> "happened without needing to know IDs in advance. By default shows only root "
+    <> "cognitive cycles; set include_agents=true to see agent sub-cycles too.",
+  )
+  |> tool.add_string_param(
+    "date",
+    "Date to query in YYYY-MM-DD format (default: today)",
+    False,
+  )
+  |> tool.add_boolean_param(
+    "include_agents",
+    "Include agent sub-cycles (default: false). When true, shows all cycles with [root]/[agent] labels.",
+    False,
+  )
+  |> tool.build()
+}
+
+fn review_recent_tool() -> Tool {
+  tool.new("review_recent")
+  |> tool.with_description(
+    "Structured self-review across recent cycles. Returns a compact summary of "
+    <> "each cycle: outcome, intent, domain, agents used, tool calls, D' decisions, "
+    <> "and token cost. Much faster than looping list_recent_cycles + inspect_cycle. "
+    <> "Use this to understand trends, diagnose repeated failures, or audit costs.",
+  )
+  |> tool.add_integer_param(
+    "count",
+    "Number of recent root cycles to review (default: 10, max: 20)",
+    False,
+  )
+  |> tool.add_string_param(
+    "filter_domain",
+    "Only include cycles in this domain (optional)",
+    False,
+  )
+  |> tool.add_string_param(
+    "filter_outcome",
+    "Only include cycles with this outcome: success, failure, or partial (optional)",
+    False,
+  )
+  |> tool.add_string_param(
+    "filter_agent",
+    "Only include cycles that delegated to this agent name (optional)",
+    False,
+  )
+  |> tool.build()
+}
+
+fn detect_patterns_tool() -> Tool {
+  tool.new("detect_patterns")
+  |> tool.with_description(
+    "Automated pattern detection across recent cycles. Scans for repeated failures "
+    <> "on the same domain, tool failure clusters, model escalation patterns, cost "
+    <> "outliers, and CBR retrieval misses. Returns a list of detected patterns with "
+    <> "severity and suggestions. Use this for operational self-diagnosis.",
+  )
+  |> tool.add_integer_param(
+    "window",
+    "Number of recent root cycles to analyze (default: 20, max: 50)",
+    False,
+  )
+  |> tool.build()
+}
+
+fn how_to_tool() -> Tool {
+  tool.new("how_to")
+  |> tool.with_description(
+    "Get guidance on using this system's tools effectively. Returns decision "
+    <> "heuristics, tool combinations, and degradation paths. Call when unsure "
+    <> "which tool to use for a task type. Optionally provide a topic.",
+  )
+  |> tool.add_string_param(
+    "topic",
+    "Optional: task type ('research', 'memory', 'code', 'agents') or a specific "
+      <> "tool name. Omit for the full guide.",
+    False,
+  )
+  |> tool.build()
+}
+
+// ---------------------------------------------------------------------------
+// Executor
+// ---------------------------------------------------------------------------
+
+/// Check if a tool call is a memory tool.
+/// Is this a memory tool on the cognitive loop? Used by dispatch_tool_calls
+/// to route synchronous tool execution. Only includes tools that remain on
+/// the cognitive loop — diagnostic and CBR curation tools are on the Observer.
+pub fn is_memory_tool(name: String) -> Bool {
+  name == "recall_recent"
+  || name == "recall_search"
+  || name == "recall_threads"
+  || name == "recall_cases"
+  || name == "memory_write"
+  || name == "memory_read"
+  || name == "memory_clear_key"
+  || name == "memory_query_facts"
+  || name == "reflect"
+  || name == "introspect"
+  || name == "how_to"
+  || name == "cancel_agent"
+  || name == "list_affect_history"
+}
+
+/// Context for facts-based memory tools.
+pub type FactsContext {
+  FactsContext(
+    facts_dir: String,
+    cycle_id: String,
+    agent_id: String,
+    fact_decay_half_life_days: Int,
+  )
+}
+
+/// Registry entry for agent roster (avoids depending on registry module's opaque type).
+pub type AgentStatusEntry {
+  AgentStatusEntry(name: String, status: String, tool_names: List(String))
+}
+
+/// Context for the `introspect` tool — carries system state from CognitiveState.
+/// Team summary for introspect output.
+pub type TeamEntry {
+  TeamEntry(name: String, description: String, strategy: String, members: Int)
+}
+
+pub type IntrospectContext {
+  IntrospectContext(
+    agent_uuid: String,
+    session_since: String,
+    agents: List(AgentStatusEntry),
+    dprime_enabled: Bool,
+    dprime_modify_threshold: Float,
+    dprime_reject_threshold: Float,
+    current_cycle_id: Option(String),
+    thread_total: Int,
+    thread_single_cycle: Int,
+    thread_uuid_named: Int,
+    thread_multi_cycle: Int,
+    sandbox_enabled: Bool,
+    teams: List(TeamEntry),
+  )
+}
+
+/// Limits for memory tool result sizes.
+pub type MemoryLimits {
+  MemoryLimits(recall_max_entries: Int, cbr_max_results: Int)
+}
+
+/// Context for agent management tools (cancel_agent).
+pub type AgentManagementContext {
+  AgentManagementContext(
+    supervisor: Option(Subject(agent_types.SupervisorMessage)),
+  )
+}
+
+/// Default memory limits.
+pub fn default_limits() -> MemoryLimits {
+  MemoryLimits(recall_max_entries: 50, cbr_max_results: 4)
+}
+
+/// Extract case IDs from recall_cases tool results.
+/// Parses `[case_id: xxx]` patterns from the result content.
+/// Accepts ToolCall list + ContentBlock list (ToolResultContent variant).
+pub fn extract_recalled_case_ids(
+  calls: List(ToolCall),
+  results: List(types.ContentBlock),
+) -> List(String) {
+  let recall_ids =
+    list.filter_map(calls, fn(call) {
+      case call.name == "recall_cases" {
+        True -> Ok(call.id)
+        False -> Error(Nil)
+      }
+    })
+  case recall_ids {
+    [] -> []
+    _ ->
+      list.flat_map(results, fn(r) {
+        case r {
+          types.ToolResultContent(tool_use_id: tuid, content: c, ..) ->
+            case list.contains(recall_ids, tuid) {
+              True -> parse_case_ids(c)
+              False -> []
+            }
+          _ -> []
+        }
+      })
+  }
+}
+
+/// Parse case IDs from the "[case_id: xxx]" format in recall_cases output.
+fn parse_case_ids(content: String) -> List(String) {
+  content
+  |> string.split("[case_id: ")
+  |> list.drop(1)
+  |> list.filter_map(fn(segment) {
+    case string.split_once(segment, "]") {
+      Ok(#(id, _)) -> Ok(id)
+      Error(_) -> Error(Nil)
+    }
+  })
+}
+
+/// Execute a memory tool call. Uses the Librarian if available,
+/// otherwise falls back to direct JSONL reads.
+pub fn execute(
+  call: ToolCall,
+  narrative_dir: String,
+  lib: Option(Subject(LibrarianMessage)),
+  facts_ctx: Option(FactsContext),
+  introspect_ctx: Option(IntrospectContext),
+  limits: MemoryLimits,
+) -> ToolResult {
+  execute_with_how_to(
+    call,
+    narrative_dir,
+    lib,
+    facts_ctx,
+    introspect_ctx,
+    limits,
+    None,
+    None,
+  )
+}
+
+/// Execute a memory tool call with optional how_to content and agent management.
+pub fn execute_with_how_to(
+  call: ToolCall,
+  narrative_dir: String,
+  lib: Option(Subject(LibrarianMessage)),
+  facts_ctx: Option(FactsContext),
+  introspect_ctx: Option(IntrospectContext),
+  limits: MemoryLimits,
+  how_to_content: Option(String),
+  agent_mgmt: Option(AgentManagementContext),
+) -> ToolResult {
+  slog.debug("memory", "execute", "tool=" <> call.name, None)
+  let current_cycle_id = case introspect_ctx {
+    Some(ctx) -> ctx.current_cycle_id
+    None -> None
+  }
+  case call.name {
+    "recall_recent" ->
+      run_recall_recent(call, narrative_dir, lib, limits.recall_max_entries)
+    "recall_search" ->
+      run_recall_search(call, narrative_dir, lib, limits.recall_max_entries)
+    "recall_threads" -> run_recall_threads(call, narrative_dir, lib)
+    "memory_write" -> run_memory_write(call, lib, facts_ctx)
+    "memory_read" -> run_memory_read(call, lib, facts_ctx)
+    "memory_clear_key" -> run_memory_clear(call, lib, facts_ctx)
+    "memory_query_facts" -> run_memory_query(call, lib, facts_ctx)
+    "memory_trace_fact" -> run_memory_trace(call, facts_ctx)
+    "reflect" -> run_reflect(call, lib)
+    "inspect_cycle" -> run_inspect_cycle(call, lib, current_cycle_id)
+    "recall_cases" -> run_recall_cases(call, lib, limits.cbr_max_results)
+    "query_tool_activity" -> run_query_tool_activity(call, lib)
+    "introspect" -> run_introspect(call, introspect_ctx)
+    "list_recent_cycles" -> run_list_recent_cycles(call, lib, current_cycle_id)
+    "review_recent" -> run_review_recent(call, lib, current_cycle_id)
+    "detect_patterns" -> run_detect_patterns(call, lib)
+    "how_to" -> run_how_to(call, how_to_content)
+    "correct_case" -> run_correct_case(call, lib)
+    "annotate_case" -> run_annotate_case(call, lib)
+    "suppress_case" -> run_suppress_case(call, lib)
+    "unsuppress_case" -> run_unsuppress_case(call, lib)
+    "boost_case" -> run_boost_case(call, lib)
+    "cancel_agent" -> run_cancel_agent(call, agent_mgmt)
+    "report_false_positive" -> run_report_false_positive(call)
+    "list_affect_history" -> run_list_affect_history(call)
+    _ -> ToolFailure(tool_use_id: call.id, error: "Unknown tool: " <> call.name)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// recall_recent
+// ---------------------------------------------------------------------------
+
+fn run_recall_recent(
+  call: ToolCall,
+  dir: String,
+  lib: Option(Subject(LibrarianMessage)),
+  recall_max: Int,
+) -> ToolResult {
+  let decoder = {
+    use period <- decode.field("period", decode.string)
+    use max <- decode.optional_field("max_entries", 20, decode.int)
+    decode.success(#(period, max))
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "Invalid recall_recent input: missing period",
+      )
+    Ok(#(period, max_entries)) -> {
+      let clamped = int.min(recall_max, int.max(1, max_entries))
+      let #(from, to) = date_range_for_period(period)
+      let entries = case lib {
+        Some(l) -> librarian.load_entries(l, from, to)
+        None -> narrative_log.load_entries(dir, from, to)
+      }
+      let limited = take_last(entries, clamped)
+      let formatted = format_entries(limited, period)
+      ToolSuccess(tool_use_id: call.id, content: formatted)
+    }
+  }
+}
+
+fn date_range_for_period(period: String) -> #(String, String) {
+  let today = get_date()
+  case period {
+    "today" -> #(today, today)
+    "yesterday" -> {
+      let yesterday = days_ago_date(1)
+      #(yesterday, yesterday)
+    }
+    "this_week" -> {
+      let week_ago = days_ago_date(7)
+      #(week_ago, today)
+    }
+    "last_week" -> {
+      let two_weeks_ago = days_ago_date(14)
+      let week_ago = days_ago_date(7)
+      #(two_weeks_ago, week_ago)
+    }
+    "last_30_days" -> {
+      let thirty_ago = days_ago_date(30)
+      #(thirty_ago, today)
+    }
+    _ -> #(today, today)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// recall_search
+// ---------------------------------------------------------------------------
+
+fn run_recall_search(
+  call: ToolCall,
+  dir: String,
+  lib: Option(Subject(LibrarianMessage)),
+  recall_max: Int,
+) -> ToolResult {
+  let decoder = {
+    use query <- decode.field("query", decode.string)
+    use max <- decode.optional_field("max_entries", 20, decode.int)
+    decode.success(#(query, max))
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "Invalid recall_search input: missing query",
+      )
+    Ok(#(query, max_entries)) -> {
+      let clamped = int.min(recall_max, int.max(1, max_entries))
+      let entries = case lib {
+        Some(l) -> librarian.search(l, query)
+        None -> narrative_log.search(dir, query)
+      }
+      let limited = take_last(entries, clamped)
+      case limited {
+        [] ->
+          ToolSuccess(
+            tool_use_id: call.id,
+            content: "No narrative entries found matching \"" <> query <> "\".",
+          )
+        _ -> {
+          let formatted =
+            "Found "
+            <> int.to_string(list.length(entries))
+            <> " entries matching \""
+            <> query
+            <> "\""
+            <> case list.length(entries) > clamped {
+              True -> " (showing last " <> int.to_string(clamped) <> ")"
+              False -> ""
+            }
+            <> ":\n\n"
+            <> format_entry_list(limited)
+          ToolSuccess(tool_use_id: call.id, content: formatted)
+        }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// recall_threads
+// ---------------------------------------------------------------------------
+
+fn run_recall_threads(
+  call: ToolCall,
+  dir: String,
+  lib: Option(Subject(LibrarianMessage)),
+) -> ToolResult {
+  let index = case lib {
+    Some(l) -> librarian.load_thread_index(l)
+    None -> narrative_log.load_thread_index(dir)
+  }
+  case index.threads {
+    [] ->
+      ToolSuccess(
+        tool_use_id: call.id,
+        content: "No active threads in narrative memory.",
+      )
+    threads -> {
+      let total = list.length(threads)
+
+      // Health metrics
+      let single_cycle = list.count(threads, fn(ts) { ts.cycle_count <= 1 })
+      let uuid_named =
+        list.count(threads, fn(ts) {
+          string.starts_with(ts.thread_name, "Thread ")
+        })
+      let named = total - uuid_named
+      let multi_cycle = total - single_cycle
+
+      // Size buckets
+      let size_2_to_5 =
+        list.count(threads, fn(ts) {
+          ts.cycle_count >= 2 && ts.cycle_count <= 5
+        })
+      let size_6_plus = list.count(threads, fn(ts) { ts.cycle_count >= 6 })
+
+      // Top threads by cycle count (up to 15)
+      let sorted =
+        list.sort(threads, fn(a, b) {
+          int.compare(b.cycle_count, a.cycle_count)
+        })
+      let top = list.take(sorted, 15)
+      let top_formatted =
+        string.join(list.map(top, format_thread_state), "\n\n")
+
+      let summary =
+        "## Thread summary\n\n"
+        <> "Total threads: "
+        <> int.to_string(total)
+        <> "\n"
+        <> "  Named: "
+        <> int.to_string(named)
+        <> " | UUID-pattern: "
+        <> int.to_string(uuid_named)
+        <> "\n"
+        <> "  Single-cycle: "
+        <> int.to_string(single_cycle)
+        <> " | Multi-cycle: "
+        <> int.to_string(multi_cycle)
+        <> "\n"
+        <> "  2-5 cycles: "
+        <> int.to_string(size_2_to_5)
+        <> " | 6+ cycles: "
+        <> int.to_string(size_6_plus)
+        <> "\n\n"
+        <> "## Top threads by activity\n\n"
+        <> top_formatted
+      ToolSuccess(tool_use_id: call.id, content: summary)
+    }
+  }
+}
+
+fn format_thread_state(ts: narrative_types.ThreadState) -> String {
+  let domains = case ts.domains {
+    [] -> ""
+    d -> "  Domains: " <> string.join(d, ", ") <> "\n"
+  }
+  let locations = case ts.locations {
+    [] -> ""
+    l -> "  Locations: " <> string.join(l, ", ") <> "\n"
+  }
+  let topics = case ts.topics {
+    [] -> ""
+    t -> "  Topics: " <> string.join(list.take(t, 10), ", ") <> "\n"
+  }
+  let keywords = case ts.keywords {
+    [] -> ""
+    k -> "  Keywords: " <> string.join(list.take(k, 10), ", ") <> "\n"
+  }
+  let data_points = case ts.last_data_points {
+    [] -> ""
+    dps ->
+      "  Last data points:\n"
+      <> string.join(
+        list.map(dps, fn(dp) {
+          "    - " <> dp.label <> ": " <> dp.value <> " " <> dp.unit
+        }),
+        "\n",
+      )
+      <> "\n"
+  }
+  "## "
+  <> ts.thread_name
+  <> " ["
+  <> ts.thread_id
+  <> "]\n"
+  <> "  Cycles: "
+  <> int.to_string(ts.cycle_count)
+  <> " | Last: "
+  <> ts.last_cycle_at
+  <> "\n"
+  <> domains
+  <> locations
+  <> topics
+  <> keywords
+  <> data_points
+}
+
+// ---------------------------------------------------------------------------
+// Formatting helpers
+// ---------------------------------------------------------------------------
+
+fn format_entries(
+  entries: List(narrative_types.NarrativeEntry),
+  period: String,
+) -> String {
+  case entries {
+    [] -> "No narrative entries found for " <> period <> "."
+    _ ->
+      int.to_string(list.length(entries))
+      <> " entries for "
+      <> period
+      <> ":\n\n"
+      <> format_entry_list(entries)
+  }
+}
+
+fn format_entry_list(entries: List(narrative_types.NarrativeEntry)) -> String {
+  string.join(list.map(entries, format_entry), "\n---\n")
+}
+
+fn format_entry(entry: narrative_types.NarrativeEntry) -> String {
+  let status = case entry.outcome.status {
+    narrative_types.Success -> "success"
+    narrative_types.Partial -> "partial"
+    narrative_types.Failure -> "failure"
+  }
+  let thread_info = case entry.thread {
+    Some(t) -> "  Thread: " <> t.thread_name <> "\n"
+    None -> ""
+  }
+  let topics = case entry.topics {
+    [] -> ""
+    t -> "  Topics: " <> string.join(t, ", ") <> "\n"
+  }
+  let keywords = case entry.keywords {
+    [] -> ""
+    k -> "  Keywords: " <> string.join(k, ", ") <> "\n"
+  }
+  let entities = format_entry_entities(entry.entities)
+  let delegation = case entry.delegation_chain {
+    [] -> ""
+    chain ->
+      "  Agents: "
+      <> string.join(list.map(chain, fn(d) { d.agent }), ", ")
+      <> "\n"
+  }
+  let continuity = case entry.thread {
+    Some(t) if t.continuity_note != "" ->
+      "  Continuity: " <> t.continuity_note <> "\n"
+    _ -> ""
+  }
+  "["
+  <> entry.timestamp
+  <> "] "
+  <> status
+  <> " | "
+  <> entry.intent.domain
+  <> "\n"
+  <> "  "
+  <> entry.summary
+  <> "\n"
+  <> thread_info
+  <> topics
+  <> keywords
+  <> entities
+  <> delegation
+  <> continuity
+}
+
+fn format_entry_entities(e: narrative_types.Entities) -> String {
+  let locations = case e.locations {
+    [] -> ""
+    l -> "  Locations: " <> string.join(l, ", ") <> "\n"
+  }
+  let orgs = case e.organisations {
+    [] -> ""
+    o -> "  Organisations: " <> string.join(o, ", ") <> "\n"
+  }
+  let dps = case e.data_points {
+    [] -> ""
+    points ->
+      "  Data points: "
+      <> string.join(
+        list.map(points, fn(dp) { dp.label <> "=" <> dp.value <> dp.unit }),
+        ", ",
+      )
+      <> "\n"
+  }
+  locations <> orgs <> dps
+}
+
+fn take_last(items: List(a), n: Int) -> List(a) {
+  let len = list.length(items)
+  case len > n {
+    True -> list.drop(items, len - n)
+    False -> items
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Facts tool implementations
+// ---------------------------------------------------------------------------
+
+@external(erlang, "springdrift_ffi", "generate_uuid")
+fn generate_id() -> String
+
+@external(erlang, "springdrift_ffi", "get_datetime")
+fn get_datetime() -> String
+
+fn run_memory_write(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+  facts_ctx: Option(FactsContext),
+) -> ToolResult {
+  case facts_ctx {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "memory_write not available: facts store not configured",
+      )
+    Some(ctx) -> {
+      let number_decoder =
+        decode.one_of(decode.float, [
+          decode.int |> decode.map(int.to_float),
+        ])
+      let decoder = {
+        use key <- decode.field("key", decode.string)
+        use value <- decode.field("value", decode.string)
+        use scope_str <- decode.field("scope", decode.string)
+        use confidence <- decode.field("confidence", number_decoder)
+        decode.success(#(key, value, scope_str, confidence))
+      }
+      case json.parse(call.input_json, decoder) {
+        Error(_) ->
+          ToolFailure(tool_use_id: call.id, error: "Invalid memory_write input")
+        Ok(#(key, value, scope_str, confidence)) -> {
+          // Validate key is non-empty
+          let trimmed_key = string.trim(key)
+          case trimmed_key {
+            "" ->
+              ToolFailure(tool_use_id: call.id, error: "key must not be empty")
+            _ -> {
+              // Clamp confidence to [0.0, 1.0]
+              let clamped_confidence =
+                float.min(1.0, float.max(0.0, confidence))
+              let scope = parse_scope(scope_str)
+              let fact =
+                facts_types.MemoryFact(
+                  schema_version: 1,
+                  fact_id: generate_id(),
+                  timestamp: get_datetime(),
+                  cycle_id: ctx.cycle_id,
+                  agent_id: Some(ctx.agent_id),
+                  key: trimmed_key,
+                  value:,
+                  scope:,
+                  operation: facts_types.Write,
+                  supersedes: None,
+                  confidence: clamped_confidence,
+                  source: "memory_write_tool",
+                  provenance: Some(facts_types.FactProvenance(
+                    source_cycle_id: ctx.cycle_id,
+                    source_tool: "memory_write",
+                    source_agent: "cognitive",
+                    derivation: facts_types.Synthesis,
+                  )),
+                )
+
+              // Write to JSONL
+              facts_log.append(ctx.facts_dir, fact)
+              // Index in Librarian
+              case lib {
+                Some(l) -> librarian.notify_new_fact(l, fact)
+                None -> Nil
+              }
+
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: "Stored fact '"
+                  <> trimmed_key
+                  <> "' = '"
+                  <> value
+                  <> "' (scope: "
+                  <> scope_str
+                  <> ", confidence: "
+                  <> float.to_string(clamped_confidence)
+                  <> ")",
+              )
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+fn run_memory_read(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+  facts_ctx: Option(FactsContext),
+) -> ToolResult {
+  let decoder = {
+    use key <- decode.field("key", decode.string)
+    decode.success(key)
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) ->
+      ToolFailure(tool_use_id: call.id, error: "Invalid memory_read input")
+    Ok(key) -> {
+      // Try Librarian first, fall back to JSONL
+      let result = case lib {
+        Some(l) -> librarian.get_fact(l, key)
+        None ->
+          case facts_ctx {
+            Some(ctx) -> {
+              let current = facts_log.resolve_current(ctx.facts_dir, None)
+              list.find(current, fn(f: facts_types.MemoryFact) { f.key == key })
+            }
+            None -> Error(Nil)
+          }
+      }
+      let half_life = case facts_ctx {
+        Some(ctx) -> ctx.fact_decay_half_life_days
+        None -> 30
+      }
+      case result {
+        Ok(fact) ->
+          ToolSuccess(
+            tool_use_id: call.id,
+            content: format_fact(fact, half_life),
+          )
+        Error(_) ->
+          ToolSuccess(
+            tool_use_id: call.id,
+            content: "No fact found for key '" <> key <> "'",
+          )
+      }
+    }
+  }
+}
+
+fn run_memory_clear(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+  facts_ctx: Option(FactsContext),
+) -> ToolResult {
+  case facts_ctx {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "memory_clear_key not available: facts store not configured",
+      )
+    Some(ctx) -> {
+      let decoder = {
+        use key <- decode.field("key", decode.string)
+        decode.success(key)
+      }
+      case json.parse(call.input_json, decoder) {
+        Error(_) ->
+          ToolFailure(
+            tool_use_id: call.id,
+            error: "Invalid memory_clear_key input",
+          )
+        Ok(key) -> {
+          let fact =
+            facts_types.MemoryFact(
+              schema_version: 1,
+              fact_id: generate_id(),
+              timestamp: get_datetime(),
+              cycle_id: ctx.cycle_id,
+              agent_id: Some(ctx.agent_id),
+              key:,
+              value: "",
+              scope: facts_types.Session,
+              operation: facts_types.Clear,
+              supersedes: None,
+              confidence: 0.0,
+              source: "memory_clear_tool",
+              provenance: None,
+            )
+
+          facts_log.append(ctx.facts_dir, fact)
+          case lib {
+            Some(l) -> librarian.notify_new_fact(l, fact)
+            None -> Nil
+          }
+
+          ToolSuccess(
+            tool_use_id: call.id,
+            content: "Cleared fact for key '" <> key <> "'",
+          )
+        }
+      }
+    }
+  }
+}
+
+fn run_memory_query(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+  facts_ctx: Option(FactsContext),
+) -> ToolResult {
+  let decoder = {
+    use keyword <- decode.field("keyword", decode.string)
+    decode.success(keyword)
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "Invalid memory_query_facts input",
+      )
+    Ok(keyword) -> {
+      let facts = case lib {
+        Some(l) -> librarian.search_facts(l, keyword)
+        None ->
+          case facts_ctx {
+            Some(ctx) -> {
+              let all = facts_log.resolve_current(ctx.facts_dir, None)
+              let lower = string.lowercase(keyword)
+              list.filter(all, fn(f: facts_types.MemoryFact) {
+                string.contains(string.lowercase(f.key), lower)
+                || string.contains(string.lowercase(f.value), lower)
+              })
+            }
+            None -> []
+          }
+      }
+      let half_life = case facts_ctx {
+        Some(ctx) -> ctx.fact_decay_half_life_days
+        None -> 30
+      }
+      case facts {
+        [] ->
+          ToolSuccess(
+            tool_use_id: call.id,
+            content: "No facts found matching '" <> keyword <> "'",
+          )
+        _ ->
+          ToolSuccess(
+            tool_use_id: call.id,
+            content: format_facts_list(facts, half_life),
+          )
+      }
+    }
+  }
+}
+
+fn run_memory_trace(
+  call: ToolCall,
+  facts_ctx: Option(FactsContext),
+) -> ToolResult {
+  case facts_ctx {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "memory_trace_fact not available: facts store not configured",
+      )
+    Some(ctx) -> {
+      let decoder = {
+        use key <- decode.field("key", decode.string)
+        decode.success(key)
+      }
+      case json.parse(call.input_json, decoder) {
+        Error(_) ->
+          ToolFailure(
+            tool_use_id: call.id,
+            error: "Invalid memory_trace_fact input",
+          )
+        Ok(key) -> {
+          let history = facts_log.trace_key(ctx.facts_dir, key)
+          case history {
+            [] ->
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: "No history found for key '" <> key <> "'",
+              )
+            _ ->
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: format_trace(key, history),
+              )
+          }
+        }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// reflect — day-level stats from DAG
+// ---------------------------------------------------------------------------
+
+fn run_reflect(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+) -> ToolResult {
+  case lib {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "reflect not available: DAG index not initialised",
+      )
+    Some(l) -> {
+      let decoder = {
+        use date <- decode.optional_field("date", get_date(), decode.string)
+        decode.success(date)
+      }
+      let date = case json.parse(call.input_json, decoder) {
+        Ok(d) -> d
+        Error(_) -> get_date()
+      }
+      let subj = process.new_subject()
+      process.send(l, librarian.QueryDayStats(date:, reply_to: subj))
+      case process.receive(subj, 5000) {
+        Error(_) ->
+          ToolFailure(tool_use_id: call.id, error: "Timeout querying DAG stats")
+        Ok(stats) ->
+          ToolSuccess(tool_use_id: call.id, content: format_day_stats(stats))
+      }
+    }
+  }
+}
+
+fn format_day_stats(stats: dag_types.DayStats) -> String {
+  let total = stats.total_cycles
+  case total {
+    0 -> "No cycles recorded for " <> stats.date <> "."
+    _ ->
+      "## Day summary for "
+      <> stats.date
+      <> "\n\n"
+      <> "Total cycles: "
+      <> int.to_string(total)
+      <> " (root: "
+      <> int.to_string(stats.root_cycles)
+      <> ", agent: "
+      <> int.to_string(stats.agent_cycles)
+      <> ")\n"
+      <> "  Success: "
+      <> int.to_string(stats.success_count)
+      <> " | Partial: "
+      <> int.to_string(stats.partial_count)
+      <> " | Failure: "
+      <> int.to_string(stats.failure_count)
+      <> "\n"
+      <> "Tokens in: "
+      <> int.to_string(stats.total_tokens_in)
+      <> " | out: "
+      <> int.to_string(stats.total_tokens_out)
+      <> "\n"
+      <> "Total duration: "
+      <> int.to_string(stats.total_duration_ms)
+      <> "ms\n"
+      <> "Tool failure rate: "
+      <> float.to_string(stats.tool_failure_rate)
+      <> "\n"
+      <> "Models used: "
+      <> string.join(stats.models_used, ", ")
+      <> "\n"
+      <> case stats.gate_decisions {
+        [] -> ""
+        gates ->
+          "D' gates:\n"
+          <> string.join(
+            list.map(gates, fn(g) {
+              "  - "
+              <> g.gate
+              <> ": "
+              <> g.decision
+              <> " (score: "
+              <> float.to_string(g.score)
+              <> ")"
+            }),
+            "\n",
+          )
+          <> "\n"
+      }
+      <> case stats.agent_failures {
+        [] -> ""
+        failures ->
+          "Agent failures ("
+          <> int.to_string(list.length(failures))
+          <> "):\n"
+          <> string.join(
+            list.map(failures, fn(f: dag_types.AgentFailureRecord) {
+              "  - "
+              <> f.agent_model
+              <> " ["
+              <> string.slice(f.cycle_id, 0, 8)
+              <> "]: "
+              <> f.reason
+            }),
+            "\n",
+          )
+          <> "\n"
+      }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// inspect_cycle — drill into a specific cycle tree
+// ---------------------------------------------------------------------------
+
+fn run_inspect_cycle(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+  current_cycle_id: Option(String),
+) -> ToolResult {
+  case lib {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "inspect_cycle not available: DAG index not initialised",
+      )
+    Some(l) -> {
+      let decoder = {
+        use cycle_id <- decode.field("cycle_id", decode.string)
+        use detail <- decode.optional_field("detail", "summary", decode.string)
+        decode.success(#(cycle_id, detail))
+      }
+      case json.parse(call.input_json, decoder) {
+        Error(_) ->
+          ToolFailure(
+            tool_use_id: call.id,
+            error: "Invalid inspect_cycle input: missing cycle_id",
+          )
+        Ok(#(cycle_id, detail)) -> {
+          let full = detail == "full"
+          let subj = process.new_subject()
+          process.send(
+            l,
+            librarian.QueryNodeWithDescendants(cycle_id:, reply_to: subj),
+          )
+          case process.receive(subj, 5000) {
+            Error(_) ->
+              ToolFailure(
+                tool_use_id: call.id,
+                error: "Timeout querying cycle tree",
+              )
+            Ok(Error(_)) ->
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: "No cycle found with ID '" <> cycle_id <> "'",
+              )
+            Ok(Ok(subtree)) ->
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: format_subtree(subtree, 0, full, current_cycle_id),
+              )
+          }
+        }
+      }
+    }
+  }
+}
+
+/// Format a DAG node outcome, distinguishing "in-flight" (current cycle)
+/// from "pending" (stuck or not yet finalised).
+fn format_node_outcome(
+  node: dag_types.CycleNode,
+  current_cycle_id: Option(String),
+) -> String {
+  case node.outcome {
+    dag_types.NodeSuccess -> "success"
+    dag_types.NodePartial -> "partial"
+    dag_types.NodeFailure(reason:) -> "failure: " <> reason
+    dag_types.NodePending ->
+      case current_cycle_id {
+        Some(cid) if cid == node.cycle_id -> "in-flight"
+        _ -> "pending"
+      }
+  }
+}
+
+fn format_subtree(
+  tree: dag_types.DagSubtree,
+  depth: Int,
+  full: Bool,
+  current_cycle_id: Option(String),
+) -> String {
+  let indent = string.repeat("  ", depth)
+  let node = tree.root
+  let type_str = case node.node_type {
+    dag_types.CognitiveCycle ->
+      case node.instance_name {
+        "" -> "cognitive"
+        name ->
+          name
+          <> " ("
+          <> case node.instance_id {
+            "" -> "cognitive"
+            id -> id
+          }
+          <> ")"
+      }
+    dag_types.AgentCycle ->
+      case node.agent_output {
+        Some(dag_types.CoderOutput(..)) -> "sub-agent:coder"
+        Some(dag_types.ResearchOutput(..)) -> "sub-agent:researcher"
+        Some(dag_types.PlanOutput(..)) -> "sub-agent:planner"
+        Some(dag_types.WriterOutput(..)) -> "sub-agent:writer"
+        Some(dag_types.GenericOutput(..)) -> "sub-agent"
+        None -> "sub-agent"
+      }
+    dag_types.SchedulerCycle -> "scheduler"
+  }
+  let outcome_str = format_node_outcome(node, current_cycle_id)
+  let tools_str = case node.tool_calls {
+    [] -> ""
+    calls ->
+      "\n"
+      <> indent
+      <> "  Tools: "
+      <> string.join(
+        list.map(calls, fn(t) {
+          t.name
+          <> case t.success {
+            True -> ""
+            False -> " (FAILED)"
+          }
+        }),
+        ", ",
+      )
+  }
+  let gates_str = case node.dprime_gates {
+    [] -> ""
+    gates ->
+      "\n"
+      <> indent
+      <> "  D' gates: "
+      <> string.join(
+        list.map(gates, fn(g) { g.gate <> "=" <> g.decision }),
+        ", ",
+      )
+  }
+  let agent_str = case node.agent_output {
+    None -> ""
+    Some(dag_types.GenericOutput(notes:)) ->
+      "\n" <> indent <> "  " <> string.join(notes, " | ")
+    Some(dag_types.PlanOutput(steps:, ..)) ->
+      "\n"
+      <> indent
+      <> "  Plan: "
+      <> int.to_string(list.length(steps))
+      <> " steps"
+    Some(dag_types.ResearchOutput(facts:, sources:, ..)) ->
+      "\n"
+      <> indent
+      <> "  Research: "
+      <> int.to_string(list.length(facts))
+      <> " facts, "
+      <> int.to_string(sources)
+      <> " sources"
+    Some(dag_types.CoderOutput(files_touched:, ..)) ->
+      "\n" <> indent <> "  Coder: " <> string.join(files_touched, ", ")
+    Some(dag_types.WriterOutput(word_count:, format:, ..)) ->
+      "\n"
+      <> indent
+      <> "  Writer: "
+      <> int.to_string(word_count)
+      <> " words ("
+      <> format
+      <> ")"
+  }
+  let tokens_str =
+    " [tokens: "
+    <> int.to_string(node.tokens_in)
+    <> "/"
+    <> int.to_string(node.tokens_out)
+    <> "]"
+  let header =
+    indent
+    <> "["
+    <> type_str
+    <> "] "
+    <> node.cycle_id
+    <> " — "
+    <> outcome_str
+    <> tokens_str
+    <> case node.model {
+      "" -> ""
+      m -> " model=" <> m
+    }
+    <> tools_str
+    <> gates_str
+    <> agent_str
+  // When full detail requested, load tool call inputs/outputs from cycle log
+  let detail_str = case full {
+    False -> ""
+    True -> {
+      let details = cycle_log.load_tool_details_for_cycle(node.cycle_id)
+      case details {
+        [] -> ""
+        _ ->
+          "\n"
+          <> string.join(
+            list.map(details, fn(d) {
+              indent
+              <> "    "
+              <> d.name
+              <> case d.success {
+                True -> ""
+                False -> " FAILED"
+              }
+              <> "\n"
+              <> indent
+              <> "      IN: "
+              <> string.slice(d.input, 0, 500)
+              <> "\n"
+              <> indent
+              <> "      OUT: "
+              <> string.slice(d.output, 0, 500)
+            }),
+            "\n",
+          )
+      }
+    }
+  }
+  let children_str = case tree.children {
+    [] -> ""
+    children ->
+      "\n"
+      <> string.join(
+        list.map(children, fn(child) {
+          format_subtree(child, depth + 1, full, current_cycle_id)
+        }),
+        "\n",
+      )
+  }
+  header <> detail_str <> children_str
+}
+
+// ---------------------------------------------------------------------------
+// recall_cases — CBR case retrieval
+// ---------------------------------------------------------------------------
+
+fn run_recall_cases(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+  cbr_max: Int,
+) -> ToolResult {
+  case lib {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "recall_cases not available: Librarian not initialised",
+      )
+    Some(l) -> {
+      let decoder = {
+        use intent <- decode.optional_field("intent", "", decode.string)
+        use domain <- decode.optional_field("domain", "", decode.string)
+        use keywords_str <- decode.optional_field("keywords", "", decode.string)
+        use max_results <- decode.optional_field("max_results", 5, decode.int)
+        decode.success(#(intent, domain, keywords_str, max_results))
+      }
+      case json.parse(call.input_json, decoder) {
+        Error(_) ->
+          ToolFailure(tool_use_id: call.id, error: "Invalid recall_cases input")
+        Ok(#(intent, domain, keywords_str, max_results)) -> {
+          let keywords = case keywords_str {
+            "" -> []
+            s ->
+              s
+              |> string.split(",")
+              |> list.map(string.trim)
+              |> list.filter(fn(k) { k != "" })
+          }
+          let clamped = int.min(cbr_max, int.max(0, max_results))
+          let query =
+            cbr_types.CbrQuery(
+              intent:,
+              domain:,
+              keywords:,
+              entities: [],
+              max_results: clamped,
+              query_complexity: None,
+            )
+          let results = librarian.retrieve_cases(l, query)
+          case results {
+            [] ->
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: "No matching cases found in CBR memory.",
+              )
+            _ ->
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: "Found "
+                  <> int.to_string(list.length(results))
+                  <> " matching cases:\n\n"
+                  <> string.join(
+                  list.map(results, format_scored_case),
+                  "\n---\n",
+                ),
+              )
+          }
+        }
+      }
+    }
+  }
+}
+
+fn format_scored_case(sc: cbr_types.ScoredCase) -> String {
+  let c = sc.cbr_case
+  let pitfalls = case c.outcome.pitfalls {
+    [] -> ""
+    ps -> "  Pitfalls: " <> string.join(ps, "; ") <> "\n"
+  }
+  let agents = case c.solution.agents_used {
+    [] -> ""
+    a -> "  Agents: " <> string.join(a, ", ") <> "\n"
+  }
+  let tools = case c.solution.tools_used {
+    [] -> ""
+    t -> "  Tools: " <> string.join(t, ", ") <> "\n"
+  }
+  let keywords = case c.problem.keywords {
+    [] -> ""
+    k -> "  Keywords: " <> string.join(k, ", ") <> "\n"
+  }
+  "[case_id: "
+  <> c.case_id
+  <> "] [score: "
+  <> float.to_string(sc.score)
+  <> "] "
+  <> c.problem.intent
+  <> " | "
+  <> c.problem.domain
+  <> "\n"
+  <> "  Query: "
+  <> c.problem.user_input
+  <> "\n"
+  <> "  Approach: "
+  <> c.solution.approach
+  <> "\n"
+  <> "  Outcome: "
+  <> c.outcome.status
+  <> " (confidence: "
+  <> float.to_string(c.outcome.confidence)
+  <> ")\n"
+  <> case c.outcome.assessment {
+    "" -> ""
+    a -> "  Assessment: " <> a <> "\n"
+  }
+  <> pitfalls
+  <> agents
+  <> tools
+  <> keywords
+}
+
+// ---------------------------------------------------------------------------
+// Facts formatting
+// ---------------------------------------------------------------------------
+
+fn parse_scope(s: String) -> facts_types.FactScope {
+  case s {
+    "persistent" -> facts_types.Persistent
+    "ephemeral" -> facts_types.Ephemeral
+    _ -> facts_types.Session
+  }
+}
+
+fn format_fact(f: facts_types.MemoryFact, half_life_days: Int) -> String {
+  let effective_confidence =
+    decay.decay_fact_confidence(
+      f.confidence,
+      f.timestamp,
+      get_date(),
+      half_life_days,
+    )
+  let base =
+    "key: "
+    <> f.key
+    <> "\nvalue: "
+    <> f.value
+    <> "\nscope: "
+    <> scope_to_string(f.scope)
+    <> "\nconfidence: "
+    <> float.to_string(effective_confidence)
+    <> "\nsource: "
+    <> f.source
+    <> "\ntimestamp: "
+    <> f.timestamp
+  case f.provenance {
+    None -> base
+    Some(p) ->
+      base
+      <> "\n[source: cycle "
+      <> p.source_cycle_id
+      <> ", tool: "
+      <> p.source_tool
+      <> ", agent: "
+      <> p.source_agent
+      <> ", derivation: "
+      <> format_derivation(p.derivation)
+      <> "]"
+  }
+}
+
+fn format_derivation(d: facts_types.FactDerivation) -> String {
+  case d {
+    facts_types.DirectObservation -> "direct_observation"
+    facts_types.Synthesis -> "synthesis"
+    facts_types.OperatorProvided -> "operator_provided"
+    facts_types.Unknown -> "unknown"
+  }
+}
+
+fn format_facts_list(
+  facts: List(facts_types.MemoryFact),
+  half_life_days: Int,
+) -> String {
+  let today = get_date()
+  facts
+  |> list.map(fn(f: facts_types.MemoryFact) {
+    let effective_confidence =
+      decay.decay_fact_confidence(
+        f.confidence,
+        f.timestamp,
+        today,
+        half_life_days,
+      )
+    f.key
+    <> " = "
+    <> f.value
+    <> " (confidence: "
+    <> float.to_string(effective_confidence)
+    <> ")"
+  })
+  |> string.join("\n")
+}
+
+fn format_trace(key: String, history: List(facts_types.MemoryFact)) -> String {
+  "History for '"
+  <> key
+  <> "' ("
+  <> int.to_string(list.length(history))
+  <> " entries):\n"
+  <> {
+    history
+    |> list.map(fn(f: facts_types.MemoryFact) {
+      f.timestamp
+      <> " ["
+      <> op_to_string(f.operation)
+      <> "] "
+      <> f.value
+      <> " (confidence: "
+      <> float.to_string(f.confidence)
+      <> ", source: "
+      <> f.source
+      <> ")"
+    })
+    |> string.join("\n")
+  }
+}
+
+fn scope_to_string(scope: facts_types.FactScope) -> String {
+  case scope {
+    facts_types.Persistent -> "persistent"
+    facts_types.Session -> "session"
+    facts_types.Ephemeral -> "ephemeral"
+  }
+}
+
+fn op_to_string(op: facts_types.FactOp) -> String {
+  case op {
+    facts_types.Write -> "write"
+    facts_types.Clear -> "clear"
+    facts_types.Superseded -> "superseded"
+  }
+}
+
+// ---------------------------------------------------------------------------
+// introspect — perceive system state
+// ---------------------------------------------------------------------------
+
+fn run_introspect(call: ToolCall, ctx: Option(IntrospectContext)) -> ToolResult {
+  case ctx {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "introspect not available: no context provided",
+      )
+    Some(c) -> {
+      let sections = []
+
+      // Identity
+      let identity =
+        "## Identity\n- agent_uuid: "
+        <> c.agent_uuid
+        <> "\n- session_since: "
+        <> c.session_since
+
+      // Cycle
+      let cycle = case c.current_cycle_id {
+        Some(cid) -> "\n- current_cycle: " <> cid
+        None -> ""
+      }
+
+      let sections = [identity <> cycle, ..sections]
+
+      // Agent roster
+      let agent_section = case c.agents {
+        [] -> "## Agents\nNo agents registered."
+        agents -> {
+          let lines =
+            list.map(agents, fn(e: AgentStatusEntry) {
+              let tools_str = case e.tool_names {
+                [] -> " (no tools)"
+                names -> " [" <> string.join(names, ", ") <> "]"
+              }
+              "- " <> e.name <> ": " <> e.status <> tools_str
+            })
+          "## Agents ("
+          <> int.to_string(list.length(agents))
+          <> ")\n"
+          <> string.join(lines, "\n")
+        }
+      }
+      let sections = [agent_section, ..sections]
+
+      // D' safety
+      let dprime_section = case c.dprime_enabled {
+        True ->
+          "## D' Safety\n- enabled: true\n- modify_threshold: "
+          <> float.to_string(c.dprime_modify_threshold)
+          <> "\n- reject_threshold: "
+          <> float.to_string(c.dprime_reject_threshold)
+        False -> "## D' Safety\n- enabled: false"
+      }
+      let sections = [dprime_section, ..sections]
+
+      // Thread health
+      let thread_section =
+        "## Thread Health\n- total: "
+        <> int.to_string(c.thread_total)
+        <> "\n- named: "
+        <> int.to_string(c.thread_total - c.thread_uuid_named)
+        <> " | uuid-pattern: "
+        <> int.to_string(c.thread_uuid_named)
+        <> "\n- single-cycle: "
+        <> int.to_string(c.thread_single_cycle)
+        <> " | multi-cycle: "
+        <> int.to_string(c.thread_multi_cycle)
+      let sections = [thread_section, ..sections]
+
+      // Teams
+      let teams_section = case c.teams {
+        [] -> "## Teams\nNo teams configured."
+        teams -> {
+          let lines =
+            list.map(teams, fn(t: TeamEntry) {
+              "- team_"
+              <> t.name
+              <> ": "
+              <> t.description
+              <> " ("
+              <> t.strategy
+              <> ", "
+              <> int.to_string(t.members)
+              <> " members)"
+            })
+          "## Teams ("
+          <> int.to_string(list.length(teams))
+          <> ")\n"
+          <> string.join(lines, "\n")
+        }
+      }
+      let sections = [teams_section, ..sections]
+
+      // Sandbox
+      let sandbox_section = case c.sandbox_enabled {
+        True ->
+          "## Sandbox\n- enabled: true\n- Use sandbox_status tool for slot details"
+        False -> "## Sandbox\n- enabled: false (coder has no execution tools)"
+      }
+      let sections = [sandbox_section, ..sections]
+
+      ToolSuccess(
+        tool_use_id: call.id,
+        content: string.join(list.reverse(sections), "\n\n"),
+      )
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// list_recent_cycles — discover cycle IDs for a date
+// ---------------------------------------------------------------------------
+
+fn run_list_recent_cycles(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+  current_cycle_id: Option(String),
+) -> ToolResult {
+  case lib {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "list_recent_cycles not available: DAG index not initialised",
+      )
+    Some(l) -> {
+      let decoder = {
+        use date <- decode.optional_field("date", get_date(), decode.string)
+        use include_agents <- decode.optional_field(
+          "include_agents",
+          False,
+          decode.bool,
+        )
+        decode.success(#(date, include_agents))
+      }
+      let #(date, include_agents) = case json.parse(call.input_json, decoder) {
+        Ok(pair) -> pair
+        Error(_) -> #(get_date(), False)
+      }
+      let subj = process.new_subject()
+      process.send(l, librarian.QueryDayAll(date:, reply_to: subj))
+      case process.receive(subj, 5000) {
+        Error(_) ->
+          ToolFailure(tool_use_id: call.id, error: "Timeout querying cycles")
+        Ok(all_nodes) -> {
+          let total = list.length(all_nodes)
+          let roots =
+            list.filter(all_nodes, fn(n) { option.is_none(n.parent_id) })
+          let root_count = list.length(roots)
+          let agent_count = total - root_count
+          let nodes = case include_agents {
+            True -> all_nodes
+            False -> roots
+          }
+          case nodes {
+            [] ->
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: "No cycles found for " <> date <> ".",
+              )
+            _ -> {
+              let lines =
+                list.map(nodes, fn(node: dag_types.CycleNode) {
+                  let outcome_str = format_node_outcome(node, current_cycle_id)
+                  let type_label = case node.parent_id {
+                    None ->
+                      case node.instance_name {
+                        "" -> "[cognitive]"
+                        name ->
+                          "["
+                          <> name
+                          <> " ("
+                          <> case node.instance_id {
+                            "" -> "cognitive"
+                            id -> id
+                          }
+                          <> ")]"
+                      }
+                    Some(pid) -> {
+                      let sub_name = case node.agent_output {
+                        Some(dag_types.CoderOutput(..)) -> "coder"
+                        Some(dag_types.ResearchOutput(..)) -> "researcher"
+                        Some(dag_types.PlanOutput(..)) -> "planner"
+                        Some(dag_types.WriterOutput(..)) -> "writer"
+                        _ -> "agent"
+                      }
+                      "["
+                      <> sub_name
+                      <> " of "
+                      <> string.slice(pid, 0, 8)
+                      <> "]"
+                    }
+                  }
+                  let indent = case node.parent_id {
+                    None -> ""
+                    Some(_) -> "  "
+                  }
+                  indent
+                  <> node.cycle_id
+                  <> " ["
+                  <> node.timestamp
+                  <> "] "
+                  <> type_label
+                  <> " "
+                  <> outcome_str
+                  <> " [tokens: "
+                  <> int.to_string(node.tokens_in)
+                  <> "/"
+                  <> int.to_string(node.tokens_out)
+                  <> "]"
+                })
+              let header = case include_agents {
+                False ->
+                  "Root cycles for "
+                  <> date
+                  <> " ("
+                  <> int.to_string(root_count)
+                  <> " of "
+                  <> int.to_string(total)
+                  <> " total — pass include_agents=true to see all):"
+                True ->
+                  "All cycles for "
+                  <> date
+                  <> " ("
+                  <> int.to_string(total)
+                  <> " total, "
+                  <> int.to_string(root_count)
+                  <> " root + "
+                  <> int.to_string(agent_count)
+                  <> " agent):"
+              }
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: header <> "\n" <> string.join(lines, "\n"),
+              )
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// review_recent — structured self-review across N recent cycles
+// ---------------------------------------------------------------------------
+
+/// Internal record for a reviewed cycle, used by both review_recent and
+/// detect_patterns.
+pub type CycleReview {
+  CycleReview(
+    cycle_id: String,
+    timestamp: String,
+    domain: String,
+    intent: String,
+    outcome: String,
+    confidence: Float,
+    agents: List(String),
+    tool_names: List(String),
+    tool_failures: List(String),
+    gates: List(dag_types.GateSummary),
+    tokens_in: Int,
+    tokens_out: Int,
+    model: String,
+    has_sources: Bool,
+  )
+}
+
+fn run_review_recent(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+  _current_cycle_id: Option(String),
+) -> ToolResult {
+  case lib {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "review_recent not available: Librarian not initialised",
+      )
+    Some(l) -> {
+      let decoder = {
+        use count <- decode.optional_field("count", 10, decode.int)
+        use filter_domain <- decode.optional_field(
+          "filter_domain",
+          "",
+          decode.string,
+        )
+        use filter_outcome <- decode.optional_field(
+          "filter_outcome",
+          "",
+          decode.string,
+        )
+        use filter_agent <- decode.optional_field(
+          "filter_agent",
+          "",
+          decode.string,
+        )
+        decode.success(#(count, filter_domain, filter_outcome, filter_agent))
+      }
+      let #(count, filter_domain, filter_outcome, filter_agent) = case
+        json.parse(call.input_json, decoder)
+      {
+        Ok(params) -> params
+        Error(_) -> #(10, "", "", "")
+      }
+      let clamped = int.min(20, int.max(1, count))
+      let reviews =
+        build_cycle_reviews(
+          l,
+          clamped,
+          filter_domain,
+          filter_outcome,
+          filter_agent,
+        )
+      case reviews {
+        [] ->
+          ToolSuccess(
+            tool_use_id: call.id,
+            content: "No matching cycles found.",
+          )
+        _ ->
+          ToolSuccess(
+            tool_use_id: call.id,
+            content: format_cycle_reviews(reviews),
+          )
+      }
+    }
+  }
+}
+
+/// Build CycleReview records by joining DAG roots with narrative entries.
+/// Queries today + previous days until we have enough cycles.
+pub fn build_cycle_reviews(
+  lib: Subject(LibrarianMessage),
+  count: Int,
+  filter_domain: String,
+  filter_outcome: String,
+  filter_agent: String,
+) -> List(CycleReview) {
+  // Query up to 7 days back to gather enough root cycles
+  let all_roots = gather_recent_roots(lib, count * 2, 7)
+  // Load narrative entries for all these cycle_ids
+  let cycle_ids = list.map(all_roots, fn(n) { n.cycle_id })
+  let entries = load_entries_by_ids(lib, cycle_ids)
+  // Join DAG nodes with narrative entries
+  let reviews =
+    list.filter_map(all_roots, fn(node) {
+      let entry =
+        list.find(entries, fn(e) { e.cycle_id == node.cycle_id })
+        |> option.from_result
+      case entry {
+        None -> Error(Nil)
+        Some(e) -> {
+          let agent_names = extract_agent_names(node)
+          Ok(CycleReview(
+            cycle_id: string.slice(node.cycle_id, 0, 8),
+            timestamp: node.timestamp,
+            domain: e.intent.domain,
+            intent: string.slice(e.intent.description, 0, 80),
+            outcome: outcome_to_string(e.outcome.status),
+            confidence: e.outcome.confidence,
+            agents: agent_names,
+            tool_names: list.map(node.tool_calls, fn(t) { t.name }),
+            tool_failures: list.filter_map(node.tool_calls, fn(t) {
+              case t.success {
+                True -> Error(Nil)
+                False -> Ok(t.name)
+              }
+            }),
+            gates: node.dprime_gates,
+            tokens_in: node.tokens_in,
+            tokens_out: node.tokens_out,
+            model: node.model,
+            has_sources: !list.is_empty(e.sources),
+          ))
+        }
+      }
+    })
+  // Apply filters
+  let filtered =
+    reviews
+    |> apply_domain_filter(filter_domain)
+    |> apply_outcome_filter(filter_outcome)
+    |> apply_agent_filter(filter_agent)
+  list.take(filtered, count)
+}
+
+fn gather_recent_roots(
+  lib: Subject(LibrarianMessage),
+  max: Int,
+  days_back: Int,
+) -> List(dag_types.CycleNode) {
+  do_gather_roots(lib, max, 0, days_back, [])
+}
+
+fn do_gather_roots(
+  lib: Subject(LibrarianMessage),
+  max: Int,
+  day_offset: Int,
+  max_days: Int,
+  acc: List(dag_types.CycleNode),
+) -> List(dag_types.CycleNode) {
+  case day_offset > max_days || list.length(acc) >= max {
+    True -> list.take(acc, max)
+    False -> {
+      let date = days_ago_date(day_offset)
+      let subj = process.new_subject()
+      process.send(lib, librarian.QueryDayRoots(date:, reply_to: subj))
+      let day_roots = case process.receive(subj, 5000) {
+        Ok(roots) -> roots
+        Error(_) -> []
+      }
+      // Roots come in chronological order; we want recent-first
+      let sorted =
+        list.sort(day_roots, fn(a, b) {
+          string.compare(b.timestamp, a.timestamp)
+        })
+      do_gather_roots(
+        lib,
+        max,
+        day_offset + 1,
+        max_days,
+        list.append(acc, sorted),
+      )
+    }
+  }
+}
+
+fn load_entries_by_ids(
+  lib: Subject(LibrarianMessage),
+  cycle_ids: List(String),
+) -> List(narrative_types.NarrativeEntry) {
+  let subj = process.new_subject()
+  process.send(lib, librarian.LoadByCycleIds(cycle_ids:, reply_to: subj))
+  case process.receive(subj, 5000) {
+    Ok(entries) -> entries
+    Error(_) -> []
+  }
+}
+
+fn extract_agent_names(node: dag_types.CycleNode) -> List(String) {
+  // Extract agent names from tool calls that look like agent delegations
+  list.filter_map(node.tool_calls, fn(t) {
+    case string.starts_with(t.name, "agent_") {
+      True -> Ok(string.drop_start(t.name, 6))
+      False -> Error(Nil)
+    }
+  })
+}
+
+fn outcome_to_string(status: narrative_types.OutcomeStatus) -> String {
+  case status {
+    narrative_types.Success -> "success"
+    narrative_types.Partial -> "partial"
+    narrative_types.Failure -> "failure"
+  }
+}
+
+fn apply_domain_filter(
+  reviews: List(CycleReview),
+  domain: String,
+) -> List(CycleReview) {
+  case domain {
+    "" -> reviews
+    d ->
+      list.filter(reviews, fn(r) {
+        string.lowercase(r.domain) == string.lowercase(d)
+      })
+  }
+}
+
+fn apply_outcome_filter(
+  reviews: List(CycleReview),
+  outcome: String,
+) -> List(CycleReview) {
+  case outcome {
+    "" -> reviews
+    o -> list.filter(reviews, fn(r) { r.outcome == o })
+  }
+}
+
+fn apply_agent_filter(
+  reviews: List(CycleReview),
+  agent: String,
+) -> List(CycleReview) {
+  case agent {
+    "" -> reviews
+    a ->
+      list.filter(reviews, fn(r) { list.any(r.agents, fn(name) { name == a }) })
+  }
+}
+
+fn format_cycle_reviews(reviews: List(CycleReview)) -> String {
+  let count = list.length(reviews)
+  let header = "## Review of " <> int.to_string(count) <> " recent cycles\n"
+  let lines =
+    list.map(reviews, fn(r) {
+      let gates_str = case r.gates {
+        [] -> ""
+        gs ->
+          " D'="
+          <> string.join(
+            list.map(gs, fn(g) { g.gate <> ":" <> g.decision }),
+            ",",
+          )
+      }
+      let agents_str = case r.agents {
+        [] -> ""
+        as_ -> " agents=" <> string.join(as_, ",")
+      }
+      let failures_str = case r.tool_failures {
+        [] -> ""
+        fs -> " FAILED=[" <> string.join(fs, ",") <> "]"
+      }
+      let source_str = case r.has_sources {
+        True -> " [sourced]"
+        False -> ""
+      }
+      "- "
+      <> r.cycle_id
+      <> " ["
+      <> r.timestamp
+      <> "] "
+      <> r.outcome
+      <> " ("
+      <> float.to_string(r.confidence)
+      <> ")"
+      <> " domain="
+      <> r.domain
+      <> agents_str
+      <> " tokens="
+      <> int.to_string(r.tokens_in + r.tokens_out)
+      <> " model="
+      <> r.model
+      <> gates_str
+      <> failures_str
+      <> source_str
+      <> "\n  "
+      <> r.intent
+    })
+  header <> string.join(lines, "\n")
+}
+
+// ---------------------------------------------------------------------------
+// detect_patterns — automated pattern detection across recent cycles
+// ---------------------------------------------------------------------------
+
+/// Detected pattern from cross-cycle analysis.
+pub type DetectedPattern {
+  DetectedPattern(
+    pattern_type: String,
+    severity: String,
+    description: String,
+    affected_cycles: List(String),
+    suggestion: String,
+  )
+}
+
+fn run_detect_patterns(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+) -> ToolResult {
+  case lib {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "detect_patterns not available: Librarian not initialised",
+      )
+    Some(l) -> {
+      let decoder = {
+        use window <- decode.optional_field("window", 20, decode.int)
+        decode.success(window)
+      }
+      let window = case json.parse(call.input_json, decoder) {
+        Ok(w) -> int.min(50, int.max(1, w))
+        Error(_) -> 20
+      }
+      let reviews = build_cycle_reviews(l, window, "", "", "")
+      let patterns = detect_all_patterns(reviews)
+      case patterns {
+        [] ->
+          ToolSuccess(
+            tool_use_id: call.id,
+            content: "No patterns detected across "
+              <> int.to_string(list.length(reviews))
+              <> " recent cycles.",
+          )
+        _ ->
+          ToolSuccess(
+            tool_use_id: call.id,
+            content: format_patterns(patterns, list.length(reviews)),
+          )
+      }
+    }
+  }
+}
+
+/// Run all pattern detectors over the cycle reviews.
+pub fn detect_all_patterns(reviews: List(CycleReview)) -> List(DetectedPattern) {
+  [
+    detect_repeated_failures(reviews),
+    detect_tool_failure_clusters(reviews),
+    detect_escalation_pattern(reviews),
+    detect_cost_outliers(reviews),
+    detect_cbr_misses(reviews),
+  ]
+  |> list.flatten
+}
+
+fn detect_repeated_failures(reviews: List(CycleReview)) -> List(DetectedPattern) {
+  // Group failures by domain, flag if 3+ in the window
+  let failures = list.filter(reviews, fn(r) { r.outcome == "failure" })
+  let domains =
+    list.map(failures, fn(r) { r.domain })
+    |> list.unique
+  list.filter_map(domains, fn(domain) {
+    let domain_failures = list.filter(failures, fn(r) { r.domain == domain })
+    case list.length(domain_failures) >= 3 {
+      True ->
+        Ok(DetectedPattern(
+          pattern_type: "repeated_failure",
+          severity: "warning",
+          description: int.to_string(list.length(domain_failures))
+            <> " failures in domain '"
+            <> domain
+            <> "'",
+          affected_cycles: list.map(domain_failures, fn(r) { r.cycle_id }),
+          suggestion: "Consider: is this domain unreliable? Check tools and sources for '"
+            <> domain
+            <> "'.",
+        ))
+      False -> Error(Nil)
+    }
+  })
+}
+
+fn detect_tool_failure_clusters(
+  reviews: List(CycleReview),
+) -> List(DetectedPattern) {
+  // Collect all tool calls and failures, flag tools with >20% failure rate
+  let all_tool_names =
+    list.flat_map(reviews, fn(r) { r.tool_names }) |> list.unique
+  list.filter_map(all_tool_names, fn(tool_name) {
+    let total =
+      list.count(reviews, fn(r) {
+        list.any(r.tool_names, fn(t) { t == tool_name })
+      })
+    let failed =
+      list.count(reviews, fn(r) {
+        list.any(r.tool_failures, fn(t) { t == tool_name })
+      })
+    case total >= 3 && int.to_float(failed) /. int.to_float(total) >. 0.2 {
+      True ->
+        Ok(DetectedPattern(
+          pattern_type: "tool_failure_cluster",
+          severity: "warning",
+          description: tool_name
+            <> " failed in "
+            <> int.to_string(failed)
+            <> "/"
+            <> int.to_string(total)
+            <> " cycles",
+          affected_cycles: list.filter_map(reviews, fn(r) {
+            case list.any(r.tool_failures, fn(t) { t == tool_name }) {
+              True -> Ok(r.cycle_id)
+              False -> Error(Nil)
+            }
+          }),
+          suggestion: "Check if '"
+            <> tool_name
+            <> "' has a systemic issue (timeouts, auth, rate limits).",
+        ))
+      False -> Error(Nil)
+    }
+  })
+}
+
+fn detect_escalation_pattern(
+  reviews: List(CycleReview),
+) -> List(DetectedPattern) {
+  // Flag if 5+ cycles used a different model than the most common
+  let models = list.map(reviews, fn(r) { r.model })
+  let unique_models = list.unique(models)
+  case list.length(unique_models) > 1 {
+    False -> []
+    True -> {
+      // Find most common model
+      let model_counts =
+        list.map(unique_models, fn(m) {
+          #(m, list.count(models, fn(x) { x == m }))
+        })
+        |> list.sort(fn(a, b) { int.compare(b.1, a.1) })
+      case model_counts {
+        [#(primary, _), #(secondary, secondary_count), ..] ->
+          case secondary_count >= 5 {
+            True -> [
+              DetectedPattern(
+                pattern_type: "escalation_pattern",
+                severity: "info",
+                description: int.to_string(secondary_count)
+                  <> " cycles escalated to "
+                  <> secondary
+                  <> " (primary: "
+                  <> primary
+                  <> ")",
+                affected_cycles: list.filter_map(reviews, fn(r) {
+                  case r.model == secondary {
+                    True -> Ok(r.cycle_id)
+                    False -> Error(Nil)
+                  }
+                }),
+                suggestion: "High escalation rate. Queries may be consistently complex, or the primary model may need upgrading.",
+              ),
+            ]
+            False -> []
+          }
+        _ -> []
+      }
+    }
+  }
+}
+
+fn detect_cost_outliers(reviews: List(CycleReview)) -> List(DetectedPattern) {
+  let total = list.length(reviews)
+  case total < 3 {
+    True -> []
+    False -> {
+      let costs = list.map(reviews, fn(r) { r.tokens_in + r.tokens_out })
+      let avg =
+        int.to_float(list.fold(costs, 0, int.add)) /. int.to_float(total)
+      let threshold = avg *. 3.0
+      let outliers =
+        list.filter(reviews, fn(r) {
+          int.to_float(r.tokens_in + r.tokens_out) >. threshold
+        })
+      case outliers {
+        [] -> []
+        _ -> [
+          DetectedPattern(
+            pattern_type: "cost_outlier",
+            severity: "info",
+            description: int.to_string(list.length(outliers))
+              <> " cycles used >3x average tokens (avg="
+              <> int.to_string(float.truncate(avg))
+              <> ")",
+            affected_cycles: list.map(outliers, fn(r) { r.cycle_id }),
+            suggestion: "Check if high-cost cycles are justified or if context is growing unbounded.",
+          ),
+        ]
+      }
+    }
+  }
+}
+
+fn detect_cbr_misses(reviews: List(CycleReview)) -> List(DetectedPattern) {
+  let total = list.length(reviews)
+  case total < 4 {
+    True -> []
+    False -> {
+      let without_sources = list.count(reviews, fn(r) { !r.has_sources })
+      let miss_rate = int.to_float(without_sources) /. int.to_float(total)
+      case miss_rate >=. 0.5 {
+        True -> [
+          DetectedPattern(
+            pattern_type: "cbr_miss",
+            severity: "warning",
+            description: int.to_string(without_sources)
+              <> "/"
+              <> int.to_string(total)
+              <> " cycles had no source references — operating without grounding",
+            affected_cycles: list.filter_map(reviews, fn(r) {
+              case r.has_sources {
+                False -> Ok(r.cycle_id)
+                True -> Error(Nil)
+              }
+            }),
+            suggestion: "High proportion of ungrounded cycles. CBR cases may need enrichment or sources may be failing.",
+          ),
+        ]
+        False -> []
+      }
+    }
+  }
+}
+
+fn format_patterns(patterns: List(DetectedPattern), window_size: Int) -> String {
+  let header =
+    "## Patterns detected across "
+    <> int.to_string(window_size)
+    <> " recent cycles\n\n"
+  let lines =
+    list.map(patterns, fn(p) {
+      "### ["
+      <> string.uppercase(p.severity)
+      <> "] "
+      <> p.pattern_type
+      <> "\n"
+      <> p.description
+      <> "\nCycles: "
+      <> string.join(p.affected_cycles, ", ")
+      <> "\nSuggestion: "
+      <> p.suggestion
+    })
+  header <> string.join(lines, "\n\n")
+}
+
+// ---------------------------------------------------------------------------
+// query_tool_activity — per-tool usage stats from DAG
+// ---------------------------------------------------------------------------
+
+fn run_query_tool_activity(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+) -> ToolResult {
+  case lib {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "query_tool_activity not available: Librarian not initialised",
+      )
+    Some(l) -> {
+      let decoder = {
+        use date <- decode.field("date", decode.string)
+        decode.success(date)
+      }
+      case json.parse(call.input_json, decoder) {
+        Error(_) ->
+          ToolFailure(
+            tool_use_id: call.id,
+            error: "Invalid query_tool_activity input: requires 'date' field",
+          )
+        Ok(date) -> {
+          let records = librarian.query_tool_activity(l, date)
+          case records {
+            [] ->
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: "No tool activity found for " <> date,
+              )
+            _ -> {
+              let lines =
+                list.map(records, fn(r: dag_types.ToolActivityRecord) {
+                  r.name
+                  <> ": "
+                  <> int.to_string(r.total_calls)
+                  <> " calls ("
+                  <> int.to_string(r.success_count)
+                  <> " ok, "
+                  <> int.to_string(r.failure_count)
+                  <> " failed) in "
+                  <> int.to_string(list.length(r.cycle_ids))
+                  <> " cycles"
+                })
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: "Tool activity for "
+                  <> date
+                  <> ":\n"
+                  <> string.join(lines, "\n"),
+              )
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// how_to — operator guidance
+// ---------------------------------------------------------------------------
+
+fn run_how_to(call: ToolCall, content: Option(String)) -> ToolResult {
+  case content {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "HOW_TO content not loaded — no HOW_TO.md file found.",
+      )
+    Some(guide) -> {
+      let decoder = {
+        use topic <- decode.optional_field(
+          "topic",
+          None,
+          decode.string |> decode.map(Some),
+        )
+        decode.success(topic)
+      }
+      let result = case json.parse(call.input_json, decoder) {
+        Error(_) -> guide
+        Ok(None) -> guide
+        Ok(Some(topic)) -> filter_by_topic(guide, topic)
+      }
+      ToolSuccess(tool_use_id: call.id, content: result)
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// CBR mutation tools (Phase 3)
+// ---------------------------------------------------------------------------
+
+fn correct_case_tool() -> Tool {
+  tool.new("correct_case")
+  |> tool.with_description(
+    "Correct a misclassified CBR case. Update status, confidence, or assessment. "
+    <> "Provide the case_id and any fields to change.",
+  )
+  |> tool.add_string_param("case_id", "The case ID to correct", True)
+  |> tool.add_string_param(
+    "status",
+    "New outcome status (e.g. 'success', 'failure', 'partial')",
+    False,
+  )
+  |> tool.add_number_param(
+    "confidence",
+    "New confidence score (0.0 to 1.0)",
+    False,
+  )
+  |> tool.add_string_param("assessment", "New outcome assessment", False)
+  |> tool.build()
+}
+
+fn annotate_case_tool() -> Tool {
+  tool.new("annotate_case")
+  |> tool.with_description(
+    "Add an annotation (pitfall or note) to an existing CBR case. "
+    <> "The annotation is appended to the case's pitfalls list.",
+  )
+  |> tool.add_string_param("case_id", "The case ID to annotate", True)
+  |> tool.add_string_param("annotation", "The annotation to add", True)
+  |> tool.build()
+}
+
+fn suppress_case_tool() -> Tool {
+  tool.new("suppress_case")
+  |> tool.with_description(
+    "Suppress a CBR case — removes it from retrieval results. "
+    <> "Use this for cases that are incorrect, misleading, or no longer relevant. "
+    <> "The case is preserved on disk but marked as suppressed.",
+  )
+  |> tool.add_string_param("case_id", "The case ID to suppress", True)
+  |> tool.add_string_param("reason", "Optional reason for suppression", False)
+  |> tool.build()
+}
+
+fn unsuppress_case_tool() -> Tool {
+  tool.new("unsuppress_case")
+  |> tool.with_description(
+    "Restore a previously suppressed CBR case back into retrieval. "
+    <> "Use this when a case was suppressed by mistake or is relevant again.",
+  )
+  |> tool.add_string_param("case_id", "The case ID to unsuppress", True)
+  |> tool.build()
+}
+
+fn boost_case_tool() -> Tool {
+  tool.new("boost_case")
+  |> tool.with_description(
+    "Adjust a CBR case's confidence score. Higher confidence makes the case "
+    <> "more prominent in retrieval. Value is clamped to [0.0, 1.0].",
+  )
+  |> tool.add_string_param("case_id", "The case ID to boost", True)
+  |> tool.add_number_param(
+    "confidence",
+    "New confidence score (0.0 to 1.0)",
+    True,
+  )
+  |> tool.build()
+}
+
+fn cancel_agent_tool() -> Tool {
+  tool.new("cancel_agent")
+  |> tool.with_description(
+    "Cancel a running agent delegation. Use when an agent is consuming too many "
+    <> "tokens, taking too long, or going off-track. Check <delegations> in the "
+    <> "sensorium to see active agents before cancelling.",
+  )
+  |> tool.add_string_param(
+    "agent_name",
+    "Name of the agent to cancel (e.g. 'researcher', 'coder', 'writer')",
+    True,
+  )
+  |> tool.build()
+}
+
+fn run_cancel_agent(
+  call: ToolCall,
+  agent_mgmt: Option(AgentManagementContext),
+) -> ToolResult {
+  let decoder = {
+    use agent_name <- decode.field("agent_name", decode.string)
+    decode.success(agent_name)
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "Invalid cancel_agent input: missing agent_name",
+      )
+    Ok(agent_name) ->
+      case agent_mgmt {
+        None ->
+          ToolFailure(
+            tool_use_id: call.id,
+            error: "Agent management not available",
+          )
+        Some(ctx) ->
+          case ctx.supervisor {
+            None ->
+              ToolFailure(
+                tool_use_id: call.id,
+                error: "No supervisor available to cancel agents",
+              )
+            Some(supervisor) -> {
+              process.send(supervisor, agent_types.StopChild(name: agent_name))
+              slog.info(
+                "memory",
+                "cancel_agent",
+                "Cancelled agent: " <> agent_name,
+                None,
+              )
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: "Agent '"
+                  <> agent_name
+                  <> "' has been cancelled. It will be restarted by the supervisor if configured as Permanent.",
+              )
+            }
+          }
+      }
+  }
+}
+
+fn run_correct_case(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+) -> ToolResult {
+  case lib {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "correct_case not available: Librarian not initialised",
+      )
+    Some(l) -> {
+      let decoder = {
+        use case_id <- decode.field("case_id", decode.string)
+        use status <- decode.optional_field("status", "", decode.string)
+        use confidence <- decode.optional_field(
+          "confidence",
+          -1.0,
+          decode.float,
+        )
+        use assessment <- decode.optional_field("assessment", "", decode.string)
+        decode.success(#(case_id, status, confidence, assessment))
+      }
+      case json.parse(call.input_json, decoder) {
+        Error(_) ->
+          ToolFailure(
+            tool_use_id: call.id,
+            error: "Invalid correct_case input: case_id required",
+          )
+        Ok(#(case_id, status, confidence, assessment)) -> {
+          // Look up the existing case first
+          let reply_to = process.new_subject()
+          process.send(l, librarian.QueryCaseById(case_id:, reply_to:))
+          case process.receive(reply_to, 5000) {
+            Error(_) ->
+              ToolFailure(
+                tool_use_id: call.id,
+                error: "Timeout looking up case " <> case_id,
+              )
+            Ok(Error(_)) ->
+              ToolFailure(
+                tool_use_id: call.id,
+                error: "Case not found: " <> case_id,
+              )
+            Ok(Ok(existing)) -> {
+              let new_status = case status {
+                "" -> existing.outcome.status
+                s -> s
+              }
+              let new_confidence = case confidence <. 0.0 {
+                True -> existing.outcome.confidence
+                False -> float.min(1.0, float.max(0.0, confidence))
+              }
+              let new_assessment = case assessment {
+                "" -> existing.outcome.assessment
+                a -> a
+              }
+              let updated =
+                cbr_types.CbrCase(
+                  ..existing,
+                  outcome: cbr_types.CbrOutcome(
+                    ..existing.outcome,
+                    status: new_status,
+                    confidence: new_confidence,
+                    assessment: new_assessment,
+                  ),
+                )
+              case librarian.update_case(l, case_id, updated) {
+                Ok(_) ->
+                  ToolSuccess(
+                    tool_use_id: call.id,
+                    content: "Case " <> case_id <> " corrected.",
+                  )
+                Error(e) ->
+                  ToolFailure(
+                    tool_use_id: call.id,
+                    error: "Update failed: " <> e,
+                  )
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+fn run_annotate_case(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+) -> ToolResult {
+  case lib {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "annotate_case not available: Librarian not initialised",
+      )
+    Some(l) -> {
+      let decoder = {
+        use case_id <- decode.field("case_id", decode.string)
+        use annotation <- decode.field("annotation", decode.string)
+        decode.success(#(case_id, annotation))
+      }
+      case json.parse(call.input_json, decoder) {
+        Error(_) ->
+          ToolFailure(
+            tool_use_id: call.id,
+            error: "Invalid annotate_case input: case_id and annotation required",
+          )
+        Ok(#(case_id, annotation)) ->
+          case librarian.annotate_case(l, case_id, annotation) {
+            Ok(_) ->
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: "Annotation added to case " <> case_id <> ".",
+              )
+            Error(e) ->
+              ToolFailure(tool_use_id: call.id, error: "Annotate failed: " <> e)
+          }
+      }
+    }
+  }
+}
+
+fn run_suppress_case(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+) -> ToolResult {
+  case lib {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "suppress_case not available: Librarian not initialised",
+      )
+    Some(l) -> {
+      let decoder = {
+        use case_id <- decode.field("case_id", decode.string)
+        use reason <- decode.optional_field("reason", "", decode.string)
+        decode.success(#(case_id, reason))
+      }
+      case json.parse(call.input_json, decoder) {
+        Error(_) ->
+          ToolFailure(
+            tool_use_id: call.id,
+            error: "Invalid suppress_case input: case_id required",
+          )
+        Ok(#(case_id, _reason)) ->
+          case librarian.suppress_case(l, case_id) {
+            Ok(_) ->
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: "Case "
+                  <> case_id
+                  <> " suppressed — removed from retrieval.",
+              )
+            Error(e) ->
+              ToolFailure(tool_use_id: call.id, error: "Suppress failed: " <> e)
+          }
+      }
+    }
+  }
+}
+
+fn run_unsuppress_case(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+) -> ToolResult {
+  case lib {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "unsuppress_case not available: Librarian not initialised",
+      )
+    Some(l) -> {
+      let decoder = {
+        use case_id <- decode.field("case_id", decode.string)
+        decode.success(case_id)
+      }
+      case json.parse(call.input_json, decoder) {
+        Error(_) ->
+          ToolFailure(
+            tool_use_id: call.id,
+            error: "Invalid unsuppress_case input: case_id required",
+          )
+        Ok(case_id) ->
+          case librarian.unsuppress_case(l, case_id) {
+            Ok(_) ->
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: "Case "
+                  <> case_id
+                  <> " unsuppressed — restored to retrieval.",
+              )
+            Error(e) ->
+              ToolFailure(
+                tool_use_id: call.id,
+                error: "Unsuppress failed: " <> e,
+              )
+          }
+      }
+    }
+  }
+}
+
+fn run_boost_case(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+) -> ToolResult {
+  case lib {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "boost_case not available: Librarian not initialised",
+      )
+    Some(l) -> {
+      let decoder = {
+        use case_id <- decode.field("case_id", decode.string)
+        use confidence <- decode.field("confidence", decode.float)
+        decode.success(#(case_id, confidence))
+      }
+      case json.parse(call.input_json, decoder) {
+        Error(_) ->
+          ToolFailure(
+            tool_use_id: call.id,
+            error: "Invalid boost_case input: case_id and confidence required",
+          )
+        Ok(#(case_id, confidence)) ->
+          case librarian.boost_case(l, case_id, confidence) {
+            Ok(_) ->
+              ToolSuccess(
+                tool_use_id: call.id,
+                content: "Case "
+                  <> case_id
+                  <> " confidence updated to "
+                  <> float.to_string(float.min(1.0, float.max(0.0, confidence)))
+                  <> ".",
+              )
+            Error(e) ->
+              ToolFailure(tool_use_id: call.id, error: "Boost failed: " <> e)
+          }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// report_false_positive
+// ---------------------------------------------------------------------------
+
+fn report_false_positive_tool() -> Tool {
+  tool.new("report_false_positive")
+  |> tool.with_description(
+    "Report a D' safety rejection as a false positive. Use when you believe a "
+    <> "rejection was incorrect — the request was legitimate but the safety system "
+    <> "blocked it. This feedback is used by the meta observer to detect overly "
+    <> "aggressive thresholds and avoid escalating on repeated false rejections.",
+  )
+  |> tool.add_string_param(
+    "cycle_id",
+    "The cycle_id where the false rejection occurred (from inspect_cycle or the rejection notice)",
+    True,
+  )
+  |> tool.add_string_param(
+    "reason",
+    "Brief explanation of why this was a false positive",
+    True,
+  )
+  |> tool.build()
+}
+
+fn run_report_false_positive(call: ToolCall) -> ToolResult {
+  let decoder = {
+    use cycle_id <- decode.field("cycle_id", decode.string)
+    use reason <- decode.field("reason", decode.string)
+    decode.success(#(cycle_id, reason))
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "Invalid report_false_positive input: missing cycle_id or reason",
+      )
+    Ok(#(cycle_id, reason)) -> {
+      let annotation =
+        meta_types.FalsePositiveAnnotation(
+          cycle_id:,
+          reason:,
+          timestamp: get_datetime(),
+        )
+      meta_log.append_false_positive(annotation)
+      slog.info(
+        "memory",
+        "report_false_positive",
+        "False positive reported for cycle " <> cycle_id <> ": " <> reason,
+        Some(cycle_id),
+      )
+      ToolSuccess(
+        tool_use_id: call.id,
+        content: "False positive recorded for cycle "
+          <> cycle_id
+          <> ". The meta observer will factor this into its rejection pattern analysis.",
+      )
+    }
+  }
+}
+
+fn filter_by_topic(content: String, topic: String) -> String {
+  let lower = string.lowercase(topic)
+  let sections = string.split(content, "\n## ")
+  case sections {
+    [intro, ..rest] -> {
+      let matching =
+        list.filter(rest, fn(s) { string.contains(string.lowercase(s), lower) })
+      case matching {
+        [] -> content
+        _ -> intro <> "\n\n## " <> string.join(matching, "\n\n## ")
+      }
+    }
+    [] -> content
+  }
+}
+
+// ---------------------------------------------------------------------------
+// list_affect_history
+// ---------------------------------------------------------------------------
+
+fn list_affect_history_tool() -> Tool {
+  tool.new("list_affect_history")
+  |> tool.with_description(
+    "View recent affect readings — desperation, calm, confidence, frustration, "
+    <> "pressure — across past cycles. Shows trajectory of functional emotional state.",
+  )
+  |> tool.add_integer_param(
+    "n",
+    "Number of recent snapshots to show (default 20, max 50)",
+    False,
+  )
+  |> tool.build()
+}
+
+fn run_list_affect_history(call: ToolCall) -> ToolResult {
+  let decoder = {
+    use n <- decode.optional_field("n", 20, decode.int)
+    decode.success(n)
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) -> ToolFailure(tool_use_id: call.id, error: "Invalid input")
+    Ok(n) -> {
+      let capped = int.min(50, int.max(1, n))
+      let snapshots = affect_store.load_recent(paths.affect_dir(), capped)
+      case snapshots {
+        [] ->
+          ToolSuccess(
+            tool_use_id: call.id,
+            content: "No affect history available yet.",
+          )
+        _ -> {
+          let lines = list.map(snapshots, affect_types.format_compact)
+          ToolSuccess(
+            tool_use_id: call.id,
+            content: string.join(list.reverse(lines), "\n"),
+          )
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,550 @@
+{"type":"tool_call","cycle_id":"a019c70e-e0e5-4f89-b57c-24da46dc11d7","timestamp":"2026-03-16T09:22:12","tool_use_id":"tc-1","name":"calculator","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"a019c70e-e0e5-4f89-b57c-24da46dc11d7","timestamp":"2026-03-16T09:22:12","tool_use_id":"tc-1","success":true,"content":"[REDACTED]","content_length":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T09:22:19","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T09:22:19","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T09:22:19","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T09:22:19","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T09:22:19","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T09:22:19","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T09:22:19","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T09:22:19","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T09:22:19","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T09:22:19","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T09:22:19","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T09:22:19","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T09:22:19","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T09:22:19","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T09:22:19","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T09:22:19","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T09:22:19","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T09:22:19","type":"dprime_layer","layer":"output_gate","decision":"reject","score":1.5555555555555556,"explanation":"Report rejected \u2014 unsourced_claims: several claims... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T09:22:19","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T09:22:19","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T09:22:19","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T09:22:19","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"type":"tool_call","cycle_id":"5c7ca468-8d12-4828-b80d-5453823b2b74","timestamp":"2026-03-16T10:01:51","tool_use_id":"tc-1","name":"calculator","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"5c7ca468-8d12-4828-b80d-5453823b2b74","timestamp":"2026-03-16T10:01:51","tool_use_id":"tc-1","success":true,"content":"[REDACTED]","content_length":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:01:58","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:01:58","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:01:58","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:01:58","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:01:58","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:01:58","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:01:58","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:01:58","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:01:58","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:01:58","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:01:58","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:01:58","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:01:58","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:01:58","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:01:58","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:01:58","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:01:58","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:01:58","type":"dprime_layer","layer":"output_gate","decision":"reject","score":1.5555555555555556,"explanation":"Report rejected \u2014 unsourced_claims: several claims... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:01:58","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:01:58","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:01:58","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:01:58","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"type":"tool_call","cycle_id":"2e0a1205-5716-4659-b40f-12b556a18b1d","timestamp":"2026-03-16T10:41:16","tool_use_id":"tc-1","name":"calculator","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"2e0a1205-5716-4659-b40f-12b556a18b1d","timestamp":"2026-03-16T10:41:16","tool_use_id":"tc-1","success":true,"content":"[REDACTED]","content_length":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:41:23","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:41:23","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:41:23","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:41:23","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:41:23","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:41:23","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:41:23","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:41:23","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:41:23","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:41:23","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:41:23","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:41:23","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:41:23","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:41:23","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:41:23","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:41:23","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:41:23","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:41:23","type":"dprime_layer","layer":"output_gate","decision":"reject","score":1.5555555555555556,"explanation":"Report rejected \u2014 unsourced_claims: several claims... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:41:23","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:41:23","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:41:23","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:41:23","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"type":"tool_call","cycle_id":"12578987-a20d-48d5-90a7-2f7d3a7c45a8","timestamp":"2026-03-16T10:48:20","tool_use_id":"tc-1","name":"calculator","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"12578987-a20d-48d5-90a7-2f7d3a7c45a8","timestamp":"2026-03-16T10:48:20","tool_use_id":"tc-1","success":true,"content":"[REDACTED]","content_length":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:48:27","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:48:27","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:48:27","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:48:27","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:48:27","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:48:27","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:48:27","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:48:27","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:48:27","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:48:27","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:48:27","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:48:27","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:48:27","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:48:27","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:48:27","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:48:27","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:48:27","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:48:27","type":"dprime_layer","layer":"output_gate","decision":"reject","score":1.5555555555555556,"explanation":"Report rejected \u2014 unsourced_claims: several claims... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:48:27","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:48:27","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:48:27","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:48:27","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"type":"human_input","cycle_id":"57a15bfa-f721-4f09-9ef0-d0dfe002edbe","parent_cycle_id":null,"timestamp":"2026-03-16T10:49:48","text":"[REDACTED]","text_length":25}
+{"cycle_id":"57a15bfa-f721-4f09-9ef0-d0dfe002edbe","timestamp":"2026-03-16T10:49:49","type":"classification","complexity":"complex","suggested_model":"claude-opus-4-6","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"57a15bfa-f721-4f09-9ef0-d0dfe002edbe","timestamp":"2026-03-16T10:49:55","model":"claude-opus-4-6","stop_reason":"tool_use","input_tokens":4545,"output_tokens":191,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"57a15bfa-f721-4f09-9ef0-d0dfe002edbe","timestamp":"2026-03-16T10:51:08","model":"claude-opus-4-6","stop_reason":"end_turn","input_tokens":4750,"output_tokens":83,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"f190a255-152b-49ed-9411-965b6f4a25db","parent_cycle_id":null,"timestamp":"2026-03-16T10:51:32","text":"[REDACTED]","text_length":42}
+{"cycle_id":"f190a255-152b-49ed-9411-965b6f4a25db","timestamp":"2026-03-16T10:51:33","type":"classification","complexity":"complex","suggested_model":"claude-opus-4-6","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"f190a255-152b-49ed-9411-965b6f4a25db","timestamp":"2026-03-16T10:51:53","model":"claude-opus-4-6","stop_reason":"end_turn","input_tokens":4847,"output_tokens":535,"content":"[REDACTED]"}
+{"type":"tool_call","cycle_id":"8283476b-f70e-4998-b14a-2013a6a61761","timestamp":"2026-03-16T10:54:16","tool_use_id":"tc-1","name":"calculator","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"8283476b-f70e-4998-b14a-2013a6a61761","timestamp":"2026-03-16T10:54:16","tool_use_id":"tc-1","success":true,"content":"[REDACTED]","content_length":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:54:23","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:54:23","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:54:23","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:54:23","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:54:24","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:54:24","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:54:24","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:54:24","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:54:24","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:54:24","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:54:24","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:54:24","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:54:24","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:54:24","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:54:24","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:54:24","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:54:24","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:54:24","type":"dprime_layer","layer":"output_gate","decision":"reject","score":1.5555555555555556,"explanation":"Report rejected \u2014 unsourced_claims: several claims... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:54:24","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:54:24","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:54:24","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T10:54:24","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"type":"human_input","cycle_id":"f6d9bb87-c783-4506-b612-70bf2935b02b","parent_cycle_id":null,"timestamp":"2026-03-16T10:56:36","text":"[REDACTED]","text_length":273}
+{"cycle_id":"f6d9bb87-c783-4506-b612-70bf2935b02b","timestamp":"2026-03-16T10:56:37","type":"classification","complexity":"complex","suggested_model":"claude-opus-4-6","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"f6d9bb87-c783-4506-b612-70bf2935b02b","timestamp":"2026-03-16T10:56:47","model":"claude-opus-4-6","stop_reason":"tool_use","input_tokens":5438,"output_tokens":355,"content":"[REDACTED]"}
+{"type":"tool_call","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:56:49","tool_use_id":"toolu_01KGUrR9sBXTQGucEkwncEzv","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:56:50","tool_use_id":"toolu_01KGUrR9sBXTQGucEkwncEzv","success":true,"content":"[REDACTED]","content_length":5383}
+{"type":"tool_call","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:56:50","tool_use_id":"toolu_01Ws5qBzTKoJ6bcbrWyQvBSS","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:56:51","tool_use_id":"toolu_01Ws5qBzTKoJ6bcbrWyQvBSS","success":true,"content":"[REDACTED]","content_length":5729}
+{"type":"tool_call","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:56:51","tool_use_id":"toolu_01Fgk8fx5PiQdegzadg9XmCw","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:56:52","tool_use_id":"toolu_01Fgk8fx5PiQdegzadg9XmCw","success":true,"content":"[REDACTED]","content_length":894}
+{"type":"tool_call","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:56:55","tool_use_id":"toolu_01T9cEjzVRsQdKP4iBfaM8Jw","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:56:56","tool_use_id":"toolu_01T9cEjzVRsQdKP4iBfaM8Jw","success":true,"content":"[REDACTED]","content_length":4025}
+{"type":"tool_call","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:56:56","tool_use_id":"toolu_0154hZzfjxeQXtD3S2HYQp5Y","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:56:56","tool_use_id":"toolu_0154hZzfjxeQXtD3S2HYQp5Y","success":true,"content":"[REDACTED]","content_length":17}
+{"type":"tool_call","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:56:56","tool_use_id":"toolu_01FDqUyXf3HvEog2urZyoYNW","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:56:57","tool_use_id":"toolu_01FDqUyXf3HvEog2urZyoYNW","success":true,"content":"[REDACTED]","content_length":17}
+{"type":"tool_call","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:56:59","tool_use_id":"toolu_01DTt3by2PCmedUhXZMkQ8Jn","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:57:00","tool_use_id":"toolu_01DTt3by2PCmedUhXZMkQ8Jn","success":true,"content":"[REDACTED]","content_length":4733}
+{"type":"tool_call","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:57:00","tool_use_id":"toolu_01KGGVfdyrxjfVjt9m3vPjCn","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:57:01","tool_use_id":"toolu_01KGGVfdyrxjfVjt9m3vPjCn","success":true,"content":"[REDACTED]","content_length":3596}
+{"type":"tool_call","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:57:01","tool_use_id":"toolu_01FDF3U2sjw52FmAS55ibXe2","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:57:02","tool_use_id":"toolu_01FDF3U2sjw52FmAS55ibXe2","success":true,"content":"[REDACTED]","content_length":4987}
+{"type":"tool_call","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:57:04","tool_use_id":"toolu_019b489hY4XgKArPfRGWaTuD","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:57:05","tool_use_id":"toolu_019b489hY4XgKArPfRGWaTuD","success":true,"content":"[REDACTED]","content_length":4687}
+{"type":"tool_call","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:57:05","tool_use_id":"toolu_01N6CuAv9ivU44C7y8hVUwCF","name":"jina_reader","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:57:15","tool_use_id":"toolu_01N6CuAv9ivU44C7y8hVUwCF","success":true,"content":"[REDACTED]","content_length":50000}
+{"type":"tool_call","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:57:18","tool_use_id":"toolu_014tNwAZHDEfjZVFgScPV93J","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:57:19","tool_use_id":"toolu_014tNwAZHDEfjZVFgScPV93J","success":true,"content":"[REDACTED]","content_length":3881}
+{"type":"tool_call","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:57:19","tool_use_id":"toolu_0124Wm68bFsjozktCL5AEXvj","name":"fetch_url","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:57:19","tool_use_id":"toolu_0124Wm68bFsjozktCL5AEXvj","success":false,"content":"[REDACTED]","content_length":33}
+{"type":"tool_call","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:57:22","tool_use_id":"toolu_014iAq2W9C3YSe1ZTRmjK1Az","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:57:23","tool_use_id":"toolu_014iAq2W9C3YSe1ZTRmjK1Az","success":true,"content":"[REDACTED]","content_length":2290}
+{"type":"tool_call","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:57:23","tool_use_id":"toolu_01BBbcAzDyDDwZrsiCop5Zn5","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:57:24","tool_use_id":"toolu_01BBbcAzDyDDwZrsiCop5Zn5","success":true,"content":"[REDACTED]","content_length":5233}
+{"type":"tool_call","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:57:28","tool_use_id":"toolu_01TMeh2vB62QCg2Tnffa9LaK","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:57:28","tool_use_id":"toolu_01TMeh2vB62QCg2Tnffa9LaK","success":true,"content":"[REDACTED]","content_length":17}
+{"type":"tool_call","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:57:28","tool_use_id":"toolu_01YKWmZ8MP5Sip7m5FMmDwo7","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:57:29","tool_use_id":"toolu_01YKWmZ8MP5Sip7m5FMmDwo7","success":true,"content":"[REDACTED]","content_length":17}
+{"type":"tool_call","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:57:31","tool_use_id":"toolu_01WuwQJVaS3vwaRmNN77n5Pa","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:57:32","tool_use_id":"toolu_01WuwQJVaS3vwaRmNN77n5Pa","success":true,"content":"[REDACTED]","content_length":4753}
+{"type":"tool_call","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:57:32","tool_use_id":"toolu_01RNMb8fK9FSkwTmEVJTy4kC","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"21522518-69ae-4afa-b27e-22b32c9cd99a","timestamp":"2026-03-16T10:57:33","tool_use_id":"toolu_01RNMb8fK9FSkwTmEVJTy4kC","success":true,"content":"[REDACTED]","content_length":4522}
+{"type":"llm_response","cycle_id":"f6d9bb87-c783-4506-b612-70bf2935b02b","timestamp":"2026-03-16T10:57:38","model":"claude-opus-4-6","stop_reason":"tool_use","input_tokens":5821,"output_tokens":177,"content":"[REDACTED]"}
+{"type":"tool_call","cycle_id":"d9557767-4245-4415-8083-9f88c4af0c04","timestamp":"2026-03-16T10:57:40","tool_use_id":"toolu_018yqShLa3SxaJ9q62JZZmQr","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"d9557767-4245-4415-8083-9f88c4af0c04","timestamp":"2026-03-16T10:57:41","tool_use_id":"toolu_018yqShLa3SxaJ9q62JZZmQr","success":true,"content":"[REDACTED]","content_length":4519}
+{"type":"tool_call","cycle_id":"d9557767-4245-4415-8083-9f88c4af0c04","timestamp":"2026-03-16T10:57:41","tool_use_id":"toolu_015gg79fuiNAEpnd3z7Lmeuz","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"d9557767-4245-4415-8083-9f88c4af0c04","timestamp":"2026-03-16T10:57:42","tool_use_id":"toolu_015gg79fuiNAEpnd3z7Lmeuz","success":true,"content":"[REDACTED]","content_length":4829}
+{"type":"tool_call","cycle_id":"d9557767-4245-4415-8083-9f88c4af0c04","timestamp":"2026-03-16T10:57:42","tool_use_id":"toolu_01MJtAsfE7DjEMieERuJ9UAo","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"d9557767-4245-4415-8083-9f88c4af0c04","timestamp":"2026-03-16T10:57:43","tool_use_id":"toolu_01MJtAsfE7DjEMieERuJ9UAo","success":true,"content":"[REDACTED]","content_length":4609}
+{"type":"tool_call","cycle_id":"d9557767-4245-4415-8083-9f88c4af0c04","timestamp":"2026-03-16T10:57:43","tool_use_id":"toolu_01SuZcfApyH45ih1p8Zs1zQm","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"d9557767-4245-4415-8083-9f88c4af0c04","timestamp":"2026-03-16T10:57:43","tool_use_id":"toolu_01SuZcfApyH45ih1p8Zs1zQm","success":true,"content":"[REDACTED]","content_length":4169}
+{"type":"tool_call","cycle_id":"d9557767-4245-4415-8083-9f88c4af0c04","timestamp":"2026-03-16T10:57:43","tool_use_id":"toolu_01M3PZkMa1Suym2DSpDovJS7","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"d9557767-4245-4415-8083-9f88c4af0c04","timestamp":"2026-03-16T10:57:44","tool_use_id":"toolu_01M3PZkMa1Suym2DSpDovJS7","success":true,"content":"[REDACTED]","content_length":5074}
+{"type":"tool_call","cycle_id":"d9557767-4245-4415-8083-9f88c4af0c04","timestamp":"2026-03-16T10:57:47","tool_use_id":"toolu_018TXosXVCEuSdiaogHMKkQi","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"d9557767-4245-4415-8083-9f88c4af0c04","timestamp":"2026-03-16T10:57:48","tool_use_id":"toolu_018TXosXVCEuSdiaogHMKkQi","success":true,"content":"[REDACTED]","content_length":17}
+{"type":"tool_call","cycle_id":"d9557767-4245-4415-8083-9f88c4af0c04","timestamp":"2026-03-16T10:57:48","tool_use_id":"toolu_01DCyc1SpuKiw1uNanUgphxC","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"d9557767-4245-4415-8083-9f88c4af0c04","timestamp":"2026-03-16T10:57:48","tool_use_id":"toolu_01DCyc1SpuKiw1uNanUgphxC","success":true,"content":"[REDACTED]","content_length":4599}
+{"type":"tool_call","cycle_id":"d9557767-4245-4415-8083-9f88c4af0c04","timestamp":"2026-03-16T10:57:48","tool_use_id":"toolu_0177pnWv1YXLnGfWd3NMYdsA","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"d9557767-4245-4415-8083-9f88c4af0c04","timestamp":"2026-03-16T10:57:49","tool_use_id":"toolu_0177pnWv1YXLnGfWd3NMYdsA","success":true,"content":"[REDACTED]","content_length":3482}
+{"type":"tool_call","cycle_id":"d9557767-4245-4415-8083-9f88c4af0c04","timestamp":"2026-03-16T10:57:49","tool_use_id":"toolu_01HFwb1D4hLQZr72stq8UVCH","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"d9557767-4245-4415-8083-9f88c4af0c04","timestamp":"2026-03-16T10:57:50","tool_use_id":"toolu_01HFwb1D4hLQZr72stq8UVCH","success":true,"content":"[REDACTED]","content_length":4425}
+{"type":"tool_call","cycle_id":"d9557767-4245-4415-8083-9f88c4af0c04","timestamp":"2026-03-16T10:57:53","tool_use_id":"toolu_01TKq4gVQtAxbxCyHWvsZaB8","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"d9557767-4245-4415-8083-9f88c4af0c04","timestamp":"2026-03-16T10:57:53","tool_use_id":"toolu_01TKq4gVQtAxbxCyHWvsZaB8","success":true,"content":"[REDACTED]","content_length":1526}
+{"type":"tool_call","cycle_id":"d9557767-4245-4415-8083-9f88c4af0c04","timestamp":"2026-03-16T10:57:53","tool_use_id":"toolu_017RtzaBrRAHD7Fx59F51dRj","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"d9557767-4245-4415-8083-9f88c4af0c04","timestamp":"2026-03-16T10:57:54","tool_use_id":"toolu_017RtzaBrRAHD7Fx59F51dRj","success":true,"content":"[REDACTED]","content_length":4327}
+{"type":"tool_call","cycle_id":"d9557767-4245-4415-8083-9f88c4af0c04","timestamp":"2026-03-16T10:57:54","tool_use_id":"toolu_01VFSHYFiGC1g8mi6DYszU1H","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"d9557767-4245-4415-8083-9f88c4af0c04","timestamp":"2026-03-16T10:57:55","tool_use_id":"toolu_01VFSHYFiGC1g8mi6DYszU1H","success":true,"content":"[REDACTED]","content_length":17}
+{"type":"tool_call","cycle_id":"d9557767-4245-4415-8083-9f88c4af0c04","timestamp":"2026-03-16T10:57:57","tool_use_id":"toolu_01SSA4wsLyGffHnWj2DRZoRc","name":"jina_reader","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"d9557767-4245-4415-8083-9f88c4af0c04","timestamp":"2026-03-16T10:58:00","tool_use_id":"toolu_01SSA4wsLyGffHnWj2DRZoRc","success":true,"content":"[REDACTED]","content_length":24760}
+{"type":"tool_call","cycle_id":"d9557767-4245-4415-8083-9f88c4af0c04","timestamp":"2026-03-16T10:58:00","tool_use_id":"toolu_015BR6i2U5oFF5D5Kc5epzgr","name":"fetch_url","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"d9557767-4245-4415-8083-9f88c4af0c04","timestamp":"2026-03-16T10:58:03","tool_use_id":"toolu_015BR6i2U5oFF5D5Kc5epzgr","success":true,"content":"[REDACTED]","content_length":49212}
+{"type":"llm_response","cycle_id":"f6d9bb87-c783-4506-b612-70bf2935b02b","timestamp":"2026-03-16T10:58:08","model":"claude-opus-4-6","stop_reason":"tool_use","input_tokens":6024,"output_tokens":120,"content":"[REDACTED]"}
+{"type":"tool_call","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:09","tool_use_id":"toolu_01EnYuabiUTEEPuZTPZjBvZr","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:10","tool_use_id":"toolu_01EnYuabiUTEEPuZTPZjBvZr","success":true,"content":"[REDACTED]","content_length":4978}
+{"type":"tool_call","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:10","tool_use_id":"toolu_01JnV77mebxbDZw1Gyoo5pKx","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:11","tool_use_id":"toolu_01JnV77mebxbDZw1Gyoo5pKx","success":true,"content":"[REDACTED]","content_length":5683}
+{"type":"tool_call","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:15","tool_use_id":"toolu_01Pt3bZgUmyTXLZhpnWtqu68","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:15","tool_use_id":"toolu_01Pt3bZgUmyTXLZhpnWtqu68","success":true,"content":"[REDACTED]","content_length":17}
+{"type":"tool_call","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:15","tool_use_id":"toolu_01XfxnfHBZChJkLimALG17mH","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:16","tool_use_id":"toolu_01XfxnfHBZChJkLimALG17mH","success":true,"content":"[REDACTED]","content_length":17}
+{"type":"tool_call","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:18","tool_use_id":"toolu_01RM3FLm5A3pkSfEXej53m6N","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:19","tool_use_id":"toolu_01RM3FLm5A3pkSfEXej53m6N","success":true,"content":"[REDACTED]","content_length":5299}
+{"type":"tool_call","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:19","tool_use_id":"toolu_01NqzGg5nuvnnedhoRCkL3yE","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:19","tool_use_id":"toolu_01NqzGg5nuvnnedhoRCkL3yE","success":true,"content":"[REDACTED]","content_length":4380}
+{"type":"tool_call","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:22","tool_use_id":"toolu_01XZSMKJueUHW3cypcpsp9MJ","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:22","tool_use_id":"toolu_01XZSMKJueUHW3cypcpsp9MJ","success":true,"content":"[REDACTED]","content_length":4440}
+{"type":"tool_call","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:22","tool_use_id":"toolu_01CkhXN9frwiCiYV6hRxDAsD","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:23","tool_use_id":"toolu_01CkhXN9frwiCiYV6hRxDAsD","success":true,"content":"[REDACTED]","content_length":3720}
+{"type":"tool_call","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:25","tool_use_id":"toolu_01XjwuwCdTMaM4kdKcv4m2G1","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:26","tool_use_id":"toolu_01XjwuwCdTMaM4kdKcv4m2G1","success":true,"content":"[REDACTED]","content_length":17}
+{"type":"tool_call","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:26","tool_use_id":"toolu_01YWvn4mhUm71uZZs2HFSeoA","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:27","tool_use_id":"toolu_01YWvn4mhUm71uZZs2HFSeoA","success":true,"content":"[REDACTED]","content_length":4392}
+{"type":"tool_call","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:29","tool_use_id":"toolu_01PZKqYpNKh63a7xCnRqDjij","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:30","tool_use_id":"toolu_01PZKqYpNKh63a7xCnRqDjij","success":true,"content":"[REDACTED]","content_length":1719}
+{"type":"tool_call","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:30","tool_use_id":"toolu_01FHnYQ7AtCSw2veXS2RTtUs","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:30","tool_use_id":"toolu_01FHnYQ7AtCSw2veXS2RTtUs","success":true,"content":"[REDACTED]","content_length":17}
+{"type":"tool_call","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:33","tool_use_id":"toolu_01LqgnTyizxjMRNHqPJgBuTp","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:33","tool_use_id":"toolu_01LqgnTyizxjMRNHqPJgBuTp","success":true,"content":"[REDACTED]","content_length":6269}
+{"type":"tool_call","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:33","tool_use_id":"toolu_01T3U4jBicCj7i9nFYfAzawy","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:34","tool_use_id":"toolu_01T3U4jBicCj7i9nFYfAzawy","success":true,"content":"[REDACTED]","content_length":5124}
+{"type":"tool_call","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:36","tool_use_id":"toolu_014K2Y4s7XhSvU5XcpbJMifM","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:37","tool_use_id":"toolu_014K2Y4s7XhSvU5XcpbJMifM","success":true,"content":"[REDACTED]","content_length":493}
+{"type":"tool_call","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:37","tool_use_id":"toolu_01SxidY8AkNWoWpm5R92d565","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"35f6c48d-17c5-40d4-a557-8d7e02cad724","timestamp":"2026-03-16T10:58:38","tool_use_id":"toolu_01SxidY8AkNWoWpm5R92d565","success":true,"content":"[REDACTED]","content_length":4386}
+{"type":"llm_response","cycle_id":"f6d9bb87-c783-4506-b612-70bf2935b02b","timestamp":"2026-03-16T10:58:42","model":"claude-opus-4-6","stop_reason":"tool_use","input_tokens":6171,"output_tokens":81,"content":"[REDACTED]"}
+{"type":"tool_call","cycle_id":"0b7eb111-1986-45cf-9b90-9b627d5e5c01","timestamp":"2026-03-16T10:58:43","tool_use_id":"toolu_01Nnd9ptidCfck9smtLLFRxy","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"0b7eb111-1986-45cf-9b90-9b627d5e5c01","timestamp":"2026-03-16T10:58:44","tool_use_id":"toolu_01Nnd9ptidCfck9smtLLFRxy","success":true,"content":"[REDACTED]","content_length":4272}
+{"type":"llm_response","cycle_id":"f6d9bb87-c783-4506-b612-70bf2935b02b","timestamp":"2026-03-16T10:58:54","model":"claude-opus-4-6","stop_reason":"tool_use","input_tokens":6662,"output_tokens":147,"content":"[REDACTED]"}
+{"type":"tool_call","cycle_id":"7e8b5998-178a-4f7b-8e87-0b356b279a20","timestamp":"2026-03-16T10:58:56","tool_use_id":"toolu_01ScqhLL5ZEV7ohnSB11aeTP","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"7e8b5998-178a-4f7b-8e87-0b356b279a20","timestamp":"2026-03-16T10:58:57","tool_use_id":"toolu_01ScqhLL5ZEV7ohnSB11aeTP","success":true,"content":"[REDACTED]","content_length":3794}
+{"type":"tool_call","cycle_id":"7e8b5998-178a-4f7b-8e87-0b356b279a20","timestamp":"2026-03-16T10:58:57","tool_use_id":"toolu_017z8QsRBW3trz7g1ewN4BVb","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"7e8b5998-178a-4f7b-8e87-0b356b279a20","timestamp":"2026-03-16T10:58:57","tool_use_id":"toolu_017z8QsRBW3trz7g1ewN4BVb","success":true,"content":"[REDACTED]","content_length":5558}
+{"type":"tool_call","cycle_id":"7e8b5998-178a-4f7b-8e87-0b356b279a20","timestamp":"2026-03-16T10:58:57","tool_use_id":"toolu_011RmAiaCj8MAit4Gv1oPxnA","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"7e8b5998-178a-4f7b-8e87-0b356b279a20","timestamp":"2026-03-16T10:58:58","tool_use_id":"toolu_011RmAiaCj8MAit4Gv1oPxnA","success":true,"content":"[REDACTED]","content_length":4433}
+{"type":"tool_call","cycle_id":"7e8b5998-178a-4f7b-8e87-0b356b279a20","timestamp":"2026-03-16T10:59:01","tool_use_id":"toolu_01FsuJyoo4bXAXziCdj9sWig","name":"jina_reader","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"7e8b5998-178a-4f7b-8e87-0b356b279a20","timestamp":"2026-03-16T10:59:01","tool_use_id":"toolu_01FsuJyoo4bXAXziCdj9sWig","success":true,"content":"[REDACTED]","content_length":24760}
+{"type":"tool_call","cycle_id":"7e8b5998-178a-4f7b-8e87-0b356b279a20","timestamp":"2026-03-16T10:59:01","tool_use_id":"toolu_01ESFMt1zGN4TNRc62HLPc2G","name":"jina_reader","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"7e8b5998-178a-4f7b-8e87-0b356b279a20","timestamp":"2026-03-16T10:59:06","tool_use_id":"toolu_01ESFMt1zGN4TNRc62HLPc2G","success":true,"content":"[REDACTED]","content_length":11502}
+{"type":"tool_call","cycle_id":"7e8b5998-178a-4f7b-8e87-0b356b279a20","timestamp":"2026-03-16T10:59:06","tool_use_id":"toolu_01P8iUgVFgNqnFxrVJreaTY2","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"7e8b5998-178a-4f7b-8e87-0b356b279a20","timestamp":"2026-03-16T10:59:06","tool_use_id":"toolu_01P8iUgVFgNqnFxrVJreaTY2","success":true,"content":"[REDACTED]","content_length":1340}
+{"type":"tool_call","cycle_id":"7e8b5998-178a-4f7b-8e87-0b356b279a20","timestamp":"2026-03-16T10:59:12","tool_use_id":"toolu_01KQEcQXftYF4tnsz4VY1ZCX","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"7e8b5998-178a-4f7b-8e87-0b356b279a20","timestamp":"2026-03-16T10:59:13","tool_use_id":"toolu_01KQEcQXftYF4tnsz4VY1ZCX","success":true,"content":"[REDACTED]","content_length":811}
+{"type":"tool_call","cycle_id":"7e8b5998-178a-4f7b-8e87-0b356b279a20","timestamp":"2026-03-16T10:59:13","tool_use_id":"toolu_01Qbkm4PtsatdJnqkFWWUfsB","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"7e8b5998-178a-4f7b-8e87-0b356b279a20","timestamp":"2026-03-16T10:59:13","tool_use_id":"toolu_01Qbkm4PtsatdJnqkFWWUfsB","success":true,"content":"[REDACTED]","content_length":2706}
+{"type":"llm_response","cycle_id":"f6d9bb87-c783-4506-b612-70bf2935b02b","timestamp":"2026-03-16T10:59:30","model":"claude-opus-4-6","stop_reason":"tool_use","input_tokens":7360,"output_tokens":233,"content":"[REDACTED]"}
+{"type":"tool_call","cycle_id":"71a14905-7f93-46ef-b896-cd6fec6672c0","timestamp":"2026-03-16T10:59:34","tool_use_id":"toolu_01WA5YPhZk5ri8DVcQebJiGj","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"71a14905-7f93-46ef-b896-cd6fec6672c0","timestamp":"2026-03-16T10:59:35","tool_use_id":"toolu_01WA5YPhZk5ri8DVcQebJiGj","success":true,"content":"[REDACTED]","content_length":4540}
+{"type":"tool_call","cycle_id":"71a14905-7f93-46ef-b896-cd6fec6672c0","timestamp":"2026-03-16T10:59:35","tool_use_id":"toolu_01Sp318VkjQCh8X9k1jhy1S2","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"71a14905-7f93-46ef-b896-cd6fec6672c0","timestamp":"2026-03-16T10:59:35","tool_use_id":"toolu_01Sp318VkjQCh8X9k1jhy1S2","success":true,"content":"[REDACTED]","content_length":4156}
+{"type":"tool_call","cycle_id":"71a14905-7f93-46ef-b896-cd6fec6672c0","timestamp":"2026-03-16T10:59:35","tool_use_id":"toolu_01NvkFudLhTi2T5bDKSf82Tw","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"71a14905-7f93-46ef-b896-cd6fec6672c0","timestamp":"2026-03-16T10:59:36","tool_use_id":"toolu_01NvkFudLhTi2T5bDKSf82Tw","success":true,"content":"[REDACTED]","content_length":4147}
+{"type":"tool_call","cycle_id":"71a14905-7f93-46ef-b896-cd6fec6672c0","timestamp":"2026-03-16T10:59:36","tool_use_id":"toolu_018mHi6TYJkCSwb7BKMfDu6x","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"71a14905-7f93-46ef-b896-cd6fec6672c0","timestamp":"2026-03-16T10:59:37","tool_use_id":"toolu_018mHi6TYJkCSwb7BKMfDu6x","success":true,"content":"[REDACTED]","content_length":17}
+{"type":"tool_call","cycle_id":"71a14905-7f93-46ef-b896-cd6fec6672c0","timestamp":"2026-03-16T10:59:40","tool_use_id":"toolu_01TvTr8shf4FvhkwqQaTrSzn","name":"jina_reader","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"71a14905-7f93-46ef-b896-cd6fec6672c0","timestamp":"2026-03-16T10:59:50","tool_use_id":"toolu_01TvTr8shf4FvhkwqQaTrSzn","success":true,"content":"[REDACTED]","content_length":50000}
+{"type":"tool_call","cycle_id":"71a14905-7f93-46ef-b896-cd6fec6672c0","timestamp":"2026-03-16T10:59:50","tool_use_id":"toolu_017bruTdW9MZj3HGQKoXZYaj","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"71a14905-7f93-46ef-b896-cd6fec6672c0","timestamp":"2026-03-16T10:59:51","tool_use_id":"toolu_017bruTdW9MZj3HGQKoXZYaj","success":true,"content":"[REDACTED]","content_length":4050}
+{"type":"tool_call","cycle_id":"71a14905-7f93-46ef-b896-cd6fec6672c0","timestamp":"2026-03-16T10:59:51","tool_use_id":"toolu_015XxkMCwsnYaBqLemC1xL5G","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"71a14905-7f93-46ef-b896-cd6fec6672c0","timestamp":"2026-03-16T10:59:52","tool_use_id":"toolu_015XxkMCwsnYaBqLemC1xL5G","success":true,"content":"[REDACTED]","content_length":4030}
+{"type":"tool_call","cycle_id":"71a14905-7f93-46ef-b896-cd6fec6672c0","timestamp":"2026-03-16T10:59:55","tool_use_id":"toolu_01NdDWaQ2BsSeKrToJPSM4jT","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"71a14905-7f93-46ef-b896-cd6fec6672c0","timestamp":"2026-03-16T10:59:56","tool_use_id":"toolu_01NdDWaQ2BsSeKrToJPSM4jT","success":true,"content":"[REDACTED]","content_length":362}
+{"type":"tool_call","cycle_id":"71a14905-7f93-46ef-b896-cd6fec6672c0","timestamp":"2026-03-16T10:59:56","tool_use_id":"toolu_01RWDJQrizUDaMp5HjtuFMtc","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"71a14905-7f93-46ef-b896-cd6fec6672c0","timestamp":"2026-03-16T10:59:57","tool_use_id":"toolu_01RWDJQrizUDaMp5HjtuFMtc","success":true,"content":"[REDACTED]","content_length":4177}
+{"type":"tool_call","cycle_id":"71a14905-7f93-46ef-b896-cd6fec6672c0","timestamp":"2026-03-16T10:59:57","tool_use_id":"toolu_015upm3H7MhLnJ8J6PXrrDua","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"71a14905-7f93-46ef-b896-cd6fec6672c0","timestamp":"2026-03-16T10:59:57","tool_use_id":"toolu_015upm3H7MhLnJ8J6PXrrDua","success":true,"content":"[REDACTED]","content_length":3381}
+{"type":"tool_call","cycle_id":"71a14905-7f93-46ef-b896-cd6fec6672c0","timestamp":"2026-03-16T11:00:00","tool_use_id":"toolu_01JoaCPhnAyR2EPBuWakgnBw","name":"jina_reader","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"71a14905-7f93-46ef-b896-cd6fec6672c0","timestamp":"2026-03-16T11:00:00","tool_use_id":"toolu_01JoaCPhnAyR2EPBuWakgnBw","success":true,"content":"[REDACTED]","content_length":24760}
+{"type":"tool_call","cycle_id":"71a14905-7f93-46ef-b896-cd6fec6672c0","timestamp":"2026-03-16T11:00:00","tool_use_id":"toolu_017mYnYWJUvZ7eqY1C7Z55eU","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"71a14905-7f93-46ef-b896-cd6fec6672c0","timestamp":"2026-03-16T11:00:01","tool_use_id":"toolu_017mYnYWJUvZ7eqY1C7Z55eU","success":true,"content":"[REDACTED]","content_length":1533}
+{"type":"llm_response","cycle_id":"f6d9bb87-c783-4506-b612-70bf2935b02b","timestamp":"2026-03-16T11:00:27","model":"claude-opus-4-6","stop_reason":"end_turn","input_tokens":8336,"output_tokens":425,"content":"[REDACTED]"}
+{"type":"tool_call","cycle_id":"6c6010aa-e1f1-4385-913b-65903911b150","timestamp":"2026-03-16T11:02:31","tool_use_id":"tc-1","name":"calculator","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"6c6010aa-e1f1-4385-913b-65903911b150","timestamp":"2026-03-16T11:02:31","tool_use_id":"tc-1","success":true,"content":"[REDACTED]","content_length":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:02:39","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:02:39","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:02:39","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:02:39","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:02:39","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:02:39","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:02:39","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:02:39","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:02:39","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:02:39","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:02:39","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:02:39","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:02:39","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:02:39","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:02:39","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:02:39","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:02:39","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:02:39","type":"dprime_layer","layer":"output_gate","decision":"reject","score":1.5555555555555556,"explanation":"Report rejected \u2014 unsourced_claims: several claims... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:02:39","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:02:39","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:02:39","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:02:39","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"type":"human_input","cycle_id":"28468b1e-da17-4ace-bf2d-35513ae63431","parent_cycle_id":null,"timestamp":"2026-03-16T11:02:50","text":"[REDACTED]","text_length":238}
+{"cycle_id":"28468b1e-da17-4ace-bf2d-35513ae63431","timestamp":"2026-03-16T11:02:51","type":"classification","complexity":"complex","suggested_model":"claude-opus-4-6","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"28468b1e-da17-4ace-bf2d-35513ae63431","timestamp":"2026-03-16T11:03:15","model":"claude-opus-4-6","stop_reason":"tool_use","input_tokens":8829,"output_tokens":851,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"28468b1e-da17-4ace-bf2d-35513ae63431","timestamp":"2026-03-16T11:03:23","model":"claude-opus-4-6","stop_reason":"end_turn","input_tokens":10008,"output_tokens":77,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"77c37fed-efc0-48d2-9d6d-cff61d7586db","parent_cycle_id":null,"timestamp":"2026-03-16T11:08:03","text":"[REDACTED]","text_length":312}
+{"cycle_id":"77c37fed-efc0-48d2-9d6d-cff61d7586db","timestamp":"2026-03-16T11:08:03","type":"classification","complexity":"complex","suggested_model":"claude-opus-4-6","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"77c37fed-efc0-48d2-9d6d-cff61d7586db","timestamp":"2026-03-16T11:09:02","model":"claude-opus-4-6","stop_reason":"tool_use","input_tokens":9461,"output_tokens":732,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"77c37fed-efc0-48d2-9d6d-cff61d7586db","timestamp":"2026-03-16T11:09:07","model":"claude-opus-4-6","stop_reason":"end_turn","input_tokens":10499,"output_tokens":71,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"ef02d9de-7944-4901-9687-369d7d09fb65","parent_cycle_id":null,"timestamp":"2026-03-16T11:11:53","text":"[REDACTED]","text_length":59}
+{"cycle_id":"ef02d9de-7944-4901-9687-369d7d09fb65","timestamp":"2026-03-16T11:11:54","type":"classification","complexity":"complex","suggested_model":"claude-opus-4-6","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"ef02d9de-7944-4901-9687-369d7d09fb65","timestamp":"2026-03-16T11:12:14","model":"claude-opus-4-6","stop_reason":"tool_use","input_tokens":10463,"output_tokens":109,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"ef02d9de-7944-4901-9687-369d7d09fb65","timestamp":"2026-03-16T11:13:41","model":"claude-opus-4-6","stop_reason":"end_turn","input_tokens":62106,"output_tokens":783,"content":"[REDACTED]"}
+{"type":"tool_call","cycle_id":"f5da89c6-6b2f-49f1-ac16-0da9b4a83dbd","timestamp":"2026-03-16T11:20:59","tool_use_id":"tc-1","name":"calculator","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"f5da89c6-6b2f-49f1-ac16-0da9b4a83dbd","timestamp":"2026-03-16T11:20:59","tool_use_id":"tc-1","success":true,"content":"[REDACTED]","content_length":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:21:06","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:21:06","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:21:06","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:21:06","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:21:06","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:21:06","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:21:06","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:21:06","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:21:06","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:21:06","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:21:06","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:21:06","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:21:06","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:21:06","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:21:06","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:21:06","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:21:06","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:21:06","type":"dprime_layer","layer":"output_gate","decision":"reject","score":1.5555555555555556,"explanation":"Report rejected \u2014 unsourced_claims: several claims... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:21:06","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:21:06","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:21:06","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:21:06","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"type":"tool_call","cycle_id":"12f40945-f02f-42e3-858a-b23eb12fc2e2","timestamp":"2026-03-16T11:46:47","tool_use_id":"tc-1","name":"calculator","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"12f40945-f02f-42e3-858a-b23eb12fc2e2","timestamp":"2026-03-16T11:46:47","tool_use_id":"tc-1","success":true,"content":"[REDACTED]","content_length":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:46:54","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:46:54","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:46:54","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:46:54","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:46:54","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:46:54","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:46:54","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:46:54","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:46:54","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:46:54","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:46:54","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:46:54","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:46:54","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:46:54","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:46:54","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:46:54","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:46:54","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:46:54","type":"dprime_layer","layer":"output_gate","decision":"reject","score":1.5555555555555556,"explanation":"Report rejected \u2014 unsourced_claims: several claims... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:46:54","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:46:54","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:46:54","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:46:54","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"type":"tool_call","cycle_id":"27a28715-16e7-4c69-89e1-e294678860ad","timestamp":"2026-03-16T11:52:04","tool_use_id":"tc-1","name":"calculator","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"27a28715-16e7-4c69-89e1-e294678860ad","timestamp":"2026-03-16T11:52:04","tool_use_id":"tc-1","success":true,"content":"[REDACTED]","content_length":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:52:11","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:52:11","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:52:11","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:52:11","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:52:11","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:52:11","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:52:11","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:52:11","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:52:11","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:52:11","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:52:11","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:52:11","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:52:11","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:52:11","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:52:11","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:52:11","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:52:11","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:52:11","type":"dprime_layer","layer":"output_gate","decision":"reject","score":1.5555555555555556,"explanation":"Report rejected \u2014 unsourced_claims: several claims... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:52:11","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:52:11","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:52:11","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:52:11","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"type":"tool_call","cycle_id":"6649d4be-dfe0-4761-9a64-3f3028de6b92","timestamp":"2026-03-16T11:53:02","tool_use_id":"tc-1","name":"calculator","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"6649d4be-dfe0-4761-9a64-3f3028de6b92","timestamp":"2026-03-16T11:53:02","tool_use_id":"tc-1","success":true,"content":"[REDACTED]","content_length":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:53:09","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:53:09","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:53:09","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:53:09","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:53:09","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:53:09","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:53:09","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:53:09","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:53:09","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:53:09","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:53:09","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:53:09","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:53:09","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:53:09","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:53:09","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:53:09","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:53:09","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:53:09","type":"dprime_layer","layer":"output_gate","decision":"reject","score":1.5555555555555556,"explanation":"Report rejected \u2014 unsourced_claims: several claims... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:53:09","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:53:09","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:53:09","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:53:09","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"type":"tool_call","cycle_id":"8ee9bf7d-ed3d-4445-a1c7-abfff5b1509f","timestamp":"2026-03-16T11:59:34","tool_use_id":"tc-1","name":"calculator","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"8ee9bf7d-ed3d-4445-a1c7-abfff5b1509f","timestamp":"2026-03-16T11:59:34","tool_use_id":"tc-1","success":true,"content":"[REDACTED]","content_length":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:59:42","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:59:42","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:59:42","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:59:42","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:59:42","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:59:42","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:59:42","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:59:42","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:59:42","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:59:42","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:59:42","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:59:42","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:59:42","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:59:42","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:59:42","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:59:42","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:59:42","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:59:42","type":"dprime_layer","layer":"output_gate","decision":"reject","score":1.5555555555555556,"explanation":"Report rejected \u2014 unsourced_claims: several claims... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:59:42","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:59:42","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:59:42","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T11:59:42","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"type":"human_input","cycle_id":"c043e235-3421-4a02-b384-18a044696e34","parent_cycle_id":null,"timestamp":"2026-03-16T12:03:03","text":"[REDACTED]","text_length":38}
+{"cycle_id":"c043e235-3421-4a02-b384-18a044696e34","timestamp":"2026-03-16T12:03:04","type":"classification","complexity":"complex","suggested_model":"claude-opus-4-6","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"c043e235-3421-4a02-b384-18a044696e34","timestamp":"2026-03-16T12:03:08","model":"claude-opus-4-6","stop_reason":"tool_use","input_tokens":3716,"output_tokens":131,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"c043e235-3421-4a02-b384-18a044696e34","timestamp":"2026-03-16T12:03:38","model":"claude-opus-4-6","stop_reason":"end_turn","input_tokens":6590,"output_tokens":497,"content":"[REDACTED]"}
+{"type":"tool_call","cycle_id":"205fbea9-db83-44c8-99e3-2e0fb81b7855","timestamp":"2026-03-16T12:11:59","tool_use_id":"tc-1","name":"calculator","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"205fbea9-db83-44c8-99e3-2e0fb81b7855","timestamp":"2026-03-16T12:11:59","tool_use_id":"tc-1","success":true,"content":"[REDACTED]","content_length":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:12:06","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:12:06","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:12:06","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:12:06","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:12:06","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:12:06","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:12:06","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:12:06","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:12:06","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:12:06","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:12:06","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:12:06","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:12:06","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:12:06","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:12:06","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:12:06","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:12:06","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:12:06","type":"dprime_layer","layer":"output_gate","decision":"reject","score":1.5555555555555556,"explanation":"Report rejected \u2014 unsourced_claims: several claims... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:12:06","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:12:06","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:12:06","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:12:06","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"type":"human_input","cycle_id":"c8ef595a-5501-40fc-a854-6588ae7d8850","parent_cycle_id":null,"timestamp":"2026-03-16T12:17:34","text":"[REDACTED]","text_length":11}
+{"cycle_id":"c8ef595a-5501-40fc-a854-6588ae7d8850","timestamp":"2026-03-16T12:17:36","type":"classification","complexity":"simple","suggested_model":"claude-haiku-4-5-20251001","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"c8ef595a-5501-40fc-a854-6588ae7d8850","timestamp":"2026-03-16T12:17:38","model":"claude-haiku-4-5-20251001","stop_reason":"end_turn","input_tokens":3724,"output_tokens":86,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"0244aaa2-ecce-4d93-a1e0-9f379ac69828","parent_cycle_id":null,"timestamp":"2026-03-16T12:18:17","text":"[REDACTED]","text_length":80}
+{"cycle_id":"0244aaa2-ecce-4d93-a1e0-9f379ac69828","timestamp":"2026-03-16T12:18:18","type":"classification","complexity":"complex","suggested_model":"claude-opus-4-6","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"0244aaa2-ecce-4d93-a1e0-9f379ac69828","timestamp":"2026-03-16T12:18:22","model":"claude-opus-4-6","stop_reason":"tool_use","input_tokens":3831,"output_tokens":113,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"0244aaa2-ecce-4d93-a1e0-9f379ac69828","timestamp":"2026-03-16T12:18:27","model":"claude-opus-4-6","stop_reason":"tool_use","input_tokens":7248,"output_tokens":167,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"0244aaa2-ecce-4d93-a1e0-9f379ac69828","timestamp":"2026-03-16T12:18:44","model":"claude-opus-4-6","stop_reason":"end_turn","input_tokens":8516,"output_tokens":486,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"f44579c5-c1a8-4c05-9aad-238713b8e44d","parent_cycle_id":null,"timestamp":"2026-03-16T12:19:50","text":"[REDACTED]","text_length":96}
+{"cycle_id":"f44579c5-c1a8-4c05-9aad-238713b8e44d","timestamp":"2026-03-16T12:19:51","type":"classification","complexity":"complex","suggested_model":"claude-opus-4-6","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"f44579c5-c1a8-4c05-9aad-238713b8e44d","timestamp":"2026-03-16T12:20:00","model":"claude-opus-4-6","stop_reason":"end_turn","input_tokens":9034,"output_tokens":187,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"ae133880-1633-4b7a-adcb-47f0d461c95a","parent_cycle_id":null,"timestamp":"2026-03-16T12:23:44","text":"[REDACTED]","text_length":8}
+{"cycle_id":"ae133880-1633-4b7a-adcb-47f0d461c95a","timestamp":"2026-03-16T12:23:44","type":"classification","complexity":"simple","suggested_model":"mock-model","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"ae133880-1633-4b7a-adcb-47f0d461c95a","timestamp":"2026-03-16T12:23:44","model":"mock","stop_reason":"end_turn","input_tokens":10,"output_tokens":10,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"55a537a6-856b-4f9d-87f8-73c7ec6947bd","parent_cycle_id":null,"timestamp":"2026-03-16T12:23:44","text":"[REDACTED]","text_length":8}
+{"cycle_id":"55a537a6-856b-4f9d-87f8-73c7ec6947bd","timestamp":"2026-03-16T12:23:44","type":"classification","complexity":"simple","suggested_model":"mock-model","prompted_user":false,"user_confirmed":null}
+{"type":"llm_error","cycle_id":"55a537a6-856b-4f9d-87f8-73c7ec6947bd","timestamp":"2026-03-16T12:23:44","error":"Unknown error: test failure"}
+{"type":"human_input","cycle_id":"58ae5708-581f-4e07-99dc-d4f13f42e219","parent_cycle_id":null,"timestamp":"2026-03-16T12:23:44","text":"[REDACTED]","text_length":13}
+{"cycle_id":"58ae5708-581f-4e07-99dc-d4f13f42e219","timestamp":"2026-03-16T12:23:44","type":"classification","complexity":"simple","suggested_model":"mock-model","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"58ae5708-581f-4e07-99dc-d4f13f42e219","timestamp":"2026-03-16T12:23:44","model":"mock","stop_reason":"end_turn","input_tokens":10,"output_tokens":10,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"fc7a026a-1a37-475c-a5f4-35983f34ecfe","parent_cycle_id":null,"timestamp":"2026-03-16T12:23:44","text":"[REDACTED]","text_length":14}
+{"cycle_id":"fc7a026a-1a37-475c-a5f4-35983f34ecfe","timestamp":"2026-03-16T12:23:44","type":"classification","complexity":"simple","suggested_model":"mock-model","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"fc7a026a-1a37-475c-a5f4-35983f34ecfe","timestamp":"2026-03-16T12:23:44","model":"mock","stop_reason":"end_turn","input_tokens":10,"output_tokens":10,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"d6c65168-4503-4328-8deb-530eeb961bef","parent_cycle_id":null,"timestamp":"2026-03-16T12:23:44","text":"[REDACTED]","text_length":4}
+{"cycle_id":"d6c65168-4503-4328-8deb-530eeb961bef","timestamp":"2026-03-16T12:23:44","type":"classification","complexity":"simple","suggested_model":"mock-model","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"d6c65168-4503-4328-8deb-530eeb961bef","timestamp":"2026-03-16T12:23:44","model":"mock","stop_reason":"end_turn","input_tokens":10,"output_tokens":10,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"b621ad78-da78-4a4d-88c7-4b8a843ae981","parent_cycle_id":null,"timestamp":"2026-03-16T12:23:44","text":"[REDACTED]","text_length":5}
+{"cycle_id":"b621ad78-da78-4a4d-88c7-4b8a843ae981","timestamp":"2026-03-16T12:23:44","type":"classification","complexity":"simple","suggested_model":"mock-model","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"b621ad78-da78-4a4d-88c7-4b8a843ae981","timestamp":"2026-03-16T12:23:44","model":"mock","stop_reason":"tool_use","input_tokens":15,"output_tokens":20,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"b621ad78-da78-4a4d-88c7-4b8a843ae981","timestamp":"2026-03-16T12:23:44","model":"mock","stop_reason":"end_turn","input_tokens":10,"output_tokens":10,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"088f73f8-4ce9-4a3e-bb89-e2d272b88fac","parent_cycle_id":null,"timestamp":"2026-03-16T12:23:44","text":"[REDACTED]","text_length":2}
+{"cycle_id":"088f73f8-4ce9-4a3e-bb89-e2d272b88fac","timestamp":"2026-03-16T12:23:44","type":"classification","complexity":"simple","suggested_model":"mock-model","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"088f73f8-4ce9-4a3e-bb89-e2d272b88fac","timestamp":"2026-03-16T12:23:44","model":"mock","stop_reason":"end_turn","input_tokens":10,"output_tokens":10,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"2efd6b4f-ed7c-4941-8511-104a1dfd53d6","parent_cycle_id":null,"timestamp":"2026-03-16T12:23:44","text":"[REDACTED]","text_length":5}
+{"cycle_id":"2efd6b4f-ed7c-4941-8511-104a1dfd53d6","timestamp":"2026-03-16T12:23:44","type":"classification","complexity":"simple","suggested_model":"mock-model","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"2efd6b4f-ed7c-4941-8511-104a1dfd53d6","timestamp":"2026-03-16T12:23:44","model":"mock","stop_reason":"end_turn","input_tokens":10,"output_tokens":10,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"82887e9b-15fd-4c74-b268-d5c396c4f231","parent_cycle_id":null,"timestamp":"2026-03-16T12:23:44","text":"[REDACTED]","text_length":11}
+{"cycle_id":"82887e9b-15fd-4c74-b268-d5c396c4f231","timestamp":"2026-03-16T12:23:44","type":"classification","complexity":"simple","suggested_model":"mock-model","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"82887e9b-15fd-4c74-b268-d5c396c4f231","timestamp":"2026-03-16T12:23:44","model":"mock","stop_reason":"end_turn","input_tokens":10,"output_tokens":10,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"dc44c19a-3d13-4e5a-9c57-ac0389b9907e","parent_cycle_id":null,"timestamp":"2026-03-16T12:23:44","text":"[REDACTED]","text_length":2}
+{"cycle_id":"dc44c19a-3d13-4e5a-9c57-ac0389b9907e","timestamp":"2026-03-16T12:23:44","type":"classification","complexity":"simple","suggested_model":"mock-model","prompted_user":false,"user_confirmed":null}
+{"type":"llm_error","cycle_id":"dc44c19a-3d13-4e5a-9c57-ac0389b9907e","timestamp":"2026-03-16T12:23:44","error":"Unknown error: test failure"}
+{"type":"human_input","cycle_id":"78bc522a-e53d-4813-8a5a-8660f9966517","parent_cycle_id":null,"timestamp":"2026-03-16T12:23:44","text":"[REDACTED]","text_length":64}
+{"cycle_id":"78bc522a-e53d-4813-8a5a-8660f9966517","timestamp":"2026-03-16T12:23:44","type":"classification","complexity":"complex","suggested_model":"mock-reasoning","prompted_user":false,"user_confirmed":null}
+{"type":"llm_error","cycle_id":"78bc522a-e53d-4813-8a5a-8660f9966517","timestamp":"2026-03-16T12:23:58","error":"API error (529): Overloaded"}
+{"type":"llm_error","cycle_id":"78bc522a-e53d-4813-8a5a-8660f9966517","timestamp":"2026-03-16T12:23:58","error":"Falling back from mock-reasoning to mock-task"}
+{"type":"llm_response","cycle_id":"78bc522a-e53d-4813-8a5a-8660f9966517","timestamp":"2026-03-16T12:23:58","model":"mock","stop_reason":"end_turn","input_tokens":10,"output_tokens":10,"content":"[REDACTED]"}
+{"type":"tool_call","cycle_id":"177a058f-6612-420b-9e3b-a7ac3a8e74df","timestamp":"2026-03-16T12:23:58","tool_use_id":"tc-1","name":"calculator","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"177a058f-6612-420b-9e3b-a7ac3a8e74df","timestamp":"2026-03-16T12:23:58","tool_use_id":"tc-1","success":true,"content":"[REDACTED]","content_length":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:24:05","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:24:05","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:24:05","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:24:05","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:24:05","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:24:05","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:24:05","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:24:05","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:24:05","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:24:05","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:24:05","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:24:05","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:24:05","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:24:05","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:24:05","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:24:05","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:24:05","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:24:05","type":"dprime_layer","layer":"output_gate","decision":"reject","score":1.5555555555555556,"explanation":"Report rejected \u2014 unsourced_claims: several claims... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:24:05","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:24:05","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:24:05","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-16T12:24:05","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"type":"human_input","cycle_id":"996aabe6-6ee2-4cf1-987a-4ee71645d555","parent_cycle_id":null,"timestamp":"2026-03-16T12:25:42","text":"[REDACTED]","text_length":32}
+{"cycle_id":"996aabe6-6ee2-4cf1-987a-4ee71645d555","timestamp":"2026-03-16T12:25:43","type":"classification","complexity":"simple","suggested_model":"claude-haiku-4-5-20251001","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"996aabe6-6ee2-4cf1-987a-4ee71645d555","timestamp":"2026-03-16T12:25:45","model":"claude-haiku-4-5-20251001","stop_reason":"tool_use","input_tokens":4064,"output_tokens":85,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"996aabe6-6ee2-4cf1-987a-4ee71645d555","timestamp":"2026-03-16T12:25:51","model":"claude-haiku-4-5-20251001","stop_reason":"end_turn","input_tokens":5883,"output_tokens":326,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"5a3685d4-584b-4cde-8dab-5966ebd79826","parent_cycle_id":null,"timestamp":"2026-03-16T12:26:44","text":"[REDACTED]","text_length":109}
+{"cycle_id":"5a3685d4-584b-4cde-8dab-5966ebd79826","timestamp":"2026-03-16T12:26:45","type":"classification","complexity":"complex","suggested_model":"claude-opus-4-6","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"5a3685d4-584b-4cde-8dab-5966ebd79826","timestamp":"2026-03-16T12:26:52","model":"claude-opus-4-6","stop_reason":"tool_use","input_tokens":6249,"output_tokens":410,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"5a3685d4-584b-4cde-8dab-5966ebd79826","timestamp":"2026-03-16T12:27:04","model":"claude-opus-4-6","stop_reason":"tool_use","input_tokens":37794,"output_tokens":385,"content":"[REDACTED]"}
+{"type":"tool_call","cycle_id":"9c663ea0-e8e9-44aa-b243-533397357da6","timestamp":"2026-03-16T12:27:05","tool_use_id":"toolu_01UkwiftUYj1stGixvrgsNFE","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_call","cycle_id":"698ac202-8843-4107-88cd-4f1ff7672181","timestamp":"2026-03-16T12:27:05","tool_use_id":"toolu_019VmpM3gGeNmUVCEnC5dYwn","name":"run_code","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"698ac202-8843-4107-88cd-4f1ff7672181","timestamp":"2026-03-16T12:27:05","tool_use_id":"toolu_019VmpM3gGeNmUVCEnC5dYwn","success":false,"content":"[REDACTED]","content_length":233}
+{"type":"tool_result","cycle_id":"9c663ea0-e8e9-44aa-b243-533397357da6","timestamp":"2026-03-16T12:27:06","tool_use_id":"toolu_01UkwiftUYj1stGixvrgsNFE","success":true,"content":"[REDACTED]","content_length":1324}
+{"type":"tool_call","cycle_id":"698ac202-8843-4107-88cd-4f1ff7672181","timestamp":"2026-03-16T12:27:06","tool_use_id":"toolu_018mH4CdwsHTc31ZxPqKwVaL","name":"run_code","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"698ac202-8843-4107-88cd-4f1ff7672181","timestamp":"2026-03-16T12:27:07","tool_use_id":"toolu_018mH4CdwsHTc31ZxPqKwVaL","success":false,"content":"[REDACTED]","content_length":233}
+{"type":"llm_response","cycle_id":"5a3685d4-584b-4cde-8dab-5966ebd79826","timestamp":"2026-03-16T12:27:18","model":"claude-opus-4-6","stop_reason":"tool_use","input_tokens":39181,"output_tokens":232,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"5a3685d4-584b-4cde-8dab-5966ebd79826","timestamp":"2026-03-16T12:27:22","model":"claude-opus-4-6","stop_reason":"tool_use","input_tokens":40330,"output_tokens":68,"content":"[REDACTED]"}
+{"type":"llm_error","cycle_id":"5a3685d4-584b-4cde-8dab-5966ebd79826","timestamp":"2026-03-16T12:29:25","error":"Request timed out"}
+{"type":"llm_error","cycle_id":"5a3685d4-584b-4cde-8dab-5966ebd79826","timestamp":"2026-03-16T12:29:25","error":"Falling back from claude-opus-4-6 to claude-haiku-4-5-20251001"}
+{"type":"llm_response","cycle_id":"5a3685d4-584b-4cde-8dab-5966ebd79826","timestamp":"2026-03-16T12:29:50","model":"claude-haiku-4-5-20251001","stop_reason":"end_turn","input_tokens":40422,"output_tokens":2055,"content":"[REDACTED]"}

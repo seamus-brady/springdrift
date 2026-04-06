@@ -1,0 +1,3489 @@
+//// Librarian — supervised actor that owns ETS-backed query layers for the
+//// Prime Narrative, CBR case store, and Facts store.
+////
+//// The Librarian retrieves, ranks, and surfaces relevant memories from the
+//// narrative log, CBR cases, and semantic facts. It owns ETS tables that serve
+//// as a fast query cache over the immutable JSONL files on disk. On startup it
+//// replays JSONL files to populate the indexes. The Archivist notifies the
+//// Librarian when new entries are written so the cache stays current.
+////
+//// Narrative ETS tables:
+////   - entries (set)           — cycle_id → NarrativeEntry
+////   - by_thread (bag)         — thread_id → NarrativeEntry
+////   - by_date (bag)           — "YYYY-MM-DD" → NarrativeEntry
+////   - by_keyword (bag)        — keyword (lowercased) → NarrativeEntry
+////   - by_recency (ordered)    — timestamp → NarrativeEntry
+////
+//// CBR:
+////   - cbr_cases (set)         — case_id → CbrCase (metadata)
+////   - CaseBase                — inverted index + optional embeddings (retrieval)
+////
+//// Facts ETS tables:
+////   - facts_by_key (set)      — key → MemoryFact (current value)
+////   - facts_by_cycle (bag)    — cycle_id → MemoryFact
+
+// Copyright (C) 2026 Seamus Brady <seamus@corvideon.ie>
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Affero General Public License as published
+// by the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+
+import agent/types as agent_types
+import artifacts/log as artifacts_log
+import artifacts/types as artifacts_types
+import cbr/bridge
+import cbr/log as cbr_log
+import cbr/types as cbr_types
+import cycle_log
+import dag/types as dag_types
+import facts/log as facts_log
+import facts/types as facts_types
+import gleam/dict
+import gleam/erlang/process.{type Pid, type Subject}
+import gleam/float
+import gleam/int
+import gleam/list
+import gleam/option.{None, Some}
+import gleam/order
+import gleam/string
+import narrative/log as narrative_log
+import narrative/types.{
+  type NarrativeEntry, type ThreadIndex, type ThreadState, ThreadIndex,
+}
+import planner/log as planner_log
+import planner/types as planner_types
+import simplifile
+import slog
+
+// ---------------------------------------------------------------------------
+// CBR Configuration
+// ---------------------------------------------------------------------------
+
+/// Configuration for CBR retrieval (weighted field scoring + inverted index).
+pub type CbrConfig {
+  CbrConfig(
+    weights: bridge.RetrievalWeights,
+    min_score: Float,
+    embed_fn: option.Option(fn(String) -> Result(List(Float), String)),
+    cbr_decay_half_life_days: Int,
+  )
+}
+
+pub fn default_cbr_config() -> CbrConfig {
+  CbrConfig(
+    weights: bridge.default_weights(),
+    min_score: 0.01,
+    embed_fn: option.None,
+    cbr_decay_half_life_days: 60,
+  )
+}
+
+// ---------------------------------------------------------------------------
+// FFI — ETS operations (typed per value type)
+// ---------------------------------------------------------------------------
+
+// Domain-specific opaque ETS table types prevent cross-domain misuse.
+// Each domain has its own type so the compiler catches table/value mismatches.
+pub type NarrativeTable
+
+pub type CbrTable
+
+pub type FactTable
+
+pub type ScratchpadTable
+
+pub type DagTable
+
+pub type ArtifactTable
+
+pub type PlannerTable
+
+@external(erlang, "springdrift_ffi", "days_between")
+fn days_between(date_a: String, date_b: String) -> Int
+
+@external(erlang, "springdrift_ffi", "get_date")
+fn get_date() -> String
+
+@external(erlang, "springdrift_ffi", "mailbox_size")
+fn get_mailbox_size() -> Int
+
+@external(erlang, "springdrift_ffi", "count_lines")
+fn count_lines(path: String) -> Int
+
+@external(erlang, "springdrift_ffi", "add_days")
+fn add_days_to_date(date: String, days: Int) -> String
+
+// Table constructors — one per domain
+@external(erlang, "store_ffi", "new_unique_table")
+fn new_narrative_table(name: String, table_type: String) -> NarrativeTable
+
+@external(erlang, "store_ffi", "new_unique_table")
+fn new_cbr_table(name: String, table_type: String) -> CbrTable
+
+@external(erlang, "store_ffi", "new_unique_table")
+fn new_fact_table(name: String, table_type: String) -> FactTable
+
+@external(erlang, "store_ffi", "new_unique_table")
+fn new_scratchpad_table(name: String, table_type: String) -> ScratchpadTable
+
+@external(erlang, "store_ffi", "new_unique_table")
+fn new_dag_table(name: String, table_type: String) -> DagTable
+
+@external(erlang, "store_ffi", "new_unique_table")
+fn new_artifact_table(name: String, table_type: String) -> ArtifactTable
+
+@external(erlang, "store_ffi", "new_unique_table")
+fn new_planner_table(name: String, table_type: String) -> PlannerTable
+
+// Narrative-typed operations
+@external(erlang, "store_ffi", "insert")
+fn ets_insert(table: NarrativeTable, key: String, value: NarrativeEntry) -> Nil
+
+@external(erlang, "store_ffi", "lookup")
+fn ets_lookup(table: NarrativeTable, key: String) -> Result(NarrativeEntry, Nil)
+
+@external(erlang, "store_ffi", "lookup_bag")
+fn ets_lookup_bag(table: NarrativeTable, key: String) -> List(NarrativeEntry)
+
+@external(erlang, "store_ffi", "all_values")
+fn ets_all_values(table: NarrativeTable) -> List(NarrativeEntry)
+
+@external(erlang, "store_ffi", "last_n")
+fn ets_last_n(table: NarrativeTable, n: Int) -> List(NarrativeEntry)
+
+@external(erlang, "store_ffi", "delete_table")
+fn ets_delete_table(table: NarrativeTable) -> Nil
+
+@external(erlang, "store_ffi", "table_size")
+fn ets_table_size(table: NarrativeTable) -> Int
+
+// Generic delete/size for other domains
+@external(erlang, "store_ffi", "delete_table")
+fn cbr_delete_table(table: CbrTable) -> Nil
+
+@external(erlang, "store_ffi", "delete_table")
+fn fact_delete_table(table: FactTable) -> Nil
+
+@external(erlang, "store_ffi", "delete_table")
+fn scratchpad_delete_table(table: ScratchpadTable) -> Nil
+
+@external(erlang, "store_ffi", "delete_table")
+fn dag_delete_table(table: DagTable) -> Nil
+
+@external(erlang, "store_ffi", "delete_table")
+fn artifact_delete_table(table: ArtifactTable) -> Nil
+
+// CBR-typed operations
+@external(erlang, "store_ffi", "insert")
+fn cbr_insert(table: CbrTable, key: String, value: cbr_types.CbrCase) -> Nil
+
+@external(erlang, "store_ffi", "lookup")
+fn cbr_lookup(table: CbrTable, key: String) -> Result(cbr_types.CbrCase, Nil)
+
+@external(erlang, "store_ffi", "all_values")
+fn cbr_all_values(table: CbrTable) -> List(cbr_types.CbrCase)
+
+@external(erlang, "store_ffi", "table_size")
+fn cbr_table_size(table: CbrTable) -> Int
+
+@external(erlang, "store_ffi", "delete_key")
+fn cbr_delete_key(table: CbrTable, key: String) -> Nil
+
+// Facts-typed operations
+@external(erlang, "store_ffi", "insert")
+fn fact_insert(
+  table: FactTable,
+  key: String,
+  value: facts_types.MemoryFact,
+) -> Nil
+
+@external(erlang, "store_ffi", "lookup")
+fn fact_lookup(
+  table: FactTable,
+  key: String,
+) -> Result(facts_types.MemoryFact, Nil)
+
+@external(erlang, "store_ffi", "lookup_bag")
+fn fact_lookup_bag(
+  table: FactTable,
+  key: String,
+) -> List(facts_types.MemoryFact)
+
+@external(erlang, "store_ffi", "all_values")
+fn fact_all_values(table: FactTable) -> List(facts_types.MemoryFact)
+
+@external(erlang, "store_ffi", "table_size")
+fn fact_table_size(table: FactTable) -> Int
+
+@external(erlang, "store_ffi", "delete_key")
+fn fact_delete_key(table: FactTable, key: String) -> Nil
+
+// AgentResult-typed operations (scratchpad)
+@external(erlang, "store_ffi", "insert")
+fn result_insert(
+  table: ScratchpadTable,
+  key: String,
+  value: agent_types.AgentResult,
+) -> Nil
+
+@external(erlang, "store_ffi", "lookup_bag")
+fn result_lookup_bag(
+  table: ScratchpadTable,
+  key: String,
+) -> List(agent_types.AgentResult)
+
+@external(erlang, "store_ffi", "delete_key")
+fn result_delete_key(table: ScratchpadTable, key: String) -> Nil
+
+// DAG-typed operations (CycleNode)
+@external(erlang, "store_ffi", "insert")
+fn dag_insert(table: DagTable, key: String, value: dag_types.CycleNode) -> Nil
+
+@external(erlang, "store_ffi", "lookup")
+fn dag_lookup(table: DagTable, key: String) -> Result(dag_types.CycleNode, Nil)
+
+@external(erlang, "store_ffi", "lookup_bag")
+fn dag_lookup_bag(table: DagTable, key: String) -> List(dag_types.CycleNode)
+
+// Narrative bag deletion (for trim operations)
+@external(erlang, "store_ffi", "delete_object")
+fn ets_delete_object(
+  table: NarrativeTable,
+  object: #(String, NarrativeEntry),
+) -> Nil
+
+// DAG key deletion
+@external(erlang, "store_ffi", "delete_key")
+fn dag_delete_key(table: DagTable, key: String) -> Nil
+
+// Artifact key deletion
+@external(erlang, "store_ffi", "delete_key")
+fn artifact_delete_key(table: ArtifactTable, key: String) -> Nil
+
+// Narrative key deletion
+@external(erlang, "store_ffi", "delete_key")
+fn narrative_delete_key(table: NarrativeTable, key: String) -> Nil
+
+// DAG all values
+@external(erlang, "store_ffi", "all_values")
+fn dag_all_values(table: DagTable) -> List(dag_types.CycleNode)
+
+// Artifact all values
+@external(erlang, "store_ffi", "all_values")
+fn artifact_all_values(
+  table: ArtifactTable,
+) -> List(artifacts_types.ArtifactMeta)
+
+// Artifact-typed operations
+@external(erlang, "store_ffi", "insert")
+fn artifact_insert(
+  table: ArtifactTable,
+  key: String,
+  value: artifacts_types.ArtifactMeta,
+) -> Nil
+
+@external(erlang, "store_ffi", "lookup")
+fn artifact_lookup_one(
+  table: ArtifactTable,
+  key: String,
+) -> Result(artifacts_types.ArtifactMeta, Nil)
+
+@external(erlang, "store_ffi", "lookup_bag")
+fn artifact_lookup_bag(
+  table: ArtifactTable,
+  key: String,
+) -> List(artifacts_types.ArtifactMeta)
+
+// Planner-typed operations
+@external(erlang, "store_ffi", "insert")
+fn planner_insert(
+  table: PlannerTable,
+  key: String,
+  value: planner_types.PlannerTask,
+) -> Nil
+
+@external(erlang, "store_ffi", "lookup")
+fn planner_lookup(
+  table: PlannerTable,
+  key: String,
+) -> Result(planner_types.PlannerTask, Nil)
+
+@external(erlang, "store_ffi", "all_values")
+fn planner_all_values(table: PlannerTable) -> List(planner_types.PlannerTask)
+
+// Reserved for future use (trim/housekeeping)
+// @external(erlang, "store_ffi", "delete_key")
+@external(erlang, "store_ffi", "delete_key")
+fn planner_delete_key(table: PlannerTable, key: String) -> Nil
+
+@external(erlang, "store_ffi", "delete_table")
+fn planner_delete_table(table: PlannerTable) -> Nil
+
+@external(erlang, "store_ffi", "table_size")
+fn planner_table_size(table: PlannerTable) -> Int
+
+// Endeavour-typed operations (reuse PlannerTable type)
+@external(erlang, "store_ffi", "insert")
+fn endeavour_insert(
+  table: PlannerTable,
+  key: String,
+  value: planner_types.Endeavour,
+) -> Nil
+
+@external(erlang, "store_ffi", "lookup")
+fn endeavour_lookup(
+  table: PlannerTable,
+  key: String,
+) -> Result(planner_types.Endeavour, Nil)
+
+@external(erlang, "store_ffi", "all_values")
+fn endeavour_all_values(table: PlannerTable) -> List(planner_types.Endeavour)
+
+@external(erlang, "store_ffi", "delete_key")
+fn endeavour_delete(table: PlannerTable, key: String) -> Nil
+
+@external(erlang, "store_ffi", "delete_table")
+fn endeavour_delete_table(table: PlannerTable) -> Nil
+
+// ---------------------------------------------------------------------------
+// Messages
+// ---------------------------------------------------------------------------
+
+pub type LibrarianMessage {
+  // --- Narrative ingestion ---
+  /// Notify the Librarian that a new entry was written to JSONL.
+  IndexEntry(entry: NarrativeEntry)
+  /// Update the in-memory thread index.
+  UpdateThreadIndex(index: ThreadIndex)
+
+  // --- Narrative queries ---
+  /// Query: get entries by date range
+  QueryDateRange(
+    from: String,
+    to: String,
+    reply_to: Subject(List(NarrativeEntry)),
+  )
+  /// Query: search by keyword
+  QuerySearch(keyword: String, reply_to: Subject(List(NarrativeEntry)))
+  /// Query: get entries for a thread
+  QueryThread(thread_id: String, reply_to: Subject(List(NarrativeEntry)))
+  /// Query: get N most recent entries
+  QueryRecent(n: Int, reply_to: Subject(List(NarrativeEntry)))
+  /// Query: get all entries
+  QueryAll(reply_to: Subject(List(NarrativeEntry)))
+  /// Query: get thread index
+  QueryThreadIndex(reply_to: Subject(ThreadIndex))
+  /// Query: get thread heads (latest entry per thread)
+  QueryThreadHeads(reply_to: Subject(List(NarrativeEntry)))
+  /// Query: look up by cycle_id
+  QueryByCycleId(
+    cycle_id: String,
+    reply_to: Subject(Result(NarrativeEntry, Nil)),
+  )
+
+  // --- CBR ingestion ---
+  /// Notify the Librarian that a new CBR case was written.
+  IndexCase(cbr_case: cbr_types.CbrCase)
+
+  // --- CBR queries ---
+  /// Retrieve scored cases matching a query.
+  RetrieveCases(
+    query: cbr_types.CbrQuery,
+    reply_to: Subject(List(cbr_types.ScoredCase)),
+  )
+  /// Look up a single case by ID.
+  QueryCaseById(
+    case_id: String,
+    reply_to: Subject(Result(cbr_types.CbrCase, Nil)),
+  )
+  /// Get all CBR cases.
+  QueryAllCases(reply_to: Subject(List(cbr_types.CbrCase)))
+
+  // --- CBR mutation (Phase 3) ---
+  /// Update a case's fields (correct misclassified data).
+  UpdateCase(
+    case_id: String,
+    updated_case: cbr_types.CbrCase,
+    reply_to: Subject(Result(Nil, String)),
+  )
+  /// Append an annotation to a case's pitfalls.
+  AnnotateCase(
+    case_id: String,
+    annotation: String,
+    reply_to: Subject(Result(Nil, String)),
+  )
+  /// Suppress a case — mark as suppressed, remove from retrieval.
+  SuppressCase(case_id: String, reply_to: Subject(Result(Nil, String)))
+  /// Unsuppress a previously suppressed case — restore to retrieval.
+  UnsuppressCase(case_id: String, reply_to: Subject(Result(Nil, String)))
+  /// Boost/adjust a case's confidence score.
+  BoostCase(
+    case_id: String,
+    new_confidence: Float,
+    reply_to: Subject(Result(Nil, String)),
+  )
+
+  /// Update usage stats on a retrieved case (fire-and-forget).
+  UpdateCaseUsage(case_id: String, success: Bool)
+
+  // --- Facts ingestion ---
+  /// Index a new fact (after it's been written to JSONL).
+  IndexFact(fact: facts_types.MemoryFact)
+
+  // --- Facts queries ---
+  /// Get current fact by key.
+  QueryFactByKey(
+    key: String,
+    reply_to: Subject(Result(facts_types.MemoryFact, Nil)),
+  )
+  /// Get all facts for a cycle.
+  QueryFactsByCycle(
+    cycle_id: String,
+    reply_to: Subject(List(facts_types.MemoryFact)),
+  )
+  /// Get all current (non-superseded, non-cleared) facts.
+  QueryAllFacts(reply_to: Subject(List(facts_types.MemoryFact)))
+  /// Search facts by keyword in key or value.
+  QueryFactsByKeyword(
+    keyword: String,
+    reply_to: Subject(List(facts_types.MemoryFact)),
+  )
+
+  // --- Housekeeping ---
+  /// Remove a CBR case from all indices (after dedup/pruning).
+  RemoveCase(case_id: String)
+  /// Supersede a fact: remove old key from facts_by_key, index the superseded record.
+  SupersedeFact(fact: facts_types.MemoryFact)
+
+  // --- Scratchpad (agent results per cycle) ---
+  /// Write an agent result to the cycle scratchpad.
+  WriteAgentResult(cycle_id: String, result: agent_types.AgentResult)
+  /// Read all agent results for a cycle.
+  ReadCycleResults(
+    cycle_id: String,
+    reply_to: Subject(List(agent_types.AgentResult)),
+  )
+  /// Clear the scratchpad for a cycle.
+  ClearCycleScratchpad(cycle_id: String)
+
+  // --- Count queries ---
+  /// Get the number of active threads.
+  QueryThreadCount(reply_to: Subject(Int))
+  /// Get the number of persistent facts (by key count).
+  QueryPersistentFactCount(reply_to: Subject(Int))
+  /// Get the number of CBR cases.
+  QueryCaseCount(reply_to: Subject(Int))
+
+  // --- DAG ingestion ---
+  /// Index a new DAG node (cycle start or update).
+  IndexNode(node: dag_types.CycleNode)
+  /// Update an existing DAG node (cycle complete).
+  UpdateNode(node: dag_types.CycleNode)
+
+  // --- DAG queries ---
+  /// Look up a single CycleNode by cycle_id.
+  QueryNode(
+    cycle_id: String,
+    reply_to: Subject(Result(dag_types.CycleNode, Nil)),
+  )
+  /// Get all child nodes for a parent cycle_id.
+  QueryChildren(parent_id: String, reply_to: Subject(List(dag_types.CycleNode)))
+  /// Get root cognitive cycles for a date ("YYYY-MM-DD").
+  QueryDayRoots(date: String, reply_to: Subject(List(dag_types.CycleNode)))
+  /// Get all cycles (roots + agents) for a date.
+  QueryDayAll(date: String, reply_to: Subject(List(dag_types.CycleNode)))
+  /// Get full subtree rooted at a cycle_id.
+  QueryNodeWithDescendants(
+    cycle_id: String,
+    reply_to: Subject(Result(dag_types.DagSubtree, Nil)),
+  )
+  /// Get aggregated stats for a date.
+  QueryDayStats(date: String, reply_to: Subject(dag_types.DayStats))
+  /// Get per-tool usage stats for a date.
+  QueryToolActivity(
+    date: String,
+    reply_to: Subject(List(dag_types.ToolActivityRecord)),
+  )
+
+  // --- Artifact operations ---
+  /// Index a new artifact after it has been written to disk.
+  IndexArtifact(meta: artifacts_types.ArtifactMeta)
+  /// Query all artifact metadata for a given cycle.
+  QueryArtifactsByCycle(
+    cycle_id: String,
+    reply_to: Subject(List(artifacts_types.ArtifactMeta)),
+  )
+  /// Read full artifact content from disk (targeted file read).
+  RetrieveArtifactContent(
+    artifact_id: String,
+    stored_at: String,
+    reply_to: Subject(Result(String, Nil)),
+  )
+  /// Look up artifact metadata by ID.
+  QueryArtifactById(
+    artifact_id: String,
+    reply_to: Subject(Result(artifacts_types.ArtifactMeta, Nil)),
+  )
+
+  // --- Scheduler cycle queries ---
+  /// Get DAG nodes with node_type == SchedulerCycle for a date.
+  QuerySchedulerCycles(
+    date: String,
+    reply_to: Subject(List(dag_types.CycleNode)),
+  )
+
+  // --- Planner operations ---
+  /// Notify of a new task operation (after writing to JSONL).
+  NotifyTaskOp(op: planner_types.TaskOp)
+  /// Notify of a new endeavour operation (after writing to JSONL).
+  NotifyEndeavourOp(op: planner_types.EndeavourOp)
+  /// Query active tasks (Pending + Active).
+  QueryActiveTasks(reply_to: Subject(List(planner_types.PlannerTask)))
+  /// Query a single task by ID.
+  QueryTaskById(
+    task_id: String,
+    reply_to: Subject(Result(planner_types.PlannerTask, Nil)),
+  )
+  /// Query a single endeavour by ID.
+  QueryEndeavourById(
+    endeavour_id: String,
+    reply_to: Subject(Result(planner_types.Endeavour, Nil)),
+  )
+  /// Query all endeavours.
+  QueryAllEndeavours(reply_to: Subject(List(planner_types.Endeavour)))
+  /// Load narrative entries by cycle_ids (for Forecaster).
+  LoadByCycleIds(
+    cycle_ids: List(String),
+    reply_to: Subject(List(NarrativeEntry)),
+  )
+
+  // --- Trim operations (Housekeeper) ---
+  /// Evict narrative entries older than cutoff_date from all narrative ETS tables.
+  TrimNarrativeWindow(cutoff_date: String, reply_to: Subject(Int))
+  /// Evict DAG nodes older than cutoff_date from all DAG ETS tables.
+  TrimDagWindow(cutoff_date: String, reply_to: Subject(Int))
+  /// Evict artifact metadata older than cutoff_date from artifact ETS tables.
+  TrimArtifactWindow(cutoff_date: String, reply_to: Subject(Int))
+
+  /// Shutdown
+  Shutdown
+}
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+
+type LibrarianState {
+  LibrarianState(
+    self: Subject(LibrarianMessage),
+    narrative_dir: String,
+    cbr_dir: String,
+    // Narrative ETS tables
+    entries: NarrativeTable,
+    by_thread: NarrativeTable,
+    by_date: NarrativeTable,
+    by_keyword: NarrativeTable,
+    by_recency: NarrativeTable,
+    thread_index: ThreadIndex,
+    // CBR — metadata ETS + CaseBase (inverted index + embeddings) + config
+    cbr_cases: CbrTable,
+    case_base: bridge.CaseBase,
+    cbr_config: CbrConfig,
+    // Facts
+    facts_dir: String,
+    facts_by_key: FactTable,
+    facts_by_cycle: FactTable,
+    // Scratchpad — agent results per cycle (ephemeral, bag)
+    cycle_scratchpad: ScratchpadTable,
+    // DAG ETS tables
+    dag_nodes: DagTable,
+    dag_by_parent: DagTable,
+    dag_by_date: DagTable,
+    // Artifact ETS tables
+    artifacts_dir: String,
+    artifacts: ArtifactTable,
+    artifacts_by_cycle: ArtifactTable,
+    // Planner ETS tables
+    planner_dir: String,
+    planner_tasks: PlannerTable,
+    planner_endeavours: PlannerTable,
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/// Start the Librarian actor. Replays JSONL files to populate ETS indexes.
+/// `max_files` limits startup loading (0 = all files).
+/// Returns a Subject for sending queries and index notifications.
+pub fn start(
+  narrative_dir: String,
+  cbr_dir: String,
+  facts_dir: String,
+  artifacts_dir: String,
+  planner_dir: String,
+  max_files: Int,
+  cbr_config: CbrConfig,
+) -> Subject(LibrarianMessage) {
+  let #(subj, _pid) =
+    start_with_pid(
+      narrative_dir,
+      cbr_dir,
+      facts_dir,
+      artifacts_dir,
+      planner_dir,
+      max_files,
+      cbr_config,
+    )
+  subj
+}
+
+/// Start the Librarian actor, returning both the Subject and the Pid.
+/// Used by the supervisor to set up a process monitor.
+fn start_with_pid(
+  narrative_dir: String,
+  cbr_dir: String,
+  facts_dir: String,
+  artifacts_dir: String,
+  planner_dir: String,
+  max_files: Int,
+  cbr_config: CbrConfig,
+) -> #(Subject(LibrarianMessage), Pid) {
+  let setup: Subject(Subject(LibrarianMessage)) = process.new_subject()
+  let pid =
+    process.spawn_unlinked(fn() {
+      let self: Subject(LibrarianMessage) = process.new_subject()
+      process.send(setup, self)
+
+      // Create narrative ETS tables
+      let entries_table = new_narrative_table("narrative_entries", "set")
+      let by_thread_table = new_narrative_table("narrative_by_thread", "bag")
+      let by_date_table = new_narrative_table("narrative_by_date", "bag")
+      let by_keyword_table = new_narrative_table("narrative_by_keyword", "bag")
+      let by_recency_table =
+        new_narrative_table("narrative_by_recency", "ordered_set")
+
+      // Create CBR metadata ETS table + CaseBase
+      let cbr_cases_table = new_cbr_table("cbr_cases", "set")
+      let case_base = case cbr_config.embed_fn {
+        option.Some(embed_fn) -> bridge.new_with_embeddings(embed_fn)
+        option.None -> bridge.new()
+      }
+
+      // Create Facts ETS tables
+      let facts_key_table = new_fact_table("facts_by_key", "set")
+      let facts_cycle_table = new_fact_table("facts_by_cycle", "bag")
+
+      // Create scratchpad table (bag — multiple results per cycle)
+      let scratchpad_table = new_scratchpad_table("cycle_scratchpad", "bag")
+
+      // Create DAG ETS tables
+      let dag_nodes_table = new_dag_table("dag_nodes", "set")
+      let dag_parent_table = new_dag_table("dag_by_parent", "bag")
+      let dag_date_table = new_dag_table("dag_by_date", "bag")
+
+      // Create Artifact ETS tables
+      let artifacts_table = new_artifact_table("artifacts", "set")
+      let artifacts_cycle_table =
+        new_artifact_table("artifacts_by_cycle", "bag")
+
+      // Create Planner ETS tables
+      let planner_tasks_table = new_planner_table("planner_tasks", "set")
+      let planner_endeavours_table =
+        new_planner_table("planner_endeavours", "set")
+
+      let state =
+        LibrarianState(
+          self:,
+          narrative_dir:,
+          cbr_dir:,
+          entries: entries_table,
+          by_thread: by_thread_table,
+          by_date: by_date_table,
+          by_keyword: by_keyword_table,
+          by_recency: by_recency_table,
+          thread_index: ThreadIndex(threads: []),
+          cbr_cases: cbr_cases_table,
+          case_base:,
+          cbr_config:,
+          facts_dir:,
+          facts_by_key: facts_key_table,
+          facts_by_cycle: facts_cycle_table,
+          cycle_scratchpad: scratchpad_table,
+          dag_nodes: dag_nodes_table,
+          dag_by_parent: dag_parent_table,
+          dag_by_date: dag_date_table,
+          artifacts_dir:,
+          artifacts: artifacts_table,
+          artifacts_by_cycle: artifacts_cycle_table,
+          planner_dir:,
+          planner_tasks: planner_tasks_table,
+          planner_endeavours: planner_endeavours_table,
+        )
+
+      // Replay narrative JSONL files
+      let state = replay_narrative_from_disk(state, max_files)
+
+      // Load thread index
+      let thread_index = narrative_log.load_thread_index(narrative_dir)
+      let state = LibrarianState(..state, thread_index:)
+
+      // Replay CBR JSONL files (into metadata ETS + CaseBase)
+      let state = replay_cbr_from_disk(state, max_files)
+
+      // Replay facts from disk
+      replay_facts_from_disk(state)
+
+      // Replay DAG from cycle log
+      replay_dag_from_cycle_log(state, max_files)
+
+      // Replay artifacts from disk
+      replay_artifacts_from_disk(state, max_files)
+
+      // Replay planner from disk
+      replay_planner_from_disk(state, max_files)
+
+      let narrative_count = ets_table_size(entries_table)
+      let cbr_count = cbr_table_size(cbr_cases_table)
+      let facts_count = fact_table_size(facts_key_table)
+      let tasks_count = planner_table_size(planner_tasks_table)
+      slog.info(
+        "narrative/librarian",
+        "start",
+        "Librarian ready — "
+          <> string.inspect(narrative_count)
+          <> " narrative entries, "
+          <> string.inspect(cbr_count)
+          <> " CBR cases, "
+          <> string.inspect(facts_count)
+          <> " facts, "
+          <> string.inspect(tasks_count)
+          <> " tasks",
+        None,
+      )
+
+      // Enter message loop
+      loop(state)
+    })
+
+  // Wait for the actor to send back its Subject
+  case process.receive(setup, 30_000) {
+    Ok(subj) -> #(subj, pid)
+    Error(_) -> {
+      slog.log_error(
+        "librarian",
+        "start",
+        "Librarian failed to start within 30s",
+        None,
+      )
+      panic as "Librarian startup timeout"
+    }
+  }
+}
+
+/// Start a supervised Librarian. If the Librarian crashes, it is automatically
+/// restarted (up to `max_restarts` times). Returns a Subject that always points
+/// to the current Librarian instance via an indirection process.
+pub fn start_supervised(
+  narrative_dir: String,
+  cbr_dir: String,
+  facts_dir: String,
+  artifacts_dir: String,
+  planner_dir: String,
+  max_files: Int,
+  max_restarts: Int,
+  cbr_config: CbrConfig,
+) -> Result(Subject(LibrarianMessage), Nil) {
+  // The proxy subject must be created inside the spawned process (owner rule),
+  // then sent back to the caller via a setup channel.
+  let setup: Subject(Subject(LibrarianMessage)) = process.new_subject()
+  process.spawn_unlinked(fn() {
+    let proxy_subj: Subject(LibrarianMessage) = process.new_subject()
+    process.send(setup, proxy_subj)
+    librarian_supervisor_loop(
+      narrative_dir,
+      cbr_dir,
+      facts_dir,
+      artifacts_dir,
+      planner_dir,
+      max_files,
+      max_restarts,
+      0,
+      proxy_subj,
+      cbr_config,
+    )
+  })
+  case process.receive(setup, 30_000) {
+    Ok(proxy_subj) -> Ok(proxy_subj)
+    Error(_) -> {
+      slog.log_error(
+        "librarian",
+        "start_supervised",
+        "Supervised Librarian failed to start within 30s",
+        None,
+      )
+      Error(Nil)
+    }
+  }
+}
+
+/// Internal message type for the supervisor selector.
+type SupervisorEvent {
+  ForwardMsg(LibrarianMessage)
+  LibrarianDown
+}
+
+fn librarian_supervisor_loop(
+  narrative_dir: String,
+  cbr_dir: String,
+  facts_dir: String,
+  artifacts_dir: String,
+  planner_dir: String,
+  max_files: Int,
+  max_restarts: Int,
+  restart_count: Int,
+  proxy: Subject(LibrarianMessage),
+  cbr_config: CbrConfig,
+) -> Nil {
+  // Start a fresh librarian, getting both Subject and Pid
+  let #(librarian, pid) =
+    start_with_pid(
+      narrative_dir,
+      cbr_dir,
+      facts_dir,
+      artifacts_dir,
+      planner_dir,
+      max_files,
+      cbr_config,
+    )
+
+  // Set up OTP monitor — fires immediately when the process exits
+  let monitor = process.monitor(pid)
+
+  // Build a selector that handles both forwarded messages and DOWN signals
+  let sel =
+    process.new_selector()
+    |> process.select_map(proxy, fn(msg) { ForwardMsg(msg) })
+    |> process.select_specific_monitor(monitor, fn(_down) { LibrarianDown })
+
+  // Forward messages until the librarian dies
+  forward_loop(
+    librarian,
+    sel,
+    narrative_dir,
+    cbr_dir,
+    facts_dir,
+    artifacts_dir,
+    planner_dir,
+    max_files,
+    max_restarts,
+    restart_count,
+    proxy,
+    cbr_config,
+  )
+}
+
+fn forward_loop(
+  librarian: Subject(LibrarianMessage),
+  sel: process.Selector(SupervisorEvent),
+  narrative_dir: String,
+  cbr_dir: String,
+  facts_dir: String,
+  artifacts_dir: String,
+  planner_dir: String,
+  max_files: Int,
+  max_restarts: Int,
+  restart_count: Int,
+  proxy: Subject(LibrarianMessage),
+  cbr_config: CbrConfig,
+) -> Nil {
+  case process.selector_receive_forever(sel) {
+    ForwardMsg(msg) -> {
+      process.send(librarian, msg)
+      forward_loop(
+        librarian,
+        sel,
+        narrative_dir,
+        cbr_dir,
+        facts_dir,
+        artifacts_dir,
+        planner_dir,
+        max_files,
+        max_restarts,
+        restart_count,
+        proxy,
+        cbr_config,
+      )
+    }
+    LibrarianDown -> {
+      case restart_count < max_restarts {
+        True -> {
+          slog.warn(
+            "librarian",
+            "supervisor",
+            "Librarian process exited, restarting (attempt "
+              <> string.inspect(restart_count + 1)
+              <> ")",
+            None,
+          )
+          librarian_supervisor_loop(
+            narrative_dir,
+            cbr_dir,
+            facts_dir,
+            artifacts_dir,
+            planner_dir,
+            max_files,
+            max_restarts,
+            restart_count + 1,
+            proxy,
+            cbr_config,
+          )
+        }
+        False -> {
+          slog.log_error(
+            "librarian",
+            "supervisor",
+            "Librarian max restarts exceeded, giving up",
+            None,
+          )
+          Nil
+        }
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Synchronous query helpers — Narrative
+// ---------------------------------------------------------------------------
+
+/// Query entries by date range. Blocks until reply.
+pub fn load_entries(
+  librarian: Subject(LibrarianMessage),
+  from: String,
+  to: String,
+) -> List(NarrativeEntry) {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryDateRange(from:, to:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(entries) -> entries
+    Error(_) -> {
+      slog.warn("librarian", "load_entries", "Timeout waiting for reply", None)
+      []
+    }
+  }
+}
+
+/// Search by keyword. Blocks until reply.
+pub fn search(
+  librarian: Subject(LibrarianMessage),
+  keyword: String,
+) -> List(NarrativeEntry) {
+  let reply_to = process.new_subject()
+  process.send(librarian, QuerySearch(keyword:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(entries) -> entries
+    Error(_) -> {
+      slog.warn("librarian", "search", "Timeout waiting for reply", None)
+      []
+    }
+  }
+}
+
+/// Get thread index. Blocks until reply.
+pub fn load_thread_index(librarian: Subject(LibrarianMessage)) -> ThreadIndex {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryThreadIndex(reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(idx) -> idx
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "load_thread_index",
+        "Timeout waiting for reply",
+        None,
+      )
+      ThreadIndex(threads: [])
+    }
+  }
+}
+
+/// Get all entries. Blocks until reply.
+pub fn load_all(librarian: Subject(LibrarianMessage)) -> List(NarrativeEntry) {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryAll(reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(entries) -> entries
+    Error(_) -> {
+      slog.warn("librarian", "load_all", "Timeout waiting for reply", None)
+      []
+    }
+  }
+}
+
+/// Get entries for a thread. Blocks until reply.
+pub fn load_thread(
+  librarian: Subject(LibrarianMessage),
+  thread_id: String,
+) -> List(NarrativeEntry) {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryThread(thread_id:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(entries) -> entries
+    Error(_) -> {
+      slog.warn("librarian", "load_thread", "Timeout waiting for reply", None)
+      []
+    }
+  }
+}
+
+/// Get N most recent entries. Blocks until reply.
+pub fn get_recent(
+  librarian: Subject(LibrarianMessage),
+  n: Int,
+) -> List(NarrativeEntry) {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryRecent(n:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(entries) -> entries
+    Error(_) -> {
+      slog.warn("librarian", "get_recent", "Timeout waiting for reply", None)
+      []
+    }
+  }
+}
+
+/// Get thread heads. Blocks until reply.
+pub fn thread_heads(
+  librarian: Subject(LibrarianMessage),
+) -> List(NarrativeEntry) {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryThreadHeads(reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(entries) -> entries
+    Error(_) -> {
+      slog.warn("librarian", "thread_heads", "Timeout waiting for reply", None)
+      []
+    }
+  }
+}
+
+/// Notify the Librarian to index a new entry (fire-and-forget).
+pub fn notify_new_entry(
+  librarian: Subject(LibrarianMessage),
+  entry: NarrativeEntry,
+) -> Nil {
+  process.send(librarian, IndexEntry(entry:))
+}
+
+/// Notify the Librarian of an updated thread index (fire-and-forget).
+pub fn notify_thread_index(
+  librarian: Subject(LibrarianMessage),
+  index: ThreadIndex,
+) -> Nil {
+  process.send(librarian, UpdateThreadIndex(index:))
+}
+
+// ---------------------------------------------------------------------------
+// Synchronous query helpers — CBR
+// ---------------------------------------------------------------------------
+
+/// Notify the Librarian to index a new CBR case (fire-and-forget).
+pub fn notify_new_case(
+  librarian: Subject(LibrarianMessage),
+  cbr_case: cbr_types.CbrCase,
+) -> Nil {
+  process.send(librarian, IndexCase(cbr_case:))
+}
+
+/// Update usage stats on a retrieved CBR case (fire-and-forget).
+/// Increments retrieval_count, and conditionally retrieval_success_count.
+pub fn update_case_usage(
+  librarian: Subject(LibrarianMessage),
+  case_id: String,
+  success: Bool,
+) -> Nil {
+  process.send(librarian, UpdateCaseUsage(case_id:, success:))
+}
+
+/// Retrieve scored cases matching a query. Blocks until reply.
+pub fn retrieve_cases(
+  librarian: Subject(LibrarianMessage),
+  query: cbr_types.CbrQuery,
+) -> List(cbr_types.ScoredCase) {
+  let reply_to = process.new_subject()
+  process.send(librarian, RetrieveCases(query:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(results) -> results
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "retrieve_cases",
+        "Timeout waiting for reply",
+        None,
+      )
+      []
+    }
+  }
+}
+
+/// Get all CBR cases. Blocks until reply.
+pub fn load_all_cases(
+  librarian: Subject(LibrarianMessage),
+) -> List(cbr_types.CbrCase) {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryAllCases(reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(cases) -> cases
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "load_all_cases",
+        "Timeout waiting for reply",
+        None,
+      )
+      []
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Synchronous mutation helpers — CBR
+// ---------------------------------------------------------------------------
+
+/// Update a case's fields. Blocks until reply.
+pub fn update_case(
+  librarian: Subject(LibrarianMessage),
+  case_id: String,
+  updated_case: cbr_types.CbrCase,
+) -> Result(Nil, String) {
+  let reply_to = process.new_subject()
+  process.send(librarian, UpdateCase(case_id:, updated_case:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(result) -> result
+    Error(_) -> Error("Timeout waiting for update_case reply")
+  }
+}
+
+/// Append an annotation to a case's pitfalls. Blocks until reply.
+pub fn annotate_case(
+  librarian: Subject(LibrarianMessage),
+  case_id: String,
+  annotation: String,
+) -> Result(Nil, String) {
+  let reply_to = process.new_subject()
+  process.send(librarian, AnnotateCase(case_id:, annotation:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(result) -> result
+    Error(_) -> Error("Timeout waiting for annotate_case reply")
+  }
+}
+
+/// Suppress a case — remove from retrieval. Blocks until reply.
+pub fn suppress_case(
+  librarian: Subject(LibrarianMessage),
+  case_id: String,
+) -> Result(Nil, String) {
+  let reply_to = process.new_subject()
+  process.send(librarian, SuppressCase(case_id:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(result) -> result
+    Error(_) -> Error("Timeout waiting for suppress_case reply")
+  }
+}
+
+/// Unsuppress a previously suppressed case. Blocks until reply.
+pub fn unsuppress_case(
+  librarian: Subject(LibrarianMessage),
+  case_id: String,
+) -> Result(Nil, String) {
+  let reply_to = process.new_subject()
+  process.send(librarian, UnsuppressCase(case_id:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(result) -> result
+    Error(_) -> Error("Timeout waiting for unsuppress_case reply")
+  }
+}
+
+/// Boost/adjust a case's confidence. Blocks until reply.
+pub fn boost_case(
+  librarian: Subject(LibrarianMessage),
+  case_id: String,
+  new_confidence: Float,
+) -> Result(Nil, String) {
+  let reply_to = process.new_subject()
+  process.send(librarian, BoostCase(case_id:, new_confidence:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(result) -> result
+    Error(_) -> Error("Timeout waiting for boost_case reply")
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Synchronous query helpers — Facts
+// ---------------------------------------------------------------------------
+
+/// Notify the Librarian to index a new fact (fire-and-forget).
+pub fn notify_new_fact(
+  librarian: Subject(LibrarianMessage),
+  fact: facts_types.MemoryFact,
+) -> Nil {
+  process.send(librarian, IndexFact(fact:))
+}
+
+/// Get current fact by key. Blocks until reply.
+pub fn get_fact(
+  librarian: Subject(LibrarianMessage),
+  key: String,
+) -> Result(facts_types.MemoryFact, Nil) {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryFactByKey(key:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(result) -> result
+    Error(_) -> {
+      slog.warn("librarian", "get_fact", "Timeout waiting for reply", None)
+      Error(Nil)
+    }
+  }
+}
+
+/// Get all facts for a cycle. Blocks until reply.
+pub fn get_facts_by_cycle(
+  librarian: Subject(LibrarianMessage),
+  cycle_id: String,
+) -> List(facts_types.MemoryFact) {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryFactsByCycle(cycle_id:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(facts) -> facts
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "get_facts_by_cycle",
+        "Timeout waiting for reply",
+        None,
+      )
+      []
+    }
+  }
+}
+
+/// Get all current facts. Blocks until reply.
+pub fn get_all_facts(
+  librarian: Subject(LibrarianMessage),
+) -> List(facts_types.MemoryFact) {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryAllFacts(reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(facts) -> facts
+    Error(_) -> {
+      slog.warn("librarian", "get_all_facts", "Timeout waiting for reply", None)
+      []
+    }
+  }
+}
+
+/// Search facts by keyword. Blocks until reply.
+pub fn search_facts(
+  librarian: Subject(LibrarianMessage),
+  keyword: String,
+) -> List(facts_types.MemoryFact) {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryFactsByKeyword(keyword:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(facts) -> facts
+    Error(_) -> {
+      slog.warn("librarian", "search_facts", "Timeout waiting for reply", None)
+      []
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Synchronous query helpers — Scratchpad
+// ---------------------------------------------------------------------------
+
+/// Write an agent result to the cycle scratchpad (fire-and-forget).
+pub fn write_agent_result(
+  librarian: Subject(LibrarianMessage),
+  cycle_id: String,
+  result: agent_types.AgentResult,
+) -> Nil {
+  process.send(librarian, WriteAgentResult(cycle_id:, result:))
+}
+
+/// Read all agent results for a cycle. Blocks until reply.
+pub fn read_cycle_results(
+  librarian: Subject(LibrarianMessage),
+  cycle_id: String,
+) -> List(agent_types.AgentResult) {
+  let reply_to = process.new_subject()
+  process.send(librarian, ReadCycleResults(cycle_id:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(results) -> results
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "read_cycle_results",
+        "Timeout waiting for reply",
+        None,
+      )
+      []
+    }
+  }
+}
+
+/// Remove a CBR case from all indices (fire-and-forget).
+pub fn remove_case(librarian: Subject(LibrarianMessage), case_id: String) -> Nil {
+  process.send(librarian, RemoveCase(case_id:))
+}
+
+/// Supersede a fact in indices (fire-and-forget).
+pub fn supersede_fact(
+  librarian: Subject(LibrarianMessage),
+  fact: facts_types.MemoryFact,
+) -> Nil {
+  process.send(librarian, SupersedeFact(fact:))
+}
+
+/// Clear the scratchpad for a cycle (fire-and-forget).
+/// Get the number of active threads. Blocks until reply.
+pub fn get_thread_count(librarian: Subject(LibrarianMessage)) -> Int {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryThreadCount(reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(count) -> count
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "get_thread_count",
+        "Timeout waiting for reply",
+        None,
+      )
+      0
+    }
+  }
+}
+
+/// Get the number of persistent facts. Blocks until reply.
+pub fn get_persistent_fact_count(librarian: Subject(LibrarianMessage)) -> Int {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryPersistentFactCount(reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(count) -> count
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "get_persistent_fact_count",
+        "Timeout waiting for reply",
+        None,
+      )
+      0
+    }
+  }
+}
+
+/// Get the number of CBR cases. Blocks until reply.
+pub fn get_case_count(librarian: Subject(LibrarianMessage)) -> Int {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryCaseCount(reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(count) -> count
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "get_case_count",
+        "Timeout waiting for reply",
+        None,
+      )
+      0
+    }
+  }
+}
+
+pub fn clear_cycle_scratchpad(
+  librarian: Subject(LibrarianMessage),
+  cycle_id: String,
+) -> Nil {
+  process.send(librarian, ClearCycleScratchpad(cycle_id:))
+}
+
+/// Trim narrative entries older than cutoff_date. Blocks until reply.
+pub fn trim_narrative_window(
+  librarian: Subject(LibrarianMessage),
+  cutoff_date: String,
+) -> Int {
+  let reply_to = process.new_subject()
+  process.send(librarian, TrimNarrativeWindow(cutoff_date:, reply_to:))
+  case process.receive(reply_to, 30_000) {
+    Ok(count) -> count
+    Error(_) -> 0
+  }
+}
+
+/// Trim DAG nodes older than cutoff_date. Blocks until reply.
+pub fn trim_dag_window(
+  librarian: Subject(LibrarianMessage),
+  cutoff_date: String,
+) -> Int {
+  let reply_to = process.new_subject()
+  process.send(librarian, TrimDagWindow(cutoff_date:, reply_to:))
+  case process.receive(reply_to, 30_000) {
+    Ok(count) -> count
+    Error(_) -> 0
+  }
+}
+
+/// Trim artifact metadata older than cutoff_date. Blocks until reply.
+pub fn trim_artifact_window(
+  librarian: Subject(LibrarianMessage),
+  cutoff_date: String,
+) -> Int {
+  let reply_to = process.new_subject()
+  process.send(librarian, TrimArtifactWindow(cutoff_date:, reply_to:))
+  case process.receive(reply_to, 30_000) {
+    Ok(count) -> count
+    Error(_) -> 0
+  }
+}
+
+pub fn query_tool_activity(
+  librarian: Subject(LibrarianMessage),
+  date: String,
+) -> List(dag_types.ToolActivityRecord) {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryToolActivity(date:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(records) -> records
+    Error(_) -> []
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Synchronous query helpers — Artifacts
+// ---------------------------------------------------------------------------
+
+/// Notify the Librarian to index a new artifact (fire-and-forget).
+pub fn index_artifact(
+  librarian: Subject(LibrarianMessage),
+  meta: artifacts_types.ArtifactMeta,
+) -> Nil {
+  process.send(librarian, IndexArtifact(meta:))
+}
+
+/// Query all artifact metadata for a cycle. Blocks until reply.
+pub fn query_artifacts_by_cycle(
+  librarian: Subject(LibrarianMessage),
+  cycle_id: String,
+) -> List(artifacts_types.ArtifactMeta) {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryArtifactsByCycle(cycle_id:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(metas) -> metas
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "query_artifacts_by_cycle",
+        "Timeout waiting for reply",
+        None,
+      )
+      []
+    }
+  }
+}
+
+/// Retrieve full artifact content by ID. Blocks until reply.
+pub fn retrieve_artifact_content(
+  librarian: Subject(LibrarianMessage),
+  artifact_id: String,
+  stored_at: String,
+) -> Result(String, Nil) {
+  let reply_to = process.new_subject()
+  process.send(
+    librarian,
+    RetrieveArtifactContent(artifact_id:, stored_at:, reply_to:),
+  )
+  case process.receive(reply_to, 5000) {
+    Ok(result) -> result
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "retrieve_artifact_content",
+        "Timeout waiting for reply",
+        None,
+      )
+      Error(Nil)
+    }
+  }
+}
+
+/// Look up artifact metadata by ID. Blocks until reply.
+pub fn lookup_artifact(
+  librarian: Subject(LibrarianMessage),
+  artifact_id: String,
+) -> Result(artifacts_types.ArtifactMeta, Nil) {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryArtifactById(artifact_id:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(result) -> result
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "lookup_artifact",
+        "Timeout waiting for reply",
+        None,
+      )
+      Error(Nil)
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Message loop
+// ---------------------------------------------------------------------------
+
+fn loop(state: LibrarianState) -> Nil {
+  // Periodic mailbox backpressure check
+  let mbox_size = get_mailbox_size()
+  let threshold = 50
+  case mbox_size > threshold {
+    True ->
+      slog.warn(
+        "librarian",
+        "loop",
+        "Mailbox backpressure: "
+          <> int.to_string(mbox_size)
+          <> " messages queued (threshold="
+          <> int.to_string(threshold)
+          <> ")",
+        None,
+      )
+    False -> Nil
+  }
+  case process.receive(state.self, 60_000) {
+    Error(_) -> {
+      // Timeout — run periodic ETS-vs-disk reconciliation
+      let state = reconcile_ets_with_disk(state)
+      loop(state)
+    }
+    Ok(msg) ->
+      case msg {
+        Shutdown -> {
+          // Delete narrative tables
+          ets_delete_table(state.entries)
+          ets_delete_table(state.by_thread)
+          ets_delete_table(state.by_date)
+          ets_delete_table(state.by_keyword)
+          ets_delete_table(state.by_recency)
+          // Delete CBR metadata table
+          cbr_delete_table(state.cbr_cases)
+          // Delete Facts tables
+          fact_delete_table(state.facts_by_key)
+          fact_delete_table(state.facts_by_cycle)
+          // Delete scratchpad
+          scratchpad_delete_table(state.cycle_scratchpad)
+          // Delete DAG tables
+          dag_delete_table(state.dag_nodes)
+          dag_delete_table(state.dag_by_parent)
+          dag_delete_table(state.dag_by_date)
+          // Delete Artifact tables
+          artifact_delete_table(state.artifacts)
+          artifact_delete_table(state.artifacts_by_cycle)
+          // Delete Planner tables
+          planner_delete_table(state.planner_tasks)
+          endeavour_delete_table(state.planner_endeavours)
+          slog.info(
+            "narrative/librarian",
+            "shutdown",
+            "Librarian stopped",
+            None,
+          )
+          Nil
+        }
+
+        // --- Narrative messages ---
+        IndexEntry(entry:) -> {
+          index_entry(state, entry)
+          loop(state)
+        }
+
+        UpdateThreadIndex(index:) -> {
+          loop(LibrarianState(..state, thread_index: index))
+        }
+
+        QueryDateRange(from:, to:, reply_to:) -> {
+          let results = do_query_date_range(state, from, to)
+          process.send(reply_to, results)
+          loop(state)
+        }
+
+        QuerySearch(keyword:, reply_to:) -> {
+          let results = do_search(state, keyword)
+          process.send(reply_to, results)
+          loop(state)
+        }
+
+        QueryThread(thread_id:, reply_to:) -> {
+          let results = ets_lookup_bag(state.by_thread, thread_id)
+          process.send(reply_to, results)
+          loop(state)
+        }
+
+        QueryRecent(n:, reply_to:) -> {
+          let results = ets_last_n(state.by_recency, n)
+          process.send(reply_to, results)
+          loop(state)
+        }
+
+        QueryAll(reply_to:) -> {
+          let all = ets_all_values(state.entries)
+          let sorted =
+            list.sort(all, fn(a, b) { string.compare(a.timestamp, b.timestamp) })
+          process.send(reply_to, sorted)
+          loop(state)
+        }
+
+        QueryThreadIndex(reply_to:) -> {
+          process.send(reply_to, state.thread_index)
+          loop(state)
+        }
+
+        QueryThreadHeads(reply_to:) -> {
+          let heads =
+            list.filter_map(state.thread_index.threads, fn(ts: ThreadState) {
+              ets_lookup(state.entries, ts.last_cycle_id)
+            })
+          process.send(reply_to, heads)
+          loop(state)
+        }
+
+        QueryByCycleId(cycle_id:, reply_to:) -> {
+          let result = ets_lookup(state.entries, cycle_id)
+          process.send(reply_to, result)
+          loop(state)
+        }
+
+        // --- CBR messages ---
+        IndexCase(cbr_case:) -> {
+          // Index in metadata ETS
+          cbr_insert(state.cbr_cases, cbr_case.case_id, cbr_case)
+          // Add to CaseBase (inverted index + optional embedding)
+          let case_base = bridge.retain_case(state.case_base, cbr_case)
+          loop(LibrarianState(..state, case_base:))
+        }
+
+        RetrieveCases(query:, reply_to:) -> {
+          let metadata = build_cbr_metadata(state)
+          let today = get_date()
+          let results =
+            bridge.retrieve_cases_with_decay(
+              state.case_base,
+              query,
+              metadata,
+              state.cbr_config.weights,
+              state.cbr_config.min_score,
+              state.cbr_config.cbr_decay_half_life_days,
+              today,
+            )
+          process.send(reply_to, results)
+          loop(state)
+        }
+
+        QueryCaseById(case_id:, reply_to:) -> {
+          let result = cbr_lookup(state.cbr_cases, case_id)
+          process.send(reply_to, result)
+          loop(state)
+        }
+
+        QueryAllCases(reply_to:) -> {
+          let all = cbr_all_values(state.cbr_cases)
+          process.send(reply_to, all)
+          loop(state)
+        }
+
+        // --- CBR mutation messages ---
+        UpdateCase(case_id:, updated_case:, reply_to:) -> {
+          case cbr_lookup(state.cbr_cases, case_id) {
+            Error(_) -> {
+              process.send(reply_to, Error("Case not found: " <> case_id))
+              loop(state)
+            }
+            Ok(_) -> {
+              // Update metadata ETS
+              cbr_insert(state.cbr_cases, case_id, updated_case)
+              // Update CaseBase (remove old, retain new)
+              let case_base = bridge.remove_case(state.case_base, case_id)
+              let case_base = bridge.retain_case(case_base, updated_case)
+              // Persist update to disk
+              cbr_log.append(state.cbr_dir, updated_case)
+              process.send(reply_to, Ok(Nil))
+              loop(LibrarianState(..state, case_base:))
+            }
+          }
+        }
+
+        AnnotateCase(case_id:, annotation:, reply_to:) -> {
+          case cbr_lookup(state.cbr_cases, case_id) {
+            Error(_) -> {
+              process.send(reply_to, Error("Case not found: " <> case_id))
+              loop(state)
+            }
+            Ok(existing) -> {
+              let updated =
+                cbr_types.CbrCase(
+                  ..existing,
+                  outcome: cbr_types.CbrOutcome(
+                    ..existing.outcome,
+                    pitfalls: list.append(existing.outcome.pitfalls, [
+                      annotation,
+                    ]),
+                  ),
+                )
+              cbr_insert(state.cbr_cases, case_id, updated)
+              // Pitfalls don't affect field scoring — no CaseBase update needed.
+              cbr_log.append(state.cbr_dir, updated)
+              process.send(reply_to, Ok(Nil))
+              loop(state)
+            }
+          }
+        }
+
+        SuppressCase(case_id:, reply_to:) -> {
+          case cbr_lookup(state.cbr_cases, case_id) {
+            Error(_) -> {
+              process.send(reply_to, Error("Case not found: " <> case_id))
+              loop(state)
+            }
+            Ok(existing) -> {
+              // Mark as suppressed in metadata
+              let suppressed =
+                cbr_types.CbrCase(
+                  ..existing,
+                  outcome: cbr_types.CbrOutcome(
+                    ..existing.outcome,
+                    status: "suppressed",
+                  ),
+                )
+              cbr_insert(state.cbr_cases, case_id, suppressed)
+              // Remove from CaseBase (no longer retrievable)
+              let case_base = bridge.remove_case(state.case_base, case_id)
+              cbr_log.append(state.cbr_dir, suppressed)
+              process.send(reply_to, Ok(Nil))
+              loop(LibrarianState(..state, case_base:))
+            }
+          }
+        }
+
+        UnsuppressCase(case_id:, reply_to:) -> {
+          case cbr_lookup(state.cbr_cases, case_id) {
+            Error(_) -> {
+              process.send(reply_to, Error("Case not found: " <> case_id))
+              loop(state)
+            }
+            Ok(existing) -> {
+              case existing.outcome.status == "suppressed" {
+                False -> {
+                  process.send(
+                    reply_to,
+                    Error("Case " <> case_id <> " is not suppressed"),
+                  )
+                  loop(state)
+                }
+                True -> {
+                  // Restore status to the outcome's original (best guess: "success" or "failure")
+                  let restored =
+                    cbr_types.CbrCase(
+                      ..existing,
+                      outcome: cbr_types.CbrOutcome(
+                        ..existing.outcome,
+                        status: "restored",
+                      ),
+                    )
+                  cbr_insert(state.cbr_cases, case_id, restored)
+                  // Re-add to CaseBase for retrieval
+                  let case_base = bridge.retain_case(state.case_base, restored)
+                  cbr_log.append(state.cbr_dir, restored)
+                  process.send(reply_to, Ok(Nil))
+                  loop(LibrarianState(..state, case_base:))
+                }
+              }
+            }
+          }
+        }
+
+        BoostCase(case_id:, new_confidence:, reply_to:) -> {
+          case cbr_lookup(state.cbr_cases, case_id) {
+            Error(_) -> {
+              process.send(reply_to, Error("Case not found: " <> case_id))
+              loop(state)
+            }
+            Ok(existing) -> {
+              // Clamp confidence to [0.0, 1.0]
+              let clamped = float.min(1.0, float.max(0.0, new_confidence))
+              let updated =
+                cbr_types.CbrCase(
+                  ..existing,
+                  outcome: cbr_types.CbrOutcome(
+                    ..existing.outcome,
+                    confidence: clamped,
+                  ),
+                )
+              cbr_insert(state.cbr_cases, case_id, updated)
+              // Confidence doesn't affect field scoring — no CaseBase update needed.
+              cbr_log.append(state.cbr_dir, updated)
+              process.send(reply_to, Ok(Nil))
+              loop(state)
+            }
+          }
+        }
+
+        UpdateCaseUsage(case_id:, success:) -> {
+          case cbr_lookup(state.cbr_cases, case_id) {
+            Error(_) -> loop(state)
+            Ok(existing) -> {
+              let old_stats =
+                option.unwrap(
+                  existing.usage_stats,
+                  cbr_types.empty_usage_stats(),
+                )
+              let new_stats =
+                cbr_types.CbrUsageStats(
+                  retrieval_count: old_stats.retrieval_count + 1,
+                  retrieval_success_count: case success {
+                    True -> old_stats.retrieval_success_count + 1
+                    False -> old_stats.retrieval_success_count
+                  },
+                  helpful_count: old_stats.helpful_count,
+                  harmful_count: old_stats.harmful_count,
+                )
+              let updated =
+                cbr_types.CbrCase(
+                  ..existing,
+                  usage_stats: option.Some(new_stats),
+                )
+              cbr_insert(state.cbr_cases, case_id, updated)
+              cbr_log.append(state.cbr_dir, updated)
+              loop(state)
+            }
+          }
+        }
+
+        // --- Facts messages ---
+        IndexFact(fact:) -> {
+          index_fact(state, fact)
+          loop(state)
+        }
+
+        QueryFactByKey(key:, reply_to:) -> {
+          let result = fact_lookup(state.facts_by_key, key)
+          process.send(reply_to, result)
+          loop(state)
+        }
+
+        QueryFactsByCycle(cycle_id:, reply_to:) -> {
+          let results = fact_lookup_bag(state.facts_by_cycle, cycle_id)
+          process.send(reply_to, results)
+          loop(state)
+        }
+
+        QueryAllFacts(reply_to:) -> {
+          let all = fact_all_values(state.facts_by_key)
+          process.send(reply_to, all)
+          loop(state)
+        }
+
+        QueryFactsByKeyword(keyword:, reply_to:) -> {
+          let results = do_search_facts(state, keyword)
+          process.send(reply_to, results)
+          loop(state)
+        }
+
+        // --- Housekeeping messages ---
+        RemoveCase(case_id:) -> {
+          cbr_delete_key(state.cbr_cases, case_id)
+          let case_base = bridge.remove_case(state.case_base, case_id)
+          loop(LibrarianState(..state, case_base:))
+        }
+
+        SupersedeFact(fact:) -> {
+          index_fact(state, fact)
+          loop(state)
+        }
+
+        // --- Scratchpad messages ---
+        WriteAgentResult(cycle_id:, result:) -> {
+          result_insert(state.cycle_scratchpad, cycle_id, result)
+          loop(state)
+        }
+
+        ReadCycleResults(cycle_id:, reply_to:) -> {
+          let results = result_lookup_bag(state.cycle_scratchpad, cycle_id)
+          process.send(reply_to, results)
+          loop(state)
+        }
+
+        ClearCycleScratchpad(cycle_id:) -> {
+          result_delete_key(state.cycle_scratchpad, cycle_id)
+          loop(state)
+        }
+
+        QueryThreadCount(reply_to:) -> {
+          process.send(reply_to, list.length(state.thread_index.threads))
+          loop(state)
+        }
+
+        QueryPersistentFactCount(reply_to:) -> {
+          let all = fact_all_values(state.facts_by_key)
+          let persistent =
+            list.filter(all, fn(f) { f.scope == facts_types.Persistent })
+          process.send(reply_to, list.length(persistent))
+          loop(state)
+        }
+
+        QueryCaseCount(reply_to:) -> {
+          let all = cbr_all_values(state.cbr_cases)
+          process.send(reply_to, list.length(all))
+          loop(state)
+        }
+
+        // --- DAG messages ---
+        IndexNode(node:) -> {
+          index_dag_node(state, node)
+          loop(state)
+        }
+
+        UpdateNode(node:) -> {
+          // Merge update into existing node from the set table, then update
+          // the set only. Bag tables (dag_by_date, dag_by_parent) keep the
+          // original entry — do_query_dag_day deduplicates via set lookup.
+          let merged = case dag_lookup(state.dag_nodes, node.cycle_id) {
+            Ok(existing) ->
+              dag_types.CycleNode(
+                ..existing,
+                outcome: node.outcome,
+                model: case node.model {
+                  "" -> existing.model
+                  m -> m
+                },
+                tokens_in: case node.tokens_in {
+                  0 -> existing.tokens_in
+                  t -> t
+                },
+                tokens_out: case node.tokens_out {
+                  0 -> existing.tokens_out
+                  t -> t
+                },
+                duration_ms: case node.duration_ms {
+                  0 -> existing.duration_ms
+                  d -> d
+                },
+                tool_calls: case node.tool_calls {
+                  [] -> existing.tool_calls
+                  tc -> tc
+                },
+                dprime_gates: case node.dprime_gates {
+                  [] -> existing.dprime_gates
+                  g -> g
+                },
+                agent_output: case node.agent_output {
+                  option.None -> existing.agent_output
+                  some -> some
+                },
+              )
+            Error(_) -> {
+              // New node — also index in bag tables so dag_by_date queries find it
+              let date_key = string.slice(node.timestamp, 0, 10)
+              dag_insert(state.dag_by_date, date_key, node)
+              let parent_key = case node.parent_id {
+                Some(pid) -> pid
+                None -> "root"
+              }
+              dag_insert(state.dag_by_parent, parent_key, node)
+              node
+            }
+          }
+          dag_insert(state.dag_nodes, merged.cycle_id, merged)
+          loop(state)
+        }
+
+        QueryNode(cycle_id:, reply_to:) -> {
+          let result = dag_lookup(state.dag_nodes, cycle_id)
+          process.send(reply_to, result)
+          loop(state)
+        }
+
+        QueryChildren(parent_id:, reply_to:) -> {
+          let results = dag_lookup_bag(state.dag_by_parent, parent_id)
+          process.send(reply_to, results)
+          loop(state)
+        }
+
+        QueryDayRoots(date:, reply_to:) -> {
+          let all = do_query_dag_day(state, date)
+          let roots = list.filter(all, fn(n) { option.is_none(n.parent_id) })
+          process.send(reply_to, roots)
+          loop(state)
+        }
+
+        QueryDayAll(date:, reply_to:) -> {
+          let all = do_query_dag_day(state, date)
+          process.send(reply_to, all)
+          loop(state)
+        }
+
+        QueryNodeWithDescendants(cycle_id:, reply_to:) -> {
+          let result = case dag_lookup(state.dag_nodes, cycle_id) {
+            Error(_) -> Error(Nil)
+            Ok(root) -> Ok(build_subtree(state, root))
+          }
+          process.send(reply_to, result)
+          loop(state)
+        }
+
+        QueryDayStats(date:, reply_to:) -> {
+          let stats = compute_day_stats(state, date)
+          process.send(reply_to, stats)
+          loop(state)
+        }
+
+        QueryToolActivity(date:, reply_to:) -> {
+          let records = compute_tool_activity(state, date)
+          process.send(reply_to, records)
+          loop(state)
+        }
+
+        // --- Scheduler cycle queries ---
+        QuerySchedulerCycles(date:, reply_to:) -> {
+          let all = do_query_dag_day(state, date)
+          let scheduler_only =
+            list.filter(all, fn(n) { n.node_type == dag_types.SchedulerCycle })
+          process.send(reply_to, scheduler_only)
+          loop(state)
+        }
+
+        // --- Artifact operations ---
+        IndexArtifact(meta:) -> {
+          index_artifact_meta(state, meta)
+          loop(state)
+        }
+
+        QueryArtifactsByCycle(cycle_id:, reply_to:) -> {
+          let metas = artifact_lookup_bag(state.artifacts_by_cycle, cycle_id)
+          process.send(reply_to, metas)
+          loop(state)
+        }
+
+        RetrieveArtifactContent(artifact_id:, stored_at:, reply_to:) -> {
+          let date = string.slice(stored_at, 0, 10)
+          let result =
+            artifacts_log.read_content(state.artifacts_dir, artifact_id, date)
+          process.send(reply_to, result)
+          loop(state)
+        }
+
+        QueryArtifactById(artifact_id:, reply_to:) -> {
+          let result = artifact_lookup_one(state.artifacts, artifact_id)
+          process.send(reply_to, result)
+          loop(state)
+        }
+
+        // --- Trim operations (Housekeeper) ---
+        TrimNarrativeWindow(cutoff_date:, reply_to:) -> {
+          let count = do_trim_narrative(state, cutoff_date)
+          process.send(reply_to, count)
+          loop(state)
+        }
+
+        TrimDagWindow(cutoff_date:, reply_to:) -> {
+          let count = do_trim_dag(state, cutoff_date)
+          process.send(reply_to, count)
+          loop(state)
+        }
+
+        TrimArtifactWindow(cutoff_date:, reply_to:) -> {
+          let count = do_trim_artifact(state, cutoff_date)
+          process.send(reply_to, count)
+          loop(state)
+        }
+
+        // --- Planner messages ---
+        NotifyTaskOp(op:) -> {
+          apply_task_op(state, op)
+          loop(state)
+        }
+
+        NotifyEndeavourOp(op:) -> {
+          apply_endeavour_op(state, op)
+          loop(state)
+        }
+
+        QueryActiveTasks(reply_to:) -> {
+          let all = planner_all_values(state.planner_tasks)
+          let active =
+            list.filter(all, fn(t) {
+              t.status == planner_types.Pending
+              || t.status == planner_types.Active
+            })
+          process.send(reply_to, active)
+          loop(state)
+        }
+
+        QueryTaskById(task_id:, reply_to:) -> {
+          let result = planner_lookup(state.planner_tasks, task_id)
+          process.send(reply_to, result)
+          loop(state)
+        }
+
+        QueryEndeavourById(endeavour_id:, reply_to:) -> {
+          let result = endeavour_lookup(state.planner_endeavours, endeavour_id)
+          process.send(reply_to, result)
+          loop(state)
+        }
+
+        QueryAllEndeavours(reply_to:) -> {
+          let all = endeavour_all_values(state.planner_endeavours)
+          process.send(reply_to, all)
+          loop(state)
+        }
+
+        LoadByCycleIds(cycle_ids:, reply_to:) -> {
+          let entries =
+            list.filter_map(cycle_ids, fn(cid) {
+              ets_lookup(state.entries, cid)
+            })
+          process.send(reply_to, entries)
+          loop(state)
+        }
+      }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Narrative query implementations
+// ---------------------------------------------------------------------------
+
+fn do_query_date_range(
+  state: LibrarianState,
+  from: String,
+  to: String,
+) -> List(NarrativeEntry) {
+  // Use the by_date bag index instead of scanning all entries.
+  // Generate each date in [from, to] and look up entries per date.
+  let dates = generate_date_range(from, to)
+  list.flat_map(dates, fn(date) { ets_lookup_bag(state.by_date, date) })
+  |> list.sort(fn(a, b) { string.compare(a.timestamp, b.timestamp) })
+}
+
+/// Generate a list of "YYYY-MM-DD" strings from `from` to `to` inclusive.
+fn generate_date_range(from: String, to: String) -> List(String) {
+  case string.compare(from, to) {
+    order.Gt -> []
+    _ -> {
+      let days = days_between(from, to)
+      generate_offsets(0, days)
+      |> list.map(fn(offset) { add_days_to_date(from, offset) })
+    }
+  }
+}
+
+fn do_search(state: LibrarianState, keyword: String) -> List(NarrativeEntry) {
+  let lower = string.lowercase(keyword)
+  let by_kw = ets_lookup_bag(state.by_keyword, lower)
+  let all = ets_all_values(state.entries)
+  let by_text =
+    list.filter(all, fn(entry) {
+      string.contains(string.lowercase(entry.summary), lower)
+      || list.any(entry.topics, fn(t) {
+        string.contains(string.lowercase(t), lower)
+      })
+    })
+  merge_unique_entries(by_kw, by_text)
+}
+
+// ---------------------------------------------------------------------------
+// CBR query helpers — bridge delegates retrieval
+// ---------------------------------------------------------------------------
+
+/// Build a metadata dict from the cbr_cases ETS table for bridge lookups.
+fn build_cbr_metadata(
+  state: LibrarianState,
+) -> dict.Dict(String, cbr_types.CbrCase) {
+  let all_cases = cbr_all_values(state.cbr_cases)
+  // Exclude suppressed cases from retrieval metadata
+  list.fold(all_cases, dict.new(), fn(d, c) {
+    case c.outcome.status {
+      "suppressed" -> d
+      _ -> dict.insert(d, c.case_id, c)
+    }
+  })
+}
+
+/// Generate a list [from..to] inclusive.
+fn generate_offsets(from: Int, to: Int) -> List(Int) {
+  case from > to {
+    True -> []
+    False -> [from, ..generate_offsets(from + 1, to)]
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Narrative indexing
+// ---------------------------------------------------------------------------
+
+fn index_entry(state: LibrarianState, entry: NarrativeEntry) -> Nil {
+  // Primary: cycle_id → entry
+  ets_insert(state.entries, entry.cycle_id, entry)
+
+  // Thread index
+  case entry.thread {
+    Some(t) -> ets_insert(state.by_thread, t.thread_id, entry)
+    None -> Nil
+  }
+
+  // Date index
+  let date = extract_date(entry.timestamp)
+  ets_insert(state.by_date, date, entry)
+
+  // Keyword index (lowercased)
+  list.each(entry.keywords, fn(kw) {
+    ets_insert(state.by_keyword, string.lowercase(kw), entry)
+  })
+
+  // Topic index — full phrases + individual significant words
+  list.each(entry.topics, fn(topic) {
+    let lower_topic = string.lowercase(topic)
+    ets_insert(state.by_keyword, lower_topic, entry)
+    string.split(lower_topic, " ")
+    |> list.filter(fn(w) { string.length(w) > 2 })
+    |> list.each(fn(word) { ets_insert(state.by_keyword, word, entry) })
+  })
+
+  // Recency index
+  ets_insert(state.by_recency, entry.timestamp, entry)
+}
+
+// ---------------------------------------------------------------------------
+// Facts indexing
+// ---------------------------------------------------------------------------
+
+fn index_fact(state: LibrarianState, fact: facts_types.MemoryFact) -> Nil {
+  case fact.operation {
+    facts_types.Write -> {
+      // Update current value for this key (overwrites previous)
+      fact_insert(state.facts_by_key, fact.key, fact)
+      // Also index by cycle
+      fact_insert(state.facts_by_cycle, fact.cycle_id, fact)
+    }
+    facts_types.Clear -> {
+      // Remove from current facts
+      fact_delete_key(state.facts_by_key, fact.key)
+      // Still index by cycle for provenance
+      fact_insert(state.facts_by_cycle, fact.cycle_id, fact)
+    }
+    facts_types.Superseded -> {
+      // The superseded record itself doesn't change current facts —
+      // the new Write that caused the supersession already updated facts_by_key
+      fact_insert(state.facts_by_cycle, fact.cycle_id, fact)
+    }
+  }
+}
+
+fn do_search_facts(
+  state: LibrarianState,
+  keyword: String,
+) -> List(facts_types.MemoryFact) {
+  let lower = string.lowercase(keyword)
+  let all = fact_all_values(state.facts_by_key)
+  list.filter(all, fn(f) {
+    string.contains(string.lowercase(f.key), lower)
+    || string.contains(string.lowercase(f.value), lower)
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+fn extract_date(timestamp: String) -> String {
+  case string.split(timestamp, "T") {
+    [date, ..] -> date
+    _ -> timestamp
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Replay from disk
+// ---------------------------------------------------------------------------
+
+fn replay_narrative_from_disk(
+  state: LibrarianState,
+  max_files: Int,
+) -> LibrarianState {
+  case simplifile.read_directory(state.narrative_dir) {
+    Error(_) -> state
+    Ok(files) -> {
+      let jsonl_files =
+        files
+        |> list.filter(fn(f) { string.ends_with(f, ".jsonl") })
+        |> list.sort(string.compare)
+
+      let limited = limit_files(jsonl_files, max_files)
+
+      list.each(limited, fn(f) {
+        let date = string.drop_end(f, 6)
+        let entries = narrative_log.load_date(state.narrative_dir, date)
+        list.each(entries, fn(entry) { index_entry(state, entry) })
+      })
+
+      state
+    }
+  }
+}
+
+fn replay_cbr_from_disk(state: LibrarianState, max_files: Int) -> LibrarianState {
+  case simplifile.read_directory(state.cbr_dir) {
+    Error(_) -> state
+    Ok(files) -> {
+      let jsonl_files =
+        files
+        |> list.filter(fn(f) { string.ends_with(f, ".jsonl") })
+        |> list.sort(string.compare)
+
+      let limited = limit_files(jsonl_files, max_files)
+
+      let all_cases =
+        list.flat_map(limited, fn(f) {
+          let date = string.drop_end(f, 6)
+          cbr_log.load_date(state.cbr_dir, date)
+        })
+
+      // Index metadata in ETS
+      list.each(all_cases, fn(c) { cbr_insert(state.cbr_cases, c.case_id, c) })
+
+      // Add all cases to the CaseBase + rebuild inverted index
+      let case_base =
+        list.fold(all_cases, state.case_base, fn(base, c) {
+          bridge.retain_case(base, c)
+        })
+      let case_base = bridge.rebuild_index(case_base, all_cases)
+
+      LibrarianState(..state, case_base:)
+    }
+  }
+}
+
+fn replay_facts_from_disk(state: LibrarianState) -> Nil {
+  // Facts always load ALL files — no max_files windowing.
+  // Full history is needed for memory_trace_fact, inspect_cycle, and correct
+  // supersession resolution across the entire fact timeline.
+  let facts = facts_log.load_all(state.facts_dir)
+  list.each(facts, fn(f) { index_fact(state, f) })
+}
+
+fn index_artifact_meta(
+  state: LibrarianState,
+  meta: artifacts_types.ArtifactMeta,
+) -> Nil {
+  artifact_insert(state.artifacts, meta.artifact_id, meta)
+  artifact_insert(state.artifacts_by_cycle, meta.cycle_id, meta)
+}
+
+fn replay_artifacts_from_disk(state: LibrarianState, max_files: Int) -> Nil {
+  case simplifile.read_directory(state.artifacts_dir) {
+    Error(_) -> Nil
+    Ok(files) -> {
+      let artifact_files =
+        files
+        |> list.filter(fn(f) { string.ends_with(f, ".jsonl") })
+        |> list.sort(string.compare)
+
+      let limited = limit_files(artifact_files, max_files)
+
+      list.each(limited, fn(f) {
+        // File format: artifacts-YYYY-MM-DD.jsonl
+        let date =
+          f
+          |> string.drop_start(10)
+          |> string.drop_end(6)
+        let metas = artifacts_log.load_date_meta(state.artifacts_dir, date)
+        list.each(metas, fn(m) { index_artifact_meta(state, m) })
+      })
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ETS-vs-disk reconciliation (runs on idle timeout, every ~60s)
+// ---------------------------------------------------------------------------
+// JSONL on disk is the source of truth; ETS is a cache populated by
+// fire-and-forget notifications from the Archivist. If a notification is
+// lost (mailbox full, race condition), the entry exists on disk but not in
+// ETS. This periodic check detects and repairs such gaps by comparing
+// today's line counts against ETS entry counts per store.
+
+fn reconcile_ets_with_disk(state: LibrarianState) -> LibrarianState {
+  let today = get_date()
+  let state = reconcile_narrative(state, today)
+  let state = reconcile_cbr(state, today)
+  reconcile_facts(state, today)
+  reconcile_artifacts(state, today)
+  state
+}
+
+/// Narrative: compare by_date bag count vs JSONL line count for today.
+fn reconcile_narrative(state: LibrarianState, date: String) -> LibrarianState {
+  let ets_count = list.length(ets_lookup_bag(state.by_date, date))
+  let disk_path = state.narrative_dir <> "/" <> date <> ".jsonl"
+  let disk_count = count_lines(disk_path)
+
+  case disk_count > ets_count {
+    False -> state
+    True -> {
+      let diff = disk_count - ets_count
+      slog.info(
+        "librarian",
+        "reconcile",
+        "Narrative: "
+          <> int.to_string(diff)
+          <> " missing entries for "
+          <> date
+          <> " — replaying from disk",
+        None,
+      )
+      // Replay the full day — index_entry uses set semantics for the primary
+      // table so duplicates are harmless, and bag tables may get duplicates
+      // but that is acceptable (queries already deduplicate by cycle_id).
+      let entries = narrative_log.load_date(state.narrative_dir, date)
+      list.each(entries, fn(entry) { index_entry(state, entry) })
+      state
+    }
+  }
+}
+
+/// CBR: compare cbr_cases ETS count vs JSONL line count for today.
+fn reconcile_cbr(state: LibrarianState, date: String) -> LibrarianState {
+  let disk_path = state.cbr_dir <> "/" <> date <> ".jsonl"
+  let disk_count = count_lines(disk_path)
+
+  // If no CBR file for today, nothing to reconcile
+  case disk_count {
+    0 -> state
+    _ -> {
+      // Load today's cases from disk and check which are missing from ETS
+      let disk_cases = cbr_log.load_date(state.cbr_dir, date)
+      let missing =
+        list.filter(disk_cases, fn(c) {
+          case cbr_lookup(state.cbr_cases, c.case_id) {
+            Ok(_) -> False
+            Error(_) -> True
+          }
+        })
+
+      case list.length(missing) {
+        0 -> state
+        n -> {
+          slog.info(
+            "librarian",
+            "reconcile",
+            "CBR: "
+              <> int.to_string(n)
+              <> " missing cases for "
+              <> date
+              <> " — replaying",
+            None,
+          )
+          list.each(missing, fn(c) { cbr_insert(state.cbr_cases, c.case_id, c) })
+          let case_base =
+            list.fold(missing, state.case_base, fn(base, c) {
+              bridge.retain_case(base, c)
+            })
+          let case_base =
+            bridge.rebuild_index(case_base, cbr_all_values(state.cbr_cases))
+          LibrarianState(..state, case_base:)
+        }
+      }
+    }
+  }
+}
+
+/// Facts: compare facts_by_key ETS count vs total resolved facts on disk.
+/// Facts are trickier because Write/Clear/Supersede operations change the
+/// effective count. We compare total current keys in ETS against resolved
+/// facts from all disk files.
+fn reconcile_facts(state: LibrarianState, date: String) -> Nil {
+  let disk_path = state.facts_dir <> "/" <> date <> "-facts.jsonl"
+  let disk_count = count_lines(disk_path)
+
+  // Quick check: if no facts file for today, nothing to reconcile
+  case disk_count {
+    0 -> Nil
+    _ -> {
+      // Load today's facts from disk and check for missing cycle entries
+      let disk_facts = facts_log.load_date(state.facts_dir, date)
+      let missing =
+        list.filter(disk_facts, fn(f) {
+          // Check if fact is indexed by cycle — if not, it was missed
+          let cycle_facts = fact_lookup_bag(state.facts_by_cycle, f.cycle_id)
+          let found = list.any(cycle_facts, fn(cf) { cf.fact_id == f.fact_id })
+          !found
+        })
+
+      case list.length(missing) {
+        0 -> Nil
+        n -> {
+          slog.info(
+            "librarian",
+            "reconcile",
+            "Facts: "
+              <> int.to_string(n)
+              <> " missing facts for "
+              <> date
+              <> " — replaying",
+            None,
+          )
+          list.each(missing, fn(f) { index_fact(state, f) })
+        }
+      }
+    }
+  }
+}
+
+/// Artifacts: compare artifact ETS count vs JSONL line count for today.
+fn reconcile_artifacts(state: LibrarianState, date: String) -> Nil {
+  let disk_path = state.artifacts_dir <> "/artifacts-" <> date <> ".jsonl"
+  let disk_count = count_lines(disk_path)
+
+  case disk_count {
+    0 -> Nil
+    _ -> {
+      let disk_metas = artifacts_log.load_date_meta(state.artifacts_dir, date)
+      let missing =
+        list.filter(disk_metas, fn(m) {
+          case artifact_lookup_one(state.artifacts, m.artifact_id) {
+            Ok(_) -> False
+            Error(_) -> True
+          }
+        })
+
+      case list.length(missing) {
+        0 -> Nil
+        n -> {
+          slog.info(
+            "librarian",
+            "reconcile",
+            "Artifacts: "
+              <> int.to_string(n)
+              <> " missing artifacts for "
+              <> date
+              <> " — replaying",
+            None,
+          )
+          list.each(missing, fn(m) { index_artifact_meta(state, m) })
+        }
+      }
+    }
+  }
+}
+
+fn limit_files(files: List(String), max_files: Int) -> List(String) {
+  case max_files > 0 {
+    True -> {
+      let len = list.length(files)
+      case len > max_files {
+        True -> list.drop(files, len - max_files)
+        False -> files
+      }
+    }
+    False -> files
+  }
+}
+
+fn merge_unique_entries(
+  a: List(NarrativeEntry),
+  b: List(NarrativeEntry),
+) -> List(NarrativeEntry) {
+  let id_set =
+    list.fold(a, dict.new(), fn(d, e) { dict.insert(d, e.cycle_id, Nil) })
+  let unique_b = list.filter(b, fn(e) { !dict.has_key(id_set, e.cycle_id) })
+  list.append(a, unique_b)
+}
+
+// ---------------------------------------------------------------------------
+// DAG — indexing, querying, replay
+// ---------------------------------------------------------------------------
+
+fn index_dag_node(state: LibrarianState, node: dag_types.CycleNode) -> Nil {
+  // Primary index: cycle_id → CycleNode
+  dag_insert(state.dag_nodes, node.cycle_id, node)
+
+  // Parent edge: parent_id → CycleNode (for traversal)
+  let parent_key = case node.parent_id {
+    Some(pid) -> pid
+    None -> "root"
+  }
+  dag_insert(state.dag_by_parent, parent_key, node)
+
+  // Date index: extract YYYY-MM-DD from timestamp
+  let date_key = string.slice(node.timestamp, 0, 10)
+  dag_insert(state.dag_by_date, date_key, node)
+  Nil
+}
+
+fn do_query_dag_day(
+  state: LibrarianState,
+  date: String,
+) -> List(dag_types.CycleNode) {
+  let results = dag_lookup_bag(state.dag_by_date, date)
+  case results {
+    [] -> {
+      // Lazy load: try loading from cycle log file for this date
+      let cycles = cycle_log.load_cycles_for_date(date)
+      case cycles {
+        [] -> []
+        _ -> {
+          let nodes = list.map(cycles, cycle_data_to_node)
+          list.each(nodes, fn(n) { index_dag_node(state, n) })
+          nodes
+        }
+      }
+    }
+    found -> {
+      // Deduplicate bag entries by cycle_id, looking up the authoritative
+      // version from the dag_nodes set table. This handles stale pending
+      // entries and UpdateNode duplicates.
+      let unique_ids = list.map(found, fn(n) { n.cycle_id }) |> list.unique()
+      list.filter_map(unique_ids, fn(id) {
+        case dag_lookup(state.dag_nodes, id) {
+          Ok(node) -> Ok(node)
+          Error(_) -> Error(Nil)
+        }
+      })
+    }
+  }
+}
+
+fn build_subtree(
+  state: LibrarianState,
+  root: dag_types.CycleNode,
+) -> dag_types.DagSubtree {
+  let children = dag_lookup_bag(state.dag_by_parent, root.cycle_id)
+  let child_trees = list.map(children, fn(c) { build_subtree(state, c) })
+  dag_types.DagSubtree(root:, children: child_trees)
+}
+
+fn compute_day_stats(state: LibrarianState, date: String) -> dag_types.DayStats {
+  let all = do_query_dag_day(state, date)
+  let success_count =
+    list.count(all, fn(n) { n.outcome == dag_types.NodeSuccess })
+  let partial_count =
+    list.count(all, fn(n) { n.outcome == dag_types.NodePartial })
+  let failure_count =
+    list.count(all, fn(n) {
+      case n.outcome {
+        dag_types.NodeFailure(_) -> True
+        _ -> False
+      }
+    })
+  let total_tokens_in = list.fold(all, 0, fn(acc, n) { acc + n.tokens_in })
+  let total_tokens_out = list.fold(all, 0, fn(acc, n) { acc + n.tokens_out })
+  let total_duration_ms = list.fold(all, 0, fn(acc, n) { acc + n.duration_ms })
+
+  // Tool failure rate
+  let all_tools = list.flat_map(all, fn(n) { n.tool_calls })
+  let total_tool_calls = list.length(all_tools)
+  let failed_tool_calls = list.count(all_tools, fn(t) { !t.success })
+  let tool_failure_rate = case total_tool_calls {
+    0 -> 0.0
+    n -> int.to_float(failed_tool_calls) /. int.to_float(n)
+  }
+
+  // Unique models
+  let models_used =
+    list.map(all, fn(n) { n.model })
+    |> list.unique()
+
+  // All gate decisions
+  let gate_decisions = list.flat_map(all, fn(n) { n.dprime_gates })
+
+  // Agent-level failure breakdown
+  let agent_failures =
+    list.filter_map(all, fn(n) {
+      case n.node_type, n.outcome {
+        dag_types.AgentCycle, dag_types.NodeFailure(reason:) ->
+          Ok(dag_types.AgentFailureRecord(
+            agent_model: n.model,
+            reason:,
+            cycle_id: n.cycle_id,
+          ))
+        _, _ -> Error(Nil)
+      }
+    })
+
+  let total = list.length(all)
+  let root_cycles = list.count(all, fn(n) { option.is_none(n.parent_id) })
+  let agent_cycles = total - root_cycles
+
+  dag_types.DayStats(
+    date:,
+    total_cycles: total,
+    root_cycles:,
+    agent_cycles:,
+    success_count:,
+    partial_count:,
+    failure_count:,
+    total_tokens_in:,
+    total_tokens_out:,
+    total_duration_ms:,
+    tool_failure_rate:,
+    models_used:,
+    gate_decisions:,
+    agent_failures:,
+  )
+}
+
+fn compute_tool_activity(
+  state: LibrarianState,
+  date: String,
+) -> List(dag_types.ToolActivityRecord) {
+  let all = do_query_dag_day(state, date)
+  // Collect all (tool_name, success, cycle_id) triples
+  let triples =
+    list.flat_map(all, fn(node) {
+      list.map(node.tool_calls, fn(t) { #(t.name, t.success, node.cycle_id) })
+    })
+  // Group by tool name using Dict for O(n) aggregation
+  let records_dict =
+    list.fold(triples, dict.new(), fn(acc, triple) {
+      let #(name, success, cycle_id) = triple
+      case dict.get(acc, name) {
+        Error(_) ->
+          dict.insert(
+            acc,
+            name,
+            dag_types.ToolActivityRecord(
+              name:,
+              total_calls: 1,
+              success_count: case success {
+                True -> 1
+                False -> 0
+              },
+              failure_count: case success {
+                True -> 0
+                False -> 1
+              },
+              cycle_ids: [cycle_id],
+            ),
+          )
+        Ok(rec) ->
+          dict.insert(
+            acc,
+            name,
+            dag_types.ToolActivityRecord(
+              ..rec,
+              total_calls: rec.total_calls + 1,
+              success_count: rec.success_count
+                + case success {
+                  True -> 1
+                  False -> 0
+                },
+              failure_count: rec.failure_count
+                + case success {
+                  True -> 0
+                  False -> 1
+                },
+              cycle_ids: case list.contains(rec.cycle_ids, cycle_id) {
+                True -> rec.cycle_ids
+                False -> [cycle_id, ..rec.cycle_ids]
+              },
+            ),
+          )
+      }
+    })
+  dict.values(records_dict)
+}
+
+fn replay_dag_from_cycle_log(state: LibrarianState, max_files: Int) -> Nil {
+  let dir = cycle_log.log_directory()
+  case simplifile.read_directory(dir) {
+    Error(_) -> Nil
+    Ok(files) -> {
+      let jsonl_files =
+        files
+        |> list.filter(fn(f) { string.ends_with(f, ".jsonl") })
+        |> list.sort(string.compare)
+
+      let limited = limit_files(jsonl_files, max_files)
+
+      list.each(limited, fn(f) {
+        let date = string.drop_end(f, 6)
+        let cycles = cycle_log.load_cycles_for_date(date)
+        list.each(cycles, fn(c) {
+          let node = cycle_data_to_node(c)
+          index_dag_node(state, node)
+        })
+      })
+    }
+  }
+}
+
+fn cycle_data_to_node(c: cycle_log.CycleData) -> dag_types.CycleNode {
+  let outcome = case c.response_text {
+    "" -> dag_types.NodeFailure(reason: "no response")
+    _ -> dag_types.NodeSuccess
+  }
+  let node_type = case c.parent_id {
+    Some(_) -> dag_types.AgentCycle
+    None -> dag_types.CognitiveCycle
+  }
+  // Merge tool_names with tool_successes (by position) to get proper success status
+  let tool_calls = build_tool_summaries(c.tool_names, c.tool_successes, [])
+  dag_types.CycleNode(
+    cycle_id: c.cycle_id,
+    parent_id: c.parent_id,
+    node_type:,
+    timestamp: c.timestamp,
+    outcome:,
+    model: c.model,
+    complexity: option.unwrap(c.complexity, ""),
+    tool_calls:,
+    dprime_gates: [],
+    tokens_in: c.input_tokens,
+    tokens_out: c.output_tokens,
+    duration_ms: 0,
+    agent_output: None,
+    instance_name: "",
+    instance_id: "",
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Trim operations — evict old entries from ETS tables
+// ---------------------------------------------------------------------------
+
+fn do_trim_narrative(state: LibrarianState, cutoff_date: String) -> Int {
+  // Get all entries, filter to those older than cutoff
+  let all = ets_all_values(state.entries)
+  let old_entries =
+    list.filter(all, fn(entry) {
+      string.compare(extract_date(entry.timestamp), cutoff_date) == order.Lt
+    })
+  let count = list.length(old_entries)
+  // Remove from set tables (O(1) per key)
+  list.each(old_entries, fn(entry) {
+    narrative_delete_key(state.entries, entry.cycle_id)
+    narrative_delete_key(state.by_recency, entry.timestamp)
+  })
+  // Remove from bag tables (per-object deletion required)
+  list.each(old_entries, fn(entry) {
+    let date = extract_date(entry.timestamp)
+    ets_delete_object(state.by_date, #(date, entry))
+    case entry.thread {
+      option.Some(t) ->
+        ets_delete_object(state.by_thread, #(t.thread_id, entry))
+      option.None -> Nil
+    }
+    list.each(entry.keywords, fn(kw) {
+      ets_delete_object(state.by_keyword, #(string.lowercase(kw), entry))
+    })
+    list.each(entry.topics, fn(topic) {
+      let lower_topic = string.lowercase(topic)
+      ets_delete_object(state.by_keyword, #(lower_topic, entry))
+      string.split(lower_topic, " ")
+      |> list.filter(fn(w) { string.length(w) > 2 })
+      |> list.each(fn(word) {
+        ets_delete_object(state.by_keyword, #(word, entry))
+      })
+    })
+  })
+  count
+}
+
+fn do_trim_dag(state: LibrarianState, cutoff_date: String) -> Int {
+  let all = dag_all_values(state.dag_nodes)
+  let old_nodes =
+    list.filter(all, fn(node) {
+      string.compare(string.slice(node.timestamp, 0, 10), cutoff_date)
+      == order.Lt
+    })
+  let count = list.length(old_nodes)
+  list.each(old_nodes, fn(node) {
+    dag_delete_key(state.dag_nodes, node.cycle_id)
+    // dag_by_parent and dag_by_date are bags — stale entries remain but
+    // do_query_dag_day deduplicates via set lookup, so orphaned bag entries
+    // are harmless and will be cleaned on next restart (replay skips old files).
+  })
+  count
+}
+
+fn do_trim_artifact(state: LibrarianState, cutoff_date: String) -> Int {
+  let all = artifact_all_values(state.artifacts)
+  let old_metas =
+    list.filter(all, fn(meta) {
+      string.compare(string.slice(meta.stored_at, 0, 10), cutoff_date)
+      == order.Lt
+    })
+  let count = list.length(old_metas)
+  list.each(old_metas, fn(meta) {
+    artifact_delete_key(state.artifacts, meta.artifact_id)
+    // artifacts_by_cycle bag entries become orphaned but harmless
+  })
+  count
+}
+
+/// Pair tool_call names with tool_result successes positionally.
+fn build_tool_summaries(
+  names: List(String),
+  results: List(#(String, Bool)),
+  acc: List(dag_types.ToolSummary),
+) -> List(dag_types.ToolSummary) {
+  case names {
+    [] -> list.reverse(acc)
+    [name, ..rest_names] -> {
+      let #(success, rest_results) = case results {
+        [#(_, s), ..rest] -> #(s, rest)
+        [] -> #(True, [])
+      }
+      build_tool_summaries(rest_names, rest_results, [
+        dag_types.ToolSummary(name:, success:, error: None),
+        ..acc
+      ])
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Planner — apply ops, replay, queries
+// ---------------------------------------------------------------------------
+
+fn apply_task_op(state: LibrarianState, op: planner_types.TaskOp) -> Nil {
+  case op {
+    planner_types.CreateTask(task:) ->
+      planner_insert(state.planner_tasks, task.task_id, task)
+
+    planner_types.UpdateTaskStatus(task_id:, status:, at:) ->
+      case planner_lookup(state.planner_tasks, task_id) {
+        Ok(t) ->
+          planner_insert(
+            state.planner_tasks,
+            task_id,
+            planner_types.PlannerTask(..t, status:, updated_at: at),
+          )
+        Error(_) -> Nil
+      }
+
+    planner_types.CompleteStep(task_id:, step_index:, at:) ->
+      case planner_lookup(state.planner_tasks, task_id) {
+        Ok(t) -> {
+          let steps =
+            list.map(t.plan_steps, fn(s) {
+              case s.index == step_index {
+                True ->
+                  planner_types.PlanStep(
+                    ..s,
+                    status: planner_types.Complete,
+                    completed_at: Some(at),
+                  )
+                False -> s
+              }
+            })
+          let all_complete =
+            list.all(steps, fn(s) { s.status == planner_types.Complete })
+          let new_status = case all_complete {
+            True -> planner_types.Complete
+            False -> t.status
+          }
+          planner_insert(
+            state.planner_tasks,
+            task_id,
+            planner_types.PlannerTask(
+              ..t,
+              plan_steps: steps,
+              status: new_status,
+              updated_at: at,
+            ),
+          )
+        }
+        Error(_) -> Nil
+      }
+
+    planner_types.FlagRisk(task_id:, text:, at:) ->
+      case planner_lookup(state.planner_tasks, task_id) {
+        Ok(t) ->
+          planner_insert(
+            state.planner_tasks,
+            task_id,
+            planner_types.PlannerTask(
+              ..t,
+              materialised_risks: list.append(t.materialised_risks, [text]),
+              updated_at: at,
+            ),
+          )
+        Error(_) -> Nil
+      }
+
+    planner_types.AddCycleId(task_id:, cycle_id:) ->
+      case planner_lookup(state.planner_tasks, task_id) {
+        Ok(t) ->
+          case list.contains(t.cycle_ids, cycle_id) {
+            True -> Nil
+            False ->
+              planner_insert(
+                state.planner_tasks,
+                task_id,
+                planner_types.PlannerTask(
+                  ..t,
+                  cycle_ids: list.append(t.cycle_ids, [cycle_id]),
+                ),
+              )
+          }
+        Error(_) -> Nil
+      }
+
+    planner_types.UpdateForecastScore(task_id:, score:) ->
+      case planner_lookup(state.planner_tasks, task_id) {
+        Ok(t) ->
+          planner_insert(
+            state.planner_tasks,
+            task_id,
+            planner_types.PlannerTask(..t, forecast_score: Some(score)),
+          )
+        Error(_) -> Nil
+      }
+
+    // Delete — remove from ETS entirely
+    planner_types.DeleteTask(task_id:) ->
+      planner_delete_key(state.planner_tasks, task_id)
+
+    // Direct field update — apply to ETS record
+    planner_types.UpdateForecastBreakdown(task_id:, score:, breakdown:) ->
+      case planner_lookup(state.planner_tasks, task_id) {
+        Ok(t) ->
+          planner_insert(
+            state.planner_tasks,
+            task_id,
+            planner_types.PlannerTask(
+              ..t,
+              forecast_score: Some(score),
+              forecast_breakdown: Some(breakdown),
+            ),
+          )
+        Error(_) -> Nil
+      }
+
+    planner_types.AddPreMortem(task_id:, pre_mortem:) ->
+      case planner_lookup(state.planner_tasks, task_id) {
+        Ok(t) ->
+          planner_insert(
+            state.planner_tasks,
+            task_id,
+            planner_types.PlannerTask(..t, pre_mortem: option.Some(pre_mortem)),
+          )
+        Error(_) -> Nil
+      }
+
+    planner_types.AddPostMortem(task_id:, post_mortem:) ->
+      case planner_lookup(state.planner_tasks, task_id) {
+        Ok(t) ->
+          planner_insert(
+            state.planner_tasks,
+            task_id,
+            planner_types.PlannerTask(
+              ..t,
+              post_mortem: option.Some(post_mortem),
+            ),
+          )
+        Error(_) -> Nil
+      }
+
+    // Remaining task ops — apply via resolve pattern
+    other_op -> {
+      let tid = case other_op {
+        planner_types.UpdateTaskFields(task_id: id, ..) -> id
+        planner_types.AddTaskStep(task_id: id, ..) -> id
+        planner_types.RemoveTaskStep(task_id: id, ..) -> id
+        // Already handled above — unreachable
+        _ -> ""
+      }
+      case tid {
+        "" -> Nil
+        _ ->
+          case planner_lookup(state.planner_tasks, tid) {
+            Ok(t) -> {
+              let resolved =
+                planner_log.resolve_tasks([
+                  planner_types.CreateTask(task: t),
+                  other_op,
+                ])
+              case resolved {
+                [updated, ..] ->
+                  planner_insert(state.planner_tasks, tid, updated)
+                _ -> Nil
+              }
+            }
+            Error(_) -> Nil
+          }
+      }
+    }
+  }
+}
+
+fn apply_endeavour_op(
+  state: LibrarianState,
+  op: planner_types.EndeavourOp,
+) -> Nil {
+  case op {
+    planner_types.CreateEndeavour(endeavour:) ->
+      endeavour_insert(
+        state.planner_endeavours,
+        endeavour.endeavour_id,
+        endeavour,
+      )
+
+    planner_types.AddTaskToEndeavour(endeavour_id:, task_id:) ->
+      case endeavour_lookup(state.planner_endeavours, endeavour_id) {
+        Ok(e) ->
+          case list.contains(e.task_ids, task_id) {
+            True -> Nil
+            False ->
+              endeavour_insert(
+                state.planner_endeavours,
+                endeavour_id,
+                planner_types.Endeavour(
+                  ..e,
+                  task_ids: list.append(e.task_ids, [task_id]),
+                ),
+              )
+          }
+        Error(_) -> Nil
+      }
+
+    planner_types.UpdateEndeavourStatus(endeavour_id:, status:) ->
+      case endeavour_lookup(state.planner_endeavours, endeavour_id) {
+        Ok(e) ->
+          endeavour_insert(
+            state.planner_endeavours,
+            endeavour_id,
+            planner_types.Endeavour(..e, status:),
+          )
+        Error(_) -> Nil
+      }
+
+    // Delete — remove from ETS entirely
+    planner_types.DeleteEndeavour(endeavour_id:) ->
+      endeavour_delete(state.planner_endeavours, endeavour_id)
+
+    // Direct field updates — apply to ETS record without re-resolve
+    planner_types.UpdateEndeavourForecastBreakdown(
+      endeavour_id:,
+      score:,
+      breakdown:,
+    ) ->
+      case endeavour_lookup(state.planner_endeavours, endeavour_id) {
+        Ok(e) ->
+          endeavour_insert(
+            state.planner_endeavours,
+            endeavour_id,
+            planner_types.Endeavour(
+              ..e,
+              forecast_score: option.Some(score),
+              forecast_breakdown: option.Some(breakdown),
+            ),
+          )
+        Error(_) -> Nil
+      }
+
+    planner_types.UpdateForecasterConfig(
+      endeavour_id:,
+      feature_overrides:,
+      threshold_override:,
+    ) ->
+      case endeavour_lookup(state.planner_endeavours, endeavour_id) {
+        Ok(e) ->
+          endeavour_insert(
+            state.planner_endeavours,
+            endeavour_id,
+            planner_types.Endeavour(
+              ..e,
+              feature_overrides:,
+              threshold_override:,
+            ),
+          )
+        Error(_) -> Nil
+      }
+
+    planner_types.UpdateEndeavourFields(
+      endeavour_id:,
+      goal:,
+      success_criteria:,
+      deadline:,
+      update_cadence:,
+      approval_config:,
+    ) ->
+      case endeavour_lookup(state.planner_endeavours, endeavour_id) {
+        Ok(e) -> {
+          let updated =
+            planner_types.Endeavour(
+              ..e,
+              goal: option.unwrap(goal, e.goal),
+              success_criteria: option.unwrap(
+                success_criteria,
+                e.success_criteria,
+              ),
+              deadline: case deadline {
+                option.Some(d) -> option.Some(d)
+                option.None -> e.deadline
+              },
+              update_cadence: case update_cadence {
+                option.Some(c) -> option.Some(c)
+                option.None -> e.update_cadence
+              },
+              approval_config: option.unwrap(approval_config, e.approval_config),
+            )
+          endeavour_insert(state.planner_endeavours, endeavour_id, updated)
+        }
+        Error(_) -> Nil
+      }
+
+    planner_types.CancelSession(endeavour_id:, session_id:, reason:, ..) ->
+      case endeavour_lookup(state.planner_endeavours, endeavour_id) {
+        Ok(e) -> {
+          let updated_sessions =
+            list.map(e.work_sessions, fn(s) {
+              case s.session_id == session_id {
+                True ->
+                  planner_types.WorkSession(
+                    ..s,
+                    status: planner_types.SessionSkipped(reason:),
+                  )
+                False -> s
+              }
+            })
+          endeavour_insert(
+            state.planner_endeavours,
+            endeavour_id,
+            planner_types.Endeavour(..e, work_sessions: updated_sessions),
+          )
+        }
+        Error(_) -> Nil
+      }
+
+    planner_types.AddEndeavourPostMortem(endeavour_id:, post_mortem:) ->
+      case endeavour_lookup(state.planner_endeavours, endeavour_id) {
+        Ok(e) ->
+          endeavour_insert(
+            state.planner_endeavours,
+            endeavour_id,
+            planner_types.Endeavour(..e, post_mortem: option.Some(post_mortem)),
+          )
+        Error(_) -> Nil
+      }
+
+    // Remaining ops — apply via resolve pattern (re-create + apply)
+    other_op -> {
+      let eid = case other_op {
+        planner_types.UpdatePhase(endeavour_id: id, ..) -> id
+        planner_types.AddPhase(endeavour_id: id, ..) -> id
+        planner_types.AddBlocker(endeavour_id: id, ..) -> id
+        planner_types.ResolveBlocker(endeavour_id: id, ..) -> id
+        planner_types.RecordSession(endeavour_id: id, ..) -> id
+        planner_types.ScheduleSession(endeavour_id: id, ..) -> id
+        planner_types.SendUpdate(endeavour_id: id, ..) -> id
+        planner_types.Replan(endeavour_id: id, ..) -> id
+        planner_types.RecordMetrics(endeavour_id: id, ..) -> id
+        // Already handled above — unreachable but required for exhaustiveness
+        _ -> ""
+      }
+      case eid {
+        "" -> Nil
+        _ ->
+          case endeavour_lookup(state.planner_endeavours, eid) {
+            Ok(e) -> {
+              let resolved =
+                planner_log.resolve_endeavours([
+                  planner_types.CreateEndeavour(endeavour: e),
+                  other_op,
+                ])
+              case resolved {
+                [updated, ..] ->
+                  endeavour_insert(state.planner_endeavours, eid, updated)
+                _ -> Nil
+              }
+            }
+            Error(_) -> Nil
+          }
+      }
+    }
+  }
+}
+
+fn replay_planner_from_disk(state: LibrarianState, max_files: Int) -> Nil {
+  // Load and resolve tasks
+  case simplifile.read_directory(state.planner_dir) {
+    Error(_) -> Nil
+    Ok(files) -> {
+      let task_files =
+        files
+        |> list.filter(fn(f) { string.ends_with(f, "-tasks.jsonl") })
+        |> list.sort(string.compare)
+      let limited_tasks = limit_files(task_files, max_files)
+      let task_ops =
+        list.flat_map(limited_tasks, fn(f) {
+          let date = string.drop_end(f, 12)
+          planner_log.load_task_ops_date(state.planner_dir, date)
+        })
+      let tasks = planner_log.resolve_tasks(task_ops)
+      list.each(tasks, fn(t) {
+        planner_insert(state.planner_tasks, t.task_id, t)
+      })
+
+      // Load and resolve endeavours
+      let endeavour_files =
+        files
+        |> list.filter(fn(f) { string.ends_with(f, "-endeavours.jsonl") })
+        |> list.sort(string.compare)
+      let limited_endeavours = limit_files(endeavour_files, max_files)
+      let endeavour_ops =
+        list.flat_map(limited_endeavours, fn(f) {
+          let date = string.drop_end(f, 17)
+          planner_log.load_endeavour_ops_date(state.planner_dir, date)
+        })
+      let endeavours = planner_log.resolve_endeavours(endeavour_ops)
+      list.each(endeavours, fn(e) {
+        endeavour_insert(state.planner_endeavours, e.endeavour_id, e)
+      })
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Synchronous query helpers — Planner
+// ---------------------------------------------------------------------------
+
+/// Query active tasks (Pending + Active). Blocks until reply.
+pub fn get_active_tasks(
+  librarian: Subject(LibrarianMessage),
+) -> List(planner_types.PlannerTask) {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryActiveTasks(reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(tasks) -> tasks
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "get_active_tasks",
+        "Timeout waiting for reply",
+        None,
+      )
+      []
+    }
+  }
+}
+
+/// Query a single task by ID. Blocks until reply.
+pub fn get_task_by_id(
+  librarian: Subject(LibrarianMessage),
+  task_id: String,
+) -> Result(planner_types.PlannerTask, Nil) {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryTaskById(task_id:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(result) -> result
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "get_task_by_id",
+        "Timeout waiting for reply",
+        None,
+      )
+      Error(Nil)
+    }
+  }
+}
+
+/// Query a single endeavour by ID. Blocks until reply.
+/// Short alias for get_endeavour_by_id.
+pub fn get_endeavour(
+  librarian: Subject(LibrarianMessage),
+  endeavour_id: String,
+) -> Result(planner_types.Endeavour, Nil) {
+  get_endeavour_by_id(librarian, endeavour_id)
+}
+
+pub fn get_endeavour_by_id(
+  librarian: Subject(LibrarianMessage),
+  endeavour_id: String,
+) -> Result(planner_types.Endeavour, Nil) {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryEndeavourById(endeavour_id:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(result) -> result
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "get_endeavour_by_id",
+        "Timeout waiting for reply",
+        None,
+      )
+      Error(Nil)
+    }
+  }
+}
+
+/// Query all endeavours. Blocks until reply.
+pub fn get_all_endeavours(
+  librarian: Subject(LibrarianMessage),
+) -> List(planner_types.Endeavour) {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryAllEndeavours(reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(endeavours) -> endeavours
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "get_all_endeavours",
+        "Timeout waiting for reply",
+        None,
+      )
+      []
+    }
+  }
+}
+
+/// Notify the Librarian of a task operation (fire-and-forget).
+pub fn notify_task_op(
+  librarian: Subject(LibrarianMessage),
+  op: planner_types.TaskOp,
+) -> Nil {
+  process.send(librarian, NotifyTaskOp(op:))
+}
+
+/// Notify the Librarian of an endeavour operation (fire-and-forget).
+pub fn notify_endeavour_op(
+  librarian: Subject(LibrarianMessage),
+  op: planner_types.EndeavourOp,
+) -> Nil {
+  process.send(librarian, NotifyEndeavourOp(op:))
+}
+
+/// Load narrative entries by cycle IDs. Blocks until reply.
+pub fn load_by_cycle_ids(
+  librarian: Subject(LibrarianMessage),
+  cycle_ids: List(String),
+) -> List(NarrativeEntry) {
+  let reply_to = process.new_subject()
+  process.send(librarian, LoadByCycleIds(cycle_ids:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(entries) -> entries
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "load_by_cycle_ids",
+        "Timeout waiting for reply",
+        None,
+      )
+      []
+    }
+  }
+}

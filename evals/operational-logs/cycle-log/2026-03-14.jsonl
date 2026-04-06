@@ -1,0 +1,184 @@
+{"type":"tool_call","cycle_id":"5a0de445-ec05-4c68-9a65-ff2fb21bb2f6","timestamp":"2026-03-14T09:33:59","tool_use_id":"tc-1","name":"calculator","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"5a0de445-ec05-4c68-9a65-ff2fb21bb2f6","timestamp":"2026-03-14T09:33:59","tool_use_id":"tc-1","success":true,"content":"[REDACTED]","content_length":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:34:05","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:34:05","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:34:05","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:34:05","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:34:05","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:34:05","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:34:05","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:34:05","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:34:05","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:34:05","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:34:05","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:34:05","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:34:05","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:34:05","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:34:05","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:34:05","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:34:05","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:34:05","type":"dprime_layer","layer":"output_gate","decision":"reject","score":1.5555555555555556,"explanation":"Report rejected \u2014 unsourced_claims: several claims... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:34:05","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:34:05","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:34:05","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:34:05","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"type":"tool_call","cycle_id":"8280e6a4-bceb-4400-9a71-83bf459a2f33","timestamp":"2026-03-14T09:38:09","tool_use_id":"tc-1","name":"calculator","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"8280e6a4-bceb-4400-9a71-83bf459a2f33","timestamp":"2026-03-14T09:38:09","tool_use_id":"tc-1","success":true,"content":"[REDACTED]","content_length":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:38:15","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:38:15","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:38:15","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:38:15","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:38:15","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:38:15","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:38:15","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:38:15","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:38:15","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:38:15","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:38:15","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:38:15","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:38:15","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:38:15","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:38:15","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:38:15","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:38:15","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:38:15","type":"dprime_layer","layer":"output_gate","decision":"reject","score":1.5555555555555556,"explanation":"Report rejected \u2014 unsourced_claims: several claims... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:38:15","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:38:15","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:38:15","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T09:38:15","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"type":"tool_call","cycle_id":"4cc3b4a1-f882-4bd1-aea4-c59e5a5832cc","timestamp":"2026-03-14T11:26:22","tool_use_id":"tc-1","name":"calculator","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"4cc3b4a1-f882-4bd1-aea4-c59e5a5832cc","timestamp":"2026-03-14T11:26:22","tool_use_id":"tc-1","success":true,"content":"[REDACTED]","content_length":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:26:29","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:26:29","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:26:29","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:26:29","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:26:29","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:26:29","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:26:29","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:26:29","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:26:29","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:26:29","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:26:29","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:26:29","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:26:29","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:26:29","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:26:29","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:26:29","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:26:29","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:26:29","type":"dprime_layer","layer":"output_gate","decision":"reject","score":1.5555555555555556,"explanation":"Report rejected \u2014 unsourced_claims: several claims... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:26:29","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:26:29","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:26:29","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:26:29","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"type":"tool_call","cycle_id":"175c02d4-5edd-4d4d-bdee-8359ca9722e2","timestamp":"2026-03-14T11:27:35","tool_use_id":"tc-1","name":"calculator","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"175c02d4-5edd-4d4d-bdee-8359ca9722e2","timestamp":"2026-03-14T11:27:35","tool_use_id":"tc-1","success":true,"content":"[REDACTED]","content_length":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:27:41","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:27:41","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:27:41","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:27:41","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:27:41","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:27:41","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:27:41","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:27:41","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:27:41","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:27:42","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:27:42","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:27:42","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:27:42","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:27:42","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:27:42","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:27:42","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:27:42","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:27:42","type":"dprime_layer","layer":"output_gate","decision":"reject","score":1.5555555555555556,"explanation":"Report rejected \u2014 unsourced_claims: several claims... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:27:42","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:27:42","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:27:42","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:27:42","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"type":"tool_call","cycle_id":"aa464912-7b96-4bea-aafc-f1986c7646a8","timestamp":"2026-03-14T11:28:57","tool_use_id":"tc-1","name":"calculator","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"aa464912-7b96-4bea-aafc-f1986c7646a8","timestamp":"2026-03-14T11:28:57","tool_use_id":"tc-1","success":true,"content":"[REDACTED]","content_length":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:29:04","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:29:04","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:29:04","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:29:04","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:29:04","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:29:04","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:29:04","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:29:04","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:29:04","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:29:04","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:29:04","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:29:04","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:29:04","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:29:04","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:29:04","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:29:04","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:29:04","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:29:04","type":"dprime_layer","layer":"output_gate","decision":"reject","score":1.5555555555555556,"explanation":"Report rejected \u2014 unsourced_claims: several claims... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:29:04","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:29:04","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:29:04","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:29:04","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"type":"human_input","cycle_id":"aaaa7713-87fb-4997-8645-4f18eb17d866","parent_cycle_id":null,"timestamp":"2026-03-14T11:41:26","text":"[REDACTED]","text_length":79}
+{"cycle_id":"aaaa7713-87fb-4997-8645-4f18eb17d866","timestamp":"2026-03-14T11:41:28","type":"classification","complexity":"simple","suggested_model":"claude-haiku-4-5-20251001","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"aaaa7713-87fb-4997-8645-4f18eb17d866","timestamp":"2026-03-14T11:41:29","model":"claude-haiku-4-5-20251001","stop_reason":"tool_use","input_tokens":3377,"output_tokens":77,"content":"[REDACTED]"}
+{"type":"llm_response","cycle_id":"aaaa7713-87fb-4997-8645-4f18eb17d866","timestamp":"2026-03-14T11:41:33","model":"claude-haiku-4-5-20251001","stop_reason":"end_turn","input_tokens":3580,"output_tokens":227,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"f371eb02-9421-4b52-b02b-78a04f3e2258","parent_cycle_id":null,"timestamp":"2026-03-14T11:42:39","text":"[REDACTED]","text_length":85}
+{"cycle_id":"f371eb02-9421-4b52-b02b-78a04f3e2258","timestamp":"2026-03-14T11:42:40","type":"classification","complexity":"complex","suggested_model":"claude-opus-4-6","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"f371eb02-9421-4b52-b02b-78a04f3e2258","timestamp":"2026-03-14T11:42:48","model":"claude-opus-4-6","stop_reason":"tool_use","input_tokens":3831,"output_tokens":247,"content":"[REDACTED]"}
+{"type":"tool_call","cycle_id":"cd21cbf5-a70d-4131-808a-18e318411320","timestamp":"2026-03-14T11:42:50","tool_use_id":"toolu_0198trJBkjm8CQFame972oAo","name":"brave_news_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"cd21cbf5-a70d-4131-808a-18e318411320","timestamp":"2026-03-14T11:42:52","tool_use_id":"toolu_0198trJBkjm8CQFame972oAo","success":true,"content":"[REDACTED]","content_length":4634}
+{"type":"tool_call","cycle_id":"cd21cbf5-a70d-4131-808a-18e318411320","timestamp":"2026-03-14T11:42:52","tool_use_id":"toolu_01SGM3mBoFawW2QuowUT1nWD","name":"brave_web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"cd21cbf5-a70d-4131-808a-18e318411320","timestamp":"2026-03-14T11:42:53","tool_use_id":"toolu_01SGM3mBoFawW2QuowUT1nWD","success":true,"content":"[REDACTED]","content_length":3546}
+{"type":"tool_call","cycle_id":"cd21cbf5-a70d-4131-808a-18e318411320","timestamp":"2026-03-14T11:42:53","tool_use_id":"toolu_01232Ak3ErhR4YvGr2TD1ad7","name":"brave_summarizer","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"cd21cbf5-a70d-4131-808a-18e318411320","timestamp":"2026-03-14T11:42:54","tool_use_id":"toolu_01232Ak3ErhR4YvGr2TD1ad7","success":true,"content":"[REDACTED]","content_length":5771}
+{"type":"tool_call","cycle_id":"cd21cbf5-a70d-4131-808a-18e318411320","timestamp":"2026-03-14T11:42:54","tool_use_id":"toolu_018sbQzPDCFxEp9jkv2hmY3p","name":"web_search","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"cd21cbf5-a70d-4131-808a-18e318411320","timestamp":"2026-03-14T11:42:54","tool_use_id":"toolu_018sbQzPDCFxEp9jkv2hmY3p","success":true,"content":"[REDACTED]","content_length":2236}
+{"type":"tool_call","cycle_id":"cd21cbf5-a70d-4131-808a-18e318411320","timestamp":"2026-03-14T11:42:57","tool_use_id":"toolu_01VacTd9DBvGCA2nsAchMjas","name":"brave_answer","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"cd21cbf5-a70d-4131-808a-18e318411320","timestamp":"2026-03-14T11:42:57","tool_use_id":"toolu_01VacTd9DBvGCA2nsAchMjas","success":false,"content":"[REDACTED]","content_length":147}
+{"type":"tool_call","cycle_id":"cd21cbf5-a70d-4131-808a-18e318411320","timestamp":"2026-03-14T11:42:57","tool_use_id":"toolu_01RXN161oi3ss9x4DCpviNTs","name":"brave_llm_context","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"cd21cbf5-a70d-4131-808a-18e318411320","timestamp":"2026-03-14T11:43:27","tool_use_id":"toolu_01RXN161oi3ss9x4DCpviNTs","success":false,"content":"[REDACTED]","content_length":26}
+{"type":"tool_call","cycle_id":"cd21cbf5-a70d-4131-808a-18e318411320","timestamp":"2026-03-14T11:43:31","tool_use_id":"toolu_01MBir8sXvhxnvFNpjuDjVVf","name":"jina_reader","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"cd21cbf5-a70d-4131-808a-18e318411320","timestamp":"2026-03-14T11:43:36","tool_use_id":"toolu_01MBir8sXvhxnvFNpjuDjVVf","success":true,"content":"[REDACTED]","content_length":50000}
+{"type":"tool_call","cycle_id":"cd21cbf5-a70d-4131-808a-18e318411320","timestamp":"2026-03-14T11:43:36","tool_use_id":"toolu_015BoGE8YHi2uUP3pGWbztiF","name":"jina_reader","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"cd21cbf5-a70d-4131-808a-18e318411320","timestamp":"2026-03-14T11:44:06","tool_use_id":"toolu_015BoGE8YHi2uUP3pGWbztiF","success":false,"content":"[REDACTED]","content_length":20}
+{"type":"tool_call","cycle_id":"cd21cbf5-a70d-4131-808a-18e318411320","timestamp":"2026-03-14T11:44:06","tool_use_id":"toolu_01LepxEKgY4zDpmKvMrjbkxu","name":"fetch_url","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"cd21cbf5-a70d-4131-808a-18e318411320","timestamp":"2026-03-14T11:44:08","tool_use_id":"toolu_01LepxEKgY4zDpmKvMrjbkxu","success":true,"content":"[REDACTED]","content_length":51200}
+{"type":"llm_response","cycle_id":"f371eb02-9421-4b52-b02b-78a04f3e2258","timestamp":"2026-03-14T11:44:42","model":"claude-opus-4-6","stop_reason":"end_turn","input_tokens":5665,"output_tokens":507,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"d797bffd-e3c0-43e3-89f1-c6a0768c52e1","parent_cycle_id":null,"timestamp":"2026-03-14T11:45:44","text":"[REDACTED]","text_length":138}
+{"cycle_id":"d797bffd-e3c0-43e3-89f1-c6a0768c52e1","timestamp":"2026-03-14T11:45:46","type":"classification","complexity":"simple","suggested_model":"claude-haiku-4-5-20251001","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"d797bffd-e3c0-43e3-89f1-c6a0768c52e1","timestamp":"2026-03-14T11:45:51","model":"claude-haiku-4-5-20251001","stop_reason":"end_turn","input_tokens":6204,"output_tokens":293,"content":"[REDACTED]"}
+{"type":"human_input","cycle_id":"66ea953c-b1a8-486d-9311-586bd1a9eff0","parent_cycle_id":null,"timestamp":"2026-03-14T11:47:04","text":"[REDACTED]","text_length":32}
+{"cycle_id":"66ea953c-b1a8-486d-9311-586bd1a9eff0","timestamp":"2026-03-14T11:47:04","type":"classification","complexity":"simple","suggested_model":"claude-haiku-4-5-20251001","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"66ea953c-b1a8-486d-9311-586bd1a9eff0","timestamp":"2026-03-14T11:47:07","model":"claude-haiku-4-5-20251001","stop_reason":"end_turn","input_tokens":6509,"output_tokens":34,"content":"[REDACTED]"}
+{"type":"tool_call","cycle_id":"30b0a1ed-3576-4201-8c0d-ea12a7bd0f56","timestamp":"2026-03-14T11:50:25","tool_use_id":"tc-1","name":"calculator","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"30b0a1ed-3576-4201-8c0d-ea12a7bd0f56","timestamp":"2026-03-14T11:50:25","tool_use_id":"tc-1","success":true,"content":"[REDACTED]","content_length":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:50:31","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:50:31","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Reactive reject: critical feature score exceeds reactive threshold"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:50:31","type":"dprime_canary","hijack_detected":true,"leakage_detected":true,"details":"Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:50:31","type":"dprime_layer","layer":"reactive","decision":"reject","score":1.0,"explanation":"Canary probe failed: Hijack and leakage detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:50:31","type":"dprime_canary","hijack_detected":false,"leakage_detected":false,"details":"No issues detected"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:50:31","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:50:31","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:50:31","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:50:31","type":"dprime_layer","layer":"reactive","decision":"accept","score":0.0,"explanation":"Fast accept: no critical feature discrepancies"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:50:31","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:50:31","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:50:31","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:50:31","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:50:31","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.6666666666666666,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:50:31","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:50:31","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:50:31","type":"dprime_layer","layer":"output_gate","decision":"accept","score":0.0,"explanation":"Output quality acceptable"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:50:31","type":"dprime_layer","layer":"output_gate","decision":"reject","score":1.5555555555555556,"explanation":"Report rejected \u2014 unsourced_claims: several claims... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:50:31","type":"dprime_layer","layer":"output_gate","decision":"modify","score":1.5555555555555556,"explanation":"Quality issues: unsourced_claims: several claims l... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:50:31","type":"dprime_layer","layer":"output_gate","decision":"reject","score":2.0,"explanation":"Report rejected \u2014 unsourced_claims: no sources; ca... [TRUNCATED]"}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:50:31","type":"dprime_scorer_fallback","reason":"LLM error after retry","feature_count":1}
+{"cycle_id":"test-cycle","timestamp":"2026-03-14T11:50:31","type":"dprime_scorer_fallback","reason":"JSON parse failed after retry","feature_count":1}
+{"type":"human_input","cycle_id":"6530e1a0-a8f5-40f9-a48f-e8fe316ea7c5","parent_cycle_id":null,"timestamp":"2026-03-14T11:52:54","text":"[REDACTED]","text_length":82}
+{"cycle_id":"6530e1a0-a8f5-40f9-a48f-e8fe316ea7c5","timestamp":"2026-03-14T11:52:56","type":"classification","complexity":"complex","suggested_model":"claude-opus-4-6","prompted_user":false,"user_confirmed":null}
+{"type":"llm_response","cycle_id":"6530e1a0-a8f5-40f9-a48f-e8fe316ea7c5","timestamp":"2026-03-14T11:53:04","model":"claude-opus-4-6","stop_reason":"tool_use","input_tokens":6562,"output_tokens":281,"content":"[REDACTED]"}
+{"type":"tool_call","cycle_id":"34fae5e0-8dbb-4687-8796-b50da0bae30d","timestamp":"2026-03-14T11:53:05","tool_use_id":"toolu_01UvRE7mKqmrKc2BYuN8uCKJ","name":"brave_answer","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"34fae5e0-8dbb-4687-8796-b50da0bae30d","timestamp":"2026-03-14T11:53:07","tool_use_id":"toolu_01UvRE7mKqmrKc2BYuN8uCKJ","success":false,"content":"[REDACTED]","content_length":147}
+{"type":"tool_call","cycle_id":"34fae5e0-8dbb-4687-8796-b50da0bae30d","timestamp":"2026-03-14T11:53:07","tool_use_id":"toolu_01Ru8j6HpRJnZy7mo3NkCW2e","name":"brave_llm_context","input":"[REDACTED]"}
+{"type":"tool_result","cycle_id":"34fae5e0-8dbb-4687-8796-b50da0bae30d","timestamp":"2026-03-14T11:53:07","tool_use_id":"toolu_01Ru8j6HpRJnZy7mo3NkCW2e","success":false,"content":"[REDACTED]","content_length":487}
+{"type":"llm_response","cycle_id":"6530e1a0-a8f5-40f9-a48f-e8fe316ea7c5","timestamp":"2026-03-14T11:53:20","model":"claude-opus-4-6","stop_reason":"end_turn","input_tokens":7255,"output_tokens":266,"content":"[REDACTED]"}

@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SD Audit — Springdrift Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+         background: #0a0a0a; color: #e0e0e0; padding: 20px; }
+  h1 { font-size: 1.4em; color: #fff; margin-bottom: 4px; }
+  h2 { font-size: 1.1em; color: #aaa; margin: 20px 0 10px; }
+  .subtitle { color: #888; font-size: 0.9em; margin-bottom: 20px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .card { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 16px; }
+  .card .label { color: #888; font-size: 0.8em; text-transform: uppercase; }
+  .card .value { font-size: 1.8em; font-weight: 600; color: #fff; margin: 4px 0; }
+  .card .detail { color: #666; font-size: 0.85em; }
+  .chart-container { background: #1a1a1a; border: 1px solid #333; border-radius: 8px;
+                     padding: 16px; margin-bottom: 16px; }
+  .chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  canvas { max-height: 300px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.85em; }
+  th { text-align: left; padding: 8px; color: #888; border-bottom: 1px solid #333; }
+  td { padding: 8px; border-bottom: 1px solid #222; }
+  .success { color: #248a3d; }
+  .failure { color: #d70015; }
+  .partial { color: #c77c00; }
+  .date-picker { margin-bottom: 20px; display: flex; gap: 10px; align-items: center; }
+  .date-picker input { background: #1a1a1a; border: 1px solid #333; border-radius: 4px;
+                        color: #e0e0e0; padding: 6px 10px; }
+  .date-picker button { background: #248a3d; border: none; border-radius: 4px;
+                         color: #fff; padding: 6px 14px; cursor: pointer; }
+  .tabs { display: flex; gap: 2px; margin-bottom: 16px; }
+  .tabs button { background: #1a1a1a; border: 1px solid #333; border-radius: 4px 4px 0 0;
+                  color: #888; padding: 8px 16px; cursor: pointer; border-bottom: none; }
+  .tabs button.active { background: #222; color: #fff; }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+  @media (max-width: 800px) { .chart-row { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<h1>SD Audit</h1>
+<div class="subtitle">Springdrift Log Analysis — {{ summary.date_range.from or 'no data' }} to {{ summary.date_range.to or 'no data' }} ({{ summary.date_range.days }} days)</div>
+
+<div class="date-picker">
+  <label>From:</label>
+  <input type="date" id="from-date" value="{{ from_date }}">
+  <label>To:</label>
+  <input type="date" id="to-date" value="{{ to_date }}">
+  <button onclick="applyDateRange()">Apply</button>
+</div>
+
+<!-- Summary cards -->
+<div class="grid">
+  <div class="card">
+    <div class="label">Cycles</div>
+    <div class="value">{{ summary.cycles.total }}</div>
+    <div class="detail">{{ summary.cycles.user_inputs }} user inputs</div>
+  </div>
+  <div class="card">
+    <div class="label">Tokens</div>
+    <div class="value">{{ "{:,}".format(summary.tokens.total) }}</div>
+    <div class="detail">in: {{ "{:,}".format(summary.tokens.input) }} / out: {{ "{:,}".format(summary.tokens.output) }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Tool Calls</div>
+    <div class="value">{{ summary.tools.total_calls }}</div>
+    <div class="detail">{{ summary.tools.failures }} failures ({{ "%.1f"|format(summary.tools.failure_rate * 100) }}%)</div>
+  </div>
+  <div class="card">
+    <div class="label">Narrative</div>
+    <div class="value">{{ summary.narrative.total_entries }}</div>
+    <div class="detail">
+      {% for k, v in summary.narrative.outcomes.items() %}{{ k }}: {{ v }}{% if not loop.last %}, {% endif %}{% endfor %}
+    </div>
+  </div>
+  <div class="card">
+    <div class="label">D' Safety</div>
+    <div class="value">{{ summary.safety.dprime_evaluations }}</div>
+    <div class="detail">{{ summary.safety.accepts }} accept / {{ summary.safety.modifies }} modify / {{ summary.safety.rejects }} reject</div>
+  </div>
+  <div class="card">
+    <div class="label">Memory</div>
+    <div class="value">{{ summary.memory.facts + summary.memory.cbr_cases }}</div>
+    <div class="detail">{{ summary.memory.facts }} facts, {{ summary.memory.cbr_cases }} CBR cases</div>
+  </div>
+  <div class="card">
+    <div class="label">Comms</div>
+    <div class="value">{{ summary.comms.total_messages }}</div>
+    <div class="detail">{{ summary.comms.outbound }} out / {{ summary.comms.inbound }} in</div>
+  </div>
+  <div class="card">
+    <div class="label">Models</div>
+    <div class="value">{{ summary.models | length }}</div>
+    <div class="detail">
+      {% for m, c in summary.models.items() %}{{ m.split('/')[-1][:20] }}: {{ c }}{% if not loop.last %}, {% endif %}{% endfor %}
+    </div>
+  </div>
+</div>
+
+<!-- Tabs -->
+<div class="tabs">
+  <button class="active" onclick="switchTab('activity')">Activity</button>
+  <button onclick="switchTab('tokens')">Tokens</button>
+  <button onclick="switchTab('safety')">Safety</button>
+  <button onclick="switchTab('narrative')">Narrative</button>
+  <button onclick="switchTab('comms')">Comms</button>
+</div>
+
+<!-- Activity tab -->
+<div id="tab-activity" class="tab-content active">
+  <div class="chart-row">
+    <div class="chart-container">
+      <h2>Daily Cycles</h2>
+      <canvas id="activity-chart"></canvas>
+    </div>
+    <div class="chart-container">
+      <h2>Outcomes</h2>
+      <canvas id="outcomes-chart"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- Tokens tab -->
+<div id="tab-tokens" class="tab-content">
+  <div class="chart-container">
+    <h2>Daily Token Usage</h2>
+    <canvas id="tokens-chart"></canvas>
+  </div>
+</div>
+
+<!-- Safety tab -->
+<div id="tab-safety" class="tab-content">
+  <div class="chart-container">
+    <h2>D' Gate Decisions Over Time</h2>
+    <canvas id="dprime-chart"></canvas>
+  </div>
+</div>
+
+<!-- Narrative tab -->
+<div id="tab-narrative" class="tab-content">
+  <h2>Recent Narrative Entries</h2>
+  <table id="narrative-table">
+    <thead><tr><th>Time</th><th>Cycle</th><th>Domain</th><th>Outcome</th><th>Tokens</th><th>Summary</th></tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<!-- Comms tab -->
+<div id="tab-comms" class="tab-content">
+  <h2>Communications</h2>
+  <table id="comms-table">
+    <thead><tr><th>Time</th><th>Dir</th><th>From</th><th>To</th><th>Subject</th><th>Status</th></tr></thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<script>
+const fromDate = document.getElementById('from-date').value;
+const toDate = document.getElementById('to-date').value;
+const qs = `?from=${fromDate}&to=${toDate}`;
+
+function applyDateRange() {
+  const f = document.getElementById('from-date').value;
+  const t = document.getElementById('to-date').value;
+  window.location.href = `/?from=${f}&to=${t}`;
+}
+
+function switchTab(name) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tabs button').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  event.target.classList.add('active');
+  if (name === 'narrative') loadNarrative();
+  if (name === 'comms') loadComms();
+}
+
+function escapeHtml(s) {
+  const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML;
+}
+
+// Activity chart
+fetch('/api/daily-activity' + qs).then(r => r.json()).then(data => {
+  new Chart(document.getElementById('activity-chart'), {
+    type: 'bar',
+    data: {
+      labels: data.map(d => d.date.substring(5)),
+      datasets: [{
+        label: 'Cycles',
+        data: data.map(d => d.total),
+        backgroundColor: '#248a3d',
+      }]
+    },
+    options: { responsive: true, scales: { y: { beginAtZero: true } },
+               plugins: { legend: { display: false } } }
+  });
+
+  // Outcomes stacked
+  new Chart(document.getElementById('outcomes-chart'), {
+    type: 'bar',
+    data: {
+      labels: data.map(d => d.date.substring(5)),
+      datasets: [
+        { label: 'Success', data: data.map(d => d.success), backgroundColor: '#248a3d' },
+        { label: 'Partial', data: data.map(d => d.partial), backgroundColor: '#c77c00' },
+        { label: 'Failure', data: data.map(d => d.failure), backgroundColor: '#d70015' },
+      ]
+    },
+    options: { responsive: true, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } } }
+  });
+});
+
+// Token chart
+fetch('/api/token-timeline' + qs).then(r => r.json()).then(data => {
+  new Chart(document.getElementById('tokens-chart'), {
+    type: 'line',
+    data: {
+      labels: data.map(d => d.date.substring(5)),
+      datasets: [
+        { label: 'Input', data: data.map(d => d.input), borderColor: '#007aff', fill: false },
+        { label: 'Output', data: data.map(d => d.output), borderColor: '#248a3d', fill: false },
+      ]
+    },
+    options: { responsive: true, scales: { y: { beginAtZero: true } } }
+  });
+});
+
+// D' chart
+fetch('/api/dprime-timeline' + qs).then(r => r.json()).then(data => {
+  const accepts = data.filter(d => d.decision === 'accept');
+  const modifies = data.filter(d => d.decision === 'modify');
+  const rejects = data.filter(d => d.decision === 'reject');
+  new Chart(document.getElementById('dprime-chart'), {
+    type: 'scatter',
+    data: {
+      datasets: [
+        { label: 'Accept', data: accepts.map(d => ({x: d.timestamp, y: d.score})),
+          backgroundColor: '#248a3d', pointRadius: 3 },
+        { label: 'Modify', data: modifies.map(d => ({x: d.timestamp, y: d.score})),
+          backgroundColor: '#c77c00', pointRadius: 5 },
+        { label: 'Reject', data: rejects.map(d => ({x: d.timestamp, y: d.score})),
+          backgroundColor: '#d70015', pointRadius: 7 },
+      ]
+    },
+    options: { responsive: true, scales: { y: { min: 0, max: 1, title: { display: true, text: "D' Score" } } } }
+  });
+});
+
+// Narrative table
+function loadNarrative() {
+  fetch('/api/narrative' + qs).then(r => r.json()).then(data => {
+    const tbody = document.querySelector('#narrative-table tbody');
+    if (!data.length) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;opacity:.5">No entries</td></tr>'; return; }
+    tbody.innerHTML = data.reverse().map(e => {
+      const cls = e.outcome === 'success' ? 'success' : e.outcome === 'failure' ? 'failure' : 'partial';
+      return `<tr><td style="white-space:nowrap">${escapeHtml((e.timestamp||'').substring(0,16).replace('T',' '))}</td>` +
+        `<td>${escapeHtml(e.cycle_id)}</td>` +
+        `<td>${escapeHtml(e.domain)}</td>` +
+        `<td class="${cls}">${escapeHtml(e.outcome)}</td>` +
+        `<td>${(e.tokens_in+e.tokens_out).toLocaleString()}</td>` +
+        `<td>${escapeHtml(e.summary)}</td></tr>`;
+    }).join('');
+  });
+}
+
+// Comms table
+function loadComms() {
+  fetch('/api/comms' + qs).then(r => r.json()).then(data => {
+    const tbody = document.querySelector('#comms-table tbody');
+    if (!data.length) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;opacity:.5">No messages</td></tr>'; return; }
+    tbody.innerHTML = data.reverse().map(m => {
+      const dir = m.direction === 'outbound' ? '&#8599;' : '&#8601;';
+      return `<tr><td style="white-space:nowrap">${escapeHtml((m.timestamp||'').substring(0,16).replace('T',' '))}</td>` +
+        `<td>${dir}</td>` +
+        `<td>${escapeHtml(m.from)}</td>` +
+        `<td>${escapeHtml(m.to)}</td>` +
+        `<td>${escapeHtml(m.subject)}</td>` +
+        `<td>${escapeHtml(m.status)}</td></tr>`;
+    }).join('');
+  });
+}
+</script>
+
+</body>
+</html>
