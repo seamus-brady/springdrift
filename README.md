@@ -1,5 +1,8 @@
 # Springdrift
 
+
+
+
 <p align="center">
   <img src="docs/img/springdrift_logo_small.png" alt="Springdrift" width="300">
 </p>
@@ -29,6 +32,10 @@ and relatively stable. There are probably bugs though!
 
 See [docs/roadmap/](docs/roadmap/) for planned work
 including federation, learner ingestion, and metacognition reporting.
+
+### Arxiv Paper
+
+[Springdrift: An Auditable Persistent Runtime for LLM Agents with Case-Based Memory, Normative Safety, and Ambient Self-Perception](https://arxiv.org/pdf/2604.04660)
 
 ---
 
