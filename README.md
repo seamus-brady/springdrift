@@ -137,9 +137,6 @@ gleam run
 
 # Terminal TUI
 gleam run -- --gui tui
-
-# Resume previous session
-gleam run -- --resume
 ```
 
 ### API keys
