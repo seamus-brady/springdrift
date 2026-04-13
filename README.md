@@ -9,22 +9,23 @@
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
-
-### Why I Built This
+## Why I Built This
 
 Most AI agents have no memory of yesterday. Every session starts from scratch. If something went wrong, you cannot find out why. If the agent made a bad decision, there is no trail to follow. If a process crashed, it stayed crashed.
 
-Springdrift is built around a different idea. An agent you work with over weeks or months should remember what happened, know when it is struggling, and be able to show its working. Every decision is recorded and traceable. The agent always knows what time it is, what has failed recently, and how it is performing, not because it stopped to check, but because that information is just there at the start of every cycle. When the safety system blocks something, you can see exactly which rules fired and why. When something crashes, the system recovers without intervention. When something goes wrong, the agent notices, diagnoses it, and records what it learned. It can schedule its own work and manage its own workload across sessions, not just within them.
+Springdrift is built around a different idea. An agent you work with over weeks or months should remember what happened, know when it is struggling, and be able to show its working.
+
+Every decision is recorded and traceable. The agent always knows what time it is, what has failed recently, and how it is performing, not because it stopped to check, but because that information is just there at the start of every cycle. When the safety system blocks something, you can see exactly which rules fired and why. When something crashes, the system recovers without intervention. When something goes wrong, the agent notices, diagnoses it, and records what it learned. It can schedule its own work and manage its own workload across sessions, not just within them.
 
 An agent whose decisions cannot be inspected cannot really be trusted, no matter how capable it is.
 
-### Meaning of the Name
+## Meaning of the Name
 
 Springdrift is an English rendering of 花吹雪 (hanafubuki), a Japanese word for the phenomenon of cherry blossom petals falling en masse and swirling through the air like a blizzard. In Japanese aesthetics this is bound up with mono no aware (物の哀れ),  the bittersweet recognition that transience is not a flaw in beautiful things but constitutive of them.
 
 A long-lived agent system is, in one sense, the opposite of that: it accumulates, persists, remembers. But each cognitive cycle is ephemeral, a single petal, complete in itself, released and gone. And each cycle, in falling, contributes to something larger: the overall blossoming of a system that becomes more itself over time.
 
-# Overview
+## Overview
 
 A persistent runtime for long-lived LLM agents. Integrates an auditable execution substrate (append-only memory, supervised processes, git-backed recovery), a case-based reasoning memory layer with hybrid retrieval, a deterministic normative calculus for safety gating with auditable axiom trails, and continuous ambient self-perception via a structured self-state representation (the *sensorium*) injected each cycle without tool calls.
 
@@ -36,7 +37,7 @@ Built in [Gleam](https://gleam.run) on the Erlang/OTP runtime.
 > -- Curragh (a running Springdrift instance), diagnosing an infrastructure
 > bug in its own telemetry subsystem. March 28, 2026.
 
-### Status
+## Status
 
 Beta. In active development. Running in daily use. ~62,000 lines of Gleam across 136 source files, 1,490 tests passing. Core systems (cognitive loop, multi-agent delegation, D' safety gates, normative calculus, CBR memory, narrative threading, sensorium, scheduler, comms, web GUI) are implemented and relatively stable. There are probably bugs though.
 
