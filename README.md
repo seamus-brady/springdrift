@@ -15,7 +15,7 @@ Most AI agents have no memory of yesterday. Every session starts from scratch. I
 
 Springdrift is built around a different idea. An agent you work with over weeks or months should remember what happened, know when it is struggling, and be able to show its working. 
 
-Most agent systems are assistants: they execute instructions. Springdrift is built to be something closer to a retainer - the kind of relationship a professional has with a retained solicitor, or a handler has with a guide dog. A guide dog doesn't just follow. When the handler steps toward traffic, it refuses, because it has access to something the handler doesn't. That domain-specific judgment, bounded and accountable, is what makes the relationship one of trust rather than just service.
+Most agent systems are assistants: they execute instructions. Springdrift is built to be something closer to a retainer - the kind of relationship a professional has with a retained lawyer, or a handler has with a guide dog. A guide dog doesn't just follow. When the handler steps toward traffic, it refuses, because it has access to something the handler doesn't. That domain-specific judgment, bounded and accountable, is what makes the relationship one of trust rather than just service.
 
 A Springdrift agent always knows what time it is, what has failed recently, and how it is performing. When the safety system blocks something, you can see exactly which rules fired and why. When something crashes, the system recovers without intervention. 
 
