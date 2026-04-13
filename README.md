@@ -13,11 +13,14 @@
 
 Most AI agents have no memory of yesterday. Every session starts from scratch. If something went wrong, you cannot find out why. If the agent made a bad decision, there is no trail to follow. If a process crashed, it stayed crashed.
 
-Springdrift is built around a different idea. An agent you work with over weeks or months should remember what happened, know when it is struggling, and be able to show its working.
+Springdrift is built around a different idea. An agent you work with over weeks or months should remember what happened, know when it is struggling, and be able to show its working. 
 
-Every decision is recorded and traceable. The agent always knows what time it is, what has failed recently, and how it is performing, not because it stopped to check, but because that information is just there at the start of every cycle. When the safety system blocks something, you can see exactly which rules fired and why. When something crashes, the system recovers without intervention. When something goes wrong, the agent notices, diagnoses it, and records what it learned. It can schedule its own work and manage its own workload across sessions, not just within them.
+Most agent systems are assistants: they execute instructions. Springdrift is built to be something closer to a retainer - the kind of relationship a professional has with a retained solicitor, or a handler has with a guide dog. A guide dog doesn't just follow. When the handler steps toward traffic, it refuses, because it has access to something the handler doesn't. That domain-specific judgment, bounded and accountable, is what makes the relationship one of trust rather than just service.
 
-An agent whose decisions cannot be inspected cannot really be trusted, no matter how capable it is.
+A Springdrift agent always knows what time it is, what has failed recently, and how it is performing. When the safety system blocks something, you can see exactly which rules fired and why. When something crashes, the system recovers without intervention. 
+
+When something goes wrong, the agent notices, diagnoses it, and records what it learned. It can schedule its own work and manage its own workload across sessions, not just within them. The emergent system is closer to a trusted professional than a tool - bounded, accountable, and more useful the longer you work with it.
+
 
 ## Meaning of the Name
 
