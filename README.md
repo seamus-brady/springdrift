@@ -45,7 +45,7 @@ See [docs/roadmap/](docs/roadmap/) for planned work including federation, learne
 
 ### Arxiv Paper
 
-[Springdrift: An Auditable Persistent Runtime for LLM Agents with Case-Based Memory, Normative Safety, and Ambient Self-Perception](https://arxiv.org/pdf/2604.04660)
+[Springdrift: An Auditable Persistent Runtime for LLM Agents with Case-Based Memory, Normative Safety, and Ambient Self-Perception](https://arxiv.org/abs/2604.04660)
 
 
 ---
@@ -168,7 +168,7 @@ gleam run             # Run the application
 ## What it is
 
 Springdrift is a reference implementation of what the
-[paper](docs/paper/April2026/springdrift-combined.pdf) calls an **Artificial
+[paper](https://arxiv.org/abs/2604.04660) calls an **Artificial
 Retainer** -- a category of AI system that occupies a specific niche between
 assistants (which execute instructions) and autonomous agents (which pursue
 goals without bounded authority). The term draws on the professional retainer
