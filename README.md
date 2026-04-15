@@ -501,9 +501,10 @@ detection, cross-cycle pattern analysis). Three gates: input (fast-accept for
 benign input), tool (every non-exempt dispatch), and output (autonomous
 deliveries only -- the operator is the quality gate for interactive sessions).
 
-**Normative calculus** -- based on Becker's *A New Stoicism* (1998). A
-deterministic calculus that resolves conflicts between normative propositions
-using six named Stoic axioms. The agent's character specification defines
+**Normative calculus** -- based on Becker's *A New Stoicism* (1998); see
+[docs/normative_calculus.pdf](docs/normative_calculus.pdf) for the full
+derivation. A deterministic calculus that resolves conflicts between
+normative propositions using six named Stoic axioms. The agent's character specification defines
 normative commitments at 14 levels from EthicalMoral down to Operational.
 Eight floor rules produce verdicts: **Flourishing** (accept), **Constrained**
 (modify), or **Prohibited** (reject). Every verdict carries a named axiom trail.
