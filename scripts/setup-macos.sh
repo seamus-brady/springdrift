@@ -21,8 +21,8 @@ warn() { echo -e "  ${YELLOW}!${NC} $1"; }
 fail() { echo -e "  ${RED}✗${NC} $1"; exit 1; }
 ask()  { read -rp "  $1: " "$2"; }
 ask_default() { read -rp "  $1 [$2]: " val; eval "$3=\${val:-$2}"; }
-ask_yn() { read -rp "  $1 [y/N]: " val; [[ "${val,,}" == "y" ]]; }
-ask_yn_default_yes() { read -rp "  $1 [Y/n]: " val; [[ "${val,,}" != "n" ]]; }
+ask_yn() { read -rp "  $1 [y/N]: " val; [[ "$(printf '%s' "$val" | tr '[:upper:]' '[:lower:]')" == "y" ]]; }
+ask_yn_default_yes() { read -rp "  $1 [Y/n]: " val; [[ "$(printf '%s' "$val" | tr '[:upper:]' '[:lower:]')" != "n" ]]; }
 
 echo ""
 echo -e "${BOLD}Springdrift — macOS Setup${NC}"
