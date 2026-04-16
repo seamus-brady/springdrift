@@ -258,6 +258,14 @@ pub type AppConfig {
     affect_history_window: Option(Int),
     // ── Knowledge ──
     knowledge_enabled: Option(Bool),
+    // ── Remembrancer ──
+    remembrancer_enabled: Option(Bool),
+    remembrancer_model: Option(String),
+    remembrancer_max_turns: Option(Int),
+    remembrancer_consolidation_schedule: Option(String),
+    remembrancer_review_confidence_threshold: Option(Float),
+    remembrancer_dormant_thread_days: Option(Int),
+    remembrancer_min_pattern_cases: Option(Int),
   )
 }
 
@@ -442,6 +450,13 @@ pub fn default() -> AppConfig {
     affect_enabled: None,
     affect_history_window: None,
     knowledge_enabled: None,
+    remembrancer_enabled: None,
+    remembrancer_model: None,
+    remembrancer_max_turns: None,
+    remembrancer_consolidation_schedule: None,
+    remembrancer_review_confidence_threshold: None,
+    remembrancer_dormant_thread_days: None,
+    remembrancer_min_pattern_cases: None,
   )
 }
 
@@ -1039,6 +1054,35 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       override_cfg.knowledge_enabled,
       base.knowledge_enabled,
     ),
+    // Remembrancer
+    remembrancer_enabled: option.or(
+      override_cfg.remembrancer_enabled,
+      base.remembrancer_enabled,
+    ),
+    remembrancer_model: option.or(
+      override_cfg.remembrancer_model,
+      base.remembrancer_model,
+    ),
+    remembrancer_max_turns: option.or(
+      override_cfg.remembrancer_max_turns,
+      base.remembrancer_max_turns,
+    ),
+    remembrancer_consolidation_schedule: option.or(
+      override_cfg.remembrancer_consolidation_schedule,
+      base.remembrancer_consolidation_schedule,
+    ),
+    remembrancer_review_confidence_threshold: option.or(
+      override_cfg.remembrancer_review_confidence_threshold,
+      base.remembrancer_review_confidence_threshold,
+    ),
+    remembrancer_dormant_thread_days: option.or(
+      override_cfg.remembrancer_dormant_thread_days,
+      base.remembrancer_dormant_thread_days,
+    ),
+    remembrancer_min_pattern_cases: option.or(
+      override_cfg.remembrancer_min_pattern_cases,
+      base.remembrancer_min_pattern_cases,
+    ),
   )
 }
 
@@ -1152,6 +1196,26 @@ pub fn to_string(cfg: AppConfig) -> String {
     // Knowledge
     option.map(cfg.knowledge_enabled, fn(v) {
       "knowledge_enabled: " <> bool_str(v)
+    }),
+    // Remembrancer
+    option.map(cfg.remembrancer_enabled, fn(v) {
+      "remembrancer_enabled: " <> bool_str(v)
+    }),
+    option.map(cfg.remembrancer_model, fn(v) { "remembrancer_model: " <> v }),
+    option.map(cfg.remembrancer_max_turns, fn(v) {
+      "remembrancer_max_turns: " <> int.to_string(v)
+    }),
+    option.map(cfg.remembrancer_consolidation_schedule, fn(v) {
+      "remembrancer_consolidation_schedule: " <> v
+    }),
+    option.map(cfg.remembrancer_review_confidence_threshold, fn(v) {
+      "remembrancer_review_confidence_threshold: " <> float.to_string(v)
+    }),
+    option.map(cfg.remembrancer_dormant_thread_days, fn(v) {
+      "remembrancer_dormant_thread_days: " <> int.to_string(v)
+    }),
+    option.map(cfg.remembrancer_min_pattern_cases, fn(v) {
+      "remembrancer_min_pattern_cases: " <> int.to_string(v)
     }),
     // Redaction
     option.map(cfg.redact_secrets, fn(v) { "redact_secrets: " <> bool_str(v) }),
@@ -1663,6 +1727,26 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     affect_history_window: get_toml_int(table, ["affect", "history_window"]),
     // ── [knowledge] ──
     knowledge_enabled: get_toml_bool(table, ["knowledge", "enabled"]),
+    // ── [remembrancer] ──
+    remembrancer_enabled: get_toml_bool(table, ["remembrancer", "enabled"]),
+    remembrancer_model: get_toml_str(table, ["remembrancer", "model"]),
+    remembrancer_max_turns: get_toml_int(table, ["remembrancer", "max_turns"]),
+    remembrancer_consolidation_schedule: get_toml_str(table, [
+      "remembrancer",
+      "consolidation_schedule",
+    ]),
+    remembrancer_review_confidence_threshold: get_toml_float(table, [
+      "remembrancer",
+      "review_confidence_threshold",
+    ]),
+    remembrancer_dormant_thread_days: get_toml_int(table, [
+      "remembrancer",
+      "dormant_thread_days",
+    ]),
+    remembrancer_min_pattern_cases: get_toml_int(table, [
+      "remembrancer",
+      "min_pattern_cases",
+    ]),
   )
 }
 
@@ -1769,7 +1853,7 @@ const known_keys = [
   "housekeeper", "cbr", "agents", "web", "services", "scheduler", "xstructor",
   "forecaster", "sandbox", "delegation", "escalation", "dprime", "vertex",
   "anthropic", "mistral", "local", "backup", "comms", "appraisal", "affect",
-  "teams", "knowledge",
+  "teams", "knowledge", "remembrancer",
 ]
 
 const known_narrative_keys = [

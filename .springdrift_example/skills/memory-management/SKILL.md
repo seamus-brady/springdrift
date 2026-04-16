@@ -86,3 +86,23 @@ Check `recall_threads` before starting research in a domain you've worked
 on before. Threads link related cycles and flag when data points change.
 If a thread exists for your current topic, mention it — continuity notes
 help the operator see what changed.
+
+### Deep Memory: Delegate to the Remembrancer
+
+The memory tools above (`recall_recent`, `recall_search`, `recall_threads`,
+`recall_cases`) query the Librarian's ETS index — fast, but bounded to a
+recent window (default 30 days). For older work, **delegate to the
+Remembrancer agent**. It reads raw JSONL from disk, so it reaches months
+or years of archive.
+
+Good reasons to delegate to `agent_remembrancer`:
+- "Have we researched this before?" — `deep_search` across months
+- "What did we used to know about X?" — `fact_archaeology` traces belief over time
+- "What patterns have emerged in my cases?" — `mine_patterns` clusters CBR cases
+- "Are there dormant threads worth revisiting?" — `resurrect_thread`
+- "Write a weekly consolidation of what we learned" — `consolidate_memory` + `write_consolidation_report`
+- "Is this old fact still accurate? I re-verified it" — `restore_confidence`
+
+Do NOT use the Remembrancer for recent cycles — that's the Observer's
+job (and it's faster). Rough rule: within the last ~30 days use the
+Librarian-backed tools above; beyond that, delegate to the Remembrancer.

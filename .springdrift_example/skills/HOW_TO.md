@@ -208,6 +208,7 @@ When verification fails, use `recall_cases` to check if this is a known pattern.
 - **agent_writer** — long-form writing and structured reports (builtin tools, max 6 turns)
 - **agent_observer** — diagnostic memory examination, CBR curation (18 diagnostic tools, max 6 turns)
 - **agent_comms** — email send/receive via AgentMail (comms tools, max 6 turns, requires `comms_enabled`)
+- **agent_remembrancer** — deep memory consolidation across months/years; reads full JSONL archive, bypasses Librarian ETS window (8 tools: deep_search, fact_archaeology, mine_patterns, resurrect_thread, consolidate_memory, restore_confidence, find_connections, write_consolidation_report; max 8 turns; requires `remembrancer_enabled`). Use for: historical precedent, dormant threads, pattern mining over months, consolidating a period into a report, re-verifying old facts.
 
 ### Agent error surfacing
 

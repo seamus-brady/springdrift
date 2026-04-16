@@ -18,6 +18,7 @@ import agents/comms as comms_agent
 import agents/observer
 import agents/planner
 import agents/project_manager
+import agents/remembrancer as remembrancer_agent
 import agents/researcher
 import agents/scheduler as scheduler_agent
 import backup/actor as backup_actor
@@ -70,6 +71,7 @@ import tools/how_to_content
 import tools/knowledge as tools_knowledge
 import tools/memory as tools_memory
 import tools/rate_limiter
+import tools/remembrancer as tools_remembrancer
 import tui
 import web/gui as web_gui
 
@@ -1407,7 +1409,17 @@ fn default_agent_specs(
       redact_secrets: redact,
     ),
     agent_types.AgentSpec(..o_spec, redact_secrets: redact),
-    ..comms_specs(cfg, provider, task_model, delay, redact)
+    ..list.append(
+      comms_specs(cfg, provider, task_model, delay, redact),
+      remembrancer_specs(
+        cfg,
+        provider,
+        task_model,
+        librarian_subj,
+        delay,
+        redact,
+      ),
+    )
   ]
 }
 
@@ -1485,6 +1497,54 @@ fn comms_specs(
           ),
         ]
       }
+    }
+  }
+}
+
+fn remembrancer_specs(
+  cfg: AppConfig,
+  provider: Provider,
+  task_model: String,
+  librarian_subj: process.Subject(librarian.LibrarianMessage),
+  delay: Int,
+  redact: Bool,
+) -> List(agent_types.AgentSpec) {
+  case option.unwrap(cfg.remembrancer_enabled, False) {
+    False -> []
+    True -> {
+      let model = option.unwrap(cfg.remembrancer_model, task_model)
+      let review_threshold =
+        option.unwrap(cfg.remembrancer_review_confidence_threshold, 0.3)
+      let dormant_days = option.unwrap(cfg.remembrancer_dormant_thread_days, 7)
+      let min_cases = option.unwrap(cfg.remembrancer_min_pattern_cases, 3)
+      let ctx =
+        tools_remembrancer.RemembrancerContext(
+          narrative_dir: option.unwrap(cfg.narrative_dir, paths.narrative_dir()),
+          cbr_dir: paths.cbr_dir(),
+          facts_dir: paths.facts_dir(),
+          knowledge_consolidation_dir: paths.knowledge_consolidation_dir(),
+          consolidation_log_dir: paths.consolidation_log_dir(),
+          cycle_id: "remembrancer",
+          agent_id: "remembrancer",
+          librarian: option.Some(librarian_subj),
+          review_confidence_threshold: review_threshold,
+          dormant_thread_days: dormant_days,
+          min_pattern_cases: min_cases,
+        )
+      [
+        agent_types.AgentSpec(
+          ..remembrancer_agent.spec(
+            provider,
+            model,
+            ctx,
+            option.unwrap(cfg.max_tokens, 4096),
+            option.unwrap(cfg.remembrancer_max_turns, 8),
+            option.unwrap(cfg.max_consecutive_errors, 3),
+          ),
+          inter_turn_delay_ms: delay,
+          redact_secrets: redact,
+        ),
+      ]
     }
   }
 }

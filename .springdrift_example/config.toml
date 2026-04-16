@@ -295,6 +295,33 @@ summary_schedule = "weekly"
 [knowledge]
 # enabled = false                     # Enable document library (default: false)
 
+# ── Remembrancer ────────────────────────────────────────────────────────────
+# The Remembrancer is a specialist agent that works with the full depth of
+# memory (months, not days) — finding forgotten patterns, resurrecting dormant
+# threads, consolidating narrative entries into higher-level knowledge.
+
+[remembrancer]
+# Enable the Remembrancer agent (default: false)
+# enabled = false
+
+# Model for consolidation synthesis (default: reasoning_model — needs strong synthesis)
+# model = ""
+
+# Max turns per Remembrancer invocation (default: 8)
+# max_turns = 8
+
+# Consolidation schedule — "weekly" or "monthly" (default: "weekly")
+# consolidation_schedule = "weekly"
+
+# Minimum decayed confidence before a fact is flagged for review (default: 0.3)
+# review_confidence_threshold = 0.3
+
+# Minimum days of inactivity before a thread is considered dormant (default: 7)
+# dormant_thread_days = 7
+
+# Minimum CBR cases to form a pattern (default: 3)
+# min_pattern_cases = 3
+
 # ── Communications ──────────────────────────────────────────────────────────
 
 [comms]

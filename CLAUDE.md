@@ -93,7 +93,13 @@ src/
 │   ├── coder.gleam            Coding agent (builtin, max_turns=10)
 │   ├── writer.gleam           Writer agent (builtin, max_turns=6)
 │   ├── observer.gleam         Observer agent (17 diagnostic + CBR curation tools, max_turns=6)
-│   └── comms.gleam            Communications agent (comms tools, max_turns=6, max_context=20)
+│   ├── comms.gleam            Communications agent (comms tools, max_turns=6, max_context=20)
+│   └── remembrancer.gleam     Remembrancer — deep memory consolidation (8 tools, max_turns=8)
+│
+├── remembrancer/              Deep memory operations (bypasses Librarian ETS window)
+│   ├── reader.gleam           Direct JSONL readers for narrative/CBR/facts
+│   ├── query.gleam            Pure filter/aggregate: search, trace, cluster, dormant, xref
+│   └── consolidation.gleam    ConsolidationRun JSONL log + markdown report writer
 │
 ├── comms/                     Communications — email via AgentMail
 │   ├── types.gleam            CommsMessage, CommsChannel (Email), Direction, DeliveryStatus, CommsConfig
@@ -418,6 +424,13 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `comms_allowed_recipients` | — | [] | Hard allowlist of permitted email recipients |
 | `comms_from_name` | — | agent_name | Display name on outbound emails |
 | `comms_max_outbound_per_hour` | — | 20 | Max outbound emails per rolling hour |
+| `remembrancer_enabled` | — | False | Enable Remembrancer agent (deep-memory consolidation) |
+| `remembrancer_model` | — | reasoning_model | Model for consolidation synthesis |
+| `remembrancer_max_turns` | — | 8 | Max react-loop iterations per invocation |
+| `remembrancer_consolidation_schedule` | — | "weekly" | Consolidation cadence: "weekly" \| "monthly" |
+| `remembrancer_review_confidence_threshold` | — | 0.3 | Decayed confidence floor for fact review |
+| `remembrancer_dormant_thread_days` | — | 7 | Min days idle before a thread is dormant |
+| `remembrancer_min_pattern_cases` | — | 3 | Min cases to form a mined pattern |
 
 ## Memory architecture
 
@@ -435,6 +448,7 @@ indexed in ETS by the Librarian actor for fast queries.
 | Endeavours | `.springdrift/memory/planner/YYYY-MM-DD-endeavours.jsonl` | `Endeavour` | Self-directed initiatives grouping multiple independent tasks |
 | DAG nodes | (in-memory ETS, populated from cycle log) | `CycleNode` | Operational telemetry: token counts, tool calls, D' gates, agent output per cycle |
 | Comms | `.springdrift/memory/comms/YYYY-MM-DD-comms.jsonl` | `CommsMessage` | Sent and received email messages with delivery status |
+| Consolidation | `.springdrift/memory/consolidation/YYYY-MM-DD-consolidation.jsonl` | `ConsolidationRun` | Remembrancer run records: period, counts, report path |
 
 **How they relate:** Narrative entries are the atomic record of each cycle. Threads
 group entries by topic using overlap scoring (location=3, domain=2, keyword=1;
@@ -550,6 +564,32 @@ agent. Heavy planner operations moved to the Planner agent.
 | `check_inbox` | Comms | List recent messages in inbox |
 | `read_message` | Comms | Read full message content by ID |
 
+**Remembrancer tools** (8 tools in `tools/remembrancer.gleam`, on Remembrancer agent):
+
+| Tool | Store(s) | Purpose |
+|---|---|---|
+| `deep_search` | Narrative | Search full narrative archive across date range (bypasses Librarian ETS window) |
+| `fact_archaeology` | Facts | Trace a fact key through every write/supersede/clear + find related keys |
+| `mine_patterns` | CBR | Cluster cases by domain + shared keywords, return patterns above min_cases |
+| `resurrect_thread` | Narrative | Find dormant threads (no activity >N days), optionally filtered by topic |
+| `consolidate_memory` | Narrative+CBR+Facts | Gather statistics + excerpts for a period for in-agent synthesis |
+| `restore_confidence` | Facts | Write a verified fact with restored confidence (supersedes previous) |
+| `find_connections` | Narrative+CBR+Facts | Cross-reference a topic across all memory stores with hit counts |
+| `write_consolidation_report` | Knowledge + Consolidation | Persist markdown report + append ConsolidationRun log entry |
+
+**Remembrancer** (`agents/remembrancer.gleam`) is a deep-memory specialist. Unlike
+Observer (recent-cycle diagnostics via Librarian), the Remembrancer reads raw JSONL
+directly from disk, so it works across months/years of archive — beyond the
+Librarian's ETS window. Enabled via `remembrancer_enabled = true` (default: False).
+Model defaults to `reasoning_model` since synthesis is the main capability.
+Consolidation reports land in `.springdrift/knowledge/consolidation/YYYY-MM-DD-*.md`
+and a JSONL run log at `.springdrift/memory/consolidation/`. The latest run's
+timestamp surfaces in the sensorium as `<memory last_consolidation="..."
+consolidation_age="..."/>`. Scheduled consolidation is created at runtime via the
+scheduler agent's `schedule_from_spec` tool — ask the scheduler agent to create a
+weekly recurring job that delegates to the Remembrancer. Phase 11 of the roadmap
+(skill-proposal integration) is blocked on the separate skills-management spec.
+
 **Curator** (`narrative/curator.gleam`) assembles the system prompt from memory.
 On each `BuildSystemPrompt` message (with optional `CycleContext`) it loads identity
 files (persona + preamble template), queries the Librarian for thread/fact/case counts,
@@ -600,6 +640,7 @@ exposes this (and other system state) to the LLM.
 | Writer | builtin | 6 | unlimited | Permanent | Draft and edit text |
 | Observer | diagnostic + CBR curation (18 tools) | 6 | 20 | Transient | Cycle forensics, pattern detection, CBR curation, fact tracing, D' feedback |
 | Comms | comms (4 tools) | 6 | 20 | Permanent | Send and receive email via AgentMail |
+| Remembrancer | remembrancer (8 tools) | 8 | 30 | Transient | Deep-memory consolidation across months. Search, trace, cluster, resurrect dormant threads, restore verified confidence, cross-reference, persist reports |
 
 **Structured output** — when an agent completes, the framework populates
 `AgentSuccess.structured_result` with typed `AgentFindings` based on the agent name
@@ -1169,6 +1210,7 @@ The config is organized into these TOML sections:
 | `[sandbox]` | Local Podman sandbox: enabled, pool_size, memory, ports, image |
 | `[delegation]` | Agent delegation depth limits |
 | `[comms]` | Communications agent: enabled, inbox_id, api_key_env, allowed_recipients, rate limit |
+| `[remembrancer]` | Remembrancer agent: enabled, model, max_turns, consolidation_schedule, review_confidence_threshold, dormant_thread_days, min_pattern_cases |
 | `[vertex]` | Google Vertex AI provider: project_id, location, endpoint |
 
 Quick example (top-level fields only):
