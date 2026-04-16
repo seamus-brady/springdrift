@@ -13,6 +13,7 @@ import agent/types.{
   type CognitiveStatus, type DelegationInfo, type Notification, type PendingTask,
   type QueuedInput, type SensoryEvent, type SupervisorMessage,
 }
+import agentlair/types as agentlair_types
 import dag/types as dag_types
 import dprime/deterministic.{type DeterministicConfig}
 import dprime/types as dprime_types
@@ -91,6 +92,7 @@ pub type RuntimeConfig {
     normative_calculus_enabled: Bool,
     character_spec: Option(normative_types.CharacterSpec),
     team_guards: team.TeamGuards,
+    agentlair_config: Option(agentlair_types.AgentLairConfig),
   )
 }
 

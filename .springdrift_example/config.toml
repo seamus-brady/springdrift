@@ -322,6 +322,14 @@ summary_schedule = "weekly"
 # Minimum CBR cases to form a pattern (default: 3)
 # min_pattern_cases = 3
 
+# ── AgentLair (behavioral trust network) ────────────────────────────────────
+
+[agentlair]
+# enabled = false                     # Enable AgentLair telemetry (default: false)
+# api_key = "al_live_..."             # AgentLair API key
+# endpoint_url = "https://api.agentlair.dev"  # AgentLair API base URL
+# trust_query = true                  # Expose /trust/{agent_id} on web API (default: true)
+
 # ── Communications ──────────────────────────────────────────────────────────
 
 [comms]

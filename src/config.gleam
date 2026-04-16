@@ -266,6 +266,11 @@ pub type AppConfig {
     remembrancer_review_confidence_threshold: Option(Float),
     remembrancer_dormant_thread_days: Option(Int),
     remembrancer_min_pattern_cases: Option(Int),
+    // ── AgentLair ──
+    agentlair_enabled: Option(Bool),
+    agentlair_api_key: Option(String),
+    agentlair_endpoint_url: Option(String),
+    agentlair_trust_query: Option(Bool),
   )
 }
 
@@ -457,6 +462,10 @@ pub fn default() -> AppConfig {
     remembrancer_review_confidence_threshold: None,
     remembrancer_dormant_thread_days: None,
     remembrancer_min_pattern_cases: None,
+    agentlair_enabled: None,
+    agentlair_api_key: None,
+    agentlair_endpoint_url: None,
+    agentlair_trust_query: None,
   )
 }
 
@@ -1083,6 +1092,23 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       override_cfg.remembrancer_min_pattern_cases,
       base.remembrancer_min_pattern_cases,
     ),
+    // AgentLair
+    agentlair_enabled: option.or(
+      override_cfg.agentlair_enabled,
+      base.agentlair_enabled,
+    ),
+    agentlair_api_key: option.or(
+      override_cfg.agentlair_api_key,
+      base.agentlair_api_key,
+    ),
+    agentlair_endpoint_url: option.or(
+      override_cfg.agentlair_endpoint_url,
+      base.agentlair_endpoint_url,
+    ),
+    agentlair_trust_query: option.or(
+      override_cfg.agentlair_trust_query,
+      base.agentlair_trust_query,
+    ),
   )
 }
 
@@ -1216,6 +1242,16 @@ pub fn to_string(cfg: AppConfig) -> String {
     }),
     option.map(cfg.remembrancer_min_pattern_cases, fn(v) {
       "remembrancer_min_pattern_cases: " <> int.to_string(v)
+    }),
+    // AgentLair
+    option.map(cfg.agentlair_enabled, fn(v) {
+      "agentlair_enabled: " <> bool_str(v)
+    }),
+    option.map(cfg.agentlair_endpoint_url, fn(v) {
+      "agentlair_endpoint_url: " <> v
+    }),
+    option.map(cfg.agentlair_trust_query, fn(v) {
+      "agentlair_trust_query: " <> bool_str(v)
     }),
     // Redaction
     option.map(cfg.redact_secrets, fn(v) { "redact_secrets: " <> bool_str(v) }),
@@ -1747,6 +1783,11 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
       "remembrancer",
       "min_pattern_cases",
     ]),
+    // ── [agentlair] ──
+    agentlair_enabled: get_toml_bool(table, ["agentlair", "enabled"]),
+    agentlair_api_key: get_toml_str(table, ["agentlair", "api_key"]),
+    agentlair_endpoint_url: get_toml_str(table, ["agentlair", "endpoint_url"]),
+    agentlair_trust_query: get_toml_bool(table, ["agentlair", "trust_query"]),
   )
 }
 
@@ -1853,7 +1894,7 @@ const known_keys = [
   "housekeeper", "cbr", "agents", "web", "services", "scheduler", "xstructor",
   "forecaster", "sandbox", "delegation", "escalation", "dprime", "vertex",
   "anthropic", "mistral", "local", "backup", "comms", "appraisal", "affect",
-  "teams", "knowledge", "remembrancer",
+  "teams", "knowledge", "remembrancer", "agentlair",
 ]
 
 const known_narrative_keys = [

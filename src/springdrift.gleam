@@ -13,6 +13,7 @@ import agent/supervisor
 import agent/team as agent_team
 import agent/types as agent_types
 import agent_identity
+import agentlair/types as agentlair_types
 import agents/coder
 import agents/comms as comms_agent
 import agents/observer
@@ -833,6 +834,7 @@ fn run(cfg: AppConfig) -> Nil {
         token_budget: option.unwrap(cfg.team_token_budget, 200_000),
         max_debate_rounds: option.unwrap(cfg.team_max_debate_rounds, 3),
       ),
+      agentlair_config: build_agentlair_config(cfg),
     ))
   {
     Ok(subj) -> subj
@@ -1574,6 +1576,33 @@ fn remembrancer_specs(
 }
 
 /// Convert team template configs from TOML into TeamSpec values.
+fn build_agentlair_config(
+  cfg: AppConfig,
+) -> option.Option(agentlair_types.AgentLairConfig) {
+  case option.unwrap(cfg.agentlair_enabled, False) {
+    False -> option.None
+    True ->
+      case cfg.agentlair_api_key {
+        option.None -> {
+          io.println(
+            "Warning: [agentlair] enabled but no api_key set — disabling",
+          )
+          option.None
+        }
+        option.Some(api_key) ->
+          option.Some(agentlair_types.AgentLairConfig(
+            enabled: True,
+            api_key:,
+            endpoint_url: option.unwrap(
+              cfg.agentlair_endpoint_url,
+              "https://api.agentlair.dev",
+            ),
+            trust_query: option.unwrap(cfg.agentlair_trust_query, True),
+          ))
+      }
+  }
+}
+
 fn build_team_specs(
   templates: option.Option(List(config.TeamTemplateConfig)),
   default_model: String,
