@@ -175,7 +175,8 @@ src/
 │                              request_human_input, read_skill
 ├── tools/planner.gleam        Planner tools: task/endeavour CRUD, get_active_work, get_task_detail
 ├── tools/how_to_content.gleam Default HOW_TO content (builtin fallback)
-├── tools/web.gleam            Web tools: fetch_url, web_search
+├── tools/web.gleam            Web tools: fetch_url, web_search (DuckDuckGo)
+├── tools/kagi.gleam           Kagi tools: kagi_search, kagi_summarize (requires KAGI_API_KEY)
 ├── tools/artifacts.gleam      Artifact tools: store_result, retrieve_result (researcher agent)
 ├── tools/comms.gleam          Comms tools: send_email, list_contacts, check_inbox, read_message + hard allowlist
 ├── tools/sandbox.gleam        Sandbox tools: run_code, serve, stop_serve, sandbox_status, workspace_ls, sandbox_exec
@@ -1071,11 +1072,15 @@ Narrative, Log, Scheduler (job list with status and next-run times), and Cycles
 `RequestSchedulerData`/`SchedulerData` and `RequestSchedulerCycles`/`SchedulerCyclesData`
 power the admin tabs. The scheduler subject is threaded through `web/gui.gleam`.
 
-**Web research tools** — `tools/web.gleam` provides two tools. `web_search`
-(DuckDuckGo, no key) and `fetch_url` (raw HTTP GET, no key). The researcher agent
-dispatches both tools. A `web-research` skill
-(`.springdrift/skills/web-research/SKILL.md`) teaches the agent the decision tree
-for tool selection: discovery (web_search) → extraction (fetch_url).
+**Web research tools** — the researcher agent has 10 web tools in 4 tiers:
+Tier 1: `kagi_search`, `kagi_summarize` (Kagi API, requires `KAGI_API_KEY`).
+Tier 2: `brave_web_search`, `brave_news_search`, `brave_llm_context`,
+`brave_summarizer`, `brave_answer` (Brave API, requires `BRAVE_SEARCH_API_KEY`).
+Tier 3: `jina_reader` (Jina, requires `JINA_API_KEY`).
+Tier 4: `web_search` (DuckDuckGo, no key), `fetch_url` (raw HTTP GET, no key).
+Tool modules: `tools/kagi.gleam`, `tools/brave.gleam`, `tools/jina.gleam`,
+`tools/web.gleam`. A `web-research` skill teaches the agent the decision tree
+for tool selection.
 
 **Tasks and Endeavours** — `planner/types.gleam`, `planner/log.gleam`, `tools/planner.gleam`.
 A Task is a unit of planned work with steps, dependencies, risks, and a forecast score.
@@ -1160,7 +1165,7 @@ The config is organized into these TOML sections:
 | `[agents.coder]` | Coder agent: max_tokens, max_turns, max_errors |
 | `[agents.writer]` | Writer agent: max_tokens, max_turns, max_errors |
 | `[web]` | Web GUI port |
-| `[services]` | External API base URLs (DuckDuckGo, Brave, Jina) |
+| `[services]` | External API base URLs (DuckDuckGo, Brave, Jina, Kagi) |
 | `[sandbox]` | Local Podman sandbox: enabled, pool_size, memory, ports, image |
 | `[delegation]` | Agent delegation depth limits |
 | `[comms]` | Communications agent: enabled, inbox_id, api_key_env, allowed_recipients, rate limit |
