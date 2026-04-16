@@ -179,9 +179,12 @@ esac
 
 BRAVE_KEY=""
 JINA_KEY=""
+KAGI_KEY=""
 echo ""
 echo "  Optional services (press Enter to skip any):"
-echo "  Brave Search — better web search. Free tier: https://brave.com/search/api/"
+echo "  Kagi Search — high quality, ad-free search. https://kagi.com/settings?p=api"
+ask "  Kagi API key" KAGI_KEY
+echo "  Brave Search — web search with news and answers. Free tier: https://brave.com/search/api/"
 ask "  Brave Search API key" BRAVE_KEY
 echo "  Jina Reader — cleaner URL extraction. Free tier: https://jina.ai/reader/"
 ask "  Jina Reader API key" JINA_KEY
@@ -245,7 +248,7 @@ fi
 # ── Write .env ───────────────────────────────────────────────────────────────
 generate_env_file ".env" \
   "$ANTHROPIC_KEY" "$MISTRAL_KEY" "$VERTEX_PROJECT" \
-  "$BRAVE_KEY" "$JINA_KEY" "$AGENTMAIL_KEY" "$WEB_TOKEN" "setup-macos.sh"
+  "$BRAVE_KEY" "$JINA_KEY" "$AGENTMAIL_KEY" "$WEB_TOKEN" "setup-macos.sh" "$KAGI_KEY"
 ok "Generated .env"
 
 if ! grep -q "^\.env$" .gitignore 2>/dev/null; then
