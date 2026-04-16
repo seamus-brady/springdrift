@@ -343,7 +343,7 @@ pub fn keyword_search_finds_match_test() {
       None,
       None,
     )
-  { list.length(results) > 0 } |> should.be_true
+  { results != [] } |> should.be_true
   let assert [first, ..] = results
   string.contains(first.content, "neural") |> should.be_true
   let _ = simplifile.delete(dir)

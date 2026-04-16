@@ -40,6 +40,7 @@ import paths
 import planner/log as planner_log
 import planner/types as planner_types
 import slog
+import tools/knowledge as knowledge_tools
 import tools/memory
 import tools/planner as planner_tools
 
@@ -125,11 +126,16 @@ pub fn dispatch_tool_calls(
       // Check for memory and planner tools — execute synchronously, then re-think
       let #(memory_calls, after_memory) =
         list.partition(calls, fn(c) { memory.is_memory_tool(c.name) })
-      let #(planner_calls, remaining_calls) =
+      let #(planner_calls, after_planner) =
         list.partition(after_memory, fn(c) {
           planner_tools.is_planner_tool(c.name)
         })
-      let sync_calls = list.append(memory_calls, planner_calls)
+      let #(knowledge_calls, remaining_calls) =
+        list.partition(after_planner, fn(c) {
+          knowledge_tools.is_knowledge_tool(c.name)
+        })
+      let sync_calls =
+        list.flatten([memory_calls, planner_calls, knowledge_calls])
       case sync_calls {
         [] ->
           dispatch_agent_calls(state, task_id, resp, remaining_calls, reply_to)
@@ -286,18 +292,35 @@ fn handle_memory_tools(
               )
           }
         False ->
-          memory.execute_with_how_to(
-            call,
-            state.memory.narrative_dir,
-            state.memory.librarian,
-            facts_ctx,
-            introspect_ctx,
-            state.config.memory_limits,
-            state.config.how_to_content,
-            option.Some(memory.AgentManagementContext(
-              supervisor: state.supervisor,
-            )),
-          )
+          case knowledge_tools.is_knowledge_tool(call.name) {
+            True ->
+              knowledge_tools.execute(
+                call,
+                knowledge_tools.KnowledgeConfig(
+                  knowledge_dir: paths.knowledge_dir(),
+                  indexes_dir: paths.knowledge_indexes_dir(),
+                  sources_dir: paths.knowledge_sources_dir(),
+                  journal_dir: paths.knowledge_journal_dir(),
+                  notes_dir: paths.knowledge_notes_dir(),
+                  drafts_dir: paths.knowledge_drafts_dir(),
+                  exports_dir: paths.knowledge_exports_dir(),
+                  embed_fn: None,
+                ),
+              )
+            False ->
+              memory.execute_with_how_to(
+                call,
+                state.memory.narrative_dir,
+                state.memory.librarian,
+                facts_ctx,
+                introspect_ctx,
+                state.config.memory_limits,
+                state.config.how_to_content,
+                option.Some(memory.AgentManagementContext(
+                  supervisor: state.supervisor,
+                )),
+              )
+          }
       }
       // Log tool result to cycle log
       cycle_log.log_tool_result(cycle_id, result, state.redact_secrets)

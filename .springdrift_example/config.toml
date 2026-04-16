@@ -290,6 +290,11 @@ summary_schedule = "weekly"
 # enabled = true                      # Whether affect monitoring is active (default: true)
 # history_window = 20                 # Cycles to consider for affect computation (default: 20)
 
+# ── Knowledge library ────────────────────────────────────────────────────────
+
+[knowledge]
+# enabled = false                     # Enable document library (default: false)
+
 # ── Communications ──────────────────────────────────────────────────────────
 
 [comms]

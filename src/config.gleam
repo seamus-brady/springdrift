@@ -256,6 +256,8 @@ pub type AppConfig {
     // ── Affect ──
     affect_enabled: Option(Bool),
     affect_history_window: Option(Int),
+    // ── Knowledge ──
+    knowledge_enabled: Option(Bool),
   )
 }
 
@@ -439,6 +441,7 @@ pub fn default() -> AppConfig {
     appraisal_min_steps: None,
     affect_enabled: None,
     affect_history_window: None,
+    knowledge_enabled: None,
   )
 }
 
@@ -1031,6 +1034,11 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       override_cfg.affect_history_window,
       base.affect_history_window,
     ),
+    // Knowledge
+    knowledge_enabled: option.or(
+      override_cfg.knowledge_enabled,
+      base.knowledge_enabled,
+    ),
   )
 }
 
@@ -1140,6 +1148,10 @@ pub fn to_string(cfg: AppConfig) -> String {
     option.map(cfg.affect_enabled, fn(v) { "affect_enabled: " <> bool_str(v) }),
     option.map(cfg.affect_history_window, fn(v) {
       "affect_history_window: " <> int.to_string(v)
+    }),
+    // Knowledge
+    option.map(cfg.knowledge_enabled, fn(v) {
+      "knowledge_enabled: " <> bool_str(v)
     }),
     // Redaction
     option.map(cfg.redact_secrets, fn(v) { "redact_secrets: " <> bool_str(v) }),
@@ -1649,6 +1661,8 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     // ── [affect] ──
     affect_enabled: get_toml_bool(table, ["affect", "enabled"]),
     affect_history_window: get_toml_int(table, ["affect", "history_window"]),
+    // ── [knowledge] ──
+    knowledge_enabled: get_toml_bool(table, ["knowledge", "enabled"]),
   )
 }
 
@@ -1755,7 +1769,7 @@ const known_keys = [
   "housekeeper", "cbr", "agents", "web", "services", "scheduler", "xstructor",
   "forecaster", "sandbox", "delegation", "escalation", "dprime", "vertex",
   "anthropic", "mistral", "local", "backup", "comms", "appraisal", "affect",
-  "teams",
+  "teams", "knowledge",
 ]
 
 const known_narrative_keys = [
