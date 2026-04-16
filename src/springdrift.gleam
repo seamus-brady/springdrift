@@ -31,6 +31,8 @@ import dprime/config as dprime_config_mod
 import embedding
 import facts/log as facts_log
 import gleam/erlang/process
+import gleam/http/request as http_request
+import gleam/httpc
 import gleam/int
 import gleam/io
 import gleam/list
@@ -100,10 +102,17 @@ pub fn main() -> Nil {
           io.println(config.to_string(cfg))
           do_halt(0)
         }
-        False -> {
-          let cfg = resolve_config()
-          run(cfg)
-        }
+        False ->
+          case list.contains(args, "--selftest") {
+            True -> {
+              let cfg = resolve_config()
+              run_selftest(cfg)
+            }
+            False -> {
+              let cfg = resolve_config()
+              run(cfg)
+            }
+          }
       }
   }
 }
@@ -176,7 +185,7 @@ fn print_help() -> Nil {
   io.println("")
   io.println("Session / config:")
   io.println(
-    "  --gui <tui|web>           GUI mode: tui (default) or web (port 8080)",
+    "  --gui <tui|web>           GUI mode: tui (default) or web (port 12001)",
   )
   io.println("  --skills-dir <path>       Add a skills directory (repeatable)")
   io.println(
@@ -187,6 +196,9 @@ fn print_help() -> Nil {
     "  --verbose                 Log full LLM payloads to the cycle log",
   )
   io.println("  --print-config            Print resolved config and exit")
+  io.println(
+    "  --selftest                Boot, verify HTTP, exit 0 (pass) or 1 (fail)",
+  )
   io.println("  --help, -h                Show this help")
   io.println("")
   io.println("Safety (D' discrepancy gate):")
@@ -225,6 +237,64 @@ fn print_help() -> Nil {
   io.println("  log_verbose    = false")
   io.println("  write_anywhere = false")
   io.println("  skills_dirs    = [\"/path/to/skills\"]")
+}
+
+fn run_selftest(cfg: AppConfig) -> Nil {
+  let selftest_cfg =
+    config.AppConfig(
+      ..cfg,
+      gui: option.Some("web"),
+      cbr_embedding_enabled: option.Some(False),
+    )
+  let port = option.unwrap(selftest_cfg.web_port, 12_001)
+
+  let _ = process.spawn(fn() { run(selftest_cfg) })
+
+  let max_wait = 15
+  let result = selftest_poll(port, max_wait, 0)
+  case result {
+    Ok(status) -> {
+      io.println(
+        "selftest: PASS (HTTP "
+        <> int.to_string(status)
+        <> " on port "
+        <> int.to_string(port)
+        <> ")",
+      )
+      do_halt(0)
+    }
+    Error(reason) -> {
+      io.println("selftest: FAIL (" <> reason <> ")")
+      do_halt(1)
+    }
+  }
+}
+
+fn selftest_poll(port: Int, max_wait: Int, elapsed: Int) -> Result(Int, String) {
+  case elapsed >= max_wait {
+    True ->
+      Error("app did not respond within " <> int.to_string(max_wait) <> "s")
+    False -> {
+      case
+        http_request.to("http://localhost:" <> int.to_string(port) <> "/chat")
+      {
+        Error(_) -> Error("invalid request URL")
+        Ok(req) ->
+          case httpc.send(req) {
+            Ok(resp) ->
+              case resp.status >= 200 && resp.status < 500 {
+                True -> Ok(resp.status)
+                False ->
+                  Error("unexpected status " <> int.to_string(resp.status))
+              }
+            Error(_) -> {
+              process.sleep(1000)
+              selftest_poll(port, max_wait, elapsed + 1)
+            }
+          }
+      }
+    }
+  }
 }
 
 fn run(cfg: AppConfig) -> Nil {
@@ -991,7 +1061,7 @@ fn run(cfg: AppConfig) -> Nil {
   let gui = option.unwrap(cfg.gui, "tui")
   case gui {
     "web" -> {
-      let port = option.unwrap(cfg.web_port, 8080)
+      let port = option.unwrap(cfg.web_port, 12_001)
       io.println("Web GUI  : http://localhost:" <> int.to_string(port))
       web_gui.start(
         cognitive_subj,

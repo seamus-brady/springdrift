@@ -21,7 +21,7 @@ max_tokens = 2048            # Max output tokens per LLM call
 max_turns = 5                # React-loop iterations per message
 max_consecutive_errors = 3   # Tool failures before abort
 # max_context_messages = 100 # Sliding-window cap on context messages (default: unlimited)
-gui = "web"                  # "tui" (terminal) or "web" (browser on port 8080)
+gui = "web"                  # "tui" (terminal) or "web" (browser on port 12001)
 
 # ── Logging ──────────────────────────────────────────────────────────────────
 log_verbose = false
@@ -195,7 +195,7 @@ summary_schedule = "weekly"
 # ── Web GUI ──────────────────────────────────────────────────────────────────
 
 [web]
-# port = 8080
+# port = 12001
 
 # ── External services ────────────────────────────────────────────────────────
 

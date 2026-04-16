@@ -186,7 +186,7 @@ GUI mode:
 
 Select [1]: >
 
-Web port: [8080] >
+Web port: [12001] >
 Authentication:
   Set SPRINGDRIFT_WEB_TOKEN for access control? [y/N]: > y
   Token: > (auto-generated: sd_a7b3c9d2e1f4...)
@@ -350,7 +350,7 @@ Review
 Agent:      Curragh (Mk-2)
 Domain:     Legal
 Provider:   Anthropic (claude-haiku-4-5 / claude-opus-4-6)
-GUI:        Web on port 8080 (authenticated)
+GUI:        Web on port 12001 (authenticated)
 Sandbox:    Podman (2 containers, 512MB each)
 Embeddings: Ollama (nomic-embed-text)
 D':         Legal preset (5 input features, 4 tool features, 6 output features)
@@ -374,7 +374,7 @@ Done! Start the agent with:
   gleam run
 
 Web GUI at:
-  http://localhost:8080
+  http://localhost:12001
 ```
 
 ---
@@ -452,7 +452,7 @@ credentials = "/path/to/sa-key.json"
 
 [gui]
 mode = "web"
-port = 8080
+port = 12001
 authenticated = true
 
 [sandbox]

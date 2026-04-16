@@ -240,7 +240,7 @@ The output gate's feature set should be extended for external-facing messages:
 {
   "comms_rules": [
     { "id": "no-credentials-in-email", "pattern": "\\bsk-[A-Za-z0-9_-]{20,}", "action": "block" },
-    { "id": "no-internal-urls", "pattern": "localhost|127\\.0\\.0\\.1|\\:8080", "action": "block" },
+    { "id": "no-internal-urls", "pattern": "localhost|127\\.0\\.0\\.1|\\:12001", "action": "block" },
     { "id": "no-raw-json", "pattern": "\\{\\\"cycle_id\\\"", "action": "escalate" },
     { "id": "no-system-internals", "pattern": "dprime|sensorium|CognitiveState", "action": "escalate" }
   ]

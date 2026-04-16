@@ -372,7 +372,7 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `log_verbose` | `--verbose` | False | Enable stderr log output + full LLM payloads to cycle log |
 | `skills_dirs` | `--skills-dir` (repeatable) | `[~/.config/springdrift/skills, .springdrift/skills]` | Skill directories |
 | `write_anywhere` | `--allow-write-anywhere` | False | Allow `write_file` outside CWD |
-| `gui` | `--gui` | tui | GUI mode: `tui` (terminal) or `web` (browser on port 8080) |
+| `gui` | `--gui` | tui | GUI mode: `tui` (terminal) or `web` (browser on port 12001) |
 | `dprime_enabled` | `--dprime` / `--no-dprime` | True | Enable D' safety evaluation before tool dispatch |
 | `dprime_config` | `--dprime-config` | built-in defaults | Path to D' config JSON file |
 | `gate_timeout_ms` | — | 60000 | Gate evaluation timeout (ms) — fail-open after this delay |

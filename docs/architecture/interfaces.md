@@ -194,7 +194,7 @@ build step required.
 | Field | Section | Default | Purpose |
 |---|---|---|---|
 | `gui` | top-level | `"tui"` | Interface mode: `tui` or `web` |
-| `web_port` | `[web]` | 8080 | HTTP server port |
+| `web_port` | `[web]` | 12001 | HTTP server port |
 
 ## 6. Key Source Files
 
