@@ -214,8 +214,8 @@
     "enabled": true,
     "input_rules": [
       { "id": "injection-override", "pattern": "ignore previous instructions", "action": "block" },
-      { "id": "injection-system", "pattern": "you are now|act as|pretend you", "action": "escalate" },
-      { "id": "injection-jailbreak", "pattern": "DAN|do anything now|jailbreak", "action": "block" }
+      { "id": "injection-system", "pattern": "\\byou are now\\b|\\bact as\\b|\\bpretend you\\b", "action": "escalate" },
+      { "id": "injection-jailbreak", "pattern": "\\bDAN\\b|\\bdo anything now\\b|\\bjailbreak\\b", "action": "block" }
     ],
     "tool_rules": [
       { "id": "rm-rf-root", "pattern": "rm\\s+-rf\\s+/", "action": "block" },
