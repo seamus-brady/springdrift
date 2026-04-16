@@ -9,28 +9,55 @@
 
 set -euo pipefail
 
-# ── Colours ──────────────────────────────────────────────────────────────────
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-BOLD='\033[1m'
-NC='\033[0m'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/setup-common.sh"
 
-ok()   { echo -e "  ${GREEN}✓${NC} $1"; }
-warn() { echo -e "  ${YELLOW}!${NC} $1"; }
-fail() { echo -e "  ${RED}✗${NC} $1"; exit 1; }
-ask()  { read -rp "  $1: " "$2"; }
-ask_default() { read -rp "  $1 [$2]: " val; eval "$3=\${val:-$2}"; }
-ask_yn() { read -rp "  $1 [y/N]: " val; [[ "${val,,}" == "y" ]]; }
+ask()  { read -rp "  $1: " "$2" <&3; }
+ask_default() { read -rp "  $1 [$2]: " val <&3; eval "$3=\${val:-$2}"; }
+ask_yn() { read -rp "  $1 [y/N]: " val <&3; [[ "${val,,}" == "y" ]]; }
+
+SETUP_LOG=".springdrift-setup.log"
+exec 3<&0
+exec 0< /dev/null
+if [[ -t 3 ]]; then
+  exec > >(tee -a "$SETUP_LOG") 2>&1
+fi
+
+cleanup() {
+  local exit_code=$?
+  if [[ $exit_code -ne 0 ]]; then
+    echo ""
+    echo -e "${RED}Setup failed at step above.${NC}"
+    echo "  Full log saved to: $SETUP_LOG"
+    echo ""
+    echo "  Common fixes:"
+    echo "    - Permission denied → don't run as root; use a normal user with sudo"
+    echo "    - Port in use → change [web] port in .springdrift/config.toml"
+    echo "    - Gleam version → install latest from https://gleam.run"
+    echo "    - API keys not found → source /etc/springdrift/env or .env before gleam run"
+  fi
+}
+trap cleanup EXIT
 
 echo ""
 echo -e "${BOLD}Springdrift — Linux Setup${NC}"
 echo "─────────────────────────────────────────"
 echo ""
 
-# ── Check we're in the repo root ─────────────────────────────────────────────
-if [[ ! -f "gleam.toml" ]]; then
-  fail "Run this script from the springdrift repo root (where gleam.toml is)"
+# ── Preflight checks ───────────────────────────────────────────────────────
+echo -e "${BOLD}0. Preflight${NC}"
+
+check_repo_root "." || fail "Run this script from the springdrift repo root (where gleam.toml is)"
+ok "In repo root"
+
+check_not_root || fail "Do not run this script as root. Run as a normal user — it will sudo when needed."
+ok "Running as $(whoami) (not root)"
+
+if [[ -d ".springdrift" ]]; then
+  check_springdrift_writable ".springdrift" || fail ".springdrift/ exists but you don't have write permission. Fix with: sudo chown -R $(whoami) .springdrift/"
+  ok ".springdrift/ exists and is writable"
+else
+  ok ".springdrift/ will be created from example"
 fi
 
 # ── Detect distro ────────────────────────────────────────────────────────────
@@ -46,6 +73,7 @@ if [[ "$DISTRO" != "ubuntu" && "$DISTRO" != "debian" ]]; then
 fi
 
 # ── Dependencies ─────────────────────────────────────────────────────────────
+echo ""
 echo -e "${BOLD}1. Dependencies${NC}"
 
 # Erlang/OTP
@@ -55,26 +83,45 @@ else
   echo "  Installing Erlang/OTP..."
   sudo apt-get update -qq
   sudo apt-get install -y -qq erlang-dev erlang-xmerl erlang-ssl erlang-inets erlang-parsetools erlang-tools
+  command -v erl &>/dev/null || fail "Erlang installation failed — erl not found in PATH"
   ok "Erlang/OTP installed"
 fi
 
 # Gleam
-if command -v gleam &>/dev/null; then
-  ok "Gleam ($(gleam --version 2>/dev/null || echo "installed"))"
-else
-  echo "  Installing Gleam..."
+install_gleam_linux() {
+  local GLEAM_VERSION
   GLEAM_VERSION=$(curl -sfL https://api.github.com/repos/gleam-lang/gleam/releases/latest | grep -o '"tag_name": "v[^"]*"' | head -1 | tr -d '"' | cut -d'v' -f2)
   if [[ -z "$GLEAM_VERSION" ]]; then
     fail "Could not determine latest Gleam version. Install manually from https://gleam.run"
   fi
+  local ARCH
   ARCH=$(uname -m)
+  local GLEAM_ARCH
   case "$ARCH" in
     x86_64)  GLEAM_ARCH="x86_64-unknown-linux-musl" ;;
     aarch64) GLEAM_ARCH="aarch64-unknown-linux-musl" ;;
     *) fail "Unsupported architecture: $ARCH" ;;
   esac
   curl -sfL "https://github.com/gleam-lang/gleam/releases/download/v${GLEAM_VERSION}/gleam-v${GLEAM_VERSION}-${GLEAM_ARCH}.tar.gz" | sudo tar xzf - -C /usr/local/bin
+  command -v gleam &>/dev/null || fail "Gleam installation failed — gleam not found in PATH"
   ok "Gleam $GLEAM_VERSION installed"
+}
+
+if command -v gleam &>/dev/null; then
+  GLEAM_VER=$(parse_gleam_version "$(gleam --version 2>/dev/null)")
+  if gleam_version_ok "$GLEAM_VER"; then
+    ok "Gleam ($GLEAM_VER)"
+  else
+    warn "Gleam ($GLEAM_VER) is too old — this project requires >= $REQUIRED_GLEAM_MAJOR.$REQUIRED_GLEAM_MINOR.0"
+    if ask_yn "Upgrade Gleam to latest?"; then
+      install_gleam_linux
+    else
+      fail "Gleam >= $REQUIRED_GLEAM_MAJOR.$REQUIRED_GLEAM_MINOR.0 is required"
+    fi
+  fi
+else
+  echo "  Installing Gleam..."
+  install_gleam_linux
 fi
 
 # Podman (optional)
@@ -85,6 +132,7 @@ if command -v podman &>/dev/null; then
 else
   if ask_yn "Install Podman? (isolated containers for code execution — the coder agent needs this)"; then
     sudo apt-get install -y -qq podman
+    command -v podman &>/dev/null || fail "Podman installation failed"
     ok "Podman installed"
     SANDBOX_AVAILABLE=true
   else
@@ -100,6 +148,7 @@ if command -v ollama &>/dev/null; then
 else
   if ask_yn "Install Ollama? (local embeddings for case-based memory — significantly improves retrieval)"; then
     curl -fsSL https://ollama.com/install.sh | sh
+    command -v ollama &>/dev/null || fail "Ollama installation failed"
     ok "Ollama installed"
     echo "  Run: ollama pull nomic-embed-text"
     OLLAMA_AVAILABLE=true
@@ -112,25 +161,22 @@ fi
 echo ""
 echo -e "${BOLD}2. Building Springdrift${NC}"
 gleam build 2>&1 | tail -1
-ok "Build complete"
+ok "Build complete (Gleam $(parse_gleam_version "$(gleam --version 2>/dev/null)"))"
 
 # ── Configuration ────────────────────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}3. Configuration${NC}"
 echo ""
 
-# Agent name
 ask_default "Agent name" "Springdrift" AGENT_NAME
 
-# Provider (default anthropic)
 echo ""
 echo "  LLM Providers: anthropic (default), vertex, mistral, local, mock"
 ask_default "Provider" "anthropic" PROVIDER
 
-# API keys
 echo ""
 echo -e "${BOLD}4. API Keys${NC}"
-echo "  Keys are stored in /etc/springdrift/env (root-readable only)."
+echo "  Keys are stored in /etc/springdrift/env (for systemd) and .env (for manual runs)."
 echo ""
 
 ANTHROPIC_KEY=""
@@ -163,7 +209,6 @@ ask "  Brave Search API key" BRAVE_KEY
 echo "  Jina Reader — cleaner URL extraction. Free tier: https://jina.ai/reader/"
 ask "  Jina Reader API key" JINA_KEY
 
-# Comms
 echo ""
 echo "  AgentMail — email send/receive. Free at https://agentmail.to"
 COMMS_ENABLED=false
@@ -177,7 +222,6 @@ if ask_yn "Enable email (AgentMail)?"; then
   ask "AgentMail API key" AGENTMAIL_KEY
 fi
 
-# Git backup remote
 echo ""
 echo "  Git backup — agent memory is backed up to a git repo automatically."
 echo "  Provide a private GitHub/GitLab repo URL for remote backup (optional)."
@@ -197,73 +241,14 @@ fi
 
 # ── Write config.toml ────────────────────────────────────────────────────────
 CONFIG=".springdrift/config.toml"
+WEB_TOKEN=$(openssl rand -hex 24 2>/dev/null || head -c 48 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 48)
 
 if [[ ! -f "$CONFIG" ]] || grep -q "example" "$CONFIG" 2>/dev/null; then
-  WEB_TOKEN=$(openssl rand -hex 24 2>/dev/null || head -c 48 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 48)
+  RECIPIENTS_TOML=$(format_recipients_toml "$COMMS_RECIPIENTS")
 
-  RECIPIENTS_TOML="[]"
-  if [[ -n "$COMMS_RECIPIENTS" ]]; then
-    RECIPIENTS_TOML="[$(echo "$COMMS_RECIPIENTS" | sed 's/[[:space:]]*,[[:space:]]*/", "/g; s/^/"/; s/$/"/' )]"
-  fi
-
-  cat > "$CONFIG" << TOML
-# ─────────────────────────────────────────────────────────────────────────────
-# Springdrift config — generated by setup-linux.sh
-# ─────────────────────────────────────────────────────────────────────────────
-
-provider = "$PROVIDER"
-max_tokens = 4096
-max_turns = 8
-max_consecutive_errors = 3
-gui = "web"
-log_verbose = false
-dprime_config = ".springdrift/dprime.json"
-
-[agent]
-name = "$AGENT_NAME"
-version = "Springdrift Mk-3"
-
-[anthropic]
-task_model = "claude-haiku-4-5-20251001"
-reasoning_model = "claude-opus-4-6"
-
-[narrative]
-threading = true
-summaries = false
-
-[dprime]
-normative_calculus_enabled = true
-
-[sandbox]
-enabled = $SANDBOX_AVAILABLE
-
-[cbr]
-# embedding_enabled = $OLLAMA_AVAILABLE
-
-[comms]
-enabled = $COMMS_ENABLED
-$(if $COMMS_ENABLED; then
-  echo "from_address = \"$COMMS_ADDRESS\""
-  echo "allowed_recipients = $RECIPIENTS_TOML"
-  echo "from_name = \"$AGENT_NAME\""
-fi)
-
-[web]
-# port = 8080
-
-[scheduler]
-# max_autonomous_cycles_per_hour = 20
-
-[backup]
-enabled = true
-mode = "periodic"
-# interval_ms = 300000
-$(if [[ -n "$BACKUP_REMOTE" ]]; then echo "remote_url = \"$BACKUP_REMOTE\""; fi)
-
-[forecaster]
-# enabled = false
-TOML
-
+  generate_config "$CONFIG" "$PROVIDER" "$AGENT_NAME" "$SANDBOX_AVAILABLE" \
+    "$OLLAMA_AVAILABLE" "$COMMS_ENABLED" "$COMMS_ADDRESS" "$RECIPIENTS_TOML" \
+    "$BACKUP_REMOTE" "setup-linux.sh"
   ok "Generated $CONFIG"
 fi
 
@@ -279,31 +264,50 @@ if [[ -n "$BACKUP_REMOTE" ]]; then
   ok "Git remote set to $BACKUP_REMOTE"
 fi
 
-# ── Write env file ───────────────────────────────────────────────────────────
+# ── Write env files ─────────────────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}6. Environment${NC}"
 
+# Systemd env file
 sudo mkdir -p /etc/springdrift
-{
-  echo "# Springdrift environment — generated by setup-linux.sh"
-  [[ -n "$ANTHROPIC_KEY" ]] && echo "ANTHROPIC_API_KEY=$ANTHROPIC_KEY"
-  [[ -n "$MISTRAL_KEY" ]] && echo "MISTRAL_API_KEY=$MISTRAL_KEY"
-  [[ -n "$VERTEX_PROJECT" ]] && echo "VERTEX_PROJECT_ID=$VERTEX_PROJECT"
-  [[ -n "$BRAVE_KEY" ]] && echo "BRAVE_API_KEY=$BRAVE_KEY"
-  [[ -n "$JINA_KEY" ]] && echo "JINA_API_KEY=$JINA_KEY"
-  [[ -n "$AGENTMAIL_KEY" ]] && echo "AGENTMAIL_API_KEY=$AGENTMAIL_KEY"
-  echo "SPRINGDRIFT_WEB_TOKEN=$WEB_TOKEN"
-} | sudo tee /etc/springdrift/env > /dev/null
+generate_systemd_env_file "/tmp/springdrift-env.tmp" \
+  "$ANTHROPIC_KEY" "$MISTRAL_KEY" "$VERTEX_PROJECT" \
+  "$BRAVE_KEY" "$JINA_KEY" "$AGENTMAIL_KEY" "$WEB_TOKEN"
+sudo mv /tmp/springdrift-env.tmp /etc/springdrift/env
 sudo chmod 600 /etc/springdrift/env
-ok "API keys written to /etc/springdrift/env (root-readable only)"
+ok "API keys written to /etc/springdrift/env (systemd)"
+
+# .env for manual runs
+generate_env_file ".env" \
+  "$ANTHROPIC_KEY" "$MISTRAL_KEY" "$VERTEX_PROJECT" \
+  "$BRAVE_KEY" "$JINA_KEY" "$AGENTMAIL_KEY" "$WEB_TOKEN" "setup-linux.sh"
+ok "API keys written to .env (manual runs)"
+
+if ! grep -q "^\.env$" .gitignore 2>/dev/null; then
+  echo ".env" >> .gitignore
+  ok "Added .env to .gitignore"
+fi
+
+verify_env_file ".env" "$PROVIDER" || fail "API key verification failed — .env does not contain required keys"
+ok "API keys verified"
+
+# ── Check port availability ─────────────────────────────────────────────────
+WEB_PORT=12001
+if check_port_available "$WEB_PORT"; then
+  ok "Port $WEB_PORT is available"
+else
+  warn "Port $WEB_PORT is already in use. Change [web] port in .springdrift/config.toml"
+fi
 
 # ── Systemd service ──────────────────────────────────────────────────────────
+if [[ "${SPRINGDRIFT_SKIP_SYSTEMD:-0}" == "1" ]]; then
+  ok "Systemd setup skipped (SPRINGDRIFT_SKIP_SYSTEMD=1)"
+else
 echo ""
 echo -e "${BOLD}7. Systemd service${NC}"
 
 INSTALL_DIR="$(pwd)"
 
-# Create springdrift user if needed
 if ! id springdrift &>/dev/null; then
   sudo useradd --system --shell /usr/sbin/nologin --home-dir "$INSTALL_DIR" springdrift
   ok "Created springdrift user"
@@ -311,7 +315,6 @@ else
   ok "springdrift user exists"
 fi
 
-# Set ownership
 sudo chown -R springdrift:springdrift .springdrift/ 2>/dev/null || true
 sudo chown -R springdrift:springdrift .sandbox-workspaces/ 2>/dev/null || true
 
@@ -349,16 +352,28 @@ ok "Systemd service installed"
 if ask_yn "Start Springdrift now?"; then
   sudo systemctl enable springdrift
   sudo systemctl start springdrift
-  sleep 2
+  sleep 3
   if systemctl is-active --quiet springdrift; then
     ok "Springdrift is running"
+    if command -v curl &>/dev/null; then
+      sleep 2
+      if curl -sf --max-time 5 "http://localhost:${WEB_PORT}" > /dev/null 2>&1; then
+        ok "Web GUI responding at http://localhost:${WEB_PORT}"
+      else
+        warn "Service is running but web GUI not yet responding — it may still be starting up"
+        echo "    Check: journalctl -u springdrift -f"
+      fi
+    fi
   else
-    warn "Service started but may still be initialising — check: journalctl -u springdrift -f"
+    warn "Service failed to start"
+    echo "    Check: journalctl -u springdrift --no-pager -n 20"
   fi
 else
   ok "Service installed but not started"
   echo "  Start with: sudo systemctl enable --now springdrift"
 fi
+
+fi # end SPRINGDRIFT_SKIP_SYSTEMD guard
 
 # ── Summary ──────────────────────────────────────────────────────────────────
 echo ""
@@ -367,7 +382,7 @@ echo -e "${BOLD}${GREEN}Setup complete!${NC}"
 echo ""
 echo "  Agent:     $AGENT_NAME"
 echo "  Provider:  $PROVIDER"
-echo "  Web GUI:   http://localhost:8080"
+echo "  Web GUI:   http://localhost:$WEB_PORT"
 echo "  Auth:      $WEB_TOKEN"
 echo ""
 echo "  Manage:"
@@ -377,8 +392,13 @@ echo "    sudo systemctl restart springdrift"
 echo "    journalctl -u springdrift -f"
 echo ""
 echo "  Config:    .springdrift/config.toml"
-echo "  API keys:  /etc/springdrift/env"
+echo "  API keys:  /etc/springdrift/env (systemd) or .env (manual runs)"
+echo ""
+echo -e "  ${BOLD}For manual runs:${NC}"
+echo "    source .env && gleam run"
+echo ""
 echo "  Tests:     gleam test"
+echo "  Setup log: $SETUP_LOG"
 echo ""
 if $OLLAMA_AVAILABLE; then
   echo "  For CBR embeddings:"
@@ -386,3 +406,10 @@ if $OLLAMA_AVAILABLE; then
   echo "    sudo systemctl restart springdrift"
   echo ""
 fi
+
+echo "  Troubleshooting:"
+echo "    - Port in use?     Change [web] port in .springdrift/config.toml"
+echo "    - Keys not found?  source .env before gleam run (or check /etc/springdrift/env for systemd)"
+echo "    - Gleam too old?   gleam --version (need >= $REQUIRED_GLEAM_MAJOR.$REQUIRED_GLEAM_MINOR.0)"
+echo "    - Service crash?   journalctl -u springdrift --no-pager -n 50"
+echo ""

@@ -143,7 +143,7 @@ reasoning_model = "claude-sonnet-4-6"
 # Terminal UI mode
 gleam run
 
-# Web GUI mode (browser at http://localhost:8080)
+# Web GUI mode (browser at http://localhost:12001)
 gleam run -- --gui web
 
 # Resume previous session

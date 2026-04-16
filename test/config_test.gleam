@@ -734,7 +734,7 @@ pub fn merge_new_sections_test() {
     AppConfig(
       ..config.default(),
       llm_request_timeout_ms: Some(300_000),
-      web_port: Some(8080),
+      web_port: Some(12_001),
     )
   let override = AppConfig(..config.default(), web_port: Some(9090))
   let merged = config.merge(base, override:)

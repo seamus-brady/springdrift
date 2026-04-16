@@ -240,7 +240,7 @@ Certificate auto-renewal managed by certbot's built-in systemd timer. Mist reloa
 Verification
 =============
   Service:     ✓ springdrift.service active (running)
-  Web GUI:     ✓ http://localhost:8080 responding
+  Web GUI:     ✓ http://localhost:12001 responding
   Sandbox:     ✓ Podman healthy, 2 containers ready
   Embeddings:  ✓ Ollama responding, nomic-embed-text loaded
   Backup:      ✓ Git repo initialised, first commit created

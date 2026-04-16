@@ -135,7 +135,7 @@ gleam run
 ### Running
 
 ```bash
-# Web GUI (default, on port 8080)
+# Web GUI (default, on port 12001)
 gleam run
 
 # Terminal TUI

@@ -1,0 +1,38 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Springdrift setup integration test — Erlang 27 + Gleam container
+# Build:  docker build -f tests/setup/Dockerfile.integration -t springdrift-setup-test .
+# Run:    docker run --rm springdrift-setup-test
+# ─────────────────────────────────────────────────────────────────────────────
+
+FROM erlang:27-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update -qq && \
+    apt-get install -y -qq curl git sudo lsof && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install latest Gleam
+RUN ARCH=$(uname -m) && \
+    case "$ARCH" in \
+      x86_64)  GLEAM_ARCH="x86_64-unknown-linux-musl" ;; \
+      aarch64) GLEAM_ARCH="aarch64-unknown-linux-musl" ;; \
+    esac && \
+    GLEAM_VERSION=$(curl -sfL https://api.github.com/repos/gleam-lang/gleam/releases/latest \
+      | grep -o '"tag_name": "v[^"]*"' | head -1 | tr -d '"' | cut -d'v' -f2) && \
+    curl -sfL "https://github.com/gleam-lang/gleam/releases/download/v${GLEAM_VERSION}/gleam-v${GLEAM_VERSION}-${GLEAM_ARCH}.tar.gz" \
+      | tar xzf - -C /usr/local/bin
+
+# Create non-root user
+RUN useradd -m -s /bin/bash testuser && \
+    echo "testuser ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers && \
+    su - testuser -c 'git config --global user.email "test@test.com" && git config --global user.name "Test User"'
+
+COPY --chown=testuser:testuser . /home/testuser/springdrift
+WORKDIR /home/testuser/springdrift
+USER testuser
+
+# Pre-build so the integration test doesn't need network for deps
+RUN gleam build
+
+CMD ["bash", "tests/setup/test_integration.sh"]

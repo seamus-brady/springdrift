@@ -1,0 +1,8 @@
+_impl_docs/
+.springdrift/
+.sandbox-workspaces/
+.env
+.git/
+build/
+evals/operational-logs/
+docs/paper/
