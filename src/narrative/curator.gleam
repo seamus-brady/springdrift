@@ -29,6 +29,9 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import identity
+import knowledge/log as knowledge_log
+import knowledge/types as knowledge_types
+import knowledge/workspace
 import narrative/housekeeper
 import narrative/librarian
 import narrative/meta_states
@@ -1046,10 +1049,12 @@ fn build_sensorium(
   let endeavours = librarian.get_all_endeavours(state.librarian)
   let tasks_section = render_sensorium_tasks(active_tasks, endeavours)
 
+  let knowledge_section = render_sensorium_knowledge(state)
+
   let sections =
     [
       clock, situation, schedule, vitals, sandbox_section, delegations, events,
-      tasks_section,
+      tasks_section, knowledge_section,
     ]
     |> list.filter(fn(s) { s != "" })
     |> string.join("\n")
@@ -1510,6 +1515,99 @@ fn find_last_failure(entries: List(narrative_types.NarrativeEntry)) -> String {
         }
         _ -> find_last_failure(rest)
       }
+  }
+}
+
+fn render_sensorium_knowledge(_state: CuratorState) -> String {
+  let knowledge_dir = paths.knowledge_dir()
+  let docs = knowledge_log.resolve(knowledge_dir)
+  case docs {
+    [] -> ""
+    _ -> {
+      let sources =
+        list.count(docs, fn(m) { m.doc_type == knowledge_types.Source })
+      let notes = list.count(docs, fn(m) { m.doc_type == knowledge_types.Note })
+      let drafts =
+        list.count(docs, fn(m) { m.doc_type == knowledge_types.Draft })
+      let exports =
+        list.count(docs, fn(m) { m.doc_type == knowledge_types.Export })
+      let stale = list.count(docs, fn(m) { m.status == knowledge_types.Stale })
+      let journal_today =
+        workspace.read_journal_today(paths.knowledge_journal_dir())
+      let has_journal = journal_today != ""
+      let active_notes = workspace.list_notes(paths.knowledge_notes_dir())
+      let active_drafts = workspace.list_drafts(paths.knowledge_drafts_dir())
+
+      let attrs =
+        "sources=\""
+        <> int.to_string(sources)
+        <> "\" notes=\""
+        <> int.to_string(notes)
+        <> "\" drafts=\""
+        <> int.to_string(drafts)
+        <> "\" exports=\""
+        <> int.to_string(exports)
+        <> "\" stale=\""
+        <> int.to_string(stale)
+        <> "\" journal_today=\""
+        <> case has_journal {
+          True -> "true"
+          False -> "false"
+        }
+        <> "\""
+
+      let children = []
+      let children = case has_journal {
+        True -> {
+          let lines = string.split(journal_today, "\n---\n")
+          let last_entry = case list.last(lines) {
+            Ok(entry) -> string.trim(entry)
+            Error(_) -> ""
+          }
+          case last_entry {
+            "" -> children
+            entry -> {
+              let truncated = case string.length(entry) > 200 {
+                True -> string.slice(entry, 0, 200) <> "..."
+                False -> entry
+              }
+              list.append(children, [
+                "    <recent_journal>" <> truncated <> "</recent_journal>",
+              ])
+            }
+          }
+        }
+        False -> children
+      }
+      let children = case active_notes {
+        [] -> children
+        slugs ->
+          list.append(children, [
+            "    <active_notes>"
+            <> string.join(slugs, ", ")
+            <> "</active_notes>",
+          ])
+      }
+      let children = case active_drafts {
+        [] -> children
+        slugs ->
+          list.append(children, [
+            "    <active_drafts>"
+            <> string.join(slugs, ", ")
+            <> "</active_drafts>",
+          ])
+      }
+
+      case children {
+        [] -> "  <knowledge " <> attrs <> "/>"
+        _ ->
+          "  <knowledge "
+          <> attrs
+          <> ">\n"
+          <> string.join(children, "\n")
+          <> "\n  </knowledge>"
+      }
+    }
   }
 }
 
