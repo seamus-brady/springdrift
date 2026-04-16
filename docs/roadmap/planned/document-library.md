@@ -253,6 +253,223 @@ document and section.
 
 ---
 
+## Web GUI — Documents Panel
+
+The Documents panel is a tab in the web GUI alongside Chat, Log, Narrative,
+Scheduler, and Cycles. It gives the operator full visibility and control
+over the knowledge lifecycle.
+
+### Layout
+
+```
+┌─ Documents ─────────────────────────────────────────────────┐
+│                                                              │
+│  ┌─ Sidebar ──────────┐  ┌─ Main Panel ──────────────────┐ │
+│  │                     │  │                               │ │
+│  │  📂 Knowledge Base  │  │  [Rendered document content]  │ │
+│  │    legal/           │  │                               │ │
+│  │      aamodt...  ✅  │  │  Section navigation:          │ │
+│  │      contract.. 📖  │  │  1. Introduction              │ │
+│  │    research/        │  │  2. Background                │ │
+│  │      gartner..  ⏳  │  │    2.1 Prior work             │ │
+│  │                     │  │    2.2 Methodology            │ │
+│  │  📥 Inbox (1)       │  │  3. Results                   │ │
+│  │    report.pdf  ⏳   │  │                               │ │
+│  │                     │  └───────────────────────────────┘ │
+│  │  📤 Exports         │  ┌─ Detail Sidebar ─────────────┐ │
+│  │    q2-analysis ✅   │  │  Status: Promoted             │ │
+│  │                     │  │  Domain: legal                │ │
+│  │  🔍 [Search...]     │  │  Indexed: 34 nodes            │ │
+│  │                     │  │  Studied: 2026-04-10          │ │
+│  └─────────────────────┘  │  CBR cases: 3 derived         │ │
+│                            │  Facts: 7 derived             │ │
+│  [+ Upload] [↻ Re-index]  │  Hash: sha256:abc1...         │ │
+│                            └──────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Three Sections in Sidebar
+
+**Knowledge Base** (sources):
+- Tree view organised by domain
+- Status icons: ⏳ Pending, 📖 Studied, ✅ Promoted, ⚠️ Stale
+- Click to view rendered markdown with section navigation
+- Section navigation built from the tree index (clickable headings)
+
+**Inbox**:
+- Shows pending uploads not yet normalised
+- Drag-and-drop zone or file picker button
+- Progress indicator during normalisation
+- Auto-clears when documents move to sources/
+
+**Exports**:
+- Reverse chronological list of agent-generated reports
+- Status: Draft, Reviewed, Final, Delivered
+- Download as Markdown or HTML
+- Delivery history (who received it, when, via which channel)
+
+### Document Viewer (Main Panel)
+
+Click any document in the sidebar to view:
+- Rendered markdown in the main area
+- Section navigation from the tree index (jump to heading)
+- For sources: study status, number of derived CBR cases and facts
+- For exports: D' score, delivery recipients, linked endeavour
+
+### Detail Sidebar
+
+Metadata panel showing:
+- Document status and lifecycle stage
+- Domain classification
+- Content hash and version
+- Node count from tree index
+- Provenance: source URL, upload date, who uploaded
+- Derived artifacts: linked CBR case IDs, fact keys
+
+### Upload Flow
+
+1. Operator drags file to inbox area (or clicks "Upload" button)
+2. HTTP POST to `/api/documents/upload` with multipart form data
+3. Server writes to `.springdrift/knowledge/inbox/`
+4. WebSocket notification: `DocumentUploaded { filename, status: "pending" }`
+5. If auto_study enabled: normalisation runs, then study cycle triggers
+6. Progress updates via WebSocket: `DocumentStatusChanged { doc_id, status }`
+7. Document appears in Knowledge Base sidebar when normalised
+
+### Supported Upload Formats
+
+- Markdown (.md) — stored directly, no conversion needed
+- Plain text (.txt) — stored directly
+- PDF (.pdf) — text extracted via Erlang or external tool, stored as markdown
+- Operator can also paste a URL — researcher fetches and normalises
+
+### Download / Export
+
+- Any document downloadable as raw markdown
+- Exports downloadable as markdown or HTML
+- Bulk export of all sources for a domain (zip)
+
+### HTTP Endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/documents/upload` | Upload file to inbox |
+| GET | `/api/documents` | List all documents (JSON) |
+| GET | `/api/documents/:id` | Get document content + metadata |
+| GET | `/api/documents/:id/tree` | Get tree index for section navigation |
+| DELETE | `/api/documents/:id` | Remove document |
+| POST | `/api/documents/:id/restudy` | Trigger re-study cycle |
+
+### WebSocket Messages
+
+| Client → Server | Server → Client | Purpose |
+|---|---|---|
+| `RequestDocuments` | `DocumentsData` | Initial document list |
+| — | `DocumentUploaded` | New upload notification |
+| — | `DocumentStatusChanged` | Status transition notification |
+| `RequestDocumentTree` | `DocumentTreeData` | Tree index for section nav |
+
+---
+
+## Email Attachments — Inbound Document Pipeline
+
+When the comms agent receives an email with attachments, they flow into the
+document library automatically. This bridges the gap between the email
+channel and the knowledge pipeline.
+
+See also: [mail-attachments.md](mail-attachments.md) for the full attachment spec.
+
+### Inbound Flow
+
+```
+Email with attachment arrives
+  → Inbox poller detects attachment metadata
+  → Attachment content fetched via AgentMail API
+  → Written to .springdrift/knowledge/inbox/{message-id}-{filename}
+  → Document metadata logged with provenance: source_type = "email",
+    sender, message_id, received_at
+  → If auto_study enabled: normalisation + study cycle runs
+  → Agent notified via sensory event: "new document from email"
+```
+
+### Provenance
+
+Email-sourced documents carry full provenance:
+- `source_type: "email"`
+- `sender: "alice@example.com"`
+- `message_id: "msg-abc123"`
+- `received_at: "2026-04-16T10:00:00Z"`
+- `subject: "Q2 market data attached"`
+
+This traces all the way through: email → inbox → source → study → CBR case.
+
+### Safety
+
+- Inbound attachments pass through the D' input gate before acceptance
+- Executable files (.exe, .sh, .bat) are rejected at the deterministic layer
+- Content is scanned for prompt injection patterns (same as web content)
+- Attachments from senders not on the comms allowlist are quarantined
+  (logged but not processed until operator approves)
+
+### Supported Attachment Types
+
+- Text/Markdown — direct to inbox
+- PDF — text extracted, stored as markdown
+- Images — stored as artifacts (not indexed as knowledge)
+- Other — stored as artifacts with metadata, not auto-studied
+
+---
+
+## Operator Experience — End to End
+
+### Uploading a Document
+
+1. Open web GUI → Documents tab
+2. Drag a PDF into the inbox zone (or click Upload)
+3. See "market-report.pdf — Pending" appear in inbox
+4. Within seconds: status changes to "Normalised" — the markdown extraction ran
+5. If auto_study is on: status changes to "Studying..." with a progress note
+6. After study completes: document moves to Knowledge Base under its domain
+7. Status shows "Promoted" with a count of derived CBR cases and facts
+8. Click the document to read the rendered markdown with section headings
+
+### Searching the Library
+
+1. Type a query in the search box in the Documents sidebar
+2. Results appear ranked by relevance with provenance breadcrumbs:
+   `legal / aamodt-plaza-1994 / Section 3.2 — Similarity Assessment`
+3. Click a result to jump directly to that section in the viewer
+4. The agent can also search the library via chat: "What do our legal
+   sources say about similarity assessment in CBR?"
+
+### Receiving a Document via Email
+
+1. Someone emails an attachment to the agent's address
+2. The comms agent picks it up and routes the attachment to inbox
+3. A toast notification appears: "New document from alice@example.com"
+4. The document appears in inbox, then flows through the normal pipeline
+5. The operator can view it in the Documents panel or ask the agent about it
+
+### Monitoring Study Progress
+
+1. Documents in "Studying" state show which cycle is running
+2. The Narrative tab shows study cycle entries as they're written
+3. Once promoted, the detail sidebar shows derived artifacts:
+   "3 CBR cases, 7 facts derived from this document"
+4. The operator can trigger a re-study via the "Re-index" button if the
+   source content has changed
+
+### Working with Exports
+
+1. The agent generates a report (via writer agent or cognitive loop)
+2. The report appears in Exports as "Draft"
+3. For autonomous cycles: D' output gate evaluates → status becomes "Reviewed"
+4. Operator reads it, clicks "Approve" → status becomes "Final"
+5. Operator clicks "Send" → comms agent delivers to configured recipients
+6. Status becomes "Delivered" with recipient list and timestamp
+
+---
+
 ## Implementation Phases
 
 | Phase | What | Effort | Depends On |
@@ -267,9 +484,11 @@ document and section.
 | 8 | Sensorium integration + stale detection | Small | Phase 1 |
 | 9 | Consolidation output (Remembrancer → consolidation/) | Medium | Phase 1, Remembrancer |
 | 10 | Export storage (agent reports → exports/) | Small | Phase 1 |
-| 11 | Web GUI Documents panel | Large | Phase 1-10, Web GUI v2 |
+| 11 | Web GUI Documents panel (upload, browse, viewer, section nav) | Large | Phase 1-10, Web GUI v2 |
 | 12 | PDF support (text extraction + page-level indexing) | Medium | Phase 2 |
-| 13 | LLM reasoning retrieval (Tier 3) | Medium | Phase 2 |
+| 13 | Email attachment inbound pipeline (comms → inbox) | Medium | Phase 5, mail-attachments |
+| 14 | Export approval + delivery workflow (approve → comms send) | Medium | Phase 10, comms agent |
+| 15 | LLM reasoning retrieval (Tier 3) | Medium | Phase 2 |
 
 **Phase 1-4 is the MVP**: directory structure, tree indexer, embedding search, tools.
 Delivers a working document library the agent can index and search.
@@ -277,8 +496,12 @@ Delivers a working document library the agent can index and search.
 **Phase 5-7 adds the knowledge pipeline**: documents flow through study cycles
 into CBR and facts.
 
-**Phase 8-13 adds polish**: sensorium awareness, consolidation, exports, web
-GUI, PDF, and LLM reasoning search.
+**Phase 8-10 adds internal awareness**: sensorium, consolidation, exports.
+
+**Phase 11-14 adds the operator experience**: web GUI with upload/browse/viewer,
+email attachment pipeline, export approval and delivery workflow.
+
+**Phase 15 adds advanced retrieval**: LLM reasoning search for complex queries.
 
 ---
 
