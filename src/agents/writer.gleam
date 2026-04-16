@@ -12,8 +12,10 @@ import gleam/option.{type Option, None, Some}
 import llm/provider.{type Provider}
 import llm/types as llm_types
 import narrative/librarian.{type LibrarianMessage}
+import paths
 import tools/artifacts
 import tools/builtin
+import tools/knowledge as knowledge_tools
 
 const system_prompt = "You are a writer agent within a multi-agent system. You receive instructions from the orchestrating agent, not directly from the user.
 
@@ -37,7 +39,12 @@ pub fn spec(
   lib: Option(Subject(LibrarianMessage)),
   max_artifact_chars: Int,
 ) -> AgentSpec {
-  let tools = list.flatten([artifacts.all(), builtin.agent_tools()])
+  let tools =
+    list.flatten([
+      knowledge_tools.writer_tools(),
+      artifacts.all(),
+      builtin.agent_tools(),
+    ])
 
   AgentSpec(
     name: "writer",
@@ -64,15 +71,38 @@ fn writer_executor(
   max_artifact_chars: Int,
 ) -> fn(llm_types.ToolCall) -> llm_types.ToolResult {
   fn(call: llm_types.ToolCall) -> llm_types.ToolResult {
-    case call.name, lib {
-      "store_result", Some(l) | "retrieve_result", Some(l) ->
-        artifacts.execute(call, artifacts_dir, "writer", l, max_artifact_chars)
-      "store_result", None | "retrieve_result", None ->
-        llm_types.ToolFailure(
-          tool_use_id: call.id,
-          error: "Artifact tools unavailable (no librarian)",
+    case call.name {
+      "create_draft" | "update_draft" | "promote_draft" ->
+        knowledge_tools.execute(
+          call,
+          knowledge_tools.KnowledgeConfig(
+            knowledge_dir: paths.knowledge_dir(),
+            indexes_dir: paths.knowledge_indexes_dir(),
+            sources_dir: paths.knowledge_sources_dir(),
+            journal_dir: paths.knowledge_journal_dir(),
+            notes_dir: paths.knowledge_notes_dir(),
+            drafts_dir: paths.knowledge_drafts_dir(),
+            exports_dir: paths.knowledge_exports_dir(),
+            embed_fn: None,
+          ),
         )
-      _, _ -> builtin.execute(call)
+      _ ->
+        case call.name, lib {
+          "store_result", Some(l) | "retrieve_result", Some(l) ->
+            artifacts.execute(
+              call,
+              artifacts_dir,
+              "writer",
+              l,
+              max_artifact_chars,
+            )
+          "store_result", None | "retrieve_result", None ->
+            llm_types.ToolFailure(
+              tool_use_id: call.id,
+              error: "Artifact tools unavailable (no librarian)",
+            )
+          _, _ -> builtin.execute(call)
+        }
     }
   }
 }

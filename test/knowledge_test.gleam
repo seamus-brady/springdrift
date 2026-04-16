@@ -477,6 +477,55 @@ pub fn note_not_found_test() {
   workspace.read_note(dir, "nonexistent") |> should.be_error
 }
 
+// ---------------------------------------------------------------------------
+// Inbox tests
+// ---------------------------------------------------------------------------
+
+import knowledge/inbox
+
+pub fn inbox_process_markdown_test() {
+  let base = "/tmp/springdrift_test_inbox_" <> generate_uuid()
+  let inbox_dir = base <> "/inbox"
+  let sources_dir = base <> "/sources"
+  let indexes_dir = base <> "/indexes"
+  let _ = simplifile.create_directory_all(inbox_dir)
+  let _ = simplifile.write(inbox_dir <> "/test-doc.md", "# Test\n\nContent.")
+  let count = inbox.process_inbox(base, inbox_dir, sources_dir, indexes_dir)
+  count |> should.equal(1)
+  case simplifile.read_directory(inbox_dir) {
+    Ok(files) -> list.length(files) |> should.equal(0)
+    Error(_) -> Nil
+  }
+  let docs = knowledge_log.read_all(base)
+  list.length(docs) |> should.equal(1)
+  let _ = simplifile.delete(base)
+  Nil
+}
+
+pub fn inbox_skip_non_markdown_test() {
+  let base = "/tmp/springdrift_test_inbox2_" <> generate_uuid()
+  let inbox_dir = base <> "/inbox"
+  let _ = simplifile.create_directory_all(inbox_dir)
+  let _ = simplifile.write(inbox_dir <> "/image.png", "binary data")
+  let count =
+    inbox.process_inbox(base, inbox_dir, base <> "/sources", base <> "/indexes")
+  count |> should.equal(0)
+  let _ = simplifile.delete(base)
+  Nil
+}
+
+pub fn inbox_empty_dir_test() {
+  let base = "/tmp/springdrift_test_inbox3_" <> generate_uuid()
+  let count =
+    inbox.process_inbox(
+      base,
+      base <> "/inbox",
+      base <> "/sources",
+      base <> "/indexes",
+    )
+  count |> should.equal(0)
+}
+
 pub fn draft_create_and_read_test() {
   let dir = "/tmp/springdrift_test_drafts_" <> generate_uuid()
   workspace.write_draft(dir, "q2-report", "# Q2 Analysis\n\nDraft.")
