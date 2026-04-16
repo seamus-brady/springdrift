@@ -238,6 +238,111 @@ document and section.
 
 ---
 
+## Access Control
+
+The document library has three actors: the **operator** (human using the web
+GUI or email), the **agent** (cognitive loop and specialist agents), and
+the **system** (automated pipelines like study cycles and inbox polling).
+
+### Permission Model
+
+| Action | Operator | Agent | System |
+|---|---|---|---|
+| Upload to inbox | Yes | Yes (store_as_source) | Yes (email attachments) |
+| Delete a source | Yes | No — must request_human_input | No |
+| Trigger re-study | Yes (UI button) | Yes (if source is stale) | Yes (auto on stale detect) |
+| Create export | No | Yes (writer/cognitive) | No |
+| Approve export | Yes (UI button) | No — agent cannot self-approve | No |
+| Delete export | Yes | No | No |
+| Download | Yes | N/A | N/A |
+| Deliver via email | Yes (UI button) | Yes (if export is Final) | No |
+
+Key constraints:
+- **The agent cannot delete operator-uploaded sources.** If the agent wants
+  to remove a document, it must use `request_human_input` to ask the operator.
+  This prevents the agent from silently discarding reference material.
+- **The agent cannot approve its own exports.** For interactive cycles, the
+  operator is the quality gate. For autonomous cycles, D' output gate
+  evaluates the export — but the operator must still click "Approve" to
+  move it to Final status before delivery.
+- **System actions are always logged.** Automated study cycles, inbox
+  processing, and email attachment ingestion produce audit entries in the
+  document metadata so the operator can see what happened and when.
+
+### Multi-Tenant Extension
+
+In multi-tenant mode, documents are scoped to tenants:
+- Each tenant has an isolated `knowledge/` directory
+- Uploads are scoped to the authenticated tenant
+- Documents from one tenant are never visible to another
+- Federated document exchange carries source tenant ID in provenance
+
+---
+
+## Storage Quotas and Cleanup
+
+### Quota Enforcement
+
+The `max_size_mb` config (default 500MB) caps the total size of
+`.springdrift/knowledge/`. Enforcement happens at three points:
+
+1. **Upload rejection** — when the inbox receives a new file and accepting
+   it would exceed the quota, the upload is rejected with a clear error:
+   "Knowledge library is full (487/500 MB). Remove unused documents or
+   increase [knowledge] max_size_mb." The WebSocket sends a
+   `DocumentUploadRejected` notification so the operator sees it immediately.
+
+2. **Study cycle skip** — if a normalised source would generate an index
+   that pushes past the quota, the study cycle is skipped and the document
+   stays in "normalised" status. A sensory event warns the agent:
+   "knowledge_quota_pressure: 97% of 500MB used, study cycle deferred."
+
+3. **Export write** — if saving an export would exceed quota, the export
+   content is held in memory and the agent reports: "Export ready but
+   knowledge directory is full. Approve a cleanup to save it."
+
+### Disk Pressure Signals
+
+The sensorium's `<knowledge>` section includes quota status:
+
+```xml
+<knowledge documents="34" sources="28" exports="6"
+  usage_mb="312" quota_mb="500" usage_pct="62"
+  stale="2" pending="1" />
+```
+
+When usage exceeds 80%, the `usage_pct` attribute triggers a
+`knowledge_quota_warning` sensory event (once, not every cycle). At 95%,
+a `knowledge_quota_critical` event fires. These are informational — the
+agent can suggest cleanup but cannot delete operator sources.
+
+### Automated Cleanup
+
+The system can automatically clean up:
+- **Superseded consolidation reports** — when a new weekly consolidation
+  is generated, the previous one for the same period is eligible for
+  removal after 30 days (configurable via `consolidation_retention_days`)
+- **Orphaned indexes** — tree indexes in `indexes/` with no matching
+  source document are removed on startup
+- **Failed inbox items** — files in `inbox/` that failed normalisation
+  are moved to `inbox/failed/` with an error log, and cleaned up after
+  7 days
+
+The system never automatically deletes:
+- Operator-uploaded sources (any status)
+- Exports (any status)
+- Documents with derived CBR cases still in active use
+
+### Manual Cleanup
+
+The operator can:
+- Delete individual documents via the web GUI (sidebar → right-click → Delete)
+- Bulk-delete by domain (sidebar → right-click domain folder → "Delete all")
+- The `remove_document` tool is available but restricted (agent must confirm
+  via request_human_input for operator-uploaded sources)
+
+---
+
 ## Configuration
 
 ```toml
@@ -249,6 +354,9 @@ document and section.
 # max_tree_depth = 6                  # Max index hierarchy depth
 # embedding_enabled = true            # Embed tree nodes (reuses CBR embedding config)
 # retrieval_max_results = 5           # Default search result count
+# consolidation_retention_days = 30   # Days to keep superseded consolidation reports
+# quota_warning_pct = 80              # Emit warning sensory event at this usage %
+# quota_critical_pct = 95             # Emit critical sensory event at this usage %
 ```
 
 ---
