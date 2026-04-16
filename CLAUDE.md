@@ -91,7 +91,7 @@ src/
 │   ├── project_manager.gleam  Project Manager agent (22 planner tools, max_turns=8)
 │   ├── researcher.gleam       Research agent (web+artifacts+builtin, max_turns=8)
 │   ├── coder.gleam            Coding agent (builtin, max_turns=10)
-│   ├── writer.gleam           Writer agent (builtin, max_turns=6)
+│   ├── writer.gleam           Writer agent (knowledge drafts + artifacts + builtin, max_turns=5)
 │   ├── observer.gleam         Observer agent (17 diagnostic + CBR curation tools, max_turns=6)
 │   ├── comms.gleam            Communications agent (comms tools, max_turns=6, max_context=20)
 │   └── remembrancer.gleam     Remembrancer — deep memory consolidation (8 tools, max_turns=8)
@@ -637,7 +637,7 @@ exposes this (and other system state) to the LLM.
 | Project Manager | planner (22 tools) | 8 | unlimited | Permanent | Full work management: tasks, endeavours, phases, sessions, blockers, forecaster |
 | Researcher | web + artifacts + builtin | 8 | 30 | Permanent | Gather information via search and extraction |
 | Coder | builtin | 10 | unlimited | Permanent | Write and modify code, fix errors |
-| Writer | builtin | 6 | unlimited | Permanent | Draft and edit text |
+| Writer | knowledge (drafts) + artifacts + builtin | 5 | unlimited | Permanent | Draft structured reports; create/update/promote drafts via document library |
 | Observer | diagnostic + CBR curation (18 tools) | 6 | 20 | Transient | Cycle forensics, pattern detection, CBR curation, fact tracing, D' feedback |
 | Comms | comms (4 tools) | 6 | 20 | Permanent | Send and receive email via AgentMail |
 | Remembrancer | remembrancer (8 tools) | 8 | 30 | Transient | Deep-memory consolidation across months. Search, trace, cluster, resurrect dormant threads, restore verified confidence, cross-reference, persist reports |

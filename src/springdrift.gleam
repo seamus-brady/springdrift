@@ -21,6 +21,7 @@ import agents/project_manager
 import agents/remembrancer as remembrancer_agent
 import agents/researcher
 import agents/scheduler as scheduler_agent
+import agents/writer
 import backup/actor as backup_actor
 import cbr/bridge as cbr_bridge
 import comms/email as comms_email
@@ -1343,6 +1344,14 @@ fn default_agent_specs(
       option.Some(librarian_subj),
       max_artifact_chars,
     )
+  let w_spec =
+    writer.spec(
+      provider,
+      task_model,
+      paths.artifacts_dir(),
+      option.Some(librarian_subj),
+      max_artifact_chars,
+    )
   let recall_max_entries = option.unwrap(cfg.recall_max_entries, 50)
   let cbr_max_results = option.unwrap(cfg.cbr_max_results, 20)
   let o_spec =
@@ -1404,6 +1413,17 @@ fn default_agent_specs(
       max_consecutive_errors: option.unwrap(
         cfg.coder_max_errors,
         c_spec.max_consecutive_errors,
+      ),
+      inter_turn_delay_ms: delay,
+      redact_secrets: redact,
+    ),
+    agent_types.AgentSpec(
+      ..w_spec,
+      max_tokens: option.unwrap(cfg.writer_max_tokens, w_spec.max_tokens),
+      max_turns: option.unwrap(cfg.writer_max_turns, w_spec.max_turns),
+      max_consecutive_errors: option.unwrap(
+        cfg.writer_max_errors,
+        w_spec.max_consecutive_errors,
       ),
       inter_turn_delay_ms: delay,
       redact_secrets: redact,
