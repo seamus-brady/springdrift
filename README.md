@@ -87,6 +87,7 @@ See [docs/roadmap/](docs/roadmap/) for planned work including federation, learne
 - Git (required -- all agent memory is git-backed for versioning and
   recovery; optionally push to a private remote for offsite backup)
 - An API key for at least one LLM provider (Anthropic recommended)
+- Kagi API key (recommended if you have a Kagi subscription -- https://kagi.com/settings?p=api)
 - Brave Search API key (recommended -- free tier at https://brave.com/search/api/)
 - Jina Reader API key (recommended -- free tier at https://jina.ai/reader/)
 - Podman (optional -- code execution sandbox; coder agent falls back to
@@ -147,7 +148,8 @@ gleam run -- --gui tui
 | Key | Environment variable | Required? |
 |---|---|---|
 | Anthropic | `ANTHROPIC_API_KEY` | Yes (default provider) |
-| Brave Search | `BRAVE_API_KEY` | Optional -- better web search |
+| Kagi Search | `KAGI_API_KEY` | Optional -- high quality, ad-free search |
+| Brave Search | `BRAVE_API_KEY` | Optional -- web search with news and answers |
 | Jina Reader | `JINA_API_KEY` | Optional -- better URL extraction |
 | AgentMail | `AGENTMAIL_API_KEY` | Optional -- email send/receive |
 | Web GUI auth | `SPRINGDRIFT_WEB_TOKEN` | Recommended -- secures the web GUI |
