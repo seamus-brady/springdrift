@@ -12,12 +12,14 @@ import gleam/option.{type Option, Some}
 import llm/provider.{type Provider}
 import llm/types as llm_types
 import narrative/librarian.{type LibrarianMessage}
+import paths
 import tools/artifacts
 import tools/brave
 import tools/builtin
 import tools/cache
 import tools/jina
 import tools/kagi
+import tools/knowledge as knowledge_tools
 import tools/rate_limiter
 import tools/web
 
@@ -77,6 +79,7 @@ pub fn spec(
 ) -> AgentSpec {
   let tools =
     list.flatten([
+      knowledge_tools.researcher_tools(),
       kagi.all(),
       brave.all(),
       jina.all(),
@@ -123,6 +126,20 @@ fn researcher_executor(
 ) -> fn(llm_types.ToolCall) -> llm_types.ToolResult {
   fn(call: llm_types.ToolCall) -> llm_types.ToolResult {
     case call.name {
+      "save_to_library" | "search_library" | "read_section" | "get_document" ->
+        knowledge_tools.execute(
+          call,
+          knowledge_tools.KnowledgeConfig(
+            knowledge_dir: paths.knowledge_dir(),
+            indexes_dir: paths.knowledge_indexes_dir(),
+            sources_dir: paths.knowledge_sources_dir(),
+            journal_dir: paths.knowledge_journal_dir(),
+            notes_dir: paths.knowledge_notes_dir(),
+            drafts_dir: paths.knowledge_drafts_dir(),
+            exports_dir: paths.knowledge_exports_dir(),
+            embed_fn: option.None,
+          ),
+        )
       "kagi_search" | "kagi_summarize" -> kagi.execute(call)
       "fetch_url" | "web_search" -> web.execute(call)
       "brave_web_search"

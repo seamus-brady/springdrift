@@ -123,6 +123,60 @@ pub fn comms_dir() -> String {
   project_dir() <> "/memory/comms"
 }
 
+// ---------------------------------------------------------------------------
+// Knowledge
+// ---------------------------------------------------------------------------
+
+/// Knowledge base root: .springdrift/knowledge/
+pub fn knowledge_dir() -> String {
+  project_dir() <> "/knowledge"
+}
+
+/// Knowledge source documents: .springdrift/knowledge/sources/
+pub fn knowledge_sources_dir() -> String {
+  knowledge_dir() <> "/sources"
+}
+
+/// Knowledge tree indexes: .springdrift/knowledge/indexes/
+pub fn knowledge_indexes_dir() -> String {
+  knowledge_dir() <> "/indexes"
+}
+
+/// Knowledge inbox: .springdrift/knowledge/inbox/
+pub fn knowledge_inbox_dir() -> String {
+  knowledge_dir() <> "/inbox"
+}
+
+/// Agent workspace: .springdrift/knowledge/workspace/
+pub fn knowledge_workspace_dir() -> String {
+  knowledge_dir() <> "/workspace"
+}
+
+/// Agent journal: .springdrift/knowledge/workspace/journal/
+pub fn knowledge_journal_dir() -> String {
+  knowledge_workspace_dir() <> "/journal"
+}
+
+/// Agent notes: .springdrift/knowledge/workspace/notes/
+pub fn knowledge_notes_dir() -> String {
+  knowledge_workspace_dir() <> "/notes"
+}
+
+/// Agent drafts: .springdrift/knowledge/workspace/drafts/
+pub fn knowledge_drafts_dir() -> String {
+  knowledge_workspace_dir() <> "/drafts"
+}
+
+/// Knowledge exports: .springdrift/knowledge/exports/
+pub fn knowledge_exports_dir() -> String {
+  knowledge_dir() <> "/exports"
+}
+
+/// Knowledge consolidation: .springdrift/knowledge/consolidation/
+pub fn knowledge_consolidation_dir() -> String {
+  knowledge_dir() <> "/consolidation"
+}
+
 /// XStructor schema directory: .springdrift/schemas/
 pub fn schemas_dir() -> String {
   project_dir() <> "/schemas"

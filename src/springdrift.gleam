@@ -67,6 +67,7 @@ import skills
 import slog
 import tools/cache
 import tools/how_to_content
+import tools/knowledge as tools_knowledge
 import tools/memory as tools_memory
 import tools/rate_limiter
 import tui
@@ -618,8 +619,19 @@ fn run(cfg: AppConfig) -> Nil {
       inter_turn_delay_ms: 0,
       redact_secrets:,
     ))
+  let knowledge_tools = case option.unwrap(cfg.knowledge_enabled, False) {
+    True -> {
+      io.println("Knowledge: enabled")
+      tools_knowledge.cognitive_tools()
+    }
+    False -> []
+  }
   let agent_tools =
-    list.append(list.map(agent_specs, cognitive.agent_to_tool), [scheduler_tool])
+    list.flatten([
+      list.map(agent_specs, cognitive.agent_to_tool),
+      [scheduler_tool],
+      knowledge_tools,
+    ])
 
   // Load D' config if enabled (unified: input + tool + output + post_exec gates)
   let unified_dprime = case cfg.dprime_config {
