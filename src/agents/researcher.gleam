@@ -17,6 +17,7 @@ import tools/brave
 import tools/builtin
 import tools/cache
 import tools/jina
+import tools/kagi
 import tools/rate_limiter
 import tools/web
 
@@ -24,28 +25,33 @@ const system_prompt = "You are a research agent. Your job is to gather informati
 
 ## Tool selection strategy
 
-You have 8 web tools arranged in tiers. Pick the right tool for the task:
+You have 10 web tools arranged in tiers. Pick the right tool for the task:
 
-### Tier 1 — Brave Search (preferred when API keys available)
+### Tier 1 — Kagi Search (preferred when KAGI_API_KEY available)
+- **kagi_search**: High quality, ad-free web search. Best general-purpose search when available.
+- **kagi_summarize**: Summarize any URL into concise text. Great for quickly digesting long pages.
+
+### Tier 2 — Brave Search (preferred when BRAVE_SEARCH_API_KEY available)
 - **brave_answer**: Self-contained factual questions ('what is X', 'when did Y'). Fastest, cheapest for simple facts.
-- **brave_llm_context**: Default hot path. Returns machine-optimised context for reasoning over search results.
+- **brave_llm_context**: Returns machine-optimised context for reasoning over search results.
 - **brave_web_search**: Broad discovery with titles, URLs, and snippets. Good for finding multiple sources.
 - **brave_news_search**: Time-sensitive queries, current events, recent developments.
 - **brave_summarizer**: When you need citations plus follow-up threads. Uses search + summary chain.
 
-### Tier 2 — Jina Reader (preferred for URL extraction)
+### Tier 3 — Jina Reader (preferred for URL extraction)
 - **jina_reader**: Extract clean markdown from a URL. Better than fetch_url for content extraction.
 
-### Tier 3 — Fallback (no API keys needed)
-- **web_search**: DuckDuckGo keyword search. Use when Brave keys are unavailable.
+### Tier 4 — Fallback (no API keys needed)
+- **web_search**: DuckDuckGo keyword search. Use when no paid search keys are available.
 - **fetch_url**: Raw HTTP GET. Use when Jina key is unavailable, or for non-HTML content.
 
 ### Decision tree
+- General web search? → kagi_search (primary), brave_web_search (fallback)
 - Factual, self-contained question? → brave_answer
-- Need raw context to reason over? → brave_llm_context (default hot path)
-- Broad discovery with snippets? → brave_web_search
+- Need raw context to reason over? → brave_llm_context
 - Time-sensitive / news? → brave_news_search
 - Need citations + follow-up threads? → brave_summarizer
+- Have a URL, need summary? → kagi_summarize (primary), jina_reader (full text)
 - Have a URL, need full content? → jina_reader (primary), fetch_url (fallback)
 - No API keys available? → web_search (DuckDuckGo fallback)
 
@@ -71,6 +77,7 @@ pub fn spec(
 ) -> AgentSpec {
   let tools =
     list.flatten([
+      kagi.all(),
       brave.all(),
       jina.all(),
       web.all(),
@@ -81,7 +88,7 @@ pub fn spec(
   AgentSpec(
     name: "researcher",
     human_name: "Researcher",
-    description: "Search the web and extract content from pages. Has Brave Search (web, news, LLM context, summarizer, answers), Jina Reader, DuckDuckGo web_search, and fetch_url. Can store and retrieve large content via artifacts.",
+    description: "Search the web and extract content from pages. Has Kagi Search (web search, summarizer), Brave Search (web, news, LLM context, summarizer, answers), Jina Reader, DuckDuckGo web_search, and fetch_url. Can store and retrieve large content via artifacts.",
     system_prompt:,
     provider:,
     model:,
@@ -116,6 +123,7 @@ fn researcher_executor(
 ) -> fn(llm_types.ToolCall) -> llm_types.ToolResult {
   fn(call: llm_types.ToolCall) -> llm_types.ToolResult {
     case call.name {
+      "kagi_search" | "kagi_summarize" -> kagi.execute(call)
       "fetch_url" | "web_search" -> web.execute(call)
       "brave_web_search"
       | "brave_news_search"

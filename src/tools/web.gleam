@@ -19,6 +19,7 @@ import llm/types.{
 import slog
 import tools/brave
 import tools/jina
+import tools/kagi
 
 /// Configurable URLs and limits for web tools.
 pub type WebToolsConfig {
@@ -83,6 +84,7 @@ pub fn is_web_tool(name: String) -> Bool {
   || name == "web_search"
   || brave.is_brave_tool(name)
   || jina.is_jina_tool(name)
+  || kagi.is_kagi_tool(name)
 }
 
 pub fn execute(call: ToolCall) -> ToolResult {

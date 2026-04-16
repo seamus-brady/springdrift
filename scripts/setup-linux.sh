@@ -202,9 +202,12 @@ esac
 
 BRAVE_KEY=""
 JINA_KEY=""
+KAGI_KEY=""
 echo ""
 echo "  Optional services (press Enter to skip any):"
-echo "  Brave Search — better web search. Free tier: https://brave.com/search/api/"
+echo "  Kagi Search — high quality, ad-free search. https://kagi.com/settings?p=api"
+ask "  Kagi API key" KAGI_KEY
+echo "  Brave Search — web search with news and answers. Free tier: https://brave.com/search/api/"
 ask "  Brave Search API key" BRAVE_KEY
 echo "  Jina Reader — cleaner URL extraction. Free tier: https://jina.ai/reader/"
 ask "  Jina Reader API key" JINA_KEY
@@ -272,7 +275,7 @@ echo -e "${BOLD}6. Environment${NC}"
 sudo mkdir -p /etc/springdrift
 generate_systemd_env_file "/tmp/springdrift-env.tmp" \
   "$ANTHROPIC_KEY" "$MISTRAL_KEY" "$VERTEX_PROJECT" \
-  "$BRAVE_KEY" "$JINA_KEY" "$AGENTMAIL_KEY" "$WEB_TOKEN"
+  "$BRAVE_KEY" "$JINA_KEY" "$AGENTMAIL_KEY" "$WEB_TOKEN" "$KAGI_KEY"
 sudo mv /tmp/springdrift-env.tmp /etc/springdrift/env
 sudo chmod 600 /etc/springdrift/env
 ok "API keys written to /etc/springdrift/env (systemd)"
@@ -280,7 +283,7 @@ ok "API keys written to /etc/springdrift/env (systemd)"
 # .env for manual runs
 generate_env_file ".env" \
   "$ANTHROPIC_KEY" "$MISTRAL_KEY" "$VERTEX_PROJECT" \
-  "$BRAVE_KEY" "$JINA_KEY" "$AGENTMAIL_KEY" "$WEB_TOKEN" "setup-linux.sh"
+  "$BRAVE_KEY" "$JINA_KEY" "$AGENTMAIL_KEY" "$WEB_TOKEN" "setup-linux.sh" "$KAGI_KEY"
 ok "API keys written to .env (manual runs)"
 
 if ! grep -q "^\.env$" .gitignore 2>/dev/null; then

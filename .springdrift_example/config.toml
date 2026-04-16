@@ -203,6 +203,7 @@ summary_schedule = "weekly"
 # duckduckgo_url = "https://html.duckduckgo.com/html/"
 # brave_search_base_url = "https://api.search.brave.com"
 # brave_answers_base_url = "https://api.search.brave.com"
+# kagi_base_url = "https://kagi.com/api/v0"
 # jina_reader_base_url = "https://r.jina.ai/"
 
 # ── Timeouts (ms) ────────────────────────────────────────────────────────────
