@@ -10,13 +10,23 @@
 
 ## Outcome
 
-Springdrift gains a persistent, self-managed document library. It can ingest
-documents (Markdown, PDF, plain text), build structured hierarchical indexes,
-and retrieve specific passages using two-tier search: fast keyword matching
-for simple lookups, embedding-based semantic search for reasoning queries.
-Every retrieval carries provenance: which document, which section, which
-page/line. Documents flow through the existing memory pipeline — study cycles
-produce narrative entries, the Archivist promotes them to CBR cases and facts.
+Springdrift gains a persistent document library that serves two audiences:
+
+**For the operator**: upload reference materials, receive reports, browse the
+agent's knowledge base, monitor study progress, approve and deliver exports.
+
+**For the agent**: a personal workspace — keep a journal, store working notes,
+save research papers and books (including PDFs), build a reference library
+over time, draft and revise reports across sessions, and cite specific
+passages from stored documents. The library is the agent's long-term memory
+for *documents*, complementing the existing structured stores (narrative,
+CBR, facts) which handle *records*.
+
+Documents are parsed into hierarchical tree indexes with per-section
+embeddings, enabling three-tier retrieval: keyword, semantic, and LLM
+reasoning. Every retrieval carries provenance: which document, which section,
+which page/line. Source documents flow through study cycles into CBR cases
+and facts via the existing Archivist pipeline.
 
 ## Overview
 
@@ -26,6 +36,14 @@ the source files. Retrieval reuses the existing Ollama embeddings (CBR pattern)
 for semantic search, with an optional LLM reasoning tier for complex queries.
 Storage lives in `.springdrift/knowledge/` — persistent across sessions, backed
 up by git, indexed in ETS by the Librarian.
+
+The library has two halves:
+- **Knowledge base** — operator-uploaded and agent-discovered reference
+  material (papers, books, articles, domain documents). Studied and promoted
+  into CBR/facts. The agent's research library.
+- **Agent workspace** — the agent's own documents: journal entries, working
+  notes, draft reports. Written by the agent, for the agent (and operator).
+  Not studied — these ARE the agent's thinking, not input to it.
 
 This design merges three planned specs into one implementation:
 - **document-library.md** — document store, tools, curator integration
@@ -41,17 +59,30 @@ This design merges three planned specs into one implementation:
 ```
 .springdrift/knowledge/
 ├── index.jsonl                    # Append-only document metadata log
+│
 ├── inbox/                         # Drop zone — unprocessed uploads
 │   └── market-report.pdf
-├── sources/                       # Normalised source documents (immutable)
+│
+├── sources/                       # Reference library (immutable once normalised)
 │   ├── {domain}/
-│   │   └── {slug}.md
+│   │   └── {slug}.md              # Normalised markdown (from any source)
 │   └── ...
-├── indexes/                       # Hierarchical tree indexes (one per source)
-│   └── {doc-id}.json
+│
+├── indexes/                       # Hierarchical tree indexes (one per document)
+│   └── {doc-id}.json              # Tree nodes with embeddings
+│
+├── workspace/                     # Agent's own documents (mutable)
+│   ├── journal/
+│   │   └── YYYY-MM-DD.md          # Daily journal entries
+│   ├── notes/
+│   │   └── {slug}.md              # Working notes, scratch documents
+│   └── drafts/
+│       └── {slug}.md              # Reports in progress (iterative)
+│
 ├── consolidation/                 # Remembrancer synthesis output
 │   └── YYYY-MM-DD-weekly.md
-└── exports/                       # Agent-generated deliverables
+│
+└── exports/                       # Final deliverables (immutable once approved)
     └── {title-slug}.md
 ```
 
@@ -144,38 +175,199 @@ which covers most use cases without LLM cost.
 
 ---
 
+## Agent Workspace
+
+The workspace is the agent's personal document space — where it writes,
+thinks, and drafts. Unlike the knowledge base (reference material studied
+into CBR), workspace documents ARE the agent's own writing. They are not
+studied or promoted — they're consumed directly.
+
+### Document Types
+
+| Type | Location | Mutable? | Purpose |
+|---|---|---|---|
+| **Journal** | `workspace/journal/YYYY-MM-DD.md` | Append-only | Daily reflections, session notes, observations |
+| **Working note** | `workspace/notes/{slug}.md` | Yes | Scratch documents, running lists, research notes |
+| **Draft report** | `workspace/drafts/{slug}.md` | Yes | Reports in progress — iterative, multi-session |
+
+### Journal
+
+The agent writes journal entries after significant work — not every cycle
+(that's the narrative), but when something is worth reflecting on. Journal
+entries are freeform markdown, appended to the day's file. The agent decides
+what to write; the system just provides the tool.
+
+Journal entries differ from narrative entries:
+- **Narrative** is structured telemetry (intent, outcome, entities, delegation chain)
+- **Journal** is freeform reflection ("today I finally understood why the
+  contract liability cases cluster differently from tort cases")
+
+The Curator injects recent journal entries (last 3 days) into the sensorium
+so the agent is aware of its recent reflections without tool calls.
+
+### Working Notes
+
+Scratch documents the agent creates during research or complex tasks. A
+running list of open questions, a comparison table, a collection of quotes
+from sources. These persist across sessions — the agent can pick up where
+it left off.
+
+### Draft Reports
+
+Reports the agent is actively writing. Unlike exports (which are immutable
+once approved), drafts are mutable — the agent can revise them over multiple
+sessions. When a draft is ready, the agent promotes it to an export.
+
+The writer agent knows about drafts and can be delegated revision tasks:
+"revise the Q2 analysis draft based on the new data."
+
+---
+
+## Reference Library — Books, Papers, PDFs
+
+The agent builds a personal reference library over time by saving documents
+it finds during research. This is persistent, indexed, and searchable across
+sessions — not ephemeral artifacts that disappear.
+
+### Saving to the Library
+
+The researcher agent uses `save_to_library` to permanently store a document:
+
+```
+Agent finds a paper via kagi_search
+  → Fetches the PDF via fetch_url
+  → Calls save_to_library(url, domain: "cbr_theory", title: "Aamodt & Plaza 1994")
+  → PDF text extracted → markdown normalised → tree indexed → embeddings computed
+  → Document appears in sources/cbr_theory/aamodt-plaza-1994.md
+  → 34 sections indexed with embeddings
+  → Agent can now search and cite specific sections
+```
+
+### Reading Specific Sections
+
+The `read_section` tool retrieves a specific section by path without loading
+the entire document into context. This is critical for large documents
+(books, long papers) where the full text would blow the context window:
+
+```
+read_section(doc_id: "aamodt-plaza-1994", section: "3.2")
+→ Returns: "3.2 Similarity Assessment\n\nThe similarity function..."
+   (just that section, ~500 tokens, not the full 15,000-token paper)
+```
+
+### Citations
+
+When the agent retrieves a passage from the library, the result includes
+a formatted citation the agent can include in reports:
+
+```
+[Aamodt & Plaza 1994, §3.2 "Similarity Assessment", p.12]
+Source: sources/cbr_theory/aamodt-plaza-1994.md, lines 145-178
+```
+
+The writer agent is taught to use these citations in exports. SD Audit
+can verify every citation traces back to a stored source.
+
+### PDF Support
+
+PDF is a first-class format, not an afterthought:
+
+1. **Text extraction** — via Erlang `:pdf` module or external tool (`pdftotext`)
+2. **Page-level indexing** — tree nodes carry `page` numbers, not just line numbers
+3. **Fallback** — if text extraction fails (scanned PDF, complex layout),
+   store the raw file and log a warning. The agent can still reference it
+   by title even if sections aren't indexed.
+4. **Large documents** — chunked processing. A 200-page book is indexed
+   incrementally, chapter by chapter, not loaded whole.
+
+---
+
 ## Tools
 
-Six tools, split between the researcher agent and the cognitive loop:
+Twelve tools across three agents:
 
 ### Researcher Agent Tools
 
 | Tool | Description |
 |---|---|
-| `index_document` | Parse and index a document from inbox or URL |
-| `search_library` | Search indexed documents (keyword/embedding/reasoning) |
-| `get_document` | Retrieve full document or specific section by path |
+| `save_to_library` | Fetch a URL or file, normalise, index, store permanently as a source |
+| `search_library` | Search indexed documents (keyword/embedding/reasoning mode) |
+| `read_section` | Retrieve a specific section by document ID + section path |
+| `get_document` | Retrieve full document metadata and content |
 
 ### Cognitive Loop Tools
 
 | Tool | Description |
 |---|---|
-| `list_documents` | List indexed documents with metadata (type, status, domain) |
-| `store_as_source` | Save web content as a knowledge source (promotes from artifact) |
-| `remove_document` | Remove a document and its index |
+| `list_documents` | List documents by type/domain/status |
+| `write_journal` | Append a freeform entry to today's journal |
+| `write_note` | Create or update a working note |
+| `read_note` | Read a working note by slug |
+| `remove_document` | Remove a document (requires confirmation for operator sources) |
 
-### Tool Parameters
+### Writer Agent Tools
+
+| Tool | Description |
+|---|---|
+| `create_draft` | Create a new draft report |
+| `update_draft` | Revise an existing draft |
+| `promote_draft` | Move a draft to exports (status: Draft → pending approval) |
+
+### Key Tool Parameters
+
+`save_to_library`:
+- `url` (string) — URL to fetch, or path to file in inbox
+- `domain` (string) — classification domain (legal, research, etc.)
+- `title` (string, optional) — override auto-detected title
+- `doc_type` (string, optional) — "paper", "book", "article" (default: "article")
 
 `search_library`:
 - `query` (string, required) — the search query
 - `mode` (string, optional) — "keyword", "embedding" (default), or "reasoning"
 - `max_results` (int, optional) — default 5
 - `domain` (string, optional) — filter by domain
+- `type` (string, optional) — filter: "source", "journal", "note", "draft", "export"
 
-`index_document`:
-- `filepath` (string) — path in inbox, or URL to fetch
-- `domain` (string) — classification domain (legal, research, etc.)
-- `title` (string, optional) — override auto-detected title
+`read_section`:
+- `doc_id` (string, required) — document identifier
+- `section` (string, required) — section path (e.g. "3.2" or "introduction")
+
+`write_journal`:
+- `content` (string, required) — freeform markdown to append
+
+`write_note`:
+- `slug` (string, required) — note identifier (creates if new, updates if exists)
+- `content` (string, required) — full note content (replaces on update)
+
+---
+
+## Skill — Document Library
+
+A skill at `.springdrift/skills/document-library/SKILL.md` teaches the agent
+when and how to use the library:
+
+```yaml
+---
+name: document-library
+description: When and how to use the document library
+agents: cognitive, researcher, writer
+---
+```
+
+The skill covers:
+- **When to save to library** — papers, books, key articles worth keeping
+  permanently. NOT every web page (that's artifacts). Save it if you'd
+  want to cite it later.
+- **When to write journal** — after significant discoveries, completed
+  tasks, changed understanding. Not every cycle — the narrative handles that.
+- **When to use notes** — running lists, comparison tables, research
+  scratchpads. Things you need across multiple cycles but don't belong in facts.
+- **When to draft** — substantial reports that need revision. One-shot
+  answers stay in chat; multi-session work goes into drafts.
+- **How to cite** — always include document ID and section when referencing
+  library sources in reports.
+- **How to search** — use embedding mode (default) for most queries, keyword
+  for exact phrases, reasoning only for complex multi-hop questions.
 
 ---
 
@@ -190,9 +382,22 @@ indexes are loaded on-demand (not held in ETS — too large).
 
 ### Curator / Sensorium
 
-The sensorium gains a `<knowledge>` section showing document counts by type
-and status. When documents are stale (source changed since last study), a
-sensory event is emitted so the agent notices without tool calls.
+The sensorium gains a `<knowledge>` section:
+
+```xml
+<knowledge sources="28" notes="5" drafts="2" journal_today="true"
+  usage_mb="312" quota_mb="500" stale="2" pending="1">
+  <recent_journal>Realized the contract cases cluster by jurisdiction,
+    not by outcome. Need to re-examine the CBR retrieval weights.</recent_journal>
+  <active_notes>comparison-table, open-questions, reading-list</active_notes>
+  <active_drafts>q2-market-analysis (last edited 2h ago)</active_drafts>
+</knowledge>
+```
+
+The agent sees at every cycle: how many sources it has, whether it wrote
+a journal entry today, what notes and drafts are active, and any stale
+sources needing re-study. Recent journal content (last entry) is injected
+directly so the agent picks up where it left off without a tool call.
 
 ### Archivist / Study Pipeline
 
@@ -583,33 +788,37 @@ This traces all the way through: email → inbox → source → study → CBR ca
 | Phase | What | Effort | Depends On |
 |---|---|---|---|
 | 1 | Knowledge directory + index.jsonl + Librarian ETS | Small | None |
-| 2 | Markdown tree indexer (port Curragh's Python to Gleam) | Medium | Phase 1 |
+| 2 | Markdown + PDF tree indexer (port Curragh's Python to Gleam) | Medium | Phase 1 |
 | 3 | Embedding per tree node (reuse Ollama infra) | Small | Phase 2, CBR embeddings |
-| 4 | Tools: index_document, search_library, get_document, list_documents | Medium | Phase 2 |
-| 5 | Inbox → normalise → sources pipeline | Medium | Phase 1 |
-| 6 | Study cycles (Ingestor → Archivist → CBR promotion) | Medium | Phase 5, Archivist |
-| 7 | store_as_source tool (researcher → knowledge source) | Small | Phase 5 |
-| 8 | Sensorium integration + stale detection | Small | Phase 1 |
-| 9 | Consolidation output (Remembrancer → consolidation/) | Medium | Phase 1, Remembrancer |
-| 10 | Export storage (agent reports → exports/) | Small | Phase 1 |
-| 11 | Web GUI Documents panel (upload, browse, viewer, section nav) | Large | Phase 1-10, Web GUI v2 |
-| 12 | PDF support (text extraction + page-level indexing) | Medium | Phase 2 |
-| 13 | Email attachment inbound pipeline (comms → inbox) | Medium | Phase 5, mail-attachments |
-| 14 | Export approval + delivery workflow (approve → comms send) | Medium | Phase 10, comms agent |
-| 15 | LLM reasoning retrieval (Tier 3) | Medium | Phase 2 |
+| 4 | Researcher tools: save_to_library, search_library, read_section, get_document | Medium | Phase 2-3 |
+| 5 | Agent workspace: write_journal, write_note, read_note, create/update/promote_draft | Medium | Phase 1 |
+| 6 | Document library skill (.springdrift/skills/document-library/SKILL.md) | Small | Phase 4-5 |
+| 7 | Sensorium integration (knowledge block + journal + active notes/drafts) | Small | Phase 5 |
+| 8 | Inbox → normalise → sources pipeline | Medium | Phase 1 |
+| 9 | Study cycles (Ingestor → Archivist → CBR promotion) | Medium | Phase 8, Archivist |
+| 10 | Citation formatting in retrieval results | Small | Phase 4 |
+| 11 | Export storage + approval workflow | Medium | Phase 5 |
+| 12 | Web GUI Documents panel (upload, browse, viewer, section nav) | Large | Phase 1-11, Web GUI v2 |
+| 13 | Email attachment inbound pipeline (comms → inbox) | Medium | Phase 8, mail-attachments |
+| 14 | Consolidation output (Remembrancer → consolidation/) | Medium | Phase 1, Remembrancer |
+| 15 | Writer agent draft awareness (revise existing drafts) | Small | Phase 5 |
+| 16 | LLM reasoning retrieval (Tier 3) | Medium | Phase 2 |
 
-**Phase 1-4 is the MVP**: directory structure, tree indexer, embedding search, tools.
-Delivers a working document library the agent can index and search.
+**Phase 1-4 is the MVP**: directory structure, tree indexer with PDF support,
+embedding search, researcher tools. The agent can save papers and search them.
 
-**Phase 5-7 adds the knowledge pipeline**: documents flow through study cycles
-into CBR and facts.
+**Phase 5-7 makes it the agent's workspace**: journal, notes, drafts, skill
+guidance, sensorium awareness. The agent uses the library as its own thinking
+space.
 
-**Phase 8-10 adds internal awareness**: sensorium, consolidation, exports.
+**Phase 8-11 adds the knowledge pipeline**: inbox processing, study cycles
+into CBR, citation support, export approval.
 
-**Phase 11-14 adds the operator experience**: web GUI with upload/browse/viewer,
-email attachment pipeline, export approval and delivery workflow.
+**Phase 12-13 adds the operator experience**: web GUI with upload/browse/viewer,
+email attachment pipeline.
 
-**Phase 15 adds advanced retrieval**: LLM reasoning search for complex queries.
+**Phase 14-16 adds depth**: consolidation, writer agent integration, LLM
+reasoning search.
 
 ---
 
