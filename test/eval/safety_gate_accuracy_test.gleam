@@ -32,12 +32,12 @@ fn test_deterministic_config() -> DeterministicConfig {
       ),
       DeterministicRule(
         id: "injection-system",
-        pattern: "you are now|act as|pretend you",
+        pattern: "\\byou are now\\b|\\bact as\\b|\\bpretend you\\b",
         action: EscalateAction,
       ),
       DeterministicRule(
         id: "injection-jailbreak",
-        pattern: "DAN|do anything now|jailbreak",
+        pattern: "\\bDAN\\b|\\bdo anything now\\b|\\bjailbreak\\b",
         action: BlockAction,
       ),
     ],

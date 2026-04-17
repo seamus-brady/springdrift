@@ -177,6 +177,11 @@ pub fn knowledge_consolidation_dir() -> String {
   knowledge_dir() <> "/consolidation"
 }
 
+/// Remembrancer run log: .springdrift/memory/consolidation/
+pub fn consolidation_log_dir() -> String {
+  project_dir() <> "/memory/consolidation"
+}
+
 /// XStructor schema directory: .springdrift/schemas/
 pub fn schemas_dir() -> String {
   project_dir() <> "/schemas"

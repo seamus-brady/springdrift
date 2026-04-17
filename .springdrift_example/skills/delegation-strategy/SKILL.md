@@ -19,6 +19,7 @@ Delegate when the task matches an agent's specialisation:
 | Endeavour lifecycle, phases, sessions, blockers, forecaster config | project_manager | Quick task step completion (use cognitive loop tools) |
 | Cycle inspection, pattern detection, CBR curation, fact tracing | observer | Quick status checks (use reflect directly) |
 | Email communication | comms | Nothing — always delegate email |
+| Deep memory search (months/years), consolidation reports, pattern mining over CBR, dormant-thread resurrection, fact-confidence restoration | remembrancer | Recent-window memory (use recall_* or observer) |
 
 Do NOT delegate for:
 - Short conversational replies (answer directly)

@@ -18,8 +18,10 @@ import agents/comms as comms_agent
 import agents/observer
 import agents/planner
 import agents/project_manager
+import agents/remembrancer as remembrancer_agent
 import agents/researcher
 import agents/scheduler as scheduler_agent
+import agents/writer
 import backup/actor as backup_actor
 import cbr/bridge as cbr_bridge
 import comms/email as comms_email
@@ -70,6 +72,7 @@ import tools/how_to_content
 import tools/knowledge as tools_knowledge
 import tools/memory as tools_memory
 import tools/rate_limiter
+import tools/remembrancer as tools_remembrancer
 import tui
 import web/gui as web_gui
 
@@ -1341,6 +1344,14 @@ fn default_agent_specs(
       option.Some(librarian_subj),
       max_artifact_chars,
     )
+  let w_spec =
+    writer.spec(
+      provider,
+      task_model,
+      paths.artifacts_dir(),
+      option.Some(librarian_subj),
+      max_artifact_chars,
+    )
   let recall_max_entries = option.unwrap(cfg.recall_max_entries, 50)
   let cbr_max_results = option.unwrap(cfg.cbr_max_results, 20)
   let o_spec =
@@ -1406,8 +1417,29 @@ fn default_agent_specs(
       inter_turn_delay_ms: delay,
       redact_secrets: redact,
     ),
+    agent_types.AgentSpec(
+      ..w_spec,
+      max_tokens: option.unwrap(cfg.writer_max_tokens, w_spec.max_tokens),
+      max_turns: option.unwrap(cfg.writer_max_turns, w_spec.max_turns),
+      max_consecutive_errors: option.unwrap(
+        cfg.writer_max_errors,
+        w_spec.max_consecutive_errors,
+      ),
+      inter_turn_delay_ms: delay,
+      redact_secrets: redact,
+    ),
     agent_types.AgentSpec(..o_spec, redact_secrets: redact),
-    ..comms_specs(cfg, provider, task_model, delay, redact)
+    ..list.append(
+      comms_specs(cfg, provider, task_model, delay, redact),
+      remembrancer_specs(
+        cfg,
+        provider,
+        task_model,
+        librarian_subj,
+        delay,
+        redact,
+      ),
+    )
   ]
 }
 
@@ -1485,6 +1517,58 @@ fn comms_specs(
           ),
         ]
       }
+    }
+  }
+}
+
+fn remembrancer_specs(
+  cfg: AppConfig,
+  provider: Provider,
+  task_model: String,
+  librarian_subj: process.Subject(librarian.LibrarianMessage),
+  delay: Int,
+  redact: Bool,
+) -> List(agent_types.AgentSpec) {
+  case option.unwrap(cfg.remembrancer_enabled, False) {
+    False -> []
+    True -> {
+      let model = option.unwrap(cfg.remembrancer_model, task_model)
+      let review_threshold =
+        option.unwrap(cfg.remembrancer_review_confidence_threshold, 0.3)
+      let dormant_days = option.unwrap(cfg.remembrancer_dormant_thread_days, 7)
+      let min_cases = option.unwrap(cfg.remembrancer_min_pattern_cases, 3)
+      let ctx =
+        tools_remembrancer.RemembrancerContext(
+          narrative_dir: option.unwrap(cfg.narrative_dir, paths.narrative_dir()),
+          cbr_dir: paths.cbr_dir(),
+          facts_dir: paths.facts_dir(),
+          knowledge_consolidation_dir: paths.knowledge_consolidation_dir(),
+          consolidation_log_dir: paths.consolidation_log_dir(),
+          cycle_id: "remembrancer",
+          agent_id: "remembrancer",
+          librarian: option.Some(librarian_subj),
+          review_confidence_threshold: review_threshold,
+          dormant_thread_days: dormant_days,
+          min_pattern_cases: min_cases,
+          fact_decay_half_life_days: option.unwrap(
+            cfg.fact_decay_half_life_days,
+            30,
+          ),
+        )
+      [
+        agent_types.AgentSpec(
+          ..remembrancer_agent.spec(
+            provider,
+            model,
+            ctx,
+            option.unwrap(cfg.max_tokens, 4096),
+            option.unwrap(cfg.remembrancer_max_turns, 8),
+            option.unwrap(cfg.max_consecutive_errors, 3),
+          ),
+          inter_turn_delay_ms: delay,
+          redact_secrets: redact,
+        ),
+      ]
     }
   }
 }

@@ -15,6 +15,10 @@ pub fn main() -> Nil {
   gleeunit.main()
 }
 
+// Expose the FFI helper for direct testing. Keeps tests pure — no network.
+@external(erlang, "springdrift_ffi", "is_binary_content_type_header")
+fn is_binary_content_type(content_type: String) -> Bool
+
 // ---------------------------------------------------------------------------
 // Tool definitions
 // ---------------------------------------------------------------------------
@@ -136,4 +140,65 @@ pub fn is_web_tool_covers_jina_test() {
 
 pub fn is_web_tool_rejects_unknown_test() {
   web.is_web_tool("unknown_tool") |> should.be_false
+}
+
+// ---------------------------------------------------------------------------
+// Binary content-type detection
+//
+// Three researcher workers crashed on 2026-04-16 after fetch_url returned PDF
+// binary bytes; the subsequent LLM request or downstream string ops panicked
+// silently. The FFI now refuses known binary content-types before returning
+// the body. These tests cover the classifier.
+// ---------------------------------------------------------------------------
+
+pub fn content_type_pdf_is_binary_test() {
+  is_binary_content_type("application/pdf") |> should.be_true
+}
+
+pub fn content_type_pdf_with_charset_is_binary_test() {
+  // Some servers attach a charset even to pdf — prefix match must still catch it
+  is_binary_content_type("application/pdf; charset=binary") |> should.be_true
+}
+
+pub fn content_type_zip_is_binary_test() {
+  is_binary_content_type("application/zip") |> should.be_true
+}
+
+pub fn content_type_octet_stream_is_binary_test() {
+  is_binary_content_type("application/octet-stream") |> should.be_true
+}
+
+pub fn content_type_image_is_binary_test() {
+  is_binary_content_type("image/png") |> should.be_true
+  is_binary_content_type("image/jpeg") |> should.be_true
+  is_binary_content_type("image/webp") |> should.be_true
+}
+
+pub fn content_type_video_audio_font_are_binary_test() {
+  is_binary_content_type("video/mp4") |> should.be_true
+  is_binary_content_type("audio/mpeg") |> should.be_true
+  is_binary_content_type("font/woff2") |> should.be_true
+}
+
+pub fn content_type_html_is_text_test() {
+  is_binary_content_type("text/html") |> should.be_false
+  is_binary_content_type("text/html; charset=utf-8") |> should.be_false
+}
+
+pub fn content_type_json_is_text_test() {
+  is_binary_content_type("application/json") |> should.be_false
+  is_binary_content_type("application/json; charset=utf-8") |> should.be_false
+}
+
+pub fn content_type_case_insensitive_test() {
+  // Headers may arrive with any case
+  is_binary_content_type("Application/PDF") |> should.be_true
+  is_binary_content_type("IMAGE/PNG") |> should.be_true
+  is_binary_content_type("Text/HTML") |> should.be_false
+}
+
+pub fn content_type_application_x_is_binary_test() {
+  // application/x-* family (executables, archives, etc.) — refuse by default
+  is_binary_content_type("application/x-gzip") |> should.be_true
+  is_binary_content_type("application/x-msdownload") |> should.be_true
 }

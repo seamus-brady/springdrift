@@ -41,6 +41,7 @@ import narrative/virtual_memory.{
 }
 import paths
 import planner/types as planner_types
+import remembrancer/consolidation
 import scheduler/types as scheduler_types
 import slog
 
@@ -1050,11 +1051,12 @@ fn build_sensorium(
   let tasks_section = render_sensorium_tasks(active_tasks, endeavours)
 
   let knowledge_section = render_sensorium_knowledge(state)
+  let memory_section = render_sensorium_memory()
 
   let sections =
     [
       clock, situation, schedule, vitals, sandbox_section, delegations, events,
-      tasks_section, knowledge_section,
+      tasks_section, knowledge_section, memory_section,
     ]
     |> list.filter(fn(s) { s != "" })
     |> string.join("\n")
@@ -1515,6 +1517,30 @@ fn find_last_failure(entries: List(narrative_types.NarrativeEntry)) -> String {
         }
         _ -> find_last_failure(rest)
       }
+  }
+}
+
+/// Render the <memory> element — deep-memory freshness, only when the
+/// Remembrancer has run at least once. Cheap: reads one small JSONL file.
+/// The decayed/dormant counts are snapshots from the last run, not live
+/// numbers — they go stale as consolidation falls behind, which is exactly
+/// the signal we want (prompts the agent to re-consolidate).
+fn render_sensorium_memory() -> String {
+  let dir = paths.consolidation_log_dir()
+  case consolidation.last_run(dir) {
+    Error(_) -> ""
+    Ok(run) -> {
+      let age = format_elapsed_since(run.timestamp)
+      "  <memory last_consolidation=\""
+      <> run.timestamp
+      <> "\" consolidation_age=\""
+      <> age
+      <> "\" decayed_facts=\""
+      <> int.to_string(run.decayed_facts_count)
+      <> "\" dormant_threads=\""
+      <> int.to_string(run.dormant_threads_count)
+      <> "\"/>"
+    }
   }
 }
 

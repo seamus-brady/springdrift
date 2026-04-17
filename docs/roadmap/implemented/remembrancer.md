@@ -1,8 +1,44 @@
 # The Remembrancer — Deep Memory Agent
 
-**Status**: Planned
-**Date**: 2026-03-26
-**Dependencies**: CBR self-improvement (implemented), Confidence decay (implemented), Archivist split (implemented), Skills management (planned)
+**Status**: Implemented (Phases 1–10) — 2026-04-16
+**Original design date**: 2026-03-26
+**Dependencies**: CBR self-improvement (implemented), Confidence decay (implemented), Archivist split (implemented), Skills management (planned — blocks Phase 11)
+
+## Implementation status
+
+| Phase | Status | Notes |
+|---|---|---|
+| 1 — Agent spec + system prompt | ✅ Done | `src/agents/remembrancer.gleam`, max_turns=8, Transient restart |
+| 2 — `deep_search` tool | ✅ Done | Reads JSONL archive via `remembrancer/reader.gleam` |
+| 3 — `fact_archaeology` tool | ✅ Done | Traces key history + related-key discovery |
+| 4 — `resurrect_thread` tool | ✅ Done | Dormant-thread detection with topic filter |
+| 5 — `mine_patterns` tool | ✅ Done | CBR cluster detection (domain + shared keywords) |
+| 6 — `consolidate_memory` tool | ✅ Done | Data-gathering; synthesis happens in the agent's react loop (simpler than nested XStructor) |
+| 7 — `restore_confidence` tool | ✅ Done | Writes new fact via `facts_log.append` (append-only supersede) |
+| 8 — `find_connections` tool | ✅ Done | Cross-store reference via `rquery.cross_reference` |
+| 9 — Scheduled consolidation | ⚠️ Manual setup | No `schedule.toml` auto-loader exists. Operator asks scheduler agent to create a weekly recurring job delegating to the Remembrancer. See "Follow-up work". |
+| 10 — Sensorium integration | ✅ Done (partial) | `<memory last_consolidation="…" consolidation_age="…"/>` rendered in `curator.gleam`. Admin GUI panel deferred. |
+| 11 — Skills management integration | ❌ Blocked | Depends on the skills-management roadmap (spec-only). `mine_patterns` surfaces clusters in the report; no auto-proposal. |
+
+## What shipped
+
+- **Agent:** `agents/remembrancer.gleam`, registered via `remembrancer_specs` in `springdrift.gleam`, gated on `remembrancer_enabled` config (default false; enabled for Curragh).
+- **Tools (8):** `src/tools/remembrancer.gleam` — `deep_search`, `fact_archaeology`, `mine_patterns`, `resurrect_thread`, `consolidate_memory`, `restore_confidence`, `find_connections`, `write_consolidation_report`.
+- **Deep readers:** `src/remembrancer/reader.gleam` (delegates to existing `narrative_log.load_entries`, `cbr_log.load_all`, `facts_log.load_all`) and `src/remembrancer/query.gleam` (pure filter/aggregate: search, trace, cluster, dormant, xref).
+- **Persistence:** `src/remembrancer/consolidation.gleam` — `ConsolidationRun` JSONL log at `.springdrift/memory/consolidation/` + markdown reports at `.springdrift/knowledge/consolidation/`.
+- **Config (7 fields):** `remembrancer_enabled`, `remembrancer_model`, `remembrancer_max_turns`, `remembrancer_consolidation_schedule`, `remembrancer_review_confidence_threshold`, `remembrancer_dormant_thread_days`, `remembrancer_min_pattern_cases`.
+- **Sensorium:** `<memory>` tag in `build_sensorium` when any consolidation run has occurred.
+- **Tests:** 16 new unit tests at `test/remembrancer/` (1536 total, all pass).
+- **Docs:** CLAUDE.md (agent table, tools table, config field table, memory store table), HOW_TO.md (dev + example).
+
+## Follow-up work (deferred)
+
+See also: `docs/roadmap/planned/remembrancer-followups.md`.
+
+- **Phase 11 — Skills-proposal pipeline.** Blocked on skills-management spec. When that lands, `mine_patterns` should feed a proposal loop instead of only surfacing clusters in reports.
+- **Phase 9 — TOML-driven scheduled consolidation.** Either build a `schedule.toml` auto-loader or keep the runtime-created approach. Currently runtime-only.
+- **Phase 10 — Web GUI Memory Health panel.** Sensorium tag shipped; admin-page tab (memory-depth stats, consolidation history, "Run Consolidation" button) deferred.
+- **Advanced sensorium metrics.** `decayed_facts`, `dormant_threads` counts — skipped because computing them every cycle would require scanning the full archive. Could be cached in the Librarian later.
 
 ---
 
