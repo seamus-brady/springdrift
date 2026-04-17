@@ -363,15 +363,15 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
     // Live status card — replaces the old three-dot bubble. Lists each step
     // as the cycle progresses: classify \\u2192 agent \\u2192 tool \\u2192 synthesize.
     thinkingEl = document.createElement('div');
-    thinkingEl.className = 'msg assistant thinking-card';
-    var label = document.createElement('div');
-    label.className = 'thinking-label';
-    label.innerHTML = '<span class=\"dots\"><span>.</span><span>.</span><span>.</span></span> Working';
-    thinkingEl.appendChild(label);
+    thinkingEl.className = 'thinking-card';
     thinkingSteps = document.createElement('ul');
     thinkingSteps.className = 'thinking-steps';
     thinkingEl.appendChild(thinkingSteps);
     msgs.appendChild(thinkingEl);
+    // Seed a baseline step so simple LLM-only cycles (no tools, no delegation)
+    // don't display an empty card. If tools/agents kick in later, real steps
+    // replace the placeholder.
+    addThinkingStep('thinking\\u2026');
     scrollBottom();
     setThinkingLock(true);
   }
@@ -1702,18 +1702,10 @@ fn shared_css() -> String {
   }
   .thinking-card {
     align-self: flex-start;
-    padding: 14px 0;
+    padding: 8px 0;
     color: var(--text-dim);
-    font-size: 15px;
-    max-width: 80%;
-  }
-  .thinking-card .thinking-label {
-    font-size: 13px;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
-    color: var(--text-dim);
-    opacity: 0.7;
-    margin-bottom: 6px;
+    font-size: 14px;
+    max-width: 100%;
   }
   .thinking-card .thinking-steps {
     list-style: none;
@@ -1721,28 +1713,37 @@ fn shared_css() -> String {
     margin: 0;
   }
   .thinking-card .thinking-steps li {
-    padding: 4px 0 4px 16px;
+    padding: 2px 0 2px 18px;
     position: relative;
     font-variant-numeric: tabular-nums;
+    line-height: 1.5;
+    animation: step-fade-in 0.2s ease-out;
   }
   .thinking-card .thinking-steps li::before {
-    content: \"\\u2192\";
+    content: \"\\2192\";
     position: absolute;
     left: 0;
     color: var(--text-dim);
-    opacity: 0.5;
+    opacity: 0.45;
   }
   .thinking-card .thinking-steps li:last-child {
     color: var(--text);
   }
-  .thinking-card .dots span {
-    animation: blink 1.4s infinite both;
+  .thinking-card .thinking-steps li:last-child::before {
+    opacity: 0.9;
+    animation: step-pulse 1.4s infinite ease-in-out;
   }
-  .thinking-card .dots span:nth-child(2) { animation-delay: 0.2s; }
-  .thinking-card .dots span:nth-child(3) { animation-delay: 0.4s; }
-  @keyframes blink {
-    0%, 80%, 100% { opacity: 0.2; }
-    40% { opacity: 1; }
+  @keyframes step-fade-in {
+    from { opacity: 0; transform: translateY(-2px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes step-pulse {
+    0%, 100% { opacity: 0.35; }
+    50%      { opacity: 0.9; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .thinking-card .thinking-steps li { animation: none; }
+    .thinking-card .thinking-steps li:last-child::before { animation: none; opacity: 0.9; }
   }
 
   /* ── Status strip ───────────────────────────────── */
@@ -1782,7 +1783,6 @@ fn shared_css() -> String {
     flex-shrink: 0;
   }
   @media (prefers-reduced-motion: reduce) {
-    .thinking-card .dots span { animation: none; opacity: 0.6; }
     #status-strip { transition: none; }
   }
   /* ── Input area ──────────────────────────────────── */
