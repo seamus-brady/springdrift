@@ -667,6 +667,17 @@ fn run_restore_confidence(
         "" -> ToolFailure(tool_use_id: call.id, error: "key must not be empty")
         _ -> {
           let clamped = float.min(1.0, float.max(0.0, new_confidence))
+          // Look up the prior fact so the new fact can reference it in
+          // supersedes. This preserves the audit chain — fact_archaeology
+          // can trace the supersession link cleanly instead of inferring
+          // from timestamps alone.
+          let prior =
+            facts_log.resolve_current(ctx.facts_dir, option.None)
+            |> list.find(fn(f) { f.key == trimmed_key })
+          let supersedes_id = case prior {
+            Ok(old) -> Some(old.fact_id)
+            Error(_) -> None
+          }
           let fact =
             facts_types.MemoryFact(
               schema_version: 1,
@@ -678,7 +689,7 @@ fn run_restore_confidence(
               value:,
               scope: facts_types.Persistent,
               operation: facts_types.Write,
-              supersedes: None,
+              supersedes: supersedes_id,
               confidence: clamped,
               source: "remembrancer:restore_confidence",
               provenance: Some(facts_types.FactProvenance(
@@ -702,15 +713,24 @@ fn run_restore_confidence(
               <> float.to_string(clamped)
               <> " (reason: "
               <> reason
+              <> case supersedes_id {
+              Some(old_id) -> ", supersedes " <> old_id
+              None -> ", no prior version"
+            }
               <> ")",
             Some(ctx.cycle_id),
           )
+          let chain_note = case supersedes_id {
+            Some(old_id) -> " (supersedes " <> old_id <> ")"
+            None -> " (no prior version found)"
+          }
           ToolSuccess(
             tool_use_id: call.id,
             content: "Restored confidence on \""
               <> trimmed_key
               <> "\" to "
-              <> float.to_string(clamped),
+              <> float.to_string(clamped)
+              <> chain_note,
           )
         }
       }
