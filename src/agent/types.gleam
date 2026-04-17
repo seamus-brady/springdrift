@@ -456,6 +456,22 @@ pub type Notification {
   SandboxContainerFailed(slot: Int, reason: String)
   SandboxUnavailable(reason: String)
   ModelEscalation(from_model: String, to_model: String, reason: String)
+  /// Live turn-level progress from a delegated agent. Powers the web UI
+  /// status strip so the operator sees what's actually happening during
+  /// a multi-turn agent react loop instead of an opaque "thinking" spinner.
+  AgentProgressNotice(
+    agent_name: String,
+    turn: Int,
+    max_turns: Int,
+    tokens: Int,
+    current_tool: Option(String),
+    elapsed_ms: Int,
+  )
+  /// Cognitive loop status transition. Drives the status strip's label
+  /// and the inline status-bubble's step list.
+  /// status: "idle" | "thinking" | "classifying" | "waiting_for_agents"
+  ///       | "waiting_for_user" | "evaluating_safety"
+  StatusChange(status: String, detail: Option(String))
 }
 
 // ---------------------------------------------------------------------------

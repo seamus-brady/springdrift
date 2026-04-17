@@ -63,6 +63,22 @@ pub type ServerMessage {
   SessionHistory(messages_json: String)
   CommsData(messages_json: String)
   AffectData(snapshots_json: String)
+  /// Live progress update from a delegated agent — emitted every react turn.
+  /// Surfaces in the chat tab's status strip so the operator sees what's
+  /// actually happening instead of an opaque "thinking" spinner.
+  AgentProgressNotification(
+    agent_name: String,
+    turn: Int,
+    max_turns: Int,
+    tokens: Int,
+    current_tool: Option(String),
+    elapsed_ms: Int,
+  )
+  /// Cognitive loop status transition. Drives the status strip's label and
+  /// the inline status bubble's step list.
+  /// status: "idle" | "thinking" | "classifying" | "waiting_for_agents"
+  ///       | "waiting_for_user" | "evaluating_safety"
+  StatusTransition(status: String, detail: Option(String))
 }
 
 pub type CycleDataJson {
@@ -237,6 +253,41 @@ pub fn encode_server_message(msg: ServerMessage) -> String {
       "{\"type\":\"comms_data\",\"messages\":" <> messages_json <> "}"
     AffectData(snapshots_json:) ->
       "{\"type\":\"affect_data\",\"snapshots\":" <> snapshots_json <> "}"
+
+    AgentProgressNotification(
+      agent_name:,
+      turn:,
+      max_turns:,
+      tokens:,
+      current_tool:,
+      elapsed_ms:,
+    ) ->
+      json.object([
+        #("type", json.string("notification")),
+        #("kind", json.string("agent_progress")),
+        #("agent_name", json.string(agent_name)),
+        #("turn", json.int(turn)),
+        #("max_turns", json.int(max_turns)),
+        #("tokens", json.int(tokens)),
+        #("current_tool", case current_tool {
+          None -> json.null()
+          Some(t) -> json.string(t)
+        }),
+        #("elapsed_ms", json.int(elapsed_ms)),
+      ])
+      |> json.to_string
+
+    StatusTransition(status:, detail:) ->
+      json.object([
+        #("type", json.string("notification")),
+        #("kind", json.string("status_transition")),
+        #("status", json.string(status)),
+        #("detail", case detail {
+          None -> json.null()
+          Some(d) -> json.string(d)
+        }),
+      ])
+      |> json.to_string
   }
 }
 

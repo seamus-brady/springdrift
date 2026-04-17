@@ -392,6 +392,17 @@ fn handle_notification(
           ),
         ),
       )
+    // TUI surfaces these via the existing spinner_label; no structural change
+    // needed. Web UI handles them via StatusTransition / AgentProgressNotification.
+    agent_types.AgentProgressNotice(agent_name:, current_tool:, ..) -> {
+      let label = case current_tool {
+        option.Some(t) -> agent_name <> " · " <> t
+        option.None -> agent_name
+      }
+      continue_loop(TuiState(..state, spinner_label: label))
+    }
+    agent_types.StatusChange(status:, ..) ->
+      continue_loop(TuiState(..state, spinner_label: status))
   }
 }
 

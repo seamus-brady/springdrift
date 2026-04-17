@@ -749,6 +749,24 @@ fn notification_to_server_message(
         score: 0.0,
         explanation: from_model <> " -> " <> to_model <> ": " <> reason,
       )
+    agent_types.AgentProgressNotice(
+      agent_name:,
+      turn:,
+      max_turns:,
+      tokens:,
+      current_tool:,
+      elapsed_ms:,
+    ) ->
+      protocol.AgentProgressNotification(
+        agent_name:,
+        turn:,
+        max_turns:,
+        tokens:,
+        current_tool:,
+        elapsed_ms:,
+      )
+    agent_types.StatusChange(status:, detail:) ->
+      protocol.StatusTransition(status:, detail:)
   }
 }
 

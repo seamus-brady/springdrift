@@ -45,7 +45,11 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
 </div>
 <div id=\"content-area\">
   <div id=\"chat-tab\" class=\"tab-content active\">
-    <div id=\"thinking-overlay\"></div>
+    <div id=\"status-strip\" class=\"hidden\" aria-live=\"polite\">
+      <span class=\"status-label\">Idle</span>
+      <span class=\"status-detail\"></span>
+      <span class=\"status-meta\"></span>
+    </div>
     <div id=\"messages\"></div>
     <div id=\"input-area\">
       <form id=\"chat-form\">
@@ -73,15 +77,27 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
   var input = document.getElementById('chat-input');
   var statusEl = document.getElementById('status');
   var statusDot = document.getElementById('status-dot');
-  var thinkingOverlay = document.getElementById('thinking-overlay');
+  var statusStrip = document.getElementById('status-strip');
+  var statusStripLabel = statusStrip.querySelector('.status-label');
+  var statusStripDetail = statusStrip.querySelector('.status-detail');
+  var statusStripMeta = statusStrip.querySelector('.status-meta');
   var ws = null;
   var thinkingEl = null;
+  var thinkingSteps = null;
   var isThinking = false;
   var waitingForAnswer = false;
   var wasRevised = false;
   var reconnectDelay = 1000;
   var chatHistory = [];
   var activityCount = 0;
+  // Status-strip state
+  var cycleStartMs = 0;
+  var elapsedTimer = null;
+  var currentAgent = null;
+  var currentTool = null;
+  var currentTurn = 0;
+  var currentMaxTurns = 0;
+  var currentTokens = 0;
 
   // Tab switching
   var chatTabBtns = document.querySelectorAll('#tab-bar .tab-btn');
@@ -232,6 +248,9 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
             addActivityItem(nname);
           } else {
             addNotification('Using tool: ' + nname);
+            currentTool = nname;
+            addThinkingStep('tool: ' + nname);
+            updateStatusStrip();
           }
         } else if (data.kind === 'save_warning') {
           addNotification(data.message);
@@ -239,8 +258,32 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
           var badge = data.decision === 'ACCEPT' ? '\\u2705' : data.decision === 'REJECT' ? '\\u274C' : '\\u26A0\\uFE0F';
           addNotification(badge + ' D\\' ' + data.decision + ' (score: ' + data.score.toFixed(2) + ')');
           if (data.decision === 'MODIFY') wasRevised = true;
+        } else if (data.kind === 'agent_progress') {
+          currentAgent = data.agent_name;
+          currentTurn = data.turn;
+          currentMaxTurns = data.max_turns;
+          currentTokens = data.tokens;
+          currentTool = data.current_tool || currentTool;
+          updateStatusStrip();
+          addThinkingStep(data.agent_name + ' (turn ' + data.turn + '/' + data.max_turns + ')'
+            + (data.current_tool ? ' \\u2192 ' + data.current_tool : ''));
+        } else if (data.kind === 'status_transition') {
+          statusStripLabel.textContent = humanizeStatus(data.status);
+          if (data.detail) statusStripDetail.textContent = data.detail;
         }
         break;
+    }
+  }
+
+  function humanizeStatus(s) {
+    switch (s) {
+      case 'idle': return 'Idle';
+      case 'thinking': return 'Thinking';
+      case 'classifying': return 'Classifying';
+      case 'waiting_for_agents': return 'Delegating';
+      case 'waiting_for_user': return 'Awaiting reply';
+      case 'evaluating_safety': return 'Safety check';
+      default: return s;
     }
   }
 
@@ -307,26 +350,98 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
 
   function setThinkingLock(locked) {
     isThinking = locked;
-    if (locked) {
-      thinkingOverlay.classList.add('active');
-    } else {
-      thinkingOverlay.classList.remove('active');
-    }
   }
 
   function showThinking() {
+    cycleStartMs = Date.now();
+    startElapsedTimer();
+    statusStrip.classList.remove('hidden');
+    statusStripLabel.textContent = 'Thinking';
+    statusStripDetail.textContent = '';
+    statusStripMeta.textContent = '0s';
     if (thinkingEl) return;
+    // Live status card — replaces the old three-dot bubble. Lists each step
+    // as the cycle progresses: classify \\u2192 agent \\u2192 tool \\u2192 synthesize.
     thinkingEl = document.createElement('div');
-    thinkingEl.className = 'thinking';
-    thinkingEl.innerHTML = '<span class=\"dots\"><span>.</span><span>.</span><span>.</span></span> Thinking';
+    thinkingEl.className = 'msg assistant thinking-card';
+    var label = document.createElement('div');
+    label.className = 'thinking-label';
+    label.innerHTML = '<span class=\"dots\"><span>.</span><span>.</span><span>.</span></span> Working';
+    thinkingEl.appendChild(label);
+    thinkingSteps = document.createElement('ul');
+    thinkingSteps.className = 'thinking-steps';
+    thinkingEl.appendChild(thinkingSteps);
     msgs.appendChild(thinkingEl);
     scrollBottom();
     setThinkingLock(true);
   }
 
+  function addThinkingStep(text) {
+    if (!thinkingSteps) return;
+    // Dedup consecutive identical steps (tool calls often repeat with the same name)
+    var last = thinkingSteps.lastElementChild;
+    if (last && last.textContent === text) return;
+    var li = document.createElement('li');
+    li.textContent = text;
+    thinkingSteps.appendChild(li);
+    scrollBottom();
+  }
+
   function removeThinking() {
-    if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; }
+    if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; thinkingSteps = null; }
+    statusStrip.classList.add('hidden');
+    stopElapsedTimer();
+    currentAgent = null;
+    currentTool = null;
+    currentTurn = 0;
+    currentMaxTurns = 0;
+    currentTokens = 0;
     setThinkingLock(false);
+  }
+
+  function startElapsedTimer() {
+    stopElapsedTimer();
+    elapsedTimer = setInterval(updateElapsed, 1000);
+  }
+
+  function stopElapsedTimer() {
+    if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+  }
+
+  function updateElapsed() {
+    if (!cycleStartMs) return;
+    var secs = Math.floor((Date.now() - cycleStartMs) / 1000);
+    updateStatusStrip(secs);
+  }
+
+  function formatTokens(n) {
+    if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+    return n + '';
+  }
+
+  function updateStatusStrip(secsOverride) {
+    if (statusStrip.classList.contains('hidden')) return;
+    var secs = typeof secsOverride === 'number'
+      ? secsOverride
+      : Math.floor((Date.now() - cycleStartMs) / 1000);
+    var detail = '';
+    if (currentAgent) {
+      detail = currentAgent;
+      if (currentTurn > 0 && currentMaxTurns > 0) {
+        detail += ' \\u00b7 turn ' + currentTurn + '/' + currentMaxTurns;
+      }
+      if (currentTool) {
+        detail += ' \\u00b7 ' + currentTool;
+      }
+    } else if (currentTool) {
+      detail = currentTool;
+    }
+    statusStripDetail.textContent = detail;
+    var meta = secs + 's';
+    if (currentTokens > 0) {
+      meta = formatTokens(currentTokens) + ' tokens \\u00b7 ' + meta;
+    }
+    statusStripMeta.textContent = meta;
   }
 
 
@@ -1585,20 +1700,90 @@ fn shared_css() -> String {
     margin-left: 6px;
     vertical-align: middle;
   }
-  .thinking {
+  .thinking-card {
     align-self: flex-start;
     padding: 14px 0;
     color: var(--text-dim);
-    font-size: 17px;
+    font-size: 15px;
+    max-width: 80%;
   }
-  .thinking .dots span {
+  .thinking-card .thinking-label {
+    font-size: 13px;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    opacity: 0.7;
+    margin-bottom: 6px;
+  }
+  .thinking-card .thinking-steps {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .thinking-card .thinking-steps li {
+    padding: 4px 0 4px 16px;
+    position: relative;
+    font-variant-numeric: tabular-nums;
+  }
+  .thinking-card .thinking-steps li::before {
+    content: \"\\u2192\";
+    position: absolute;
+    left: 0;
+    color: var(--text-dim);
+    opacity: 0.5;
+  }
+  .thinking-card .thinking-steps li:last-child {
+    color: var(--text);
+  }
+  .thinking-card .dots span {
     animation: blink 1.4s infinite both;
   }
-  .thinking .dots span:nth-child(2) { animation-delay: 0.2s; }
-  .thinking .dots span:nth-child(3) { animation-delay: 0.4s; }
+  .thinking-card .dots span:nth-child(2) { animation-delay: 0.2s; }
+  .thinking-card .dots span:nth-child(3) { animation-delay: 0.4s; }
   @keyframes blink {
     0%, 80%, 100% { opacity: 0.2; }
     40% { opacity: 1; }
+  }
+
+  /* ── Status strip ───────────────────────────────── */
+  /* Lives at the top of the chat tab. Shows current cognitive-loop state,
+     active agent, tool, and elapsed time. Replaces the old overlay that
+     blocked the entire chat tab behind a grey wash. */
+  #status-strip {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-dim);
+    flex-shrink: 0;
+    transition: opacity 0.2s;
+  }
+  #status-strip.hidden {
+    display: none;
+  }
+  #status-strip .status-label {
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: 0.02em;
+  }
+  #status-strip .status-detail {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  #status-strip .status-meta {
+    color: var(--text-dim);
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .thinking-card .dots span { animation: none; opacity: 0.6; }
+    #status-strip { transition: none; }
   }
   /* ── Input area ──────────────────────────────────── */
   #input-area {
@@ -1662,20 +1847,6 @@ fn shared_css() -> String {
     color: var(--text-dim);
     margin-top: 8px;
   }
-
-  /* ── Thinking overlay (chat tab only) ────────────── */
-  #thinking-overlay {
-    display: none;
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 10;
-    background: rgba(247,247,248,0.4);
-  }
-  #thinking-overlay.active { display: block; }
-  #chat-tab { position: relative; }
 
   /* ── Narrative tab ───────────────────────────────── */
   #narrative-container {
