@@ -77,13 +77,6 @@ Either way, surface them as attributes on the existing `<memory>` tag.
 
 ---
 
-## 5. Remembrancer-authored fact-provenance improvements
+## 5. Remembrancer-authored fact-provenance improvements — DONE (2026-04-17, commit 6dbb171)
 
-When `restore_confidence` writes a new fact, the provenance chain shows `source_tool = "restore_confidence"` but doesn't reference the original fact's `fact_id` being superseded. The `supersedes` field is currently `None` because the tool doesn't know the prior ID.
-
-**Work required:**
-- Look up the current fact by key before appending the restored version.
-- Populate `supersedes: Some(old_fact_id)` so the archaeology trace shows a clean chain.
-- Add a test for the supersedes chain.
-
-Low priority — not a bug, just an auditability improvement.
+Shipped. `restore_confidence` now looks up the current fact via `facts_log.resolve_current` and populates `supersedes: Some(old_fact_id)` when a prior version exists. The success message and slog entry both name the superseded ID (or note "no prior version"). 4 unit tests cover the paths.

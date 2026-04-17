@@ -42,6 +42,13 @@ pub type ConsolidationRun {
     threads_resurrected: Int,
     report_path: String,
     summary: String,
+    /// Count of persistent facts below review_confidence_threshold at the
+    /// time of this run. Surfaced in the sensorium so the agent sees how
+    /// much memory has decayed since the last consolidation.
+    decayed_facts_count: Int,
+    /// Count of threads with no activity for >= dormant_thread_days at
+    /// the time of this run.
+    dormant_threads_count: Int,
   )
 }
 
@@ -146,6 +153,8 @@ pub fn new_run(
     threads_resurrected: 0,
     report_path: "",
     summary:,
+    decayed_facts_count: 0,
+    dormant_threads_count: 0,
   )
 }
 
@@ -171,6 +180,8 @@ pub fn encode_run(run: ConsolidationRun) -> json.Json {
     #("threads_resurrected", json.int(run.threads_resurrected)),
     #("report_path", json.string(run.report_path)),
     #("summary", json.string(run.summary)),
+    #("decayed_facts_count", json.int(run.decayed_facts_count)),
+    #("dormant_threads_count", json.int(run.dormant_threads_count)),
   ])
 }
 
@@ -187,6 +198,17 @@ pub fn run_decoder() -> decode.Decoder(ConsolidationRun) {
   use threads_resurrected <- decode.field("threads_resurrected", decode.int)
   use report_path <- decode.field("report_path", decode.string)
   use summary <- decode.field("summary", decode.string)
+  // Lenient: older runs from before these fields existed default to 0.
+  use decayed_facts_count <- decode.optional_field(
+    "decayed_facts_count",
+    0,
+    decode.int,
+  )
+  use dormant_threads_count <- decode.optional_field(
+    "dormant_threads_count",
+    0,
+    decode.int,
+  )
   decode.success(ConsolidationRun(
     run_id:,
     timestamp:,
@@ -200,6 +222,8 @@ pub fn run_decoder() -> decode.Decoder(ConsolidationRun) {
     threads_resurrected:,
     report_path:,
     summary:,
+    decayed_facts_count:,
+    dormant_threads_count:,
   ))
 }
 

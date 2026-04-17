@@ -10,6 +10,7 @@
 // by the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 
+import dprime/decay
 import facts/log as facts_log
 import facts/types as facts_types
 import gleam/dynamic/decode
@@ -59,6 +60,9 @@ pub type RemembrancerContext {
     review_confidence_threshold: Float,
     dormant_thread_days: Int,
     min_pattern_cases: Int,
+    /// Half-life (days) for fact confidence decay. Used when computing
+    /// decayed_facts_count at consolidation write time.
+    fact_decay_half_life_days: Int,
   )
 }
 
@@ -845,6 +849,8 @@ fn run_write_report(call: ToolCall, ctx: RemembrancerContext) -> ToolResult {
             error: "Failed to write report: " <> e,
           )
         Ok(path) -> {
+          let decayed_facts_count = count_decayed_facts(ctx)
+          let dormant_threads_count = count_dormant_threads(ctx)
           let base = consolidation.new_run(from_date, to_date, summary)
           let run =
             consolidation.ConsolidationRun(
@@ -853,11 +859,19 @@ fn run_write_report(call: ToolCall, ctx: RemembrancerContext) -> ToolResult {
               facts_restored:,
               threads_resurrected:,
               report_path: path,
+              decayed_facts_count:,
+              dormant_threads_count:,
             )
           consolidation.append(ctx.consolidation_log_dir, run)
           ToolSuccess(
             tool_use_id: call.id,
-            content: "Consolidation report written to " <> path,
+            content: "Consolidation report written to "
+              <> path
+              <> " (decayed_facts="
+              <> int.to_string(decayed_facts_count)
+              <> ", dormant_threads="
+              <> int.to_string(dormant_threads_count)
+              <> ")",
           )
         }
       }
@@ -878,4 +892,34 @@ fn summarise_line(s: String, max_chars: Int) -> String {
     True -> single_line
     False -> string.slice(single_line, 0, max_chars) <> "…"
   }
+}
+
+/// Count persistent facts whose effective (post-decay) confidence is below
+/// the review threshold. Uses `facts_log.resolve_current` to consider only
+/// live facts, then applies the half-life decay formula.
+fn count_decayed_facts(ctx: RemembrancerContext) -> Int {
+  let today = get_date()
+  facts_log.resolve_current(ctx.facts_dir, option.None)
+  |> list.filter(fn(f) {
+    let effective =
+      decay.decay_fact_confidence(
+        f.confidence,
+        f.timestamp,
+        today,
+        ctx.fact_decay_half_life_days,
+      )
+    effective <. ctx.review_confidence_threshold
+  })
+  |> list.length
+}
+
+/// Count threads in the past year with no activity for >= dormant_thread_days.
+fn count_dormant_threads(ctx: RemembrancerContext) -> Int {
+  let from_date = days_ago(365)
+  let to_date = get_date()
+  let entries =
+    rreader.read_narrative_entries(ctx.narrative_dir, from_date, to_date)
+  let cutoff = days_ago(ctx.dormant_thread_days)
+  rquery.find_dormant_threads(entries, cutoff)
+  |> list.length
 }

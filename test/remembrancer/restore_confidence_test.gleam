@@ -41,6 +41,7 @@ fn context(facts_dir: String) -> tools_remembrancer.RemembrancerContext {
     review_confidence_threshold: 0.3,
     dormant_thread_days: 7,
     min_pattern_cases: 3,
+    fact_decay_half_life_days: 30,
   )
 }
 

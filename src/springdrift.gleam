@@ -1550,6 +1550,10 @@ fn remembrancer_specs(
           review_confidence_threshold: review_threshold,
           dormant_thread_days: dormant_days,
           min_pattern_cases: min_cases,
+          fact_decay_half_life_days: option.unwrap(
+            cfg.fact_decay_half_life_days,
+            30,
+          ),
         )
       [
         agent_types.AgentSpec(
