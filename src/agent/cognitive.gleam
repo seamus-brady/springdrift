@@ -24,6 +24,7 @@ import agent/types.{
   UserInput,
 }
 import agent/worker
+import agentlair/emitter as agentlair_emitter
 import cycle_log
 import dag/types as dag_types
 import dprime/meta as dprime_meta
@@ -151,6 +152,7 @@ pub fn start(
           normative_calculus_enabled: cfg.normative_calculus_enabled,
           character_spec: cfg.character_spec,
           team_guards: cfg.team_guards,
+          agentlair_config: cfg.agentlair_config,
         ),
         redact_secrets: cfg.redact_secrets,
         pending_sensory_events: [],
@@ -269,7 +271,14 @@ fn handle_message(
       handle_watchdog_timeout(state, generation)
     types.ClassifyComplete(cycle_id, complexity, text, reply_to) ->
       handle_classify_complete(state, cycle_id, complexity, text, reply_to)
-    types.SafetyGateComplete(task_id, result, resp, calls, reply_to) ->
+    types.SafetyGateComplete(task_id, result, resp, calls, reply_to) -> {
+      agentlair_emitter.emit_gate_decision(
+        state.config.agentlair_config,
+        state.identity.agent_uuid,
+        result,
+        "tool",
+        state.cycle_id,
+      )
       cognitive_safety.handle_safety_gate_complete(
         state,
         task_id,
@@ -279,7 +288,15 @@ fn handle_message(
         reply_to,
         cognitive_agents.dispatch_tool_calls,
       )
-    types.InputSafetyGateComplete(cycle_id, result, model, text, reply_to) ->
+    }
+    types.InputSafetyGateComplete(cycle_id, result, model, text, reply_to) -> {
+      agentlair_emitter.emit_gate_decision(
+        state.config.agentlair_config,
+        state.identity.agent_uuid,
+        result,
+        "input",
+        Some(cycle_id),
+      )
       cognitive_safety.handle_input_safety_gate_complete(
         state,
         cycle_id,
@@ -288,7 +305,15 @@ fn handle_message(
         text,
         reply_to,
       )
-    types.PostExecutionGateComplete(cycle_id, result, pre_score, reply_to) ->
+    }
+    types.PostExecutionGateComplete(cycle_id, result, pre_score, reply_to) -> {
+      agentlair_emitter.emit_gate_decision(
+        state.config.agentlair_config,
+        state.identity.agent_uuid,
+        result,
+        "post_exec",
+        Some(cycle_id),
+      )
       cognitive_safety.handle_post_execution_gate_complete(
         state,
         cycle_id,
@@ -296,6 +321,7 @@ fn handle_message(
         pre_score,
         reply_to,
       )
+    }
     types.SetSupervisor(supervisor:) ->
       CognitiveState(..state, supervisor: Some(supervisor))
     types.SchedulerInput(
@@ -325,7 +351,14 @@ fn handle_message(
       report_text,
       modification_count,
       reply_to,
-    ) ->
+    ) -> {
+      agentlair_emitter.emit_gate_decision(
+        state.config.agentlair_config,
+        state.identity.agent_uuid,
+        result,
+        "output",
+        Some(cycle_id),
+      )
       cognitive_safety.handle_output_gate_complete(
         state,
         cycle_id,
@@ -334,6 +367,7 @@ fn handle_message(
         modification_count,
         reply_to,
       )
+    }
     types.QueuedSensoryEvent(event:) -> {
       slog.debug(
         "cognitive",

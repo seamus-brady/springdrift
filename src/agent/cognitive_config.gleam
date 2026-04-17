@@ -9,6 +9,7 @@ import agent/cognitive/escalation.{type EscalationConfig}
 import agent/registry.{type Registry}
 import agent/team
 import agent/types.{type Notification}
+import agentlair/types as agentlair_types
 import dprime/deterministic.{type DeterministicConfig}
 import dprime/types as dprime_types
 import gleam/erlang/process.{type Subject}
@@ -80,6 +81,7 @@ pub type CognitiveConfig {
     character_spec: Option(normative_types.CharacterSpec),
     team_specs: List(team.TeamSpec),
     team_guards: team.TeamGuards,
+    agentlair_config: Option(agentlair_types.AgentLairConfig),
   )
 }
 
@@ -144,5 +146,6 @@ pub fn default_test_config(
     character_spec: None,
     team_specs: [],
     team_guards: team.default_guards(),
+    agentlair_config: None,
   )
 }
