@@ -46,18 +46,31 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
 </div>
 <div id=\"content-area\">
   <div id=\"chat-tab\" class=\"tab-content active\">
-    <div id=\"status-strip\" class=\"hidden\" aria-live=\"polite\">
-      <span class=\"status-label\">Idle</span>
-      <span class=\"status-detail\"></span>
-      <span class=\"status-meta\"></span>
-    </div>
-    <div id=\"messages\"></div>
-    <div id=\"input-area\">
-      <form id=\"chat-form\">
-        <textarea id=\"chat-input\" rows=\"1\" placeholder=\"" <> placeholder <> "\" autofocus></textarea>
-        <button type=\"submit\" aria-label=\"Send\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><line x1=\"22\" y1=\"2\" x2=\"11\" y2=\"13\"/><polygon points=\"22 2 15 22 11 13 2 9 22 2\"/></svg></button>
-      </form>
-      <div id=\"input-hint\">Enter to send, Shift+Enter for new line</div>
+    <aside id=\"history-panel\" class=\"collapsed\" aria-label=\"Chat history\">
+      <div id=\"history-header\">
+        <button id=\"history-toggle\" aria-label=\"Toggle chat history\" title=\"History\">
+          <span class=\"history-toggle-icon\">&#9776;</span>
+        </button>
+        <span id=\"history-title\">History</span>
+      </div>
+      <div id=\"history-list\"></div>
+      <div id=\"history-empty\" class=\"hidden\">No past conversations yet.</div>
+      <div id=\"history-loading\" class=\"hidden\">Loading\\u2026</div>
+    </aside>
+    <div id=\"chat-main\">
+      <div id=\"status-strip\" class=\"hidden\" aria-live=\"polite\">
+        <span class=\"status-label\">Idle</span>
+        <span class=\"status-detail\"></span>
+        <span class=\"status-meta\"></span>
+      </div>
+      <div id=\"messages\"></div>
+      <div id=\"input-area\">
+        <form id=\"chat-form\">
+          <textarea id=\"chat-input\" rows=\"1\" placeholder=\"" <> placeholder <> "\" autofocus></textarea>
+          <button type=\"submit\" aria-label=\"Send\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><line x1=\"22\" y1=\"2\" x2=\"11\" y2=\"13\"/><polygon points=\"22 2 15 22 11 13 2 9 22 2\"/></svg></button>
+        </form>
+        <div id=\"input-hint\">Enter to send, Shift+Enter for new line</div>
+      </div>
     </div>
   </div>
   <div id=\"activity-tab\" class=\"tab-content\">
@@ -171,6 +184,159 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
 
   function saveChatHistory() {}
 
+  // ── History sidebar ──────────────────────────────────────────────────
+  // The narrative log is the source. Each day becomes an item in the
+  // sidebar; click opens a read-only view of that day's entries. The live
+  // chat session is never overwritten — the read-only view only replaces
+  // the #messages area until the operator returns to live chat.
+  var historyPanel = document.getElementById('history-panel');
+  var historyToggle = document.getElementById('history-toggle');
+  var historyList = document.getElementById('history-list');
+  var historyEmpty = document.getElementById('history-empty');
+  var historyLoading = document.getElementById('history-loading');
+  var liveSnapshot = null;  // preserved chat when viewing history
+  var viewingDate = null;
+
+  if (historyToggle) {
+    historyToggle.addEventListener('click', function() {
+      var collapsed = historyPanel.classList.contains('collapsed');
+      if (collapsed) {
+        historyPanel.classList.remove('collapsed');
+        // First expansion — lazy-load index if we haven't yet
+        if (!historyList.dataset.loaded && ws && ws.readyState === WebSocket.OPEN) {
+          historyLoading.classList.remove('hidden');
+          ws.send(JSON.stringify({ type: 'request_history_index' }));
+        }
+      } else {
+        historyPanel.classList.add('collapsed');
+      }
+    });
+  }
+
+  function renderHistoryIndex(days) {
+    historyLoading.classList.add('hidden');
+    historyList.innerHTML = '';
+    historyList.dataset.loaded = '1';
+    if (!days || days.length === 0) {
+      historyEmpty.classList.remove('hidden');
+      return;
+    }
+    historyEmpty.classList.add('hidden');
+    days.forEach(function(d) {
+      var btn = document.createElement('button');
+      btn.className = 'history-day';
+      btn.dataset.date = d.date;
+      var dateEl = document.createElement('span');
+      dateEl.className = 'date';
+      dateEl.textContent = formatDateShort(d.date);
+      btn.appendChild(dateEl);
+      var countEl = document.createElement('span');
+      countEl.className = 'count';
+      countEl.textContent = d.cycle_count + ' ' + (d.cycle_count === 1 ? 'cycle' : 'cycles');
+      btn.appendChild(countEl);
+      if (d.headline) {
+        var hl = document.createElement('span');
+        hl.className = 'headline';
+        hl.textContent = d.headline;
+        hl.title = d.headline;
+        btn.appendChild(hl);
+      }
+      btn.addEventListener('click', function() { loadHistoryDay(d.date, btn); });
+      historyList.appendChild(btn);
+    });
+  }
+
+  function loadHistoryDay(date, btn) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    // Mark active
+    Array.prototype.forEach.call(historyList.children, function(c) { c.classList.remove('active'); });
+    if (btn) btn.classList.add('active');
+    viewingDate = date;
+    ws.send(JSON.stringify({ type: 'request_history_day', date: date }));
+  }
+
+  function renderHistoryDay(date, entries) {
+    // Preserve live chat so the operator can return to it via the close button
+    if (!liveSnapshot) liveSnapshot = msgs.innerHTML;
+    msgs.innerHTML = '';
+    var header = document.createElement('div');
+    header.className = 'history-day-header';
+    var close = document.createElement('button');
+    close.className = 'close-history';
+    close.setAttribute('aria-label', 'Return to live chat');
+    close.innerHTML = '&times;';
+    close.addEventListener('click', returnToLiveChat);
+    header.appendChild(close);
+    var title = document.createElement('span');
+    title.textContent = formatDateLong(date) + ' \\u00b7 ' + entries.length + ' ' + (entries.length === 1 ? 'cycle' : 'cycles') + ' \\u00b7 read-only';
+    header.appendChild(title);
+    msgs.appendChild(header);
+    entries.forEach(function(e) {
+      var entry = document.createElement('div');
+      entry.className = 'history-entry';
+      var ts = document.createElement('div');
+      ts.className = 'ts';
+      ts.textContent = formatTimestamp(e.timestamp);
+      entry.appendChild(ts);
+      var summary = document.createElement('div');
+      summary.className = 'summary';
+      summary.textContent = e.summary || '(no summary)';
+      entry.appendChild(summary);
+      var metaParts = [];
+      if (e.intent && e.intent.domain) metaParts.push(e.intent.domain);
+      if (e.outcome && e.outcome.status) metaParts.push(e.outcome.status);
+      if (e.metrics && e.metrics.tool_calls) metaParts.push(e.metrics.tool_calls + ' tool calls');
+      if (e.delegation_chain && e.delegation_chain.length) metaParts.push(e.delegation_chain.length + ' delegations');
+      if (metaParts.length) {
+        var meta = document.createElement('div');
+        meta.className = 'meta';
+        meta.textContent = metaParts.join(' \\u00b7 ');
+        entry.appendChild(meta);
+      }
+      msgs.appendChild(entry);
+    });
+    scrollBottom();
+  }
+
+  function returnToLiveChat() {
+    if (liveSnapshot !== null) {
+      msgs.innerHTML = liveSnapshot;
+      liveSnapshot = null;
+    }
+    viewingDate = null;
+    Array.prototype.forEach.call(historyList.children, function(c) { c.classList.remove('active'); });
+    scrollBottom();
+  }
+
+  function formatDateShort(iso) {
+    // iso is YYYY-MM-DD
+    var parts = iso.split('-');
+    if (parts.length !== 3) return iso;
+    var today = new Date();
+    var todayStr = today.getFullYear() + '-' + pad2(today.getMonth() + 1) + '-' + pad2(today.getDate());
+    if (iso === todayStr) return 'Today';
+    var yesterday = new Date(today.getTime() - 86400000);
+    var yStr = yesterday.getFullYear() + '-' + pad2(yesterday.getMonth() + 1) + '-' + pad2(yesterday.getDate());
+    if (iso === yStr) return 'Yesterday';
+    var d = new Date(iso + 'T00:00:00');
+    return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  }
+
+  function formatDateLong(iso) {
+    var d = new Date(iso + 'T00:00:00');
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  }
+
+  function formatTimestamp(iso) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  }
+
+  function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+
   function renderSessionHistory(messages) {
     msgs.innerHTML = '';
     chatHistory = [];
@@ -226,6 +392,12 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
     switch (data.type) {
       case 'session_history':
         renderSessionHistory(data.messages);
+        break;
+      case 'history_index':
+        renderHistoryIndex(data.days);
+        break;
+      case 'history_day':
+        renderHistoryDay(data.date, data.entries);
         break;
       case 'assistant_message':
         removeThinking();
@@ -1955,6 +2127,166 @@ fn shared_css() -> String {
     font-size: 13px;
     color: var(--text-dim);
     margin-top: 8px;
+  }
+
+  /* ── Chat history panel (collapsible left drawer inside #chat-tab) ─ */
+  /* Lives as a sibling of #chat-main inside #chat-tab; the tab itself
+     is now a horizontal flex row. */
+  #chat-tab.active {
+    display: flex;
+    flex-direction: row;
+  }
+  #chat-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  #history-panel {
+    width: 240px;
+    flex-shrink: 0;
+    border-right: 1px solid var(--border);
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: width 0.2s ease;
+  }
+  #history-panel.collapsed {
+    width: 44px;
+  }
+  #history-panel.collapsed #history-title,
+  #history-panel.collapsed .history-day,
+  #history-panel.collapsed #history-empty,
+  #history-panel.collapsed #history-loading,
+  #history-panel.collapsed #history-list {
+    display: none;
+  }
+  #history-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 10px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  #history-toggle {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 4px 6px;
+    font-size: 16px;
+    color: var(--text-dim);
+    border-radius: 6px;
+  }
+  #history-toggle:hover {
+    background: var(--border);
+    color: var(--text);
+  }
+  #history-title {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--text);
+    text-transform: uppercase;
+  }
+  #history-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px 0;
+    scrollbar-width: thin;
+  }
+  #history-list::-webkit-scrollbar { width: 6px; }
+  #history-list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  .history-day {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 10px 14px;
+    border-bottom: 1px solid transparent;
+    transition: background 0.15s;
+    color: var(--text);
+  }
+  .history-day:hover {
+    background: var(--border);
+  }
+  .history-day.active {
+    background: var(--accent-light);
+    border-bottom-color: var(--border);
+  }
+  .history-day .date {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    display: block;
+    margin-bottom: 3px;
+  }
+  .history-day .count {
+    font-size: 11px;
+    color: var(--text-dim);
+    display: inline;
+    margin-right: 6px;
+  }
+  .history-day .headline {
+    font-size: 12px;
+    color: var(--text-dim);
+    display: block;
+    margin-top: 3px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    line-height: 1.4;
+  }
+  #history-empty, #history-loading {
+    padding: 16px 14px;
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  .hidden { display: none !important; }
+
+  /* Read-only history day view (rendered inline in #messages) */
+  .history-day-header {
+    padding: 14px 16px;
+    margin-bottom: 8px;
+    border-radius: var(--radius-sm);
+    background: var(--accent-light);
+    color: var(--text);
+    font-size: 14px;
+  }
+  .history-day-header .close-history {
+    float: right;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+    color: var(--text-dim);
+    padding: 0 4px;
+  }
+  .history-entry {
+    padding: 12px 16px;
+    border-left: 2px solid var(--border);
+    margin: 8px 0;
+    background: var(--surface);
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+  }
+  .history-entry .ts {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-variant-numeric: tabular-nums;
+    margin-bottom: 4px;
+  }
+  .history-entry .summary {
+    color: var(--text);
+    line-height: 1.5;
+  }
+  .history-entry .meta {
+    margin-top: 6px;
+    font-size: 11px;
+    color: var(--text-dim);
   }
 
   /* ── Narrative tab ───────────────────────────────── */

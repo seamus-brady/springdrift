@@ -27,6 +27,7 @@ import llm/types.{type Message, Assistant, TextContent, User}
 import mist.{type Connection, type ResponseData}
 import narrative/librarian.{type LibrarianMessage}
 import narrative/log as narrative_log
+import narrative/types as narrative_types
 import normative/character as normative_character
 import paths
 import planner/types as planner_types
@@ -599,6 +600,34 @@ fn ws_handler(
                 )
               mist.continue(state)
             }
+            Ok(protocol.RequestHistoryIndex) -> {
+              // Scan the narrative directory for dated JSONL files, build
+              // per-day summaries: count, last activity, one-line headline.
+              // Newest day first.
+              let days_json = history_index_json(state.narrative_dir)
+              let _ =
+                mist.send_text_frame(
+                  conn,
+                  protocol.encode_server_message(protocol.HistoryIndex(
+                    days_json:,
+                  )),
+                )
+              mist.continue(state)
+            }
+            Ok(protocol.RequestHistoryDay(date:)) -> {
+              let entries = narrative_log.load_date(state.narrative_dir, date)
+              let entries_json =
+                json.to_string(json.array(entries, narrative_log.encode_entry))
+              let _ =
+                mist.send_text_frame(
+                  conn,
+                  protocol.encode_server_message(protocol.HistoryDay(
+                    date:,
+                    entries_json:,
+                  )),
+                )
+              mist.continue(state)
+            }
             Ok(protocol.RequestRewind(index: _)) -> {
               // Rewind is no longer supported — agent starts fresh each session
               let _ =
@@ -790,6 +819,64 @@ fn notification_to_server_message(
 
 @external(erlang, "springdrift_ffi", "get_date")
 fn get_today_date() -> String
+
+/// Scan a narrative directory for dated JSONL files, build a per-day
+/// summary (date, cycle count, last activity timestamp, one-line
+/// headline), return as a JSON array sorted newest-first.
+///
+/// The headline is the `intent.description` of the most recent entry
+/// with a non-empty description, falling back to the summary text
+/// truncated to 120 chars.
+fn history_index_json(narrative_dir: String) -> String {
+  let files = case simplifile.read_directory(narrative_dir) {
+    Ok(fs) -> fs
+    Error(_) -> []
+  }
+  let days =
+    files
+    |> list.filter(fn(f) { string.ends_with(f, ".jsonl") })
+    |> list.filter(fn(f) {
+      // Only top-level day files named YYYY-MM-DD.jsonl (10 + 6 = 16 chars)
+      // Excludes thread-index files and other sub-files.
+      string.length(f) == 16
+    })
+    |> list.sort(fn(a, b) { string.compare(b, a) })
+    |> list.map(fn(f: String) -> json.Json {
+      let date = string.drop_end(f, 6)
+      let entries: List(narrative_types.NarrativeEntry) =
+        narrative_log.load_date(narrative_dir, date)
+      let reversed = list.reverse(entries)
+      let cycle_count = list.length(entries)
+      let last = case reversed {
+        [latest, ..] -> latest.timestamp
+        [] -> ""
+      }
+      let headline = case
+        list.find(reversed, fn(e) { e.intent.description != "" })
+      {
+        Ok(e) -> e.intent.description
+        Error(_) ->
+          case reversed {
+            [latest, ..] -> truncate(latest.summary, 120)
+            [] -> ""
+          }
+      }
+      json.object([
+        #("date", json.string(date)),
+        #("cycle_count", json.int(cycle_count)),
+        #("last_activity", json.string(last)),
+        #("headline", json.string(headline)),
+      ])
+    })
+  json.to_string(json.preprocessed_array(days))
+}
+
+fn truncate(s: String, n: Int) -> String {
+  case string.length(s) <= n {
+    True -> s
+    False -> string.slice(s, 0, n) <> "\u{2026}"
+  }
+}
 
 fn encode_cycle_node(node: dag_types.CycleNode) -> json.Json {
   json.object([

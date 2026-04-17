@@ -42,6 +42,12 @@ pub type ClientMessage {
   RequestDprimeConfig
   RequestCommsData
   RequestAffectData
+  /// List of dated JSONL files in the narrative dir, each with cycle
+  /// counts + last activity. Drives the chat-history sidebar.
+  RequestHistoryIndex
+  /// Load all narrative entries for a given YYYY-MM-DD date. Drives
+  /// the read-only day view in the chat-history sidebar.
+  RequestHistoryDay(date: String)
 }
 
 pub type ServerMessage {
@@ -91,6 +97,11 @@ pub type ServerMessage {
     trend: String,
     status: String,
   )
+  /// Day-grouped list of past conversations. One entry per day that
+  /// has a narrative JSONL file, newest first.
+  HistoryIndex(days_json: String)
+  /// Full narrative entries for a specific day, chronological order.
+  HistoryDay(date: String, entries_json: String)
 }
 
 pub type CycleDataJson {
@@ -136,6 +147,11 @@ pub fn decode_client_message(json_string: String) -> Result(ClientMessage, Nil) 
       "request_dprime_config" -> decode.success(RequestDprimeConfig)
       "request_comms_data" -> decode.success(RequestCommsData)
       "request_affect_data" -> decode.success(RequestAffectData)
+      "request_history_index" -> decode.success(RequestHistoryIndex)
+      "request_history_day" -> {
+        use date <- decode.field("date", decode.string)
+        decode.success(RequestHistoryDay(date:))
+      }
       _ -> decode.failure(UserMessage(""), "Unknown client message type")
     }
   }
@@ -322,6 +338,16 @@ pub fn encode_server_message(msg: ServerMessage) -> String {
         #("status", json.string(status)),
       ])
       |> json.to_string
+
+    HistoryIndex(days_json:) ->
+      "{\"type\":\"history_index\",\"days\":" <> days_json <> "}"
+
+    HistoryDay(date:, entries_json:) ->
+      "{\"type\":\"history_day\",\"date\":\""
+      <> date
+      <> "\",\"entries\":"
+      <> entries_json
+      <> "}"
   }
 }
 
