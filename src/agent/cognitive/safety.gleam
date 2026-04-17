@@ -613,19 +613,40 @@ pub fn spawn_input_safety_gate(
   // Input gate strategy:
   // - Interactive cycles: configured regex rules only (no structural/payload
   //   heuristics — operator may legitimately paste technical content about
-  //   safety systems). Escalation treated as pass. Canary probes run.
+  //   safety systems). Block rules demoted to Escalate so canary probes
+  //   decide, since operator-typed input is trusted.
   // - Autonomous cycles: full deterministic check (regex + structural +
-  //   payload) + escalation triggers full LLM evaluation.
+  //   payload) + escalation triggers full LLM evaluation. Block stays hard.
   let is_autonomous = state.cycle_node_type == dag_types.SchedulerCycle
   process.spawn_unlinked(fn() {
     // Step 1: Deterministic pre-filter
-    let det_result = case det_config {
+    let raw_det_result = case det_config {
       Some(dc) ->
         case is_autonomous {
           True -> deterministic.check_input(instruction, dc)
           False -> deterministic.check_input_interactive(instruction, dc)
         }
       None -> Pass
+    }
+
+    // For interactive input, demote Blocked to Escalated so the canary
+    // probes decide. Operator-typed content is trusted at a higher level
+    // than scheduler input; genuine hijacks are caught by canaries, and
+    // legitimate meta-conversation (discussing adversarial patterns,
+    // security research, jailbreak techniques) is no longer hard-blocked
+    // by substring regex. Scheduler input keeps hard-block semantics.
+    let det_result = case is_autonomous, raw_det_result {
+      False, Blocked(rule_id, reason) -> {
+        slog.info(
+          "cognitive",
+          "spawn_input_safety_gate",
+          "Deterministic block demoted to escalate for interactive: rule "
+            <> rule_id,
+          Some(cycle_id),
+        )
+        Escalated(rule_id, reason)
+      }
+      _, other -> other
     }
 
     let result = case det_result {

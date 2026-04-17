@@ -856,16 +856,32 @@ single-gate format — `load_unified` auto-detects and converts.
 
 **Input gate fast-accept** — the input gate uses a split evaluation path for
 performance. Since the operator is the user, the primary threat on user input is
-indirect injection (not the operator themselves). The flow is:
-1. Deterministic regex pre-filter → Block (reject, no LLM) / Escalate / Pass
-2. If Pass: canary probes (hijack + leakage, 2 LLM calls) → if detected, reject
-3. If canaries clean: fast-accept (no LLM scorer). Done.
-4. If Escalate: full LLM scorer evaluation (reactive + deliberative layers).
+indirect injection (not the operator themselves). The flow differs by source:
 
-This reduces the input gate from ~5 LLM calls to 2 (canaries only) for normal
-benign input. The tool gate does NOT get fast-accept — it always runs the full
-LLM scorer for non-exempt tools, because the threat there is a compromised agent
-acting on indirect injection via web content.
+**Interactive cycles (operator input):**
+1. Deterministic regex pre-filter → Block, Escalate, or Pass
+2. Block is **demoted to Escalate** (operator-typed content is trusted; canaries
+   decide). Only the rule_id is logged, no hard reject.
+3. Canary probes (hijack + leakage, 2 LLM calls) → if detected, reject
+4. If canaries clean → fast-accept (no LLM scorer). Done.
+
+This lets the operator discuss adversarial patterns, jailbreak research, and
+meta-conversation about safety systems without being blocked by substring
+matches. `\bDAN\b` still matches legitimate uses of the term; it just takes
+the canary-probe path instead of hard-rejecting.
+
+**Autonomous cycles (scheduler input):**
+1. Full deterministic check (regex + structural + payload signatures)
+2. Block → hard reject immediately, no LLM calls
+3. Escalate → full LLM scorer evaluation (reactive + deliberative layers)
+4. Pass → canary probes → fast-accept if clean
+
+Scheduler input can carry indirect injection from email bodies, fetched web
+content, or other untrusted sources. Hard-block semantics are retained there.
+
+The tool gate does NOT get fast-accept — it always runs the full LLM scorer
+for non-exempt tools, because the threat there is a compromised agent acting
+on indirect injection via web content.
 
 **Canary probes** — `dprime/canary.gleam` runs hijack and leakage probes using
 fresh random tokens per request. Fail-open: LLM errors during probes are treated
