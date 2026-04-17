@@ -65,15 +65,9 @@ The spec called for a dedicated admin-page tab showing memory depth, last consol
 
 ---
 
-## 4. Richer sensorium memory attributes
+## 4. Richer sensorium memory attributes — DONE (2026-04-17, commit 3f4d5b7)
 
-The original spec included `decayed_facts="23" dormant_threads="7"` in the `<memory>` tag. These were skipped because computing them every cycle would require scanning the full fact + narrative archive.
-
-**Options:**
-- Cache counts in the Librarian, refreshed only when the Remembrancer runs (cheap lookup in the sensorium).
-- Compute them periodically (e.g. once an hour) in the Forecaster or a new lightweight tick actor, and expose via the Librarian.
-
-Either way, surface them as attributes on the existing `<memory>` tag.
+Shipped. `ConsolidationRun` now carries `decayed_facts_count` and `dormant_threads_count`, computed at write time from `facts_log.resolve_current` (with `decay.decay_fact_confidence`) and `rquery.find_dormant_threads` respectively. The sensorium `<memory>` tag renders both attributes. Snapshots go stale as consolidation falls behind — the right signal, prompts re-consolidation.
 
 ---
 
