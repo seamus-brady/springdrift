@@ -38,6 +38,17 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
 <div id=\"ambient-layer\" aria-hidden=\"true\"></div>
 <div id=\"layout\">
 " <> sidebar_html("chat") <> "
+<aside id=\"history-panel\" aria-label=\"Chat history\">
+  <div id=\"history-header\">
+    <button id=\"history-toggle\" aria-label=\"Collapse chat history\" title=\"Collapse\">
+      <span class=\"history-toggle-icon\">&#9776;</span>
+    </button>
+    <span id=\"history-title\">Chats</span>
+  </div>
+  <div id=\"history-list\"></div>
+  <div id=\"history-empty\" class=\"hidden\">No past conversations yet.</div>
+  <div id=\"history-loading\" class=\"hidden\">Loading\\u2026</div>
+</aside>
 <div id=\"main-content\">
 " <> header_html(title, version) <> "
 <div id=\"tab-bar\">
@@ -46,31 +57,18 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
 </div>
 <div id=\"content-area\">
   <div id=\"chat-tab\" class=\"tab-content active\">
-    <aside id=\"history-panel\" class=\"collapsed\" aria-label=\"Chat history\">
-      <div id=\"history-header\">
-        <button id=\"history-toggle\" aria-label=\"Toggle chat history\" title=\"History\">
-          <span class=\"history-toggle-icon\">&#9776;</span>
-        </button>
-        <span id=\"history-title\">History</span>
-      </div>
-      <div id=\"history-list\"></div>
-      <div id=\"history-empty\" class=\"hidden\">No past conversations yet.</div>
-      <div id=\"history-loading\" class=\"hidden\">Loading\\u2026</div>
-    </aside>
-    <div id=\"chat-main\">
-      <div id=\"status-strip\" class=\"hidden\" aria-live=\"polite\">
-        <span class=\"status-label\">Idle</span>
-        <span class=\"status-detail\"></span>
-        <span class=\"status-meta\"></span>
-      </div>
-      <div id=\"messages\"></div>
-      <div id=\"input-area\">
-        <form id=\"chat-form\">
-          <textarea id=\"chat-input\" rows=\"1\" placeholder=\"" <> placeholder <> "\" autofocus></textarea>
-          <button type=\"submit\" aria-label=\"Send\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><line x1=\"22\" y1=\"2\" x2=\"11\" y2=\"13\"/><polygon points=\"22 2 15 22 11 13 2 9 22 2\"/></svg></button>
-        </form>
-        <div id=\"input-hint\">Enter to send, Shift+Enter for new line</div>
-      </div>
+    <div id=\"status-strip\" class=\"hidden\" aria-live=\"polite\">
+      <span class=\"status-label\">Idle</span>
+      <span class=\"status-detail\"></span>
+      <span class=\"status-meta\"></span>
+    </div>
+    <div id=\"messages\"></div>
+    <div id=\"input-area\">
+      <form id=\"chat-form\">
+        <textarea id=\"chat-input\" rows=\"1\" placeholder=\"" <> placeholder <> "\" autofocus></textarea>
+        <button type=\"submit\" aria-label=\"Send\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><line x1=\"22\" y1=\"2\" x2=\"11\" y2=\"13\"/><polygon points=\"22 2 15 22 11 13 2 9 22 2\"/></svg></button>
+      </form>
+      <div id=\"input-hint\">Enter to send, Shift+Enter for new line</div>
     </div>
   </div>
   <div id=\"activity-tab\" class=\"tab-content\">
@@ -202,15 +200,16 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
       var collapsed = historyPanel.classList.contains('collapsed');
       if (collapsed) {
         historyPanel.classList.remove('collapsed');
-        // First expansion — lazy-load index if we haven't yet
-        if (!historyList.dataset.loaded && ws && ws.readyState === WebSocket.OPEN) {
-          historyLoading.classList.remove('hidden');
-          ws.send(JSON.stringify({ type: 'request_history_index' }));
-        }
       } else {
         historyPanel.classList.add('collapsed');
       }
     });
+  }
+
+  function requestHistoryIndex() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    historyLoading.classList.remove('hidden');
+    ws.send(JSON.stringify({ type: 'request_history_index' }));
   }
 
   function renderHistoryIndex(days) {
@@ -256,18 +255,23 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
   }
 
   function renderHistoryDay(date, entries) {
-    // Preserve live chat so the operator can return to it via the close button
-    if (!liveSnapshot) liveSnapshot = msgs.innerHTML;
+    // Snapshot the live chat so incoming live messages don't mutate what we
+    // restore. While viewingDate is truthy, live message handlers still
+    // update chatHistory but skip DOM rendering. On close we rebuild
+    // the #messages DOM from chatHistory — no window reload, no lost
+    // agent replies arriving while the operator reads past cycles.
+    liveSnapshot = chatHistory.slice();
     msgs.innerHTML = '';
     var header = document.createElement('div');
     header.className = 'history-day-header';
-    var close = document.createElement('button');
-    close.className = 'close-history';
-    close.setAttribute('aria-label', 'Return to live chat');
-    close.innerHTML = '&times;';
-    close.addEventListener('click', returnToLiveChat);
-    header.appendChild(close);
+    var back = document.createElement('button');
+    back.className = 'back-to-chat';
+    back.setAttribute('aria-label', 'Return to live chat');
+    back.innerHTML = '&larr; Back to live chat';
+    back.addEventListener('click', returnToLiveChat);
+    header.appendChild(back);
     var title = document.createElement('span');
+    title.className = 'history-day-title';
     title.textContent = formatDateLong(date) + ' \\u00b7 ' + entries.length + ' ' + (entries.length === 1 ? 'cycle' : 'cycles') + ' \\u00b7 read-only';
     header.appendChild(title);
     msgs.appendChild(header);
@@ -299,12 +303,24 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
   }
 
   function returnToLiveChat() {
-    if (liveSnapshot !== null) {
-      msgs.innerHTML = liveSnapshot;
-      liveSnapshot = null;
-    }
     viewingDate = null;
     Array.prototype.forEach.call(historyList.children, function(c) { c.classList.remove('active'); });
+    // Rebuild #messages from chatHistory which has been kept up-to-date
+    // throughout (including any messages that arrived while reading
+    // history). This preserves the agent's latest replies cleanly.
+    msgs.innerHTML = '';
+    chatHistory.forEach(function(item) {
+      if (item.role === 'user') {
+        if (item.text && item.text.indexOf('[Session started.') !== 0) {
+          renderUserMessage(item.text);
+        }
+      } else if (item.role === 'assistant') {
+        renderAssistantMessage(item.text, item.model || null, item.usage || null, item.revised || false);
+      } else if (item.role === 'notification') {
+        renderNotification(item.text);
+      }
+    });
+    liveSnapshot = null;
     scrollBottom();
   }
 
@@ -345,6 +361,12 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
     messages.forEach(function(item) {
       if (item.role === 'user') {
         var text = item.text || '';
+        // Skip the synthetic bootstrap prompt the server sends to trigger
+        // a session-opening greeting. It's a user-role message to the
+        // cognitive loop, not something the operator typed.
+        if (text.indexOf('[Session started.') === 0) {
+          return;
+        }
         if (text.indexOf('<scheduler_context>') === 0) {
           inSchedulerCycle = true;
           renderSchedulerMessage(text);
@@ -471,7 +493,8 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
     // Saturation: more calm = more saturated (deeper colour); grey when agitated
     var saturation = 20 + (calm / 100) * 60;
     // Opacity: more confident = slightly more visible. Range 0.06..0.14
-    var opacity = 0.06 + (confidence / 100) * 0.08;
+    // Opacity range 0.15..0.30 — visible but not overwhelming
+    var opacity = 0.15 + (confidence / 100) * 0.15;
     // Red accent shift when frustration exceeds 60; shift up to -40deg toward red
     var accent = frustration > 60 ? ((frustration - 60) / 40) * 40 : 0;
     root.style.setProperty('--affect-hue', hue + 'deg');
@@ -551,24 +574,24 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
   }
 
   function addUserMessage(text) {
-    renderUserMessage(text);
+    if (!viewingDate) renderUserMessage(text);
     chatHistory.push({ role: 'user', text: text });
     saveChatHistory();
-    scrollBottom();
+    if (!viewingDate) scrollBottom();
   }
 
   function addAssistantMessage(text, model, usage, revised) {
-    renderAssistantMessage(text, model, usage, revised);
+    if (!viewingDate) renderAssistantMessage(text, model, usage, revised);
     chatHistory.push({ role: 'assistant', text: text, model: model, usage: usage, revised: revised || false });
     saveChatHistory();
-    scrollBottom();
+    if (!viewingDate) scrollBottom();
   }
 
   function addNotification(text) {
-    renderNotification(text);
+    if (!viewingDate) renderNotification(text);
     chatHistory.push({ role: 'notification', text: text });
     saveChatHistory();
-    scrollBottom();
+    if (!viewingDate) scrollBottom();
   }
 
   function setThinkingLock(locked) {
@@ -1606,27 +1629,33 @@ fn shared_css() -> String {
     --affect-hue: 220deg;         /* cool blue default */
     --affect-saturation: 40%;
     --affect-lightness: 55%;
-    --affect-opacity: 0.10;
+    --affect-opacity: 0.22;
     --affect-accent: 0%;          /* red tinge for frustration spikes */
     --breathing-duration: 7s;     /* idle rhythm */
   }
+  html {
+    background: var(--bg);
+  }
   body {
     font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, 'Book Antiqua', serif;
-    background: var(--bg);
+    background: transparent;
     color: var(--text);
     height: 100vh;
     margin: 0;
     font-size: 17px;
+    position: relative;
+    z-index: 0;
   }
 
   /* ── Ambient affect layer ────────────────────────
      Fixed-position gradient wash driven by live affect telemetry.
-     Sits behind all content. Honest biometric signal — the hue shifts
-     as Curragh's interior state shifts. Respects reduced-motion. */
+     Sits behind all content but above the base bg. Honest biometric
+     signal — the hue shifts as Curragh's interior state shifts.
+     Respects reduced-motion. */
   #ambient-layer {
     position: fixed;
     inset: 0;
-    z-index: -1;
+    z-index: 0;
     pointer-events: none;
     background:
       radial-gradient(
@@ -1673,6 +1702,8 @@ fn shared_css() -> String {
   #layout {
     display: flex;
     height: 100vh;
+    position: relative;
+    z-index: 1;
   }
   #main-content {
     flex: 1;
@@ -2133,21 +2164,12 @@ fn shared_css() -> String {
     margin-top: 8px;
   }
 
-  /* ── Chat history panel (collapsible left drawer inside #chat-tab) ─ */
-  /* Lives as a sibling of #chat-main inside #chat-tab; the tab itself
-     is now a horizontal flex row. */
-  #chat-tab.active {
-    display: flex;
-    flex-direction: row;
-  }
-  #chat-main {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-  }
+  /* ── Chat history panel — sits at #layout level between the outer
+     nav sidebar and #main-content. Modern chat-app positioning:
+     far-left is app nav, next column is conversation history, main
+     area is the current chat. */
   #history-panel {
-    width: 240px;
+    width: 260px;
     flex-shrink: 0;
     border-right: 1px solid var(--border);
     background: var(--bg);
@@ -2155,6 +2177,7 @@ fn shared_css() -> String {
     flex-direction: column;
     overflow: hidden;
     transition: width 0.2s ease;
+    height: 100vh;
   }
   #history-panel.collapsed {
     width: 44px;
@@ -2259,15 +2282,28 @@ fn shared_css() -> String {
     background: var(--accent-light);
     color: var(--text);
     font-size: 14px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
   }
-  .history-day-header .close-history {
-    float: right;
-    background: transparent;
-    border: none;
+  .history-day-header .back-to-chat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 13px;
     cursor: pointer;
-    font-size: 16px;
-    color: var(--text-dim);
-    padding: 0 4px;
+    padding: 6px 12px;
+    border-radius: var(--radius-sm);
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .history-day-header .back-to-chat:hover {
+    background: var(--bg);
+    border-color: var(--border-hover);
+  }
+  .history-day-header .history-day-title {
+    flex: 1;
+    color: var(--text-secondary);
   }
   .history-entry {
     padding: 12px 16px;
@@ -2620,6 +2656,9 @@ fn ws_connect_js() -> String {
       statusEl.textContent = 'connected';
       statusDot.className = 'dot connected';
       reconnectDelay = 1000;
+      // Load the chat-history index for the sidebar. Harmless on the
+      // admin page — the handler on that page ignores history_index.
+      if (typeof requestHistoryIndex === 'function') requestHistoryIndex();
       // Load data for the default active tab on connect
       var activeTab = document.querySelector('.tab-btn.active');
       if (activeTab) {
