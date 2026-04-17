@@ -2,75 +2,85 @@
 
 **Status**: Planned
 **Parent**: `docs/roadmap/implemented/remembrancer.md` (Phases 1–10 shipped 2026-04-16)
-**Dependencies**: Skills management (planned) for item 1; self-contained for 2–4.
+**Related**: `docs/roadmap/planned/meta-learning.md`, `docs/roadmap/planned/skills-management-revisions.md`
 
-This captures the work deferred from the original Remembrancer roadmap so it does not get lost.
+This captures the work deferred from the original Remembrancer roadmap. Revised 2026-04-17 to reflect the agent-led meta-learning direction.
 
 ---
 
 ## 1. Skills-proposal pipeline (Phase 11) — BLOCKED
 
-When `mine_patterns` finds recurring approaches or pitfalls across CBR cases, those clusters should become proposed Skills — not just paragraphs in a consolidation report.
+When `mine_patterns` finds recurring approaches or pitfalls across CBR cases, those clusters should become promoted Skills.
 
-**Blocked by**: `docs/roadmap/planned/skills-management.md`. That spec needs to ship first — it defines the `Skill` type with effectiveness metrics, the skill.toml sidecar format, and the approval pipeline.
+**Blocked by**: `docs/roadmap/planned/skills-management.md` + `skills-management-revisions.md`. The skills substrate must ship before the Remembrancer can promote into it.
 
-**Remembrancer work required once unblocked:**
-- Add a `propose_skill` tool (or extend `mine_patterns`) that emits a proposed skill with supporting case IDs to the skills inbox.
-- The operator reviews and approves/rejects via the web GUI.
-- Approved skills become live SKILL.md files.
+**Remembrancer work required once unblocked** (agent-led, revised):
+- Add a `propose_skill` tool (or extend `mine_patterns`) that writes the Active skill directly, subject to the D' gate and rate limit.
+- No operator inbox, no approve/reject step. The consolidation report lists what was promoted.
+- Works hand-in-hand with meta-learning Phase B.
 
-Until skills management ships, the current behaviour (describe the pattern in the consolidation report) is sufficient — the operator reads the report and can manually codify a skill if warranted.
-
----
-
-## 2. TOML-driven scheduled consolidation (Phase 9 completion)
-
-The original design referenced a `[[task]]` block in a profile's `schedule.toml`:
-
-```toml
-[[task]]
-name = "weekly-consolidation"
-kind = "recurring"
-interval_ms = 604800000
-query = "Run memory consolidation for the past week..."
-```
-
-This format is defined in `src/scheduler/types.gleam` (`ScheduleTaskConfig`) but no loader currently reads it at startup — jobs are only created at runtime via the scheduler agent's `schedule_from_spec` tool.
-
-**Work required:**
-- Implement a `schedule.toml` loader (probably in `src/scheduler/config.gleam` or as part of `profile.gleam`).
-- Call it at startup and pass resulting jobs into `scheduler_runner.start`.
-- Ship a default `schedule.toml` with the weekly consolidation entry.
-
-**Workaround until then:** the operator asks the scheduler agent to create a weekly recurring job that delegates to the Remembrancer. The Remembrancer can be invoked any time by the cognitive loop or the operator.
+**Workaround until then**: consolidation reports describe recurring patterns in prose. The operator can manually codify a skill if warranted. Agent learning happens via CBR utility scoring in the meantime.
 
 ---
 
-## 3. Web GUI Memory Health panel (Phase 10 completion)
+## 2. TOML-driven scheduled consolidation — SUPERSEDED (2026-04-17)
 
-The spec called for a dedicated admin-page tab showing memory depth, last consolidation time, pending pattern proposals, and action buttons. Currently only the sensorium tag is rendered.
+**Status**: Removed from Remembrancer followups. Superseded by meta-learning Phase F (Metacognitive Scheduler).
 
-**Work required:**
-- New admin tab in `src/web/html.gleam` ("Memory") with:
-  - Memory depth stats (narrative entries/CBR cases/facts, oldest entry date)
-  - Decayed fact count + dormant thread count (requires computing these)
-  - Consolidation run history (from `.springdrift/memory/consolidation/`)
-  - Pattern-proposal queue (requires Phase 11)
-  - Timeline view of activity density + consolidation events
-  - Action buttons: "Run Consolidation" / "Mine Patterns" / "Find Dormant Threads"
-- WebSocket messages for `RequestMemoryHealth` / `MemoryHealthData` in `src/web/protocol.gleam`.
-- Librarian queries for the expensive counts (probably cached).
+Rationale: the meta-learning spec (`docs/roadmap/planned/meta-learning.md` §4.6) defines the proper home for scheduled learning activities — `[meta_learning]` config block with intervals for consolidation, goal review, skill decay check, affect correlation, and strategy review. Building a generic `schedule.toml` loader now would duplicate that motivation.
 
-**Estimate:** Medium. About 200–300 lines in `web/html.gleam` + `protocol.gleam` + a small handler in `web/gui.gleam`.
+The weekly-consolidation use case will be handled by Phase F at startup via the existing scheduler agent's `schedule_from_spec`. No new TOML infrastructure needed.
+
+**Current workaround (permanent until Phase F)**: the operator asks the scheduler agent to create a weekly recurring job that delegates to the Remembrancer. `ScheduleTaskConfig` in `src/scheduler/types.gleam` remains as a type that a future TOML loader could use, but nothing reads it today.
+
+---
+
+## 3. Web GUI Memory Health panel — SCOPED DOWN
+
+**Revised scope (2026-04-17)**: ship a narrow consolidation-history view. Defer the broader "memory admin" surface to meta-learning Phase 10 (when strategies, skills, goals, and affect warnings all need a home).
+
+**Scope — ship now**:
+- New admin tab in `src/web/html.gleam` ("Memory") showing:
+  - Consolidation run history (list from `.springdrift/memory/consolidation/`).
+  - Each row: date, period covered, patterns found, facts restored, threads resurrected, decayed/dormant counts, report path.
+  - Clickable report path that opens the markdown in a sidebar.
+- WebSocket messages `RequestConsolidationHistory` / `ConsolidationHistoryData` in `src/web/protocol.gleam`.
+- Read-only — no "Run Consolidation" button. The agent decides when to consolidate; the metacognitive scheduler (Phase F) will trigger it.
+
+**Out of scope — deferred to meta-learning admin work**:
+- Pattern-proposal queue (requires skills-management).
+- Strategy / learning-goals / affect-warning views (meta-learning Phases A, C, D).
+- Action buttons (conflict with agent-led autonomy — the agent initiates, not the operator).
+- Timeline visualisation (nice-to-have, not essential for audit).
+
+**Estimate**: Small-Medium. About 80–120 lines in `web/html.gleam` + `protocol.gleam` + a small handler in `web/gui.gleam`.
 
 ---
 
 ## 4. Richer sensorium memory attributes — DONE (2026-04-17, commit 3f4d5b7)
 
-Shipped. `ConsolidationRun` now carries `decayed_facts_count` and `dormant_threads_count`, computed at write time from `facts_log.resolve_current` (with `decay.decay_fact_confidence`) and `rquery.find_dormant_threads` respectively. The sensorium `<memory>` tag renders both attributes. Snapshots go stale as consolidation falls behind — the right signal, prompts re-consolidation.
+Shipped. `ConsolidationRun` now carries `decayed_facts_count` and `dormant_threads_count`, computed at write time from `facts_log.resolve_current` (with `decay.decay_fact_confidence`) and `rquery.find_dormant_threads`. The sensorium `<memory>` tag renders both attributes. Snapshots go stale as consolidation falls behind — the right signal.
 
 ---
 
 ## 5. Remembrancer-authored fact-provenance improvements — DONE (2026-04-17, commit 6dbb171)
 
-Shipped. `restore_confidence` now looks up the current fact via `facts_log.resolve_current` and populates `supersedes: Some(old_fact_id)` when a prior version exists. The success message and slog entry both name the superseded ID (or note "no prior version"). 4 unit tests cover the paths.
+Shipped. `restore_confidence` looks up the current fact via `facts_log.resolve_current` and populates `supersedes: Some(old_fact_id)` when a prior version exists. The success message and slog entry both name the superseded ID (or note "no prior version"). 4 unit tests cover the paths.
+
+---
+
+## 6. Meta-learning extensions to the Remembrancer
+
+**Status**: Tracked here for awareness. These are not Remembrancer-internal work; they are deliveries of the meta-learning spec that happen to extend the Remembrancer's tool surface.
+
+When the meta-learning phases land, the Remembrancer gains the following capabilities:
+
+| Meta-learning phase | Remembrancer addition |
+|---|---|
+| A — Strategy Registry | `mine_patterns` proposes new strategies from recurring unnamed approaches. New field `strategy_id` threaded through proposals. |
+| B — Skills Management | `mine_patterns` promotes skills (resolves follow-up #1 above). Rate-limited. |
+| D — Affect-Performance Engine | Remembrancer runs affect-performance correlation analysis during consolidation. Results stored as facts. |
+| E — Study-Cycle Pipeline | Two new tools: `extract_insights` and `propose_knowledge`. Write directly to CBR/facts/skills/strategy stores via D'-gated append. |
+| F — Metacognitive Scheduler | Consolidation triggered by the scheduler on configured intervals (weekly default). Metacognitive scheduler is the orchestrator; Remembrancer is a worker. |
+
+No work on these items in this followups doc — they live in `meta-learning.md`.
