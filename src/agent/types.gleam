@@ -472,6 +472,19 @@ pub type Notification {
   /// status: "idle" | "thinking" | "classifying" | "waiting_for_agents"
   ///       | "waiting_for_user" | "evaluating_safety"
   StatusChange(status: String, detail: Option(String))
+  /// Per-cycle affect snapshot (0-100 dimensions) + trend + cognitive
+  /// status. Drives the web UI ambient background — gradient hue, opacity,
+  /// and breathing rhythm all derive from this. Honest biometric signal
+  /// of the agent's interior state.
+  AffectTickNotice(
+    desperation: Float,
+    calm: Float,
+    confidence: Float,
+    frustration: Float,
+    pressure: Float,
+    trend: String,
+    status: String,
+  )
 }
 
 // ---------------------------------------------------------------------------

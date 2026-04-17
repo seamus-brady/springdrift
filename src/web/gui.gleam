@@ -767,6 +767,24 @@ fn notification_to_server_message(
       )
     agent_types.StatusChange(status:, detail:) ->
       protocol.StatusTransition(status:, detail:)
+    agent_types.AffectTickNotice(
+      desperation:,
+      calm:,
+      confidence:,
+      frustration:,
+      pressure:,
+      trend:,
+      status:,
+    ) ->
+      protocol.AffectTick(
+        desperation:,
+        calm:,
+        confidence:,
+        frustration:,
+        pressure:,
+        trend:,
+        status:,
+      )
   }
 }
 

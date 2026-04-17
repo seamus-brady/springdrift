@@ -178,6 +178,28 @@ pub fn encode_status_transition_no_detail_test() {
   json_str |> should_contain("\"detail\":null")
 }
 
+pub fn encode_affect_tick_test() {
+  let msg =
+    protocol.AffectTick(
+      desperation: 12.5,
+      calm: 72.0,
+      confidence: 65.5,
+      frustration: 18.0,
+      pressure: 35.0,
+      trend: "rising",
+      status: "thinking",
+    )
+  let json_str = protocol.encode_server_message(msg)
+  json_str |> should_contain("\"kind\":\"affect_tick\"")
+  json_str |> should_contain("\"desperation\":12.5")
+  json_str |> should_contain("\"calm\":72.0")
+  json_str |> should_contain("\"confidence\":65.5")
+  json_str |> should_contain("\"frustration\":18.0")
+  json_str |> should_contain("\"pressure\":35.0")
+  json_str |> should_contain("\"trend\":\"rising\"")
+  json_str |> should_contain("\"status\":\"thinking\"")
+}
+
 // ---------------------------------------------------------------------------
 // Source helpers
 // ---------------------------------------------------------------------------

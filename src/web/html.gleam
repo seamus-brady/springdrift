@@ -35,6 +35,7 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
 </style>
 </head>
 <body>
+<div id=\"ambient-layer\" aria-hidden=\"true\"></div>
 <div id=\"layout\">
 " <> sidebar_html("chat") <> "
 <div id=\"main-content\">
@@ -270,9 +271,55 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
         } else if (data.kind === 'status_transition') {
           statusStripLabel.textContent = humanizeStatus(data.status);
           if (data.detail) statusStripDetail.textContent = data.detail;
+          applyStatusRhythm(data.status);
+        } else if (data.kind === 'affect_tick') {
+          applyAffectTick(data);
         }
         break;
     }
+  }
+
+  // Map the 5 affect dimensions + cognitive status to CSS custom properties
+  // that drive the ambient background. Honest biometric mapping: hue shifts
+  // with pressure, saturation with calm, opacity with confidence, and a red
+  // tinge appears above a frustration threshold. Breathing rhythm reflects
+  // whether the agent is idle or working.
+  function applyAffectTick(d) {
+    var root = document.documentElement;
+    var pressure = typeof d.pressure === 'number' ? d.pressure : 0;
+    var calm = typeof d.calm === 'number' ? d.calm : 75;
+    var confidence = typeof d.confidence === 'number' ? d.confidence : 60;
+    var frustration = typeof d.frustration === 'number' ? d.frustration : 0;
+    // Hue: cool blue (220) -> magenta (320) as pressure climbs 0..100
+    var hue = 220 + (pressure / 100) * 100;
+    // Saturation: more calm = more saturated (deeper colour); grey when agitated
+    var saturation = 20 + (calm / 100) * 60;
+    // Opacity: more confident = slightly more visible. Range 0.06..0.14
+    var opacity = 0.06 + (confidence / 100) * 0.08;
+    // Red accent shift when frustration exceeds 60; shift up to -40deg toward red
+    var accent = frustration > 60 ? ((frustration - 60) / 40) * 40 : 0;
+    root.style.setProperty('--affect-hue', hue + 'deg');
+    root.style.setProperty('--affect-saturation', saturation + '%');
+    root.style.setProperty('--affect-opacity', opacity.toFixed(3));
+    root.style.setProperty('--affect-accent', accent + 'deg');
+    applyStatusRhythm(d.status);
+  }
+
+  // Breathing rhythm reflects cognitive state:
+  //   idle / waiting_for_user   -> 7s slow breath
+  //   thinking / classifying    -> 2s faster
+  //   waiting_for_agents        -> 3s
+  //   evaluating_safety         -> 4s
+  function applyStatusRhythm(status) {
+    var duration;
+    switch (status) {
+      case 'thinking':
+      case 'classifying':         duration = '2s'; break;
+      case 'waiting_for_agents':  duration = '3s'; break;
+      case 'evaluating_safety':   duration = '4s'; break;
+      default:                    duration = '7s';
+    }
+    document.documentElement.style.setProperty('--breathing-duration', duration);
   }
 
   function humanizeStatus(s) {
@@ -514,6 +561,7 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
 </style>
 </head>
 <body>
+<div id=\"ambient-layer\" aria-hidden=\"true\"></div>
 <div id=\"layout\">
 " <> sidebar_html("admin") <> "
 <div id=\"main-content\">
@@ -1374,6 +1422,17 @@ fn shared_css() -> String {
     --code-border: #e3e2dc;
     --radius: 20px;
     --radius-sm: 12px;
+    /* ── Affect-driven ambient variables ──────────────
+       Driven by AffectTick notifications. JS sets these on arrival
+       and CSS transitions smooth the change. Defaults mimic a calm,
+       confident baseline so the background renders cleanly even
+       before the first affect reading arrives. */
+    --affect-hue: 220deg;         /* cool blue default */
+    --affect-saturation: 40%;
+    --affect-lightness: 55%;
+    --affect-opacity: 0.10;
+    --affect-accent: 0%;          /* red tinge for frustration spikes */
+    --breathing-duration: 7s;     /* idle rhythm */
   }
   body {
     font-family: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, 'Book Antiqua', serif;
@@ -1382,6 +1441,56 @@ fn shared_css() -> String {
     height: 100vh;
     margin: 0;
     font-size: 17px;
+  }
+
+  /* ── Ambient affect layer ────────────────────────
+     Fixed-position gradient wash driven by live affect telemetry.
+     Sits behind all content. Honest biometric signal — the hue shifts
+     as Curragh's interior state shifts. Respects reduced-motion. */
+  #ambient-layer {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(
+        ellipse 80% 60% at 30% 20%,
+        hsla(
+          calc(var(--affect-hue) - var(--affect-accent)),
+          var(--affect-saturation),
+          var(--affect-lightness),
+          var(--affect-opacity)
+        ) 0%,
+        transparent 60%
+      ),
+      radial-gradient(
+        ellipse 70% 70% at 70% 80%,
+        hsla(
+          calc(var(--affect-hue) + 20deg),
+          var(--affect-saturation),
+          calc(var(--affect-lightness) + 5%),
+          calc(var(--affect-opacity) * 0.7)
+        ) 0%,
+        transparent 55%
+      );
+    animation: affect-breathe var(--breathing-duration) ease-in-out infinite;
+    transition:
+      --affect-hue 3s ease,
+      --affect-saturation 3s ease,
+      --affect-lightness 3s ease,
+      --affect-opacity 3s ease,
+      --affect-accent 3s ease,
+      --breathing-duration 1.5s ease;
+  }
+  @keyframes affect-breathe {
+    0%, 100% { opacity: 0.85; }
+    50%      { opacity: 1.0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #ambient-layer {
+      animation: none;
+      transition: none;
+    }
   }
 
   /* ── Layout ──────────────────────────────────────── */

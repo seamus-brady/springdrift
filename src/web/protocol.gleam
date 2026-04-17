@@ -79,6 +79,18 @@ pub type ServerMessage {
   /// status: "idle" | "thinking" | "classifying" | "waiting_for_agents"
   ///       | "waiting_for_user" | "evaluating_safety"
   StatusTransition(status: String, detail: Option(String))
+  /// Per-cycle affect snapshot, fans out to the web UI once per cycle.
+  /// Drives the ambient background: hue from pressure, saturation from
+  /// calm, opacity from confidence, breathing rhythm from status.
+  AffectTick(
+    desperation: Float,
+    calm: Float,
+    confidence: Float,
+    frustration: Float,
+    pressure: Float,
+    trend: String,
+    status: String,
+  )
 }
 
 pub type CycleDataJson {
@@ -286,6 +298,28 @@ pub fn encode_server_message(msg: ServerMessage) -> String {
           None -> json.null()
           Some(d) -> json.string(d)
         }),
+      ])
+      |> json.to_string
+
+    AffectTick(
+      desperation:,
+      calm:,
+      confidence:,
+      frustration:,
+      pressure:,
+      trend:,
+      status:,
+    ) ->
+      json.object([
+        #("type", json.string("notification")),
+        #("kind", json.string("affect_tick")),
+        #("desperation", json.float(desperation)),
+        #("calm", json.float(calm)),
+        #("confidence", json.float(confidence)),
+        #("frustration", json.float(frustration)),
+        #("pressure", json.float(pressure)),
+        #("trend", json.string(trend)),
+        #("status", json.string(status)),
       ])
       |> json.to_string
   }

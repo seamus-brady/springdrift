@@ -403,6 +403,9 @@ fn handle_notification(
     }
     agent_types.StatusChange(status:, ..) ->
       continue_loop(TuiState(..state, spinner_label: status))
+    // Affect tick is a web-only signal (ambient background driver).
+    // TUI doesn't render it — ignored cleanly.
+    agent_types.AffectTickNotice(..) -> event_loop(state)
   }
 }
 
