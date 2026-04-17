@@ -11,6 +11,7 @@
          generate_uuid/0, get_datetime/0, get_date/0,
          tui_run/2, throw_tui_exit/0,
          fetch_url/1, http_post/3,
+         is_binary_content_type_header/1,
          rescue/1, sha256_hex/1,
          log_init/1, log_stdout_enabled/0, log_stderr/1,
          monotonic_now_ms/0, file_rename/2, sanitize_json/1,
@@ -154,11 +155,82 @@ fetch_url(Url) ->
         false -> Url
     end,
     case httpc:request(get, {UrlStr, []}, Opts, [{body_format, binary}]) of
-        {ok, {{_, _, _}, _, Body}} ->
-            Truncated = binary:part(Body, 0, min(byte_size(Body), 51200)),
-            {ok, Truncated};
+        {ok, {{_, _, _}, Headers, Body}} ->
+            case is_binary_content_type(Headers) of
+                {true, CT} ->
+                    Msg = io_lib:format(
+                        "fetch_url refused: response content-type ~s is binary "
+                        "(~p bytes). Use jina_reader for PDFs or retry with the "
+                        "HTML version of the URL.",
+                        [CT, byte_size(Body)]
+                    ),
+                    {error, list_to_binary(Msg)};
+                false ->
+                    Truncated = binary:part(Body, 0, min(byte_size(Body), 51200)),
+                    case unicode:characters_to_binary(Truncated, utf8, utf8) of
+                        {error, _, _} ->
+                            {error, <<"fetch_url refused: response body is not valid UTF-8 (looks like binary data — use jina_reader for non-HTML content).">>};
+                        {incomplete, _, _} ->
+                            {error, <<"fetch_url refused: response body is not valid UTF-8 (looks like binary data — use jina_reader for non-HTML content).">>};
+                        Valid when is_binary(Valid) ->
+                            {ok, Valid}
+                    end
+            end;
         {error, Reason} ->
             {error, list_to_binary(io_lib:format("~p", [Reason]))}
+    end.
+
+%% Return {true, ContentTypeBinary} if the response headers declare a binary
+%% content-type we should refuse (PDF, image, octet-stream, zip, audio, video).
+%% Returns false otherwise (including when no Content-Type is present — we then
+%% fall through to the UTF-8 validity check on the body).
+is_binary_content_type(Headers) ->
+    case find_header("content-type", Headers) of
+        undefined -> false;
+        Value -> classify_content_type(Value)
+    end.
+
+%% Gleam-callable helper for testing: classify a content-type string directly.
+%% Returns true if the string matches a known binary content-type prefix.
+is_binary_content_type_header(ContentType) when is_binary(ContentType) ->
+    case classify_content_type(binary_to_list(ContentType)) of
+        {true, _} -> true;
+        false     -> false
+    end;
+is_binary_content_type_header(ContentType) when is_list(ContentType) ->
+    case classify_content_type(ContentType) of
+        {true, _} -> true;
+        false     -> false
+    end.
+
+classify_content_type(Value) ->
+    Lower = string:to_lower(Value),
+    IsBinary =
+        lists:any(
+            fun(Prefix) -> lists:prefix(Prefix, Lower) end,
+            [
+                "application/pdf",
+                "application/zip",
+                "application/octet-stream",
+                "application/x-",
+                "image/",
+                "audio/",
+                "video/",
+                "font/"
+            ]
+        ),
+    case IsBinary of
+        true -> {true, list_to_binary(Value)};
+        false -> false
+    end.
+
+%% Case-insensitive header lookup. httpc returns headers as a list of
+%% {Name, Value} tuples where Name and Value are strings (lists).
+find_header(_Key, []) -> undefined;
+find_header(Key, [{Name, Value} | Rest]) ->
+    case string:to_lower(Name) of
+        Key -> Value;
+        _   -> find_header(Key, Rest)
     end.
 
 %% HTTP POST with headers and JSON body via httpc.
