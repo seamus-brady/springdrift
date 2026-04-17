@@ -420,9 +420,13 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
           if (isActivityNotification(nname)) {
             addActivityItem(nname);
           } else {
-            addNotification('Using tool: ' + nname);
+            // Tool activity now surfaces in the live thinking card plus the
+            // status strip instead of as inline chat notifications. The
+            // card shows every tool as a step with arrow markers; the
+            // strip shows the currently-active tool next to the agent name.
+            // Posting a separate chat notification was double-counting.
             currentTool = nname;
-            addThinkingStep('tool: ' + nname);
+            addThinkingStep(nname);
             updateStatusStrip();
           }
         } else if (data.kind === 'save_warning') {
