@@ -48,6 +48,7 @@ import query_complexity
 import scheduler/types as scheduler_types
 import slog
 import tools/builtin
+import tools/learning_goals as learning_goal_tools
 import tools/memory
 import tools/planner as planner_tools
 
@@ -75,6 +76,7 @@ pub fn start(
       [builtin.human_input_tool()],
       memory.all(),
       planner_tools.all(),
+      learning_goal_tools.all(),
       cfg.agent_tools,
       team_tools,
     ])

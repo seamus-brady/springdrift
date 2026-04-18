@@ -34,6 +34,8 @@ import identity
 import knowledge/log as knowledge_log
 import knowledge/types as knowledge_types
 import knowledge/workspace
+import learning_goal/log as goal_log
+import learning_goal/types as goal_types
 import narrative/housekeeper
 import narrative/librarian
 import narrative/meta_states
@@ -1133,13 +1135,14 @@ fn build_sensorium(
   let knowledge_section = render_sensorium_knowledge(state)
   let memory_section = render_sensorium_memory()
   let strategies_section = render_sensorium_strategies()
+  let goals_section = render_sensorium_learning_goals()
   let affect_warnings_section = render_sensorium_affect_warnings(state)
   let skill_procedures_section = render_sensorium_skill_procedures(state.skills)
 
   let sections =
     [
       clock, situation, schedule, vitals, sandbox_section, delegations, events,
-      tasks_section, strategies_section, affect_warnings_section,
+      tasks_section, strategies_section, goals_section, affect_warnings_section,
       skill_procedures_section, knowledge_section, memory_section,
     ]
     |> list.filter(fn(s) { s != "" })
@@ -1709,6 +1712,44 @@ pub fn render_sensorium_strategies() -> String {
       <> "\">\n"
       <> rows
       <> "\n  </strategies>"
+    }
+  }
+}
+
+/// Render the <learning_goals> element — meta-learning Phase C. Surfaces
+/// the count of active goals + summaries of the top 3 by priority. Omitted
+/// when no active goals exist (so new installs see no noise).
+pub fn render_sensorium_learning_goals() -> String {
+  let dir = paths.learning_goals_dir()
+  let all = goal_log.resolve_current(dir)
+  let active = goal_log.active_ranked(all)
+  let achieved_count =
+    list.count(all, fn(g) { g.status == goal_types.AchievedGoal })
+  case active {
+    [] -> ""
+    _ -> {
+      let top = list.take(active, 3)
+      let rows =
+        top
+        |> list.map(fn(g) {
+          "    <goal id=\""
+          <> xml_attr_escape(g.id)
+          <> "\" title=\""
+          <> xml_attr_escape(g.title)
+          <> "\" priority=\""
+          <> float.to_string(round_to_2dp(g.priority))
+          <> "\" evidence=\""
+          <> int.to_string(list.length(g.evidence))
+          <> "\"/>"
+        })
+        |> string.join("\n")
+      "  <learning_goals active=\""
+      <> int.to_string(list.length(active))
+      <> "\" achieved=\""
+      <> int.to_string(achieved_count)
+      <> "\">\n"
+      <> rows
+      <> "\n  </learning_goals>"
     }
   }
 }
