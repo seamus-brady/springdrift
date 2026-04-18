@@ -1,10 +1,40 @@
 ---
 name: memory-management
-description: When and how to use the seven memory stores. Covers facts, CBR, artifacts, and the distinction between them.
-agents: cognitive, researcher, observer
+description: When and how to use the memory stores, and which memory specialist (cognitive / Observer / Remembrancer) to delegate to.
+agents: cognitive, researcher, observer, remembrancer
 ---
 
 ## Memory Management
+
+### Which Memory Agent for Which Task
+
+Three memory access tiers. **Pick the lightest one that can do the job** —
+delegation costs a sub-cycle and tokens, so don't reach for a specialist
+when the cognitive memory tools answer.
+
+| Question | Use this | Why |
+|---|---|---|
+| "What did we do today / yesterday / this week?" | Cognitive `recall_recent`, `recall_search` | Cheapest path. Covers the Librarian's replay window. |
+| "Inspect a specific cycle in detail" | Delegate to **Observer** (`inspect_cycle`, `list_recent_cycles`) | Forensic drill-down, not built into the cognitive tools. |
+| "Tool stats / detect failure patterns" | Delegate to **Observer** (`detect_patterns`, `review_recent`, `query_tool_activity`) | Pattern detection over recent cycles. |
+| "Annotate, suppress, or correct a CBR case" | Delegate to **Observer** (`correct_case`, `suppress_case`, `boost_case`) | Owns CBR curation. |
+| "D' false positive" | Delegate to **Observer** (`report_false_positive`) | Owns the meta-observer feedback channel. |
+| "Trace a fact through time (recent)" | Cognitive `memory_query_facts` first; Observer `memory_trace_fact` for full lineage | Try the lightweight read first. |
+| "What did we know about X six months ago?" | Delegate to **Remembrancer** (`deep_search`) | Reads full archive, bypasses Librarian replay window. |
+| "Trace a fact through time (across the full archive)" | Delegate to **Remembrancer** (`fact_archaeology`) | Walks every write/supersede/clear. |
+| "Find dormant threads / resurrect old work" | Delegate to **Remembrancer** (`resurrect_thread`) | Specifically built for it. |
+| "Mine recurring patterns across cases" | Delegate to **Remembrancer** (`mine_patterns`) | Cross-case clustering. |
+| "Cross-reference a topic across all stores" | Delegate to **Remembrancer** (`find_connections`) | Hits narrative + CBR + facts in one pass. |
+| "Consolidate a period and write a report" | Delegate to **Remembrancer** (`consolidate_memory` + `write_consolidation_report`) | Owns the consolidation pipeline. |
+
+**Rule of thumb:**
+- Cognitive memory tools → working set, recent activity, fast lookups.
+- Observer → forensics, CBR curation, pattern detection within the Librarian window.
+- Remembrancer → deep time, synthesis, cross-store reach beyond the Librarian window.
+
+If you're unsure whether a question fits the Librarian window, try the
+cognitive tool first; if it returns nothing useful, escalate to the
+Remembrancer.
 
 ### Which Store For What
 
@@ -87,22 +117,9 @@ on before. Threads link related cycles and flag when data points change.
 If a thread exists for your current topic, mention it — continuity notes
 help the operator see what changed.
 
-### Deep Memory: Delegate to the Remembrancer
+### Librarian Window
 
-The memory tools above (`recall_recent`, `recall_search`, `recall_threads`,
-`recall_cases`) query the Librarian's ETS index — fast, but bounded to a
-recent window (default 30 days). For older work, **delegate to the
-Remembrancer agent**. It reads raw JSONL from disk, so it reaches months
-or years of archive.
-
-Good reasons to delegate to `agent_remembrancer`:
-- "Have we researched this before?" — `deep_search` across months
-- "What did we used to know about X?" — `fact_archaeology` traces belief over time
-- "What patterns have emerged in my cases?" — `mine_patterns` clusters CBR cases
-- "Are there dormant threads worth revisiting?" — `resurrect_thread`
-- "Write a weekly consolidation of what we learned" — `consolidate_memory` + `write_consolidation_report`
-- "Is this old fact still accurate? I re-verified it" — `restore_confidence`
-
-Do NOT use the Remembrancer for recent cycles — that's the Observer's
-job (and it's faster). Rough rule: within the last ~30 days use the
-Librarian-backed tools above; beyond that, delegate to the Remembrancer.
+The cognitive memory tools and Observer query the Librarian's ETS index,
+which holds the last `librarian_max_days` of history (default 180). Older
+material is on disk as JSONL but not indexed. Use the Remembrancer for
+anything beyond that window — see the agent-selection table at the top.

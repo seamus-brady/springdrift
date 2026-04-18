@@ -388,7 +388,7 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `narrative_dir` | `--narrative-dir` | `.springdrift/memory/narrative` | Directory for narrative JSON-L files (narrative is always enabled) |
 | `archivist_model` | — | task_model | Model used by the Archivist for narrative generation |
 | `narrative_threading` | — | True | Enable automatic thread assignment |
-| `librarian_max_days` | — | 30 | Max days of history to replay into ETS at startup |
+| `librarian_max_days` | — | 180 | Max days of history to replay into ETS at startup; also bounds housekeeping reach |
 | `narrative_summaries` | — | False | Enable periodic narrative summaries |
 | `narrative_summary_schedule` | — | `"weekly"` | Summary schedule: `"weekly"` or `"monthly"` |
 | `profiles_dirs` | `--profiles-dir` (repeatable) | `[~/.config/springdrift/profiles, .springdrift/profiles]` | Profile directories |
@@ -467,7 +467,8 @@ and DAG nodes. Messages: `QueryDayRoots`, `QueryDayStats`, `QueryNodeWithDescend
 `QueryArtifactsByCycle`, `QueryArtifactById`, `RetrieveArtifactContent`,
 `QuerySchedulerCycles`, etc.
 At startup, the Librarian replays artifact metadata from disk (configurable via
-`librarian_max_days`, default 30).
+`librarian_max_days`, default 180). The Remembrancer agent reads beyond this
+window directly from JSONL when deeper reach is needed.
 
 **Cognitive loop tools** (12 memory + 4 planner + 4 builtin = 20 tools on the
 cognitive loop). Diagnostic/forensic tools and CBR curation moved to the Observer

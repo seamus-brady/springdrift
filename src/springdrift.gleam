@@ -427,7 +427,7 @@ fn run(cfg: AppConfig) -> Nil {
     )
 
   // Start the Librarian (supervised — auto-restarts on crash)
-  let librarian_max_days = option.unwrap(cfg.librarian_max_days, 90)
+  let librarian_max_days = option.unwrap(cfg.librarian_max_days, 180)
   let librarian_subj = case
     librarian.start_supervised(
       narrative_dir,
