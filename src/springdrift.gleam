@@ -1593,6 +1593,18 @@ fn remembrancer_specs(
             cfg.fact_decay_half_life_days,
             30,
           ),
+          // Skills safety gate uses the same provider + model as the
+          // Remembrancer itself (the gate reuses the agent's LLM, no
+          // need for a separate scoring model).
+          gate_provider: option.Some(provider),
+          gate_model: model,
+          // Promoted skills land in the first configured skills dir.
+          skills_dir: case
+            option.unwrap(cfg.skills_dirs, default_skill_dirs())
+          {
+            [first, ..] -> first
+            [] -> paths.project_dir() <> "/skills"
+          },
         )
       [
         agent_types.AgentSpec(
