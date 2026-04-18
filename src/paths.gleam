@@ -118,6 +118,11 @@ pub fn schedule_dir() -> String {
   project_dir() <> "/memory/schedule"
 }
 
+/// Skills proposal/lifecycle log directory: .springdrift/memory/skills/
+pub fn skills_log_dir() -> String {
+  project_dir() <> "/memory/skills"
+}
+
 /// Communications log directory: .springdrift/memory/comms/
 pub fn comms_dir() -> String {
   project_dir() <> "/memory/comms"

@@ -26,9 +26,12 @@ import llm/types.{
   type Tool, type ToolCall, type ToolResult, ToolFailure, ToolSuccess,
 }
 import narrative/librarian.{type LibrarianMessage}
+import paths
 import remembrancer/consolidation
 import remembrancer/query as rquery
 import remembrancer/reader as rreader
+import skills/pattern as skills_pattern
+import skills/proposal_log
 import slog
 
 @external(erlang, "springdrift_ffi", "get_datetime")
@@ -75,6 +78,7 @@ pub fn all() -> List(Tool) {
     deep_search_tool(),
     fact_archaeology_tool(),
     mine_patterns_tool(),
+    propose_skills_from_patterns_tool(),
     resurrect_thread_tool(),
     consolidate_memory_tool(),
     restore_confidence_tool(),
@@ -87,6 +91,7 @@ pub fn is_remembrancer_tool(name: String) -> Bool {
   name == "deep_search"
   || name == "fact_archaeology"
   || name == "mine_patterns"
+  || name == "propose_skills_from_patterns"
   || name == "resurrect_thread"
   || name == "consolidate_memory"
   || name == "restore_confidence"
@@ -275,6 +280,8 @@ pub fn execute(call: ToolCall, ctx: RemembrancerContext) -> ToolResult {
     "deep_search" -> run_deep_search(call, ctx)
     "fact_archaeology" -> run_fact_archaeology(call, ctx)
     "mine_patterns" -> run_mine_patterns(call, ctx)
+    "propose_skills_from_patterns" ->
+      run_propose_skills_from_patterns(call, ctx)
     "resurrect_thread" -> run_resurrect_thread(call, ctx)
     "consolidate_memory" -> run_consolidate_memory(call, ctx)
     "restore_confidence" -> run_restore_confidence(call, ctx)
@@ -461,6 +468,124 @@ fn run_mine_patterns(call: ToolCall, ctx: RemembrancerContext) -> ToolResult {
       ToolSuccess(tool_use_id: call.id, content: header <> body)
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// propose_skills_from_patterns — Phase 7 of skills-management
+// ---------------------------------------------------------------------------
+
+fn propose_skills_from_patterns_tool() -> Tool {
+  tool.new("propose_skills_from_patterns")
+  |> tool.with_description(
+    "Mine CBR cases for clusters that qualify as new skill proposals (per "
+    <> "the skills-management spec — Jaccard on tools_used and agents_used, "
+    <> "domain coherence, mean confidence × utility floor). Each qualifying "
+    <> "cluster produces a SkillProposal with an auto-derived name, "
+    <> "description, body skeleton, and supporting case IDs. Proposals are "
+    <> "appended to the per-day skills log. The Promotion Safety Gate (D' "
+    <> "scorer + rate limit, separate phase) decides which proposals "
+    <> "promote to Active skills.",
+  )
+  |> tool.add_string_param(
+    "domain",
+    "Domain to mine, or 'all' for every domain (default: all)",
+    False,
+  )
+  |> tool.add_integer_param(
+    "min_cases",
+    "Minimum cases to qualify a cluster (default: from config)",
+    False,
+  )
+  |> tool.add_number_param(
+    "min_utility",
+    "Minimum mean confidence × utility (default: 0.70)",
+    False,
+  )
+  |> tool.build()
+}
+
+fn run_propose_skills_from_patterns(
+  call: ToolCall,
+  ctx: RemembrancerContext,
+) -> ToolResult {
+  let decoder = {
+    use domain <- decode.field(
+      "domain",
+      decode.optional(decode.string)
+        |> decode.map(fn(o) { option.unwrap(o, "all") }),
+    )
+    use min_cases <- decode.field(
+      "min_cases",
+      decode.optional(decode.int)
+        |> decode.map(fn(o) { option.unwrap(o, ctx.min_pattern_cases) }),
+    )
+    use min_utility <- decode.field(
+      "min_utility",
+      decode.optional(number_decoder())
+        |> decode.map(fn(o) { option.unwrap(o, 0.7) }),
+    )
+    decode.success(#(domain, min_cases, min_utility))
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "Invalid propose_skills_from_patterns input",
+      )
+    Ok(#(domain_filter, min_cases, min_utility)) -> {
+      let all_cases = rreader.read_all_cases(ctx.cbr_dir)
+      let scoped = case domain_filter {
+        "all" -> all_cases
+        d -> list.filter(all_cases, fn(c) { c.problem.domain == d })
+      }
+      let cfg =
+        skills_pattern.PatternConfig(
+          ..skills_pattern.default_config(),
+          min_cases: min_cases,
+          min_utility: min_utility,
+        )
+      let clusters = skills_pattern.find_clusters(scoped, cfg)
+      // Novelty check is structural only in PR-C — no skills loaded here.
+      // PR-D's gate runs the LLM-driven conflict classifier with full
+      // access to existing Active skills.
+      let proposals =
+        skills_pattern.clusters_to_proposals(
+          clusters,
+          [],
+          get_datetime(),
+          ctx.agent_id,
+        )
+      let dir = paths.skills_log_dir()
+      list.each(proposals, fn(p) { proposal_log.append_proposed(dir, p) })
+      let summary =
+        "propose_skills_from_patterns: "
+        <> int.to_string(list.length(clusters))
+        <> " cluster(s), "
+        <> int.to_string(list.length(proposals))
+        <> " proposal(s) logged to "
+        <> dir
+        <> "\n\nDomain filter: "
+        <> domain_filter
+        <> "\nMin cases: "
+        <> int.to_string(min_cases)
+        <> "\nMin utility: "
+        <> float.to_string(min_utility)
+        <> case proposals {
+          [] -> "\n\nNo qualifying proposals."
+          _ ->
+            "\n\nProposals:\n"
+            <> string.join(
+              list.map(proposals, fn(p) { "  - " <> p.name }),
+              "\n",
+            )
+        }
+      ToolSuccess(tool_use_id: call.id, content: summary)
+    }
+  }
+}
+
+fn number_decoder() -> decode.Decoder(Float) {
+  decode.one_of(decode.float, [decode.int |> decode.map(int.to_float)])
 }
 
 // ---------------------------------------------------------------------------
