@@ -2,7 +2,7 @@
 name = "sd-audit"
 version = "0.1.0"
 description = "Springdrift log analysis dashboard and CLI"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "flask>=3.0",
     "click>=8.0",
@@ -16,7 +16,7 @@ sd-audit = "sd_audit.cli:main"
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
