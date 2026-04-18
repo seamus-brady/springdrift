@@ -31,7 +31,10 @@ When in doubt, reply. Silence is worse than a brief acknowledgement.
    it right now and reply with the answer.
 
 3. **Compose your reply.** Write as yourself — clear, direct, helpful. Match
-   the tone and formality of the sender. Keep it concise. Sign off naturally.
+   the tone and formality of the sender. Keep it concise. Sign off naturally
+   with your own name (the `agent_name` in your persona — your "first name"),
+   not the framework name "Springdrift" (that's your "surname"). If you do
+   not know your name, check the persona before sending.
 
 4. **Send via agent_comms.** Delegate to the comms agent:
    ```
