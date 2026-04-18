@@ -88,18 +88,28 @@ src/
 │
 ├── agents/                    Specialist agent specs
 │   ├── planner.gleam          Planning agent (pure XML reasoning, no tools, max_turns=5)
-│   ├── project_manager.gleam  Project Manager agent (22 planner tools, max_turns=8)
+│   ├── project_manager.gleam  Project Manager agent (24 planner tools incl. complete_task_step, max_turns=8)
 │   ├── researcher.gleam       Research agent (web+artifacts+builtin, max_turns=8)
 │   ├── coder.gleam            Coding agent (builtin, max_turns=10)
 │   ├── writer.gleam           Writer agent (knowledge drafts + artifacts + builtin, max_turns=5)
 │   ├── observer.gleam         Observer agent (17 diagnostic + CBR curation tools, max_turns=6)
 │   ├── comms.gleam            Communications agent (comms tools, max_turns=6, max_context=20)
-│   └── remembrancer.gleam     Remembrancer — deep memory consolidation (8 tools, max_turns=8)
+│   └── remembrancer.gleam     Remembrancer — deep memory consolidation + skill proposals (9 tools, max_turns=8)
 │
 ├── remembrancer/              Deep memory operations (bypasses Librarian ETS window)
 │   ├── reader.gleam           Direct JSONL readers for narrative/CBR/facts
 │   ├── query.gleam            Pure filter/aggregate: search, trace, cluster, dormant, xref
 │   └── consolidation.gleam    ConsolidationRun JSONL log + markdown report writer
+│
+├── skills/                    Agent-led skill evolution (proposal → gate → Active)
+│   ├── metrics.gleam          Per-skill JSONL of read/inject/outcome events
+│   ├── versioning.gleam       Snapshot, history/ retention, archive.jsonl compaction, rollback
+│   ├── pattern.gleam          Pure CBR-cluster qualification (structured-field Jaccard)
+│   ├── proposal.gleam         SkillProposal + ConflictClassification + SkillLogEntry types
+│   ├── proposal_log.gleam     Per-day skills lifecycle JSONL (.springdrift/memory/skills/)
+│   ├── body_gen.gleam         LLM-written markdown body (XStructor, template fallback)
+│   ├── conflict.gleam         LLM classifier: Complementary/Redundant/Supersedes/Contradictory
+│   └── safety_gate.gleam      Four-layer gate: deterministic + rate limit + conflict + D'
 │
 ├── comms/                     Communications — email via AgentMail
 │   ├── types.gleam            CommsMessage, CommsChannel (Email), Direction, DeliveryStatus, CommsConfig
@@ -565,7 +575,7 @@ agent. Heavy planner operations moved to the Planner agent.
 | `check_inbox` | Comms | List recent messages in inbox |
 | `read_message` | Comms | Read full message content by ID |
 
-**Remembrancer tools** (8 tools in `tools/remembrancer.gleam`, on Remembrancer agent):
+**Remembrancer tools** (9 tools in `tools/remembrancer.gleam`, on Remembrancer agent):
 
 | Tool | Store(s) | Purpose |
 |---|---|---|
@@ -577,6 +587,7 @@ agent. Heavy planner operations moved to the Planner agent.
 | `restore_confidence` | Facts | Write a verified fact with restored confidence (supersedes previous) |
 | `find_connections` | Narrative+CBR+Facts | Cross-reference a topic across all memory stores with hit counts |
 | `write_consolidation_report` | Knowledge + Consolidation | Persist markdown report + append ConsolidationRun log entry |
+| `propose_skills_from_patterns` | CBR + Skills | Mine CBR clusters, generate skill proposals (LLM body + template fallback), run through the Promotion Safety Gate, promote accepted ones to Active skills on disk |
 
 **Remembrancer** (`agents/remembrancer.gleam`) is a deep-memory specialist. Unlike
 Observer (recent-cycle diagnostics via Librarian), the Remembrancer reads raw JSONL
@@ -588,8 +599,12 @@ and a JSONL run log at `.springdrift/memory/consolidation/`. The latest run's
 timestamp surfaces in the sensorium as `<memory last_consolidation="..."
 consolidation_age="..."/>`. Scheduled consolidation is created at runtime via the
 scheduler agent's `schedule_from_spec` tool — ask the scheduler agent to create a
-weekly recurring job that delegates to the Remembrancer. Phase 11 of the roadmap
-(skill-proposal integration) is blocked on the separate skills-management spec.
+weekly recurring job that delegates to the Remembrancer. Skills proposal
+(`propose_skills_from_patterns`) mines CBR clusters, generates `SkillProposal`s
+via `src/skills/body_gen.gleam`, runs them through the Promotion Safety Gate
+(`src/skills/safety_gate.gleam`), and promotes accepted ones to Active skills on
+disk — agent-led evolution, operator-audited via the skills lifecycle log at
+`.springdrift/memory/skills/YYYY-MM-DD-skills.jsonl`.
 
 **Curator** (`narrative/curator.gleam`) assembles the system prompt from memory.
 On each `BuildSystemPrompt` message (with optional `CycleContext`) it loads identity

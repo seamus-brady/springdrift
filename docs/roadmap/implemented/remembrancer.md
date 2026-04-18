@@ -35,7 +35,7 @@
 
 See also: `docs/roadmap/planned/remembrancer-followups.md`.
 
-- **Phase 11 — Skills-proposal pipeline.** Blocked on skills-management spec. When that lands, `mine_patterns` should feed a proposal loop instead of only surfacing clusters in reports.
+- **Phase 11 — Skills-proposal pipeline.** SHIPPED 2026-04-18 with `skills-management`. `propose_skills_from_patterns` in `tools/remembrancer.gleam` mines clusters via `src/skills/pattern.gleam`, generates bodies via `src/skills/body_gen.gleam`, and gates via `src/skills/safety_gate.gleam` (deterministic + rate limit + same-scope cooldown + LLM conflict classifier + D' scorer). Accepted proposals become Active skills on disk.
 - **Phase 9 — TOML-driven scheduled consolidation.** Either build a `schedule.toml` auto-loader or keep the runtime-created approach. Currently runtime-only.
 - **Phase 10 — Web GUI Memory Health panel.** Sensorium tag shipped; admin-page tab (memory-depth stats, consolidation history, "Run Consolidation" button) deferred.
 - **Advanced sensorium metrics.** `decayed_facts`, `dormant_threads` counts — skipped because computing them every cycle would require scanning the full archive. Could be cached in the Librarian later.
