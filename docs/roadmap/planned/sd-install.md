@@ -10,8 +10,8 @@
 
 **Two setup scripts implemented** in `scripts/`:
 
-- `scripts/setup-macos.sh` — Homebrew-based, writes `.env`, no systemd
-- `scripts/setup-linux.sh` — apt-based, writes `/etc/springdrift/env`, systemd service
+- `scripts/setup/macos.sh` — Homebrew-based, writes `.env`, no systemd
+- `scripts/setup/linux.sh` — apt-based, writes `/etc/springdrift/env`, systemd service
 
 Both scripts handle:
 - Dependency installation (Erlang/OTP, Gleam, optional Podman/Ollama)

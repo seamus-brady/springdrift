@@ -12,6 +12,7 @@ import affect/types as affect_types
 import agent/types as agent_types
 import comms/log as comms_log
 import comms/types as comms_types
+import cycle_log
 import dag/types as dag_types
 import gleam/bytes_tree
 import gleam/erlang/process.{type Selector, type Subject}
@@ -55,6 +56,11 @@ type WsMsg {
 type RelayMsg {
   Register(Subject(agent_types.Notification))
   Unregister(Subject(agent_types.Notification))
+  /// Request a one-shot startup greeting addressed to the given reply subject.
+  /// The relay tracks whether a greeting has already fired this session and
+  /// drops duplicates — protects against the bug where every WS reconnect
+  /// (or a second browser tab) used to trigger another "Good morning".
+  GreetOnce(reply_to: Subject(agent_types.CognitiveReply))
 }
 
 type ForwardMsg {
@@ -146,7 +152,7 @@ pub fn start(
 
   // Run forwarding loop — receives from `notify` and broadcasts to all
   // registered WebSocket connections
-  forward_loop(notify, relay, [])
+  forward_loop(cognitive, notify, relay, [], False)
 }
 
 // ---------------------------------------------------------------------------
@@ -273,26 +279,10 @@ fn ws_on_init(
       ws_max_bytes:,
     )
 
-  // Send a startup greeting if the conversation is empty
-  process.spawn_unlinked(fn() {
-    process.sleep(100)
-    let msg_subject: Subject(List(Message)) = process.new_subject()
-    process.send(cognitive, agent_types.GetMessages(reply_to: msg_subject))
-    let selector =
-      process.new_selector()
-      |> process.select(msg_subject)
-    case process.selector_receive(selector, 2000) {
-      Ok([]) | Error(_) ->
-        process.send(
-          cognitive,
-          agent_types.UserInput(
-            text: "[Session started. Greet the operator briefly — one or two sentences. Mention anything notable from your sensorium.]",
-            reply_to: reply_subject,
-          ),
-        )
-      Ok(_) -> Nil
-    }
-  })
+  // Ask the relay to fire a startup greeting addressed to this connection's
+  // reply subject. The relay enforces once-per-session semantics so reconnects
+  // and additional browser tabs don't trigger duplicate hellos.
+  process.send(relay, GreetOnce(reply_subject))
 
   // Query live messages from the cognitive loop (not the static boot snapshot)
   process.spawn_unlinked(fn() {
@@ -628,6 +618,35 @@ fn ws_handler(
                 )
               mist.continue(state)
             }
+            Ok(protocol.RequestChatHistoryDay(date:)) -> {
+              // Read raw user/assistant pairs from the cycle log. This is the
+              // actual chat, not the narrative summary. Scheduler cycles are
+              // excluded — they aren't operator conversations.
+              let cycles = cycle_log.load_cycles_for_date(date)
+              let pairs_json =
+                json.to_string(
+                  json.array(cycles, fn(c: cycle_log.CycleData) {
+                    json.object([
+                      #("cycle_id", json.string(c.cycle_id)),
+                      #("timestamp", json.string(c.timestamp)),
+                      #("user", json.string(c.human_input)),
+                      #("assistant", json.string(c.response_text)),
+                      #("model", json.string(c.model)),
+                      #("input_tokens", json.int(c.input_tokens)),
+                      #("output_tokens", json.int(c.output_tokens)),
+                    ])
+                  }),
+                )
+              let _ =
+                mist.send_text_frame(
+                  conn,
+                  protocol.encode_server_message(protocol.ChatHistoryDay(
+                    date:,
+                    pairs_json:,
+                  )),
+                )
+              mist.continue(state)
+            }
             Ok(protocol.RequestRewind(index: _)) -> {
               // Rewind is no longer supported — agent starts fresh each session
               let _ =
@@ -690,10 +709,13 @@ fn ws_handler(
 
 /// Runs in the main process. Receives notifications from the cognitive loop
 /// (via `notify`) and broadcasts them to all registered WebSocket connections.
+/// Also gates the once-per-session startup greeting via the `greeted` flag.
 fn forward_loop(
+  cognitive: Subject(agent_types.CognitiveMessage),
   notify: Subject(agent_types.Notification),
   relay: Subject(RelayMsg),
   connections: List(Subject(agent_types.Notification)),
+  greeted: Bool,
 ) -> Nil {
   let selector =
     process.new_selector()
@@ -707,13 +729,51 @@ fn forward_loop(
       list.each(connections, fn(conn_subj) {
         process.send(conn_subj, notification)
       })
-      forward_loop(notify, relay, connections)
+      forward_loop(cognitive, notify, relay, connections, greeted)
     }
     FwdRelay(Register(subj)) -> {
-      forward_loop(notify, relay, [subj, ..connections])
+      forward_loop(cognitive, notify, relay, [subj, ..connections], greeted)
     }
     FwdRelay(Unregister(subj)) -> {
-      forward_loop(notify, relay, list.filter(connections, fn(s) { s != subj }))
+      forward_loop(
+        cognitive,
+        notify,
+        relay,
+        list.filter(connections, fn(s) { s != subj }),
+        greeted,
+      )
+    }
+    FwdRelay(GreetOnce(reply_to:)) -> {
+      case greeted {
+        True -> forward_loop(cognitive, notify, relay, connections, True)
+        False -> {
+          // Set greeted=True immediately to close the race window between
+          // two near-simultaneous GreetOnce messages from rapid reconnects.
+          // The actual cognitive query runs in a spawned task so the relay
+          // stays responsive to incoming notifications.
+          process.spawn_unlinked(fn() {
+            let msg_subject: Subject(List(Message)) = process.new_subject()
+            process.send(
+              cognitive,
+              agent_types.GetMessages(reply_to: msg_subject),
+            )
+            let inner_selector =
+              process.new_selector() |> process.select(msg_subject)
+            case process.selector_receive(inner_selector, 2000) {
+              Ok([]) | Error(_) ->
+                process.send(
+                  cognitive,
+                  agent_types.UserInput(
+                    text: "[Session started. Greet the operator briefly — one or two sentences. Mention anything notable from your sensorium.]",
+                    reply_to:,
+                  ),
+                )
+              Ok(_) -> Nil
+            }
+          })
+          forward_loop(cognitive, notify, relay, connections, True)
+        }
+      }
     }
   }
 }
@@ -828,6 +888,7 @@ fn get_today_date() -> String
 /// with a non-empty description, falling back to the summary text
 /// truncated to 120 chars.
 fn history_index_json(narrative_dir: String) -> String {
+  let today = get_today_date()
   let files = case simplifile.read_directory(narrative_dir) {
     Ok(fs) -> fs
     Error(_) -> []
@@ -840,6 +901,9 @@ fn history_index_json(narrative_dir: String) -> String {
       // Excludes thread-index files and other sub-files.
       string.length(f) == 16
     })
+    // Skip today — the live chat IS today's conversation, so showing it
+    // as a separate read-only entry just confuses the operator.
+    |> list.filter(fn(f) { string.drop_end(f, 6) != today })
     |> list.sort(fn(a, b) { string.compare(b, a) })
     |> list.map(fn(f: String) -> json.Json {
       let date = string.drop_end(f, 6)

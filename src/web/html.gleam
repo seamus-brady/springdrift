@@ -34,16 +34,15 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
 " <> shared_css() <> sidebar_css() <> "
 </style>
 </head>
-<body>
-<div id=\"ambient-layer\" aria-hidden=\"true\"></div>
+<body class=\"chat-page\">
 <div id=\"layout\">
 " <> sidebar_html("chat") <> "
 <aside id=\"history-panel\" aria-label=\"Chat history\">
   <div id=\"history-header\">
-    <button id=\"history-toggle\" aria-label=\"Collapse chat history\" title=\"Collapse\">
-      <span class=\"history-toggle-icon\">&#9776;</span>
-    </button>
     <span id=\"history-title\">Chats</span>
+    <button id=\"history-toggle\" aria-label=\"Collapse chat history\" title=\"Collapse\">
+      <span class=\"history-toggle-icon\">&laquo;</span>
+    </button>
   </div>
   <div id=\"history-list\"></div>
   <div id=\"history-empty\" class=\"hidden\">No past conversations yet.</div>
@@ -63,6 +62,34 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
       <span class=\"status-meta\"></span>
     </div>
     <div id=\"messages\"></div>
+    <!-- Empty-state coaching — visible only before the first message
+         renders. Clicking an example prompt drops it into the input box
+         so the operator (or future-you) sees what kind of asks land
+         well. Hidden permanently after first render. -->
+    <div id=\"empty-state\">
+      <div class=\"empty-headline\">Ask Curragh anything.</div>
+      <div class=\"empty-sub\">It can introspect, search the web, send email, run code, and recall past work. Try:</div>
+      <div class=\"empty-hints\">
+        <button type=\"button\" class=\"empty-prompt\" data-prompt=\"What can you do?\">What can you do?</button>
+        <button type=\"button\" class=\"empty-prompt\" data-prompt=\"What's on the schedule today?\">What's on the schedule today?</button>
+        <button type=\"button\" class=\"empty-prompt\" data-prompt=\"Brief me on what we worked on yesterday.\">Brief me on yesterday</button>
+      </div>
+    </div>
+    <!-- History view is a sibling of #messages. It overlays the live chat
+         without ever mutating it. Toggled by .viewing-history on #chat-tab. -->
+    <div id=\"history-view\" aria-hidden=\"true\">
+      <div id=\"history-view-header\">
+        <div id=\"history-view-title\">
+          <span class=\"hv-date\">Loading\\u2026</span>
+          <span class=\"hv-tag\">Read-only</span>
+        </div>
+        <button id=\"history-close\" aria-label=\"Return to live chat\" title=\"Return to live chat\">
+          <svg viewBox=\"0 0 24 24\" width=\"14\" height=\"14\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><line x1=\"18\" y1=\"6\" x2=\"6\" y2=\"18\"/><line x1=\"6\" y1=\"6\" x2=\"18\" y2=\"18\"/></svg>
+          <span>Back to live chat</span>
+        </button>
+      </div>
+      <div id=\"history-view-body\"></div>
+    </div>
     <div id=\"input-area\">
       <form id=\"chat-form\">
         <textarea id=\"chat-input\" rows=\"1\" placeholder=\"" <> placeholder <> "\" autofocus></textarea>
@@ -100,8 +127,8 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
   var waitingForAnswer = false;
   var wasRevised = false;
   var reconnectDelay = 1000;
-  var chatHistory = [];
   var activityCount = 0;
+  var sessionStartedShown = false;
   // Status-strip state
   var cycleStartMs = 0;
   var elapsedTimer = null;
@@ -180,30 +207,50 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
     catch(e) { return escapeHtml(text); }
   }
 
-  function saveChatHistory() {}
+  // Empty-state coaching — visible only before the first message lands.
+  // Clicking an example prompt fills the input box; it doesn't auto-send
+  // so the operator stays in control.
+  var emptyState = document.getElementById('empty-state');
+  function hideEmptyState() {
+    if (emptyState && emptyState.style.display !== 'none') {
+      emptyState.style.display = 'none';
+    }
+  }
+  if (emptyState) {
+    emptyState.addEventListener('click', function(e) {
+      var btn = e.target.closest('.empty-prompt');
+      if (!btn) return;
+      var prompt = btn.getAttribute('data-prompt') || btn.textContent;
+      input.value = prompt;
+      input.focus();
+      autoResize();
+    });
+  }
 
   // ── History sidebar ──────────────────────────────────────────────────
-  // The narrative log is the source. Each day becomes an item in the
-  // sidebar; click opens a read-only view of that day's entries. The live
-  // chat session is never overwritten — the read-only view only replaces
-  // the #messages area until the operator returns to live chat.
+  // The chat history panel is a separate surface. Opening a past day
+  // reveals #history-view (a sibling of #messages) without ever touching
+  // the live #messages DOM. Closing simply hides #history-view again.
+  // Live messages keep arriving and rendering to #messages underneath —
+  // the conversation is sacrosanct.
+  var chatTab = document.getElementById('chat-tab');
   var historyPanel = document.getElementById('history-panel');
   var historyToggle = document.getElementById('history-toggle');
   var historyList = document.getElementById('history-list');
   var historyEmpty = document.getElementById('history-empty');
   var historyLoading = document.getElementById('history-loading');
-  var liveSnapshot = null;  // preserved chat when viewing history
-  var viewingDate = null;
+  var historyView = document.getElementById('history-view');
+  var historyViewHeader = document.getElementById('history-view-header');
+  var historyViewBody = document.getElementById('history-view-body');
+  var historyClose = document.getElementById('history-close');
 
   if (historyToggle) {
     historyToggle.addEventListener('click', function() {
-      var collapsed = historyPanel.classList.contains('collapsed');
-      if (collapsed) {
-        historyPanel.classList.remove('collapsed');
-      } else {
-        historyPanel.classList.add('collapsed');
-      }
+      historyPanel.classList.toggle('collapsed');
     });
+  }
+  if (historyClose) {
+    historyClose.addEventListener('click', closeHistoryView);
   }
 
   function requestHistoryIndex() {
@@ -247,81 +294,153 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
 
   function loadHistoryDay(date, btn) {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    // Mark active
     Array.prototype.forEach.call(historyList.children, function(c) { c.classList.remove('active'); });
     if (btn) btn.classList.add('active');
-    viewingDate = date;
-    ws.send(JSON.stringify({ type: 'request_history_day', date: date }));
+    // Pop the view open immediately with a loading state so the operator
+    // gets feedback before the server roundtrip completes.
+    openHistoryView();
+    var dateEl = historyViewHeader.querySelector('.hv-date');
+    if (dateEl) dateEl.textContent = formatDateLong(date) + ' (loading\\u2026)';
+    historyViewBody.innerHTML = '';
+    ws.send(JSON.stringify({ type: 'request_chat_history_day', date: date }));
   }
 
-  function renderHistoryDay(date, entries) {
-    // Snapshot the live chat so incoming live messages don't mutate what we
-    // restore. While viewingDate is truthy, live message handlers still
-    // update chatHistory but skip DOM rendering. On close we rebuild
-    // the #messages DOM from chatHistory — no window reload, no lost
-    // agent replies arriving while the operator reads past cycles.
-    liveSnapshot = chatHistory.slice();
-    msgs.innerHTML = '';
-    var header = document.createElement('div');
-    header.className = 'history-day-header';
-    var back = document.createElement('button');
-    back.className = 'back-to-chat';
-    back.setAttribute('aria-label', 'Return to live chat');
-    back.innerHTML = '&larr; Back to live chat';
-    back.addEventListener('click', returnToLiveChat);
-    header.appendChild(back);
-    var title = document.createElement('span');
-    title.className = 'history-day-title';
-    title.textContent = formatDateLong(date) + ' \\u00b7 ' + entries.length + ' ' + (entries.length === 1 ? 'cycle' : 'cycles') + ' \\u00b7 read-only';
-    header.appendChild(title);
-    msgs.appendChild(header);
-    entries.forEach(function(e) {
-      var entry = document.createElement('div');
-      entry.className = 'history-entry';
-      var ts = document.createElement('div');
-      ts.className = 'ts';
-      ts.textContent = formatTimestamp(e.timestamp);
-      entry.appendChild(ts);
-      var summary = document.createElement('div');
-      summary.className = 'summary';
-      summary.textContent = e.summary || '(no summary)';
-      entry.appendChild(summary);
-      var metaParts = [];
-      if (e.intent && e.intent.domain) metaParts.push(e.intent.domain);
-      if (e.outcome && e.outcome.status) metaParts.push(e.outcome.status);
-      if (e.metrics && e.metrics.tool_calls) metaParts.push(e.metrics.tool_calls + ' tool calls');
-      if (e.delegation_chain && e.delegation_chain.length) metaParts.push(e.delegation_chain.length + ' delegations');
-      if (metaParts.length) {
-        var meta = document.createElement('div');
-        meta.className = 'meta';
-        meta.textContent = metaParts.join(' \\u00b7 ');
-        entry.appendChild(meta);
-      }
-      msgs.appendChild(entry);
-    });
-    scrollBottom();
+  function openHistoryView() {
+    chatTab.classList.add('viewing-history');
+    historyView.setAttribute('aria-hidden', 'false');
+    historyView.scrollTop = 0;
   }
 
-  function returnToLiveChat() {
-    viewingDate = null;
+  function closeHistoryView() {
+    chatTab.classList.remove('viewing-history');
+    historyView.setAttribute('aria-hidden', 'true');
     Array.prototype.forEach.call(historyList.children, function(c) { c.classList.remove('active'); });
-    // Rebuild #messages from chatHistory which has been kept up-to-date
-    // throughout (including any messages that arrived while reading
-    // history). This preserves the agent's latest replies cleanly.
-    msgs.innerHTML = '';
-    chatHistory.forEach(function(item) {
-      if (item.role === 'user') {
-        if (item.text && item.text.indexOf('[Session started.') !== 0) {
-          renderUserMessage(item.text);
+    // Live #messages was never touched — nothing to restore.
+    scrollBottom();
+  }
+
+  function renderChatHistoryDay(date, pairs) {
+    // Update the sticky header — date + count. Tag and close button stay.
+    var pairCount = pairs ? pairs.length : 0;
+    var dateEl = historyViewHeader.querySelector('.hv-date');
+    if (dateEl) {
+      dateEl.textContent = formatDateLong(date)
+        + ' \\u00b7 ' + pairCount + ' ' + (pairCount === 1 ? 'exchange' : 'exchanges');
+    }
+    historyViewBody.innerHTML = '';
+    if (!pairs || pairs.length === 0) {
+      var empty = document.createElement('div');
+      empty.className = 'msg-empty';
+      empty.textContent = 'No conversation recorded for this day.';
+      historyViewBody.appendChild(empty);
+      return;
+    }
+    pairs.forEach(function(p) {
+      var userText = (p.user || '').trim();
+      var assistantText = (p.assistant || '').trim();
+      // Synthetic bootstrap prompt — never the operator typing.
+      if (userText.indexOf('[Session started.') === 0) return;
+
+      // Scheduler-driven cycles. Cycle-log format is [scheduler:JOBNAME] BODY.
+      // Live-messages format (legacy/different code path) is <scheduler_context>...
+      // Render either as a system block, not a user bubble.
+      var schedMatch = userText.match(/^\\[scheduler:([^\\]]+)\\]\\s*([\\s\\S]*)$/);
+      if (schedMatch) {
+        renderHistorySchedulerCycle(schedMatch[1], schedMatch[2], assistantText, p);
+        return;
+      }
+      if (userText.indexOf('<scheduler_context>') === 0) return;
+
+      if (userText) {
+        var u = document.createElement('div');
+        u.className = 'msg user';
+        u.textContent = userText;
+        historyViewBody.appendChild(u);
+      }
+      if (assistantText) {
+        var a = document.createElement('div');
+        a.className = 'msg assistant';
+        var body = document.createElement('div');
+        body.className = 'md-body';
+        body.innerHTML = renderMarkdown(assistantText);
+        a.appendChild(body);
+        if (p.model || p.input_tokens || p.output_tokens) {
+          var meta = document.createElement('div');
+          meta.className = 'meta';
+          var parts = [];
+          if (p.model) parts.push(p.model);
+          if (p.input_tokens || p.output_tokens) {
+            parts.push((p.input_tokens || 0) + ' in / ' + (p.output_tokens || 0) + ' out');
+          }
+          meta.textContent = parts.join(' | ');
+          a.appendChild(meta);
         }
-      } else if (item.role === 'assistant') {
-        renderAssistantMessage(item.text, item.model || null, item.usage || null, item.revised || false);
-      } else if (item.role === 'notification') {
-        renderNotification(item.text);
+        historyViewBody.appendChild(a);
       }
     });
-    liveSnapshot = null;
-    scrollBottom();
+  }
+
+  // Render a scheduler-driven cycle (email-inbound, scheduled task, etc) as
+  // a clearly-distinct system block: category badge + label + the input
+  // body in a quoted style + the agent's reply rendered as markdown.
+  // Email-inbound jobs are recognised by the job_name prefix and get a
+  // friendlier label.
+  function renderHistorySchedulerCycle(jobName, body, assistantText, pair) {
+    var isEmail = jobName.indexOf('email-inbound') === 0;
+    var label = isEmail ? 'Email received' : 'Scheduled task';
+    var icon = isEmail ? '\\u2709' : '\\u23f1';
+
+    var card = document.createElement('div');
+    card.className = 'history-system-card';
+
+    var head = document.createElement('div');
+    head.className = 'sys-card-head';
+    var iconEl = document.createElement('span');
+    iconEl.className = 'sys-card-icon';
+    iconEl.textContent = icon;
+    head.appendChild(iconEl);
+    var labelEl = document.createElement('span');
+    labelEl.className = 'sys-card-label';
+    labelEl.textContent = label;
+    head.appendChild(labelEl);
+    if (!isEmail) {
+      var nameEl = document.createElement('span');
+      nameEl.className = 'sys-card-name';
+      nameEl.textContent = jobName;
+      head.appendChild(nameEl);
+    }
+    card.appendChild(head);
+
+    if (body && body.trim()) {
+      var bodyEl = document.createElement('div');
+      bodyEl.className = 'sys-card-body';
+      bodyEl.textContent = body.trim();
+      card.appendChild(bodyEl);
+    }
+
+    if (assistantText) {
+      var replyHead = document.createElement('div');
+      replyHead.className = 'sys-card-reply-head';
+      replyHead.textContent = isEmail ? 'Reply sent' : 'Agent response';
+      card.appendChild(replyHead);
+      var reply = document.createElement('div');
+      reply.className = 'sys-card-reply md-body';
+      reply.innerHTML = renderMarkdown(assistantText);
+      card.appendChild(reply);
+      if (pair && (pair.model || pair.input_tokens || pair.output_tokens)) {
+        var meta = document.createElement('div');
+        meta.className = 'sys-card-meta';
+        var parts = [];
+        if (pair.model) parts.push(pair.model);
+        if (pair.input_tokens || pair.output_tokens) {
+          parts.push((pair.input_tokens || 0) + ' in / ' + (pair.output_tokens || 0) + ' out');
+        }
+        meta.textContent = parts.join(' | ');
+        card.appendChild(meta);
+      }
+    }
+
+    historyViewBody.appendChild(card);
   }
 
   function formatDateShort(iso) {
@@ -355,7 +474,6 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
 
   function renderSessionHistory(messages) {
     msgs.innerHTML = '';
-    chatHistory = [];
     if (!messages || messages.length === 0) return;
     var inSchedulerCycle = false;
     messages.forEach(function(item) {
@@ -374,7 +492,6 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
           inSchedulerCycle = false;
           renderUserMessage(text);
         }
-        chatHistory.push({ role: 'user', text: text });
       } else if (item.role === 'assistant') {
         if (inSchedulerCycle) {
           renderSchedulerResponse(item.text);
@@ -382,7 +499,6 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
         } else {
           renderAssistantMessage(item.text, null, null, false);
         }
-        chatHistory.push({ role: 'assistant', text: item.text });
       }
     });
     scrollBottom();
@@ -418,14 +534,15 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
       case 'history_index':
         renderHistoryIndex(data.days);
         break;
-      case 'history_day':
-        renderHistoryDay(data.date, data.entries);
+      case 'chat_history_day':
+        renderChatHistoryDay(data.date, data.pairs);
         break;
       case 'assistant_message':
         removeThinking();
         waitingForAnswer = false;
         addAssistantMessage(data.text, data.model, data.usage, wasRevised);
         wasRevised = false;
+        pulseHeaderOnCommit();
         break;
       case 'thinking':
         showThinking();
@@ -478,10 +595,11 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
   }
 
   // Map the 5 affect dimensions + cognitive status to CSS custom properties
-  // that drive the ambient background. Honest biometric mapping: hue shifts
-  // with pressure, saturation with calm, opacity with confidence, and a red
-  // tinge appears above a frustration threshold. Breathing rhythm reflects
-  // whether the agent is idle or working.
+  // that drive the header logo's halo ring. Honest biometric mapping: hue
+  // shifts with pressure, saturation with calm, opacity with confidence,
+  // red tinge above a frustration threshold. Breathing rhythm reflects
+  // whether the agent is idle or working. Tooltip on the logo shows the
+  // raw values for anyone who wants the actual numbers.
   function applyAffectTick(d) {
     var root = document.documentElement;
     var pressure = typeof d.pressure === 'number' ? d.pressure : 0;
@@ -491,17 +609,34 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
     // Hue: cool blue (220) -> magenta (320) as pressure climbs 0..100
     var hue = 220 + (pressure / 100) * 100;
     // Saturation: more calm = more saturated (deeper colour); grey when agitated
-    var saturation = 20 + (calm / 100) * 60;
-    // Opacity: more confident = slightly more visible. Range 0.06..0.14
-    // Opacity range 0.15..0.30 — visible but not overwhelming
-    var opacity = 0.15 + (confidence / 100) * 0.15;
+    var saturation = 30 + (calm / 100) * 60;
+    var opacity = 0.45 + (confidence / 100) * 0.35;
     // Red accent shift when frustration exceeds 60; shift up to -40deg toward red
     var accent = frustration > 60 ? ((frustration - 60) / 40) * 40 : 0;
-    root.style.setProperty('--affect-hue', hue + 'deg');
+    root.style.setProperty('--affect-hue', (hue - accent) + 'deg');
     root.style.setProperty('--affect-saturation', saturation + '%');
     root.style.setProperty('--affect-opacity', opacity.toFixed(3));
-    root.style.setProperty('--affect-accent', accent + 'deg');
     applyStatusRhythm(d.status);
+    var headerEl = document.getElementById('header');
+    if (headerEl) {
+      headerEl.title = 'Affect: ' + (d.status || 'idle')
+        + ' \\u00b7 calm ' + Math.round(calm) + '%'
+        + ' \\u00b7 pressure ' + Math.round(pressure) + '%'
+        + ' \\u00b7 confidence ' + Math.round(confidence) + '%'
+        + (frustration > 30 ? ' \\u00b7 frustration ' + Math.round(frustration) + '%' : '')
+        + (d.trend ? ' \\u00b7 trend ' + d.trend : '');
+    }
+  }
+
+  // Fire the cycle-commit pulse on the header. Re-add of the class restarts
+  // the CSS animation; force reflow between remove and add so back-to-back
+  // commits each produce a fresh pulse.
+  function pulseHeaderOnCommit() {
+    var headerEl = document.getElementById('header');
+    if (!headerEl) return;
+    headerEl.classList.remove('cycle-commit');
+    void headerEl.offsetWidth;
+    headerEl.classList.add('cycle-commit');
   }
 
   // Breathing rhythm reflects cognitive state:
@@ -534,6 +669,7 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
   }
 
   function renderUserMessage(text) {
+    hideEmptyState();
     var el = document.createElement('div');
     el.className = 'msg user';
     el.textContent = text;
@@ -541,6 +677,7 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
   }
 
   function renderAssistantMessage(text, model, usage, revised) {
+    hideEmptyState();
     var el = document.createElement('div');
     el.className = 'msg assistant';
     if (revised) {
@@ -567,6 +704,7 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
   }
 
   function renderNotification(text) {
+    hideEmptyState();
     var el = document.createElement('div');
     el.className = 'notification';
     el.textContent = text;
@@ -574,24 +712,18 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
   }
 
   function addUserMessage(text) {
-    if (!viewingDate) renderUserMessage(text);
-    chatHistory.push({ role: 'user', text: text });
-    saveChatHistory();
-    if (!viewingDate) scrollBottom();
+    renderUserMessage(text);
+    scrollBottom();
   }
 
   function addAssistantMessage(text, model, usage, revised) {
-    if (!viewingDate) renderAssistantMessage(text, model, usage, revised);
-    chatHistory.push({ role: 'assistant', text: text, model: model, usage: usage, revised: revised || false });
-    saveChatHistory();
-    if (!viewingDate) scrollBottom();
+    renderAssistantMessage(text, model, usage, revised);
+    scrollBottom();
   }
 
   function addNotification(text) {
-    if (!viewingDate) renderNotification(text);
-    chatHistory.push({ role: 'notification', text: text });
-    saveChatHistory();
-    if (!viewingDate) scrollBottom();
+    renderNotification(text);
+    scrollBottom();
   }
 
   function setThinkingLock(locked) {
@@ -599,6 +731,7 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
   }
 
   function showThinking() {
+    hideEmptyState();
     cycleStartMs = Date.now();
     startElapsedTimer();
     statusStrip.classList.remove('hidden');
@@ -733,6 +866,17 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
     sendMessage();
   });
 
+  // When the tab regains visibility, re-fetch the history index. Handles
+  // two midnight-rollover cases: (a) the server now considers a different
+  // date today so what was previously hidden as today appears as the
+  // newest past day; (b) the browser Today/Yesterday labels are
+  // recomputed against the current local date.
+  document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'visible' && ws && ws.readyState === WebSocket.OPEN) {
+      requestHistoryIndex();
+    }
+  });
+
   // History is loaded from server on WebSocket connect (session_history message)
   connect();
 })();
@@ -759,8 +903,7 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
 " <> shared_css() <> sidebar_css() <> "
 </style>
 </head>
-<body>
-<div id=\"ambient-layer\" aria-hidden=\"true\"></div>
+<body class=\"admin-page\">
 <div id=\"layout\">
 " <> sidebar_html("admin") <> "
 <div id=\"main-content\">
@@ -1586,7 +1729,7 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
 // ---------------------------------------------------------------------------
 
 fn header_html(title: String, version: String) -> String {
-  "<div id=\"header\">
+  "<div id=\"header\" title=\"Affect: idle\">
   <div id=\"header-left\">
     <h1>" <> title <> "</h1>
     <span class=\"version\">" <> version <> "</span>
@@ -1621,16 +1764,14 @@ fn shared_css() -> String {
     --code-border: #e3e2dc;
     --radius: 20px;
     --radius-sm: 12px;
-    /* ── Affect-driven ambient variables ──────────────
+    /* ── Affect-driven halo variables ──────────────
        Driven by AffectTick notifications. JS sets these on arrival
-       and CSS transitions smooth the change. Defaults mimic a calm,
-       confident baseline so the background renders cleanly even
-       before the first affect reading arrives. */
+       and CSS transitions smooth the change. Defaults are a calm,
+       confident baseline so the halo renders cleanly before the
+       first affect reading arrives. */
     --affect-hue: 220deg;         /* cool blue default */
-    --affect-saturation: 40%;
-    --affect-lightness: 55%;
-    --affect-opacity: 0.22;
-    --affect-accent: 0%;          /* red tinge for frustration spikes */
+    --affect-saturation: 60%;
+    --affect-opacity: 0.6;
     --breathing-duration: 7s;     /* idle rhythm */
   }
   html {
@@ -1647,55 +1788,61 @@ fn shared_css() -> String {
     z-index: 0;
   }
 
-  /* ── Ambient affect layer ────────────────────────
-     Fixed-position gradient wash driven by live affect telemetry.
-     Sits behind all content but above the base bg. Honest biometric
-     signal — the hue shifts as Curragh's interior state shifts.
-     Respects reduced-motion. */
-  #ambient-layer {
-    position: fixed;
-    inset: 0;
+  /* ── Affect-driven ink-wash header ───────────────
+     The header carries the agent's biometric signal as a slow drifting
+     gradient behind the title. Hue and saturation come from live affect
+     telemetry; a brighter pulse fires on each cycle commit (when an
+     assistant message lands), giving an honest visual heartbeat without
+     hijacking attention. */
+  #header { position: relative; overflow: hidden; }
+  #header > * { position: relative; z-index: 2; }
+  #header::before {
+    content: \"\";
+    position: absolute;
+    inset: -10%;
     z-index: 0;
     pointer-events: none;
-    background:
-      radial-gradient(
-        ellipse 80% 60% at 30% 20%,
-        hsla(
-          calc(var(--affect-hue) - var(--affect-accent)),
-          var(--affect-saturation),
-          var(--affect-lightness),
-          var(--affect-opacity)
-        ) 0%,
-        transparent 60%
-      ),
-      radial-gradient(
-        ellipse 70% 70% at 70% 80%,
-        hsla(
-          calc(var(--affect-hue) + 20deg),
-          var(--affect-saturation),
-          calc(var(--affect-lightness) + 5%),
-          calc(var(--affect-opacity) * 0.7)
-        ) 0%,
-        transparent 55%
-      );
-    animation: affect-breathe var(--breathing-duration) ease-in-out infinite;
-    transition:
-      --affect-hue 3s ease,
-      --affect-saturation 3s ease,
-      --affect-lightness 3s ease,
-      --affect-opacity 3s ease,
-      --affect-accent 3s ease,
-      --breathing-duration 1.5s ease;
+    background: radial-gradient(
+      ellipse 55% 110% at 25% 50%,
+      hsla(var(--affect-hue), var(--affect-saturation), 52%, 0.18) 0%,
+      hsla(var(--affect-hue), var(--affect-saturation), 58%, 0.07) 45%,
+      transparent 75%
+    );
+    opacity: 0.85;
+    animation: ink-drift 22s ease-in-out infinite;
+    transition: background 2s ease;
   }
-  @keyframes affect-breathe {
-    0%, 100% { opacity: 0.85; }
-    50%      { opacity: 1.0; }
+  #header::after {
+    content: \"\";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    background: radial-gradient(
+      circle at 30% 50%,
+      hsla(var(--affect-hue), var(--affect-saturation), 60%, 0.45) 0%,
+      hsla(var(--affect-hue), var(--affect-saturation), 60%, 0.12) 30%,
+      transparent 65%
+    );
+    opacity: 0;
+    transform: scale(0.55);
+    transform-origin: 30% 50%;
+  }
+  #header.cycle-commit::after {
+    animation: ink-pulse 2.6s ease-out;
+  }
+  @keyframes ink-drift {
+    0%, 100% { transform: translateX(-3%) scale(1.0); }
+    50%      { transform: translateX(3%) scale(1.06); }
+  }
+  @keyframes ink-pulse {
+    0%   { opacity: 0;    transform: scale(0.55); }
+    20%  { opacity: 1;    transform: scale(1.0); }
+    100% { opacity: 0;    transform: scale(1.6); }
   }
   @media (prefers-reduced-motion: reduce) {
-    #ambient-layer {
-      animation: none;
-      transition: none;
-    }
+    #header::before { animation: none; transform: none; }
+    #header.cycle-commit::after { animation: none; }
   }
 
   /* ── Layout ──────────────────────────────────────── */
@@ -1980,11 +2127,11 @@ fn shared_css() -> String {
     text-transform: uppercase;
     flex-shrink: 0;
   }
-  .activity-cat-scheduler { background: #1a3a5c; color: #6cb4ee; }
-  .activity-cat-reminder { background: #3a3520; color: #e0c050; }
-  .activity-cat-planner { background: #1a3c2a; color: #50c878; }
-  .activity-cat-sandbox { background: #3a2040; color: #c080e0; }
-  .activity-cat-system { background: #2a2a2a; color: #999; }
+  .activity-cat-scheduler { background: #d6e6f5; color: #1a4a7c; }
+  .activity-cat-reminder { background: #f5ecd0; color: #6e5a10; }
+  .activity-cat-planner { background: #d6efdc; color: #1c5c30; }
+  .activity-cat-sandbox { background: #ecddf2; color: #5a2070; }
+  .activity-cat-system { background: var(--border); color: var(--text-secondary); }
   .activity-text {
     color: var(--text-secondary);
     overflow: hidden;
@@ -1992,15 +2139,50 @@ fn shared_css() -> String {
     white-space: nowrap;
   }
   .activity-response {
-    padding: 8px 12px;
-    margin: 2px 0;
-    font-size: 14px;
-    color: var(--text-primary);
+    padding: 14px 18px;
+    margin: 8px 0 14px;
+    font-size: 15px;
+    line-height: 1.55;
+    color: var(--text);
     border-left: 3px solid var(--accent);
-    background: var(--bg-secondary);
-    border-radius: 0 4px 4px 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left-width: 3px;
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
   }
-  .activity-response .md-body { font-size: 14px; }
+  .activity-response .md-body { font-size: 15px; line-height: 1.6; }
+  .activity-response .md-body p { margin: 0 0 0.6em; }
+  .activity-response .md-body p:last-child { margin-bottom: 0; }
+  .activity-response .md-body h1,
+  .activity-response .md-body h2,
+  .activity-response .md-body h3 { margin: 0.6em 0 0.3em; font-size: 1.05em; }
+  .activity-response .md-body h1:first-child,
+  .activity-response .md-body h2:first-child,
+  .activity-response .md-body h3:first-child { margin-top: 0; }
+  .activity-response .md-body ul,
+  .activity-response .md-body ol { margin: 0.4em 0 0.6em 1.4em; }
+  .activity-response .md-body code {
+    background: var(--code-bg);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+  .activity-response .md-body pre {
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    overflow-x: auto;
+    font-size: 13px;
+  }
+  .activity-response .md-body pre code { background: none; padding: 0; }
+  .activity-response .md-body blockquote {
+    border-left: 3px solid var(--border);
+    padding-left: 12px;
+    color: var(--text-secondary);
+    margin: 0.5em 0;
+  }
   .activity-badge {
     display: inline-block;
     background: var(--accent);
@@ -2164,12 +2346,11 @@ fn shared_css() -> String {
     margin-top: 8px;
   }
 
-  /* ── Chat history panel — sits at #layout level between the outer
-     nav sidebar and #main-content. Modern chat-app positioning:
-     far-left is app nav, next column is conversation history, main
-     area is the current chat. */
+  /* ── Chat history panel — leftmost column on the chat page.
+     The outer nav sidebar sits to the left of this as a thin icon rail;
+     this panel is the conversation history. */
   #history-panel {
-    width: 260px;
+    width: 280px;
     flex-shrink: 0;
     border-right: 1px solid var(--border);
     background: var(--bg);
@@ -2189,11 +2370,16 @@ fn shared_css() -> String {
   #history-panel.collapsed #history-list {
     display: none;
   }
+  #history-panel.collapsed .history-toggle-icon {
+    transform: rotate(180deg);
+    display: inline-block;
+  }
   #history-header {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 8px;
-    padding: 12px 10px;
+    padding: 14px 14px;
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
   }
@@ -2201,8 +2387,9 @@ fn shared_css() -> String {
     background: transparent;
     border: none;
     cursor: pointer;
-    padding: 4px 6px;
-    font-size: 16px;
+    padding: 4px 8px;
+    font-size: 18px;
+    line-height: 1;
     color: var(--text-dim);
     border-radius: 6px;
   }
@@ -2211,9 +2398,9 @@ fn shared_css() -> String {
     color: var(--text);
   }
   #history-title {
-    font-size: 13px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
     color: var(--text);
     text-transform: uppercase;
   }
@@ -2232,10 +2419,11 @@ fn shared_css() -> String {
     background: transparent;
     border: none;
     cursor: pointer;
-    padding: 10px 14px;
+    padding: 12px 16px;
     border-bottom: 1px solid transparent;
     transition: background 0.15s;
     color: var(--text);
+    font-family: inherit;
   }
   .history-day:hover {
     background: var(--border);
@@ -2245,23 +2433,23 @@ fn shared_css() -> String {
     border-bottom-color: var(--border);
   }
   .history-day .date {
-    font-size: 13px;
+    font-size: 15px;
     font-weight: 600;
     color: var(--text);
     display: block;
-    margin-bottom: 3px;
+    margin-bottom: 4px;
   }
   .history-day .count {
-    font-size: 11px;
+    font-size: 13px;
     color: var(--text-dim);
     display: inline;
-    margin-right: 6px;
+    margin-right: 8px;
   }
   .history-day .headline {
-    font-size: 12px;
-    color: var(--text-dim);
+    font-size: 13px;
+    color: var(--text-secondary);
     display: block;
-    margin-top: 3px;
+    margin-top: 4px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -2269,64 +2457,231 @@ fn shared_css() -> String {
   }
   #history-empty, #history-loading {
     padding: 16px 14px;
-    font-size: 13px;
+    font-size: 14px;
     color: var(--text-dim);
   }
   .hidden { display: none !important; }
 
-  /* Read-only history day view (rendered inline in #messages) */
-  .history-day-header {
-    padding: 14px 16px;
-    margin-bottom: 8px;
-    border-radius: var(--radius-sm);
-    background: var(--accent-light);
-    color: var(--text);
-    font-size: 14px;
+  /* ── Empty-state coaching ───────────────────────────
+     Shown when #messages is empty — disappears on first render. Sits
+     in the same flex slot so it doesn't shove the input box around.
+     Example prompts are clickable and drop into the input box. */
+  #empty-state {
+    flex: 1;
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 14px;
+    justify-content: center;
+    padding: 32px 24px;
+    text-align: center;
+    gap: 16px;
+    color: var(--text-secondary);
   }
-  .history-day-header .back-to-chat {
+  #chat-tab.viewing-history #empty-state { display: none; }
+  .empty-headline {
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: -0.2px;
+  }
+  .empty-sub {
+    font-size: 14px;
+    max-width: 480px;
+    line-height: 1.5;
+    color: var(--text-dim);
+  }
+  .empty-hints {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 4px;
+  }
+  .empty-prompt {
     background: var(--surface);
     border: 1px solid var(--border);
     color: var(--text);
     font-family: inherit;
     font-size: 13px;
     cursor: pointer;
-    padding: 6px 12px;
-    border-radius: var(--radius-sm);
-    transition: background 0.15s, border-color 0.15s;
+    padding: 8px 14px;
+    border-radius: 999px;
+    transition: background 0.15s, border-color 0.15s, transform 0.05s;
   }
-  .history-day-header .back-to-chat:hover {
-    background: var(--bg);
-    border-color: var(--border-hover);
+  .empty-prompt:hover {
+    background: var(--accent-light);
+    border-color: var(--accent);
+    color: var(--accent);
   }
-  .history-day-header .history-day-title {
+  .empty-prompt:active { transform: scale(0.97); }
+
+  /* ── Read-only chat-history view ────────────────────
+     Sibling of #messages inside #chat-tab. Only one is visible at a time;
+     toggled by the .viewing-history class on #chat-tab. The live #messages
+     DOM is NEVER mutated when opening or closing history — incoming live
+     messages keep rendering normally underneath. */
+  #history-view {
+    display: none;
     flex: 1;
-    color: var(--text-secondary);
+    min-height: 0;
+    flex-direction: column;
+    background: var(--bg);
   }
-  .history-entry {
-    padding: 12px 16px;
-    border-left: 2px solid var(--border);
-    margin: 8px 0;
-    background: var(--surface);
-    border-radius: var(--radius-sm);
-    font-size: 14px;
+  #chat-tab.viewing-history #messages { display: none; }
+  #chat-tab.viewing-history #history-view { display: flex; }
+  #chat-tab.viewing-history #status-strip { display: none; }
+  #chat-tab.viewing-history #input-area { opacity: 0.45; pointer-events: none; }
+  /* Sticky banner across the top — date and tag on the left, large
+     close button on the right. Always visible while scrolling so the
+     operator can never get stuck in read-only mode. */
+  #history-view-header {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 14px 24px;
+    background: var(--accent-light);
+    border-bottom: 1px solid var(--border);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+    z-index: 5;
   }
-  .history-entry .ts {
-    font-size: 11px;
-    color: var(--text-dim);
-    font-variant-numeric: tabular-nums;
-    margin-bottom: 4px;
+  #history-view-title {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
   }
-  .history-entry .summary {
+  .hv-date {
+    font-weight: 700;
+    font-size: 16px;
     color: var(--text);
-    line-height: 1.5;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
-  .history-entry .meta {
-    margin-top: 6px;
+  .hv-tag {
+    flex-shrink: 0;
+    padding: 3px 10px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--accent);
+    background: var(--surface);
+    border: 1px solid var(--accent);
+    border-radius: 999px;
+  }
+  #history-close {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    color: #ffffff;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 8px 16px;
+    border-radius: 999px;
+    box-shadow: 0 2px 6px rgba(218,126,55,0.30);
+    transition: filter 0.15s, transform 0.05s;
+  }
+  #history-close:hover {
+    filter: brightness(0.95);
+  }
+  #history-close:active {
+    transform: scale(0.97);
+  }
+  #history-view-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px 24px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    scrollbar-width: thin;
+  }
+  #history-view-body::-webkit-scrollbar { width: 6px; }
+  #history-view-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  #history-view-body .msg {
+    opacity: 0.78;
+    filter: saturate(0.7);
+  }
+  #history-view-body .msg-empty {
+    padding: 32px;
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 14px;
+    align-self: center;
+  }
+  /* System cards for scheduler-driven cycles (email-inbound, scheduled
+     tasks). Wider than chat bubbles, distinct from operator messages. */
+  .history-system-card {
+    align-self: stretch;
+    max-width: 100%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    padding: 14px 18px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    opacity: 0.85;
+  }
+  .sys-card-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--accent);
+  }
+  .sys-card-icon { font-size: 16px; line-height: 1; }
+  .sys-card-label { letter-spacing: 0.02em; }
+  .sys-card-name {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-dim);
+    font-family: 'SF Mono', Menlo, monospace;
+    margin-left: auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 50%;
+  }
+  .sys-card-body {
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--text);
+    white-space: pre-wrap;
+    background: var(--code-bg);
+    border-radius: 6px;
+    padding: 10px 12px;
+    border: 1px solid var(--code-border);
+  }
+  .sys-card-reply-head {
+    margin: 14px 0 6px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-dim);
+  }
+  .sys-card-reply {
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--text);
+  }
+  .sys-card-reply p { margin: 0 0 0.6em; }
+  .sys-card-reply p:last-child { margin-bottom: 0; }
+  .sys-card-meta {
+    margin-top: 8px;
     font-size: 11px;
     color: var(--text-dim);
+    text-align: right;
   }
 
   /* ── Narrative tab ───────────────────────────────── */
@@ -2574,8 +2929,15 @@ fn sidebar_css() -> String {
   #sidebar nav a .nav-icon {
     flex-shrink: 0;
     width: 20px;
-    text-align: center;
-    font-size: 16px;
+    height: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #sidebar nav a .nav-icon svg {
+    width: 18px;
+    height: 18px;
+    display: block;
   }
   #sidebar nav a .nav-label {
     overflow: hidden;
@@ -2595,18 +2957,28 @@ fn sidebar_html(active: String) -> String {
     "admin" -> " active"
     _ -> ""
   }
-  "<div id=\"sidebar\">
-  <button id=\"sidebar-toggle\">
+  // data-page lets the JS default the collapsed state per page (chat
+  // collapses to a thin icon rail; admin stays expanded).
+  // Inline SVG icons render monochrome and stay crisp at any size — no
+  // emoji-rendering surprises across platforms. Chat = speech bubble;
+  // Admin = gear. Admin opens in a new tab so the chat session stays
+  // alive when the operator pops over to inspect telemetry.
+  let chat_icon =
+    "<svg viewBox=\"0 0 24 24\" width=\"18\" height=\"18\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z\"/></svg>"
+  let admin_icon =
+    "<svg viewBox=\"0 0 24 24\" width=\"18\" height=\"18\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><circle cx=\"12\" cy=\"12\" r=\"3\"/><path d=\"M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z\"/></svg>"
+  "<div id=\"sidebar\" data-page=\"" <> active <> "\">
+  <button id=\"sidebar-toggle\" title=\"Toggle menu\">
     <span class=\"toggle-icon\">&laquo;</span>
     <span class=\"toggle-label\">Menu</span>
   </button>
   <nav>
-    <a href=\"/chat\" target=\"_blank\" class=\"" <> chat_active <> "\">
-      <span class=\"nav-icon\">&bull;</span>
+    <a href=\"/chat\" class=\"" <> chat_active <> "\" title=\"Chat\">
+      <span class=\"nav-icon\">" <> chat_icon <> "</span>
       <span class=\"nav-label\">Chat</span>
     </a>
-    <a href=\"/admin\" target=\"_blank\" class=\"" <> admin_active <> "\">
-      <span class=\"nav-icon\">&bull;</span>
+    <a href=\"/admin\" class=\"" <> admin_active <> "\" title=\"Admin (new tab)\" target=\"_blank\" rel=\"noopener\">
+      <span class=\"nav-icon\">" <> admin_icon <> "</span>
       <span class=\"nav-label\">Admin</span>
     </a>
   </nav>
@@ -2615,10 +2987,13 @@ fn sidebar_html(active: String) -> String {
 
 fn sidebar_js() -> String {
   "(function() {
-  var SIDEBAR_KEY = 'springdrift_sidebar';
   var sidebar = document.getElementById('sidebar');
   var toggle = document.getElementById('sidebar-toggle');
   var toggleIcon = toggle.querySelector('.toggle-icon');
+  var page = sidebar.getAttribute('data-page') || 'chat';
+  // Per-page localStorage keys so the chat default (collapsed) and the
+  // admin default (expanded) don't fight each other.
+  var key = 'springdrift_sidebar_' + page;
 
   function setSidebarState(collapsed) {
     if (collapsed) {
@@ -2628,7 +3003,7 @@ fn sidebar_js() -> String {
       sidebar.classList.remove('collapsed');
       toggleIcon.innerHTML = '&laquo;';
     }
-    try { localStorage.setItem(SIDEBAR_KEY, collapsed ? 'collapsed' : 'expanded'); }
+    try { localStorage.setItem(key, collapsed ? 'collapsed' : 'expanded'); }
     catch(e) {}
   }
 
@@ -2636,10 +3011,13 @@ fn sidebar_js() -> String {
     setSidebarState(!sidebar.classList.contains('collapsed'));
   });
 
-  try {
-    var stored = localStorage.getItem(SIDEBAR_KEY);
-    if (stored === 'collapsed') setSidebarState(true);
-  } catch(e) {}
+  // On chat page, default to collapsed icon-rail when the user hasn't
+  // explicitly expanded it. On admin, default to expanded.
+  var stored = null;
+  try { stored = localStorage.getItem(key); } catch(e) {}
+  if (stored === 'collapsed') setSidebarState(true);
+  else if (stored === 'expanded') setSidebarState(false);
+  else if (page === 'chat') setSidebarState(true);
 })();
 "
 }
@@ -2656,6 +3034,12 @@ fn ws_connect_js() -> String {
       statusEl.textContent = 'connected';
       statusDot.className = 'dot connected';
       reconnectDelay = 1000;
+      // Drop a session marker into the activity tab on first connect so
+      // it isn't empty-looking. Subsequent reconnects don't re-mark.
+      if (typeof addActivityItem === 'function' && typeof sessionStartedShown !== 'undefined' && !sessionStartedShown) {
+        sessionStartedShown = true;
+        addActivityItem('Session started');
+      }
       // Load the chat-history index for the sidebar. Harmless on the
       // admin page — the handler on that page ignores history_index.
       if (typeof requestHistoryIndex === 'function') requestHistoryIndex();

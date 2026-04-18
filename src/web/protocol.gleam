@@ -48,6 +48,10 @@ pub type ClientMessage {
   /// Load all narrative entries for a given YYYY-MM-DD date. Drives
   /// the read-only day view in the chat-history sidebar.
   RequestHistoryDay(date: String)
+  /// Load raw user/assistant message pairs for a given YYYY-MM-DD date.
+  /// Reads from the cycle log directly — the actual chat, not the
+  /// Archivist's narrative summary.
+  RequestChatHistoryDay(date: String)
 }
 
 pub type ServerMessage {
@@ -102,6 +106,9 @@ pub type ServerMessage {
   HistoryIndex(days_json: String)
   /// Full narrative entries for a specific day, chronological order.
   HistoryDay(date: String, entries_json: String)
+  /// Raw user/assistant chat pairs for a specific day, chronological order.
+  /// Each pair: {timestamp, user_text, assistant_text}.
+  ChatHistoryDay(date: String, pairs_json: String)
 }
 
 pub type CycleDataJson {
@@ -151,6 +158,10 @@ pub fn decode_client_message(json_string: String) -> Result(ClientMessage, Nil) 
       "request_history_day" -> {
         use date <- decode.field("date", decode.string)
         decode.success(RequestHistoryDay(date:))
+      }
+      "request_chat_history_day" -> {
+        use date <- decode.field("date", decode.string)
+        decode.success(RequestChatHistoryDay(date:))
       }
       _ -> decode.failure(UserMessage(""), "Unknown client message type")
     }
@@ -347,6 +358,13 @@ pub fn encode_server_message(msg: ServerMessage) -> String {
       <> date
       <> "\",\"entries\":"
       <> entries_json
+      <> "}"
+
+    ChatHistoryDay(date:, pairs_json:) ->
+      "{\"type\":\"chat_history_day\",\"date\":\""
+      <> date
+      <> "\",\"pairs\":"
+      <> pairs_json
       <> "}"
   }
 }

@@ -4,17 +4,17 @@
 # Simulates a real setup with canned answers piped to stdin.
 #
 # Run standalone:
-#   docker build -f tests/setup/Dockerfile.integration -t springdrift-setup-test .
+#   docker build -f scripts/setup/test/Dockerfile.integration -t springdrift-setup-test .
 #   docker run --rm springdrift-setup-test
 #
 # Or from the test runner:
-#   bash tests/setup/run_tests.sh --integration
+#   bash scripts/setup/test/run_tests.sh --integration
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 source "$SCRIPT_DIR/harness.sh"
 
 cd "$REPO_ROOT"
@@ -58,7 +58,7 @@ n
 ANSWERS
 
 # SPRINGDRIFT_SKIP_SYSTEMD skips systemd commands that won't work in a container
-SPRINGDRIFT_SKIP_SYSTEMD=1 bash scripts/setup-linux.sh < "$INPUT_FILE" 2>&1 || true
+SPRINGDRIFT_SKIP_SYSTEMD=1 bash scripts/setup/linux.sh < "$INPUT_FILE" 2>&1 || true
 rm -f "$INPUT_FILE"
 
 echo ""
@@ -155,7 +155,7 @@ assert_eq "$?" "0"
 
 # ── Gleam version is acceptable ──────────────────────────────────────────────
 
-source "$REPO_ROOT/scripts/lib/setup-common.sh"
+source "$REPO_ROOT/scripts/setup/lib/common.sh"
 GLEAM_VER=$(parse_gleam_version "$(gleam --version 2>/dev/null)")
 
 it "installed Gleam version meets minimum requirement"
@@ -212,7 +212,7 @@ n
 
 n
 ANSWERS
-SPRINGDRIFT_SKIP_SYSTEMD=1 bash scripts/setup-linux.sh < "$INPUT_FILE2" 2>&1 || true
+SPRINGDRIFT_SKIP_SYSTEMD=1 bash scripts/setup/linux.sh < "$INPUT_FILE2" 2>&1 || true
 rm -f "$INPUT_FILE2"
 AFTER_HASH=$(md5sum .springdrift/config.toml | cut -d' ' -f1)
 assert_eq "$BEFORE_HASH" "$AFTER_HASH"
