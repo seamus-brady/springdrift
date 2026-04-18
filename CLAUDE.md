@@ -115,6 +115,10 @@ src/
 │   ├── types.gleam            Strategy + StrategyEvent (Created/Used/Outcome/Archived) + StrategySource
 │   └── log.gleam              Per-day JSONL log + resolve_from_events + active_ranked + Laplace success_rate
 │
+├── learning_goal/             Learning Goals Store — meta-learning Phase C
+│   ├── types.gleam            LearningGoal + GoalEvent (Created/EvidenceAdded/StatusChanged) + GoalSource + GoalStatus
+│   └── log.gleam              Per-day JSONL log + resolve_from_events + active_ranked (priority desc)
+│
 ├── affect/correlation.gleam   Affect-Performance Engine — meta-learning Phase D. Pure Pearson math + (snapshot, entry) join + fact key encoding
 │
 ├── comms/                     Communications — email via AgentMail
@@ -467,6 +471,7 @@ indexed in ETS by the Librarian actor for fast queries.
 | Comms | `.springdrift/memory/comms/YYYY-MM-DD-comms.jsonl` | `CommsMessage` | Sent and received email messages with delivery status |
 | Consolidation | `.springdrift/memory/consolidation/YYYY-MM-DD-consolidation.jsonl` | `ConsolidationRun` | Remembrancer run records: period, counts, report path |
 | Strategies | `.springdrift/memory/strategies/YYYY-MM-DD-strategies.jsonl` | `StrategyEvent` | Meta-learning Phase A. Append-only Created/Used/Outcome/Archived events; `Strategy` derived by replay |
+| Learning Goals | `.springdrift/memory/learning_goals/YYYY-MM-DD-goals.jsonl` | `GoalEvent` | Meta-learning Phase C. Append-only Created/EvidenceAdded/StatusChanged events; `LearningGoal` derived by replay |
 
 **How they relate:** Narrative entries are the atomic record of each cycle. Threads
 group entries by topic using overlap scoring (location=3, domain=2, keyword=1;
@@ -510,6 +515,9 @@ agent. Heavy planner operations moved to the Planner agent.
 | `activate_task` | Tasks | Set a pending task as current focus |
 | `get_active_work` | Tasks+Endeavours | List active tasks and endeavours with progress |
 | `get_task_detail` | Tasks | Full task detail: steps, risks, forecast score, cycles |
+| `create_learning_goal` | Learning Goals | Phase C. Self-directed learning goal with title/rationale/acceptance_criteria, optional strategy_id |
+| `update_learning_goal` | Learning Goals | Add evidence cycle_id and/or change status (active/achieved/abandoned/paused) with reason |
+| `list_learning_goals` | Learning Goals | List goals filtered by status; default returns active ranked by priority |
 
 **Observer agent tools** (18 tools — diagnostic, forensic, CBR curation):
 
@@ -818,6 +826,8 @@ keyword dissimilarity) — data the Curator can't derive itself.
 ambient perception block injected at every cycle start (no tool calls needed). It
 also gains a `<strategies>` section once the Strategy Registry has any active
 strategies — top 3 by Laplace-smoothed success rate (omitted when registry empty) —
+a `<learning_goals active="N" achieved="N">` block (Phase C) listing top 3 active
+goals by priority,
 an `<affect_warnings>` block surfacing strong negative
 correlations (r ≤ -0.4) between affect dimensions and outcome success per
 domain (Phase D; sourced from facts written by `analyze_affect_performance`),

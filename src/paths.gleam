@@ -128,6 +128,11 @@ pub fn strategy_log_dir() -> String {
   project_dir() <> "/memory/strategies"
 }
 
+/// Learning Goals event log directory: .springdrift/memory/learning_goals/
+pub fn learning_goals_dir() -> String {
+  project_dir() <> "/memory/learning_goals"
+}
+
 /// Communications log directory: .springdrift/memory/comms/
 pub fn comms_dir() -> String {
   project_dir() <> "/memory/comms"

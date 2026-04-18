@@ -151,29 +151,44 @@ evidence-based skill documents.
 **Operator's standing mandate** is expressed via `identity/character.json` +
 `dprime.json` + rate-limit config — no per-item approval inbox.
 
-### 4.3 Phase C — Learning Goals Store
+### 4.3 Phase C — Learning Goals Store — SHIPPED 2026-04-19
+
+**Status**: Shipped. Substrate + cognitive-loop tools + sensorium block.
 
 **Purpose**: Self-directed learning objectives.
 
 **Storage**: `.springdrift/memory/learning_goals/YYYY-MM-DD-goals.jsonl`
 
-**Data model**:
-- `id`, `title`, `rationale`, `acceptance_criteria`
-- `strategy_id` (links to Strategy Registry)
-- `priority` (0.0–1.0), `status`: `active` | `achieved` | `abandoned` | `paused`
-- `evidence` (cycle IDs), `affect_baseline`
-- `source`: `self_identified` | `remembrancer_suggested` | `operator_directed` | `pattern_mined`
+**Data model** (`src/learning_goal/types.gleam`):
+- `LearningGoal` — derived state: `id`, `title`, `rationale`,
+  `acceptance_criteria`, optional `strategy_id`, `priority`,
+  `status` (Active/Achieved/Abandoned/Paused), `evidence` (cycle ids),
+  `source` (SelfIdentified/RemembrancerSuggested/OperatorDirected/
+  PatternMined), `created_at`, `last_event_at`.
+- `GoalEvent` — append-only events: `GoalCreated`, `GoalEvidenceAdded`,
+  `GoalStatusChanged`. `resolve_from_events` derives the goal list.
 
-**Integration**:
-- Remembrancer proposes goals from pattern mining.
-- Sensorium gains `<learning_goals active="N" recently_achieved="N"/>`.
-- Metacognitive scheduler (Phase F) creates recurring check-ins.
-- Observer evaluates progress against acceptance criteria.
+**Integration shipped**:
+- Three cognitive-loop tools in `src/tools/learning_goals.gleam`:
+  `create_learning_goal`, `update_learning_goal`, `list_learning_goals`.
+- Sensorium `<learning_goals active="N" achieved="N">` block listing the
+  top 3 active goals by priority. Omitted when no active goals.
+- Strategy linkage: `strategy_id` on `LearningGoal` connects a goal to a
+  named approach in the Strategy Registry (Phase A).
+- 8 unit tests covering append/resolve/ranking/json round-trip.
+
+**Not yet shipped (Phase C follow-ups)**:
+- Remembrancer-proposed goals from pattern mining.
+- Observer-evaluated progress against acceptance criteria.
+- Metacognitive scheduler (Phase F) creates recurring goal-review jobs
+  (will land in Phase F).
+- `affect_baseline` snapshot on goal creation (deferred — uses Phase D
+  affect telemetry once auto-trigger is wired).
 
 **Reference**: Zimmerman's forethought phase. Source field distinguishes
 intrinsic from extrinsic motivation.
 
-**Dependency**: Phase A.
+**Dependency**: Phase A (shipped).
 
 ### 4.4 Phase D — Affect-Performance Correlation Engine — SHIPPED 2026-04-18
 
