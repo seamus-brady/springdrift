@@ -20,7 +20,9 @@
 // by the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 
+import affect/correlation as affect_correlation
 import agent/types as agent_types
+import facts/log as facts_log
 import facts/types as facts_types
 import gleam/erlang/process.{type Subject}
 import gleam/float
@@ -1131,11 +1133,13 @@ fn build_sensorium(
   let knowledge_section = render_sensorium_knowledge(state)
   let memory_section = render_sensorium_memory()
   let strategies_section = render_sensorium_strategies()
+  let affect_warnings_section = render_sensorium_affect_warnings(state)
 
   let sections =
     [
       clock, situation, schedule, vitals, sandbox_section, delegations, events,
-      tasks_section, strategies_section, knowledge_section, memory_section,
+      tasks_section, strategies_section, affect_warnings_section,
+      knowledge_section, memory_section,
     ]
     |> list.filter(fn(s) { s != "" })
     |> string.join("\n")
@@ -1621,6 +1625,67 @@ fn render_sensorium_memory() -> String {
       <> "\"/>"
     }
   }
+}
+
+/// Render the <affect_warnings> block — meta-learning Phase D. Reads
+/// facts with the `affect_corr_` prefix written by the Remembrancer's
+/// `analyze_affect_performance` tool and surfaces strong negative
+/// correlations (high dimension → failure) so the agent sees its own
+/// maladaptive patterns at every cycle. Omitted when no warnings meet
+/// the threshold so new installs see no noise.
+fn render_sensorium_affect_warnings(state: CuratorState) -> String {
+  let warning_threshold = -0.4
+  let facts = facts_log.resolve_current(state.facts_dir, None)
+  let warnings =
+    facts
+    |> list.filter(fn(f) {
+      string.starts_with(f.key, "affect_corr_")
+      && f.operation == facts_types.Write
+    })
+    |> list.filter_map(fn(f) {
+      case affect_correlation.parse_fact_value(f.value) {
+        Ok(#(r, n, inconclusive)) ->
+          case inconclusive || r >. warning_threshold {
+            True -> Error(Nil)
+            False -> Ok(#(f.key, r, n))
+          }
+        Error(_) -> Error(Nil)
+      }
+    })
+  case warnings {
+    [] -> ""
+    _ -> {
+      let rows =
+        warnings
+        |> list.take(5)
+        |> list.map(render_affect_warning_row)
+        |> string.join("\n")
+      "  <affect_warnings count=\""
+      <> int.to_string(list.length(warnings))
+      <> "\">\n"
+      <> rows
+      <> "\n  </affect_warnings>"
+    }
+  }
+}
+
+fn render_affect_warning_row(w: #(String, Float, Int)) -> String {
+  let #(key, r, n) = w
+  // key looks like "affect_corr_<dimension>_<domain>"
+  let parts = string.split(key, "_")
+  let #(dim, domain) = case parts {
+    ["affect", "corr", d, ..rest] -> #(d, string.join(rest, "-"))
+    _ -> #("?", key)
+  }
+  "    <affect_warning dimension=\""
+  <> xml_attr_escape(dim)
+  <> "\" domain=\""
+  <> xml_attr_escape(domain)
+  <> "\" correlation=\""
+  <> float.to_string(round_to_2dp(r))
+  <> "\" sample_size=\""
+  <> int.to_string(n)
+  <> "\"/>"
 }
 
 /// Render the <strategies> element — top active strategies from the

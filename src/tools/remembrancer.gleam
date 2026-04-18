@@ -10,6 +10,8 @@
 // by the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 
+import affect/correlation as affect_correlation
+import affect/store as affect_store
 import dprime/decay
 import facts/log as facts_log
 import facts/types as facts_types
@@ -96,6 +98,7 @@ pub fn all() -> List(Tool) {
     consolidate_memory_tool(),
     restore_confidence_tool(),
     find_connections_tool(),
+    analyze_affect_performance_tool(),
     write_consolidation_report_tool(),
   ]
 }
@@ -109,6 +112,7 @@ pub fn is_remembrancer_tool(name: String) -> Bool {
   || name == "consolidate_memory"
   || name == "restore_confidence"
   || name == "find_connections"
+  || name == "analyze_affect_performance"
   || name == "write_consolidation_report"
 }
 
@@ -253,6 +257,40 @@ fn find_connections_tool() -> Tool {
   |> tool.build()
 }
 
+fn analyze_affect_performance_tool() -> Tool {
+  tool.new("analyze_affect_performance")
+  |> tool.with_description(
+    "Phase D — meta-learning. Compute Pearson correlations between each "
+    <> "affect dimension (desperation, calm, confidence, frustration, "
+    <> "pressure) and outcome success, grouped by task domain. Strong "
+    <> "correlations (|r| >= 0.4 by default) are persisted as facts under "
+    <> "the key prefix `affect_corr_<dim>_<domain>`, where the sensorium "
+    <> "<affect_warning> block reads them. Use after a consolidation pass "
+    <> "to surface maladaptive emotional patterns.",
+  )
+  |> tool.add_string_param(
+    "from_date",
+    "Start date YYYY-MM-DD (default: 30 days ago)",
+    False,
+  )
+  |> tool.add_string_param(
+    "to_date",
+    "End date YYYY-MM-DD (default: today)",
+    False,
+  )
+  |> tool.add_integer_param(
+    "min_sample",
+    "Minimum (snapshot, entry) pairs per (dim, domain) group (default: 5)",
+    False,
+  )
+  |> tool.add_number_param(
+    "min_abs_correlation",
+    "Minimum |r| for the correlation to be persisted as a fact (default: 0.4)",
+    False,
+  )
+  |> tool.build()
+}
+
 fn write_consolidation_report_tool() -> Tool {
   tool.new("write_consolidation_report")
   |> tool.with_description(
@@ -299,6 +337,7 @@ pub fn execute(call: ToolCall, ctx: RemembrancerContext) -> ToolResult {
     "consolidate_memory" -> run_consolidate_memory(call, ctx)
     "restore_confidence" -> run_restore_confidence(call, ctx)
     "find_connections" -> run_find_connections(call, ctx)
+    "analyze_affect_performance" -> run_analyze_affect_performance(call, ctx)
     "write_consolidation_report" -> run_write_report(call, ctx)
     _ ->
       ToolFailure(
@@ -967,6 +1006,159 @@ fn run_find_connections(call: ToolCall, ctx: RemembrancerContext) -> ToolResult 
         content: rquery.format_cross_reference(xref),
       )
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// analyze_affect_performance — Phase D
+// ---------------------------------------------------------------------------
+
+fn run_analyze_affect_performance(
+  call: ToolCall,
+  ctx: RemembrancerContext,
+) -> ToolResult {
+  let decoder = {
+    use from_date <- decode.optional_field("from_date", "", decode.string)
+    use to_date <- decode.optional_field("to_date", "", decode.string)
+    use min_sample <- decode.optional_field("min_sample", 5, decode.int)
+    use min_abs_correlation <- decode.optional_field(
+      "min_abs_correlation",
+      0.4,
+      decode.float,
+    )
+    decode.success(#(from_date, to_date, min_sample, min_abs_correlation))
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "Invalid analyze_affect_performance input",
+      )
+    Ok(#(from_date_in, to_date_in, min_sample, min_abs)) -> {
+      let from_date = case from_date_in {
+        "" -> days_ago(30)
+        d -> d
+      }
+      let to_date = case to_date_in {
+        "" -> get_date()
+        d -> d
+      }
+      let entries =
+        rreader.read_narrative_entries(ctx.narrative_dir, from_date, to_date)
+      let snapshots = affect_store.load_recent(paths.affect_dir(), 10_000)
+      let correlations =
+        affect_correlation.compute_correlations(snapshots, entries, min_sample)
+      let significant =
+        list.filter(correlations, fn(c) {
+          !c.inconclusive && abs_float(c.correlation) >=. min_abs
+        })
+      let now = get_datetime()
+      let written =
+        list.fold(significant, 0, fn(count, c) {
+          let key = affect_correlation.fact_key(c)
+          let value = affect_correlation.fact_value(c)
+          let fact =
+            facts_types.MemoryFact(
+              schema_version: 1,
+              fact_id: uuid_v4(),
+              timestamp: now,
+              cycle_id: ctx.cycle_id,
+              agent_id: Some(ctx.agent_id),
+              key: key,
+              value: value,
+              scope: facts_types.Persistent,
+              operation: facts_types.Write,
+              supersedes: None,
+              confidence: 0.9,
+              source: "analyze_affect_performance",
+              provenance: Some(facts_types.FactProvenance(
+                source_cycle_id: ctx.cycle_id,
+                source_tool: "analyze_affect_performance",
+                source_agent: "remembrancer",
+                derivation: facts_types.Synthesis,
+              )),
+            )
+          facts_log.append(ctx.facts_dir, fact)
+          count + 1
+        })
+      let summary = render_correlation_report(correlations, significant)
+      let payload =
+        json.object([
+          #("groups_evaluated", json.int(list.length(correlations))),
+          #("significant", json.int(list.length(significant))),
+          #("facts_written", json.int(written)),
+          #("from_date", json.string(from_date)),
+          #("to_date", json.string(to_date)),
+          #(
+            "highlights",
+            json.array(significant, fn(c) {
+              json.object([
+                #(
+                  "dimension",
+                  json.string(affect_correlation.dimension_to_string(
+                    c.dimension,
+                  )),
+                ),
+                #("domain", json.string(c.domain)),
+                #("correlation", json.float(c.correlation)),
+                #("sample_size", json.int(c.sample_size)),
+              ])
+            }),
+          ),
+        ])
+      slog.info(
+        "tools/remembrancer",
+        "analyze_affect_performance",
+        "Wrote "
+          <> int.to_string(written)
+          <> " correlation facts ("
+          <> int.to_string(list.length(correlations))
+          <> " evaluated)",
+        Some(ctx.cycle_id),
+      )
+      ToolSuccess(
+        tool_use_id: call.id,
+        content: json.to_string(payload) <> "\n\n" <> summary,
+      )
+    }
+  }
+}
+
+fn render_correlation_report(
+  all: List(affect_correlation.AffectCorrelation),
+  significant: List(affect_correlation.AffectCorrelation),
+) -> String {
+  case list.length(all) {
+    0 ->
+      "No (snapshot, entry) pairs in range. Need affect snapshots and "
+      <> "narrative entries sharing a cycle_id."
+    n ->
+      "Affect-performance analysis: "
+      <> int.to_string(n)
+      <> " (dim, domain) groups evaluated, "
+      <> int.to_string(list.length(significant))
+      <> " above |r| threshold.\n"
+      <> string.join(
+        list.map(significant, fn(c) {
+          "- "
+          <> affect_correlation.dimension_to_string(c.dimension)
+          <> " in "
+          <> c.domain
+          <> ": r="
+          <> float.to_string(c.correlation)
+          <> " (n="
+          <> int.to_string(c.sample_size)
+          <> ")"
+        }),
+        "\n",
+      )
+  }
+}
+
+fn abs_float(f: Float) -> Float {
+  case f <. 0.0 {
+    True -> -1.0 *. f
+    False -> f
   }
 }
 
