@@ -34,6 +34,9 @@ import paths
 import planner/types as planner_types
 import scheduler/types as scheduler_types
 import simplifile
+import skills
+import skills/metrics as skills_metrics
+import skills/proposal_log
 import slog
 import web/auth
 import web/html
@@ -618,6 +621,57 @@ fn ws_handler(
                 )
               mist.continue(state)
             }
+            Ok(protocol.RequestSkillsData) -> {
+              // Discover all skills, then enrich each with usage metrics
+              // and the recent proposal-log events. Read-only audit data.
+              let dirs = paths.default_skills_dirs()
+              let discovered = skills.discover(dirs)
+              let skills_json =
+                json.to_string(
+                  json.array(discovered, fn(s: skills.SkillMeta) {
+                    let dir = string.replace(s.path, "/SKILL.md", "")
+                    let usage = skills_metrics.usage_count(dir)
+                    let injects = skills_metrics.inject_count(dir)
+                    let last_used = case skills_metrics.last_used(dir) {
+                      Some(ts) -> ts
+                      None -> ""
+                    }
+                    json.object([
+                      #("id", json.string(s.id)),
+                      #("name", json.string(s.name)),
+                      #("description", json.string(s.description)),
+                      #("path", json.string(s.path)),
+                      #("version", json.int(s.version)),
+                      #(
+                        "status",
+                        json.string(skills.status_to_string(s.status)),
+                      ),
+                      #("agents", json.array(s.agents, json.string)),
+                      #("contexts", json.array(s.contexts, json.string)),
+                      #("token_cost_estimate", json.int(s.token_cost_estimate)),
+                      #("author", json.string(skill_author_string(s.author))),
+                      #("created_at", json.string(s.created_at)),
+                      #("updated_at", json.string(s.updated_at)),
+                      #("reads", json.int(usage)),
+                      #("injects", json.int(injects)),
+                      #("last_used", json.string(last_used)),
+                    ])
+                  }),
+                )
+              let today = get_today_date()
+              let log_lines =
+                proposal_log.load_lines_for_date(paths.skills_log_dir(), today)
+              let log_json = "[" <> string.join(log_lines, ",") <> "]"
+              let _ =
+                mist.send_text_frame(
+                  conn,
+                  protocol.encode_server_message(protocol.SkillsData(
+                    skills_json:,
+                    log_json:,
+                  )),
+                )
+              mist.continue(state)
+            }
             Ok(protocol.RequestChatHistoryDay(date:)) -> {
               // Read raw user/assistant pairs from the cycle log. This is the
               // actual chat, not the narrative summary. Scheduler cycles are
@@ -879,6 +933,14 @@ fn notification_to_server_message(
 
 @external(erlang, "springdrift_ffi", "get_date")
 fn get_today_date() -> String
+
+fn skill_author_string(author: skills.SkillAuthor) -> String {
+  case author {
+    skills.Operator -> "operator"
+    skills.System -> "system"
+    skills.Agent(agent_name:, cycle_id: _) -> "agent:" <> agent_name
+  }
+}
 
 /// Scan a narrative directory for dated JSONL files, build a per-day
 /// summary (date, cycle count, last activity timestamp, one-line

@@ -918,6 +918,7 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
   <button class=\"tab-btn\" data-tab=\"dprime-config\">D' Config</button>
   <button class=\"tab-btn\" data-tab=\"comms\">Comms</button>
   <button class=\"tab-btn\" data-tab=\"affect\">Affect</button>
+  <button class=\"tab-btn\" data-tab=\"skills\">Skills</button>
 </div>
 <div id=\"content-area\">
   <div id=\"narrative-tab\" class=\"tab-content active\">
@@ -1020,6 +1021,25 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
       </tr></thead><tbody id=\"affect-body\"></tbody></table>
     </div>
   </div>
+  <div id=\"skills-tab\" class=\"tab-content\">
+    <div class=\"filter-bar\">
+      <button class=\"refresh-btn\" id=\"skills-refresh\">Refresh</button>
+      <select class=\"filter-select\" id=\"skills-status-filter\"><option value=\"\">All Statuses</option><option value=\"active\">Active</option><option value=\"archived\">Archived</option></select>
+      <input class=\"filter-input\" id=\"skills-search\" type=\"text\" placeholder=\"Search skills...\">
+      <span class=\"filter-count\" id=\"skills-count\"></span>
+    </div>
+    <div id=\"skills-container\">
+      <table class=\"admin-table\"><thead><tr>
+        <th>Name</th><th>Agents</th><th>Status</th><th>Version</th><th>Author</th><th>Reads</th><th>Tokens</th><th>Last Used</th>
+      </tr></thead><tbody id=\"skills-body\"><tr><td colspan=\"8\" style=\"text-align:center;opacity:.5\">Loading...</td></tr></tbody></table>
+      <div id=\"skills-log\" style=\"margin-top:24px\">
+        <h3 style=\"margin:12px 0 8px;font-size:15px;color:var(--text-secondary)\">Today's proposal-log events</h3>
+        <table class=\"admin-table\"><thead><tr>
+          <th>Time</th><th>Event</th><th>Subject</th><th>Detail</th>
+        </tr></thead><tbody id=\"skills-log-body\"><tr><td colspan=\"4\" style=\"text-align:center;opacity:.5\">No events today.</td></tr></tbody></table>
+      </div>
+    </div>
+  </div>
 </div>
 </div>
 </div>
@@ -1041,6 +1061,8 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
   var plannerEndeavoursRaw = [];
   var dprimeGatesRaw = [];
   var commsMessagesRaw = [];
+  var skillsRaw = [];
+  var skillsLogRaw = [];
   var affectDataRaw = [];
 
   tabBtns.forEach(function(btn) {
@@ -1059,6 +1081,7 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
       else if (tab === 'dprime-config') requestDprimeConfig();
       else if (tab === 'comms') requestCommsData();
       else if (tab === 'affect') requestAffectData();
+      else if (tab === 'skills') requestSkillsData();
     });
   });
 
@@ -1071,6 +1094,7 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
   document.getElementById('dprime-config-refresh').addEventListener('click', requestDprimeConfig);
   document.getElementById('comms-refresh').addEventListener('click', requestCommsData);
   document.getElementById('affect-refresh').addEventListener('click', requestAffectData);
+  document.getElementById('skills-refresh').addEventListener('click', requestSkillsData);
 
   // Filter event listeners
   ['change'].forEach(function(ev) {
@@ -1083,6 +1107,7 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
     document.getElementById('dprime-decision-filter').addEventListener(ev, applyDprimeFilter);
     document.getElementById('dprime-gate-filter').addEventListener(ev, applyDprimeFilter);
     document.getElementById('comms-direction-filter').addEventListener(ev, applyCommsFilter);
+    document.getElementById('skills-status-filter').addEventListener(ev, applySkillsFilter);
   });
   ['input'].forEach(function(ev) {
     document.getElementById('affect-search').addEventListener(ev, applyAffectFilter);
@@ -1093,6 +1118,7 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
     document.getElementById('planner-search').addEventListener(ev, applyPlannerFilter);
     document.getElementById('dprime-search').addEventListener(ev, applyDprimeFilter);
     document.getElementById('comms-search').addEventListener(ev, applyCommsFilter);
+    document.getElementById('skills-search').addEventListener(ev, applySkillsFilter);
   });
 
   function filterCount(id, shown, total) {
@@ -1151,6 +1177,12 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
   function requestAffectData() {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'request_affect_data' }));
+    }
+  }
+
+  function requestSkillsData() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'request_skills_data' }));
     }
   }
 
@@ -1266,6 +1298,81 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
         '<td style=\"color:' + affectColor(s.frustration) + '\">' + Math.round(s.frustration) + '%</td>' +
         '<td style=\"color:' + affectColor(s.pressure) + ';font-weight:600\">' + Math.round(s.pressure) + '%</td>' +
         '<td>' + (s.trend === 'rising' ? '\\u2191' : s.trend === 'falling' ? '\\u2193' : '\\u2194') + '</td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  function renderSkillsData(skills, log) {
+    skillsRaw = skills || [];
+    skillsLogRaw = log || [];
+    applySkillsFilter();
+    renderSkillsLog();
+  }
+
+  function applySkillsFilter() {
+    var statusVal = document.getElementById('skills-status-filter').value;
+    var q = document.getElementById('skills-search').value.toLowerCase();
+    var filtered = skillsRaw.filter(function(s) {
+      if (statusVal && s.status !== statusVal) return false;
+      if (q) {
+        var h = [s.id, s.name, s.description, (s.agents||[]).join(' '), (s.contexts||[]).join(' ')].join(' ').toLowerCase();
+        if (h.indexOf(q) === -1) return false;
+      }
+      return true;
+    });
+    filterCount('skills-count', filtered.length, skillsRaw.length);
+    var body = document.getElementById('skills-body');
+    if (filtered.length === 0) {
+      body.innerHTML = '<tr><td colspan=\"8\" style=\"text-align:center;opacity:.5\">'+(skillsRaw.length===0?'No skills discovered':'No skills match filter')+'</td></tr>';
+      return;
+    }
+    body.innerHTML = filtered.map(function(s) {
+      var statusColor = s.status === 'active' ? '#248a3d' : '#888';
+      var lastUsed = s.last_used ? s.last_used.substring(0,19).replace('T',' ') : '\\u2014';
+      return '<tr>' +
+        '<td><strong>' + escapeHtml(s.name || s.id) + '</strong>' +
+          '<div style=\"font-size:11px;color:var(--text-dim);margin-top:2px\">' + escapeHtml(s.description || '') + '</div></td>' +
+        '<td style=\"font-size:12px\">' + escapeHtml((s.agents||[]).join(', ')) + '</td>' +
+        '<td style=\"color:' + statusColor + '\">' + escapeHtml(s.status || '') + '</td>' +
+        '<td>v' + (s.version || 1) + '</td>' +
+        '<td style=\"font-size:12px\">' + escapeHtml(s.author || 'operator') + '</td>' +
+        '<td style=\"text-align:right\">' + (s.reads || 0) + '</td>' +
+        '<td style=\"text-align:right;color:var(--text-dim)\">~' + (s.token_cost_estimate || 0) + '</td>' +
+        '<td style=\"font-size:12px;color:var(--text-dim)\">' + escapeHtml(lastUsed) + '</td>' +
+        '</tr>';
+    }).join('');
+  }
+
+  function renderSkillsLog() {
+    var body = document.getElementById('skills-log-body');
+    if (!skillsLogRaw || skillsLogRaw.length === 0) {
+      body.innerHTML = '<tr><td colspan=\"4\" style=\"text-align:center;opacity:.5\">No events today.</td></tr>';
+      return;
+    }
+    body.innerHTML = skillsLogRaw.map(function(entry) {
+      var time = (entry.timestamp || '').substring(11,19);
+      var event = entry.event || '?';
+      var eventColor = event === 'created' ? '#248a3d' : event === 'rejected' ? '#d70015' : event === 'archived' ? '#888' : '#007aff';
+      var subject = '';
+      var detail = '';
+      if (event === 'proposed' && entry.proposal) {
+        subject = entry.proposal.name || entry.proposal.proposal_id || '';
+        detail = (entry.proposal.source_cases || []).length + ' source case(s), confidence ' + Math.round((entry.proposal.confidence || 0) * 100) + '%';
+      } else if (event === 'created') {
+        subject = entry.skill_id || entry.proposal_id || '';
+        detail = entry.skill_path || '';
+      } else if (event === 'rejected') {
+        subject = entry.proposal_id || '';
+        detail = entry.reason || '';
+      } else if (event === 'archived') {
+        subject = entry.skill_id || '';
+        detail = entry.reason || '';
+      }
+      return '<tr>' +
+        '<td style=\"font-family:monospace;font-size:12px\">' + escapeHtml(time) + '</td>' +
+        '<td style=\"color:' + eventColor + ';font-weight:600;font-size:12px;text-transform:uppercase\">' + escapeHtml(event) + '</td>' +
+        '<td style=\"font-size:12px\">' + escapeHtml(subject) + '</td>' +
+        '<td style=\"font-size:12px;color:var(--text-dim)\">' + escapeHtml(detail) + '</td>' +
         '</tr>';
     }).join('');
   }
@@ -1684,6 +1791,9 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
         break;
       case 'affect_data':
         renderAffectData(data.snapshots);
+        break;
+      case 'skills_data':
+        renderSkillsData(data.skills, data.log);
         break;
       case 'notification':
         if (data.kind === 'safety') {
