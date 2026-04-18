@@ -14,6 +14,7 @@
 // by the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 
+import gleam/dynamic/decode
 import gleam/json
 import gleam/list
 import gleam/option.{None}
@@ -43,11 +44,15 @@ pub fn append_proposed(dir: String, proposal: SkillProposal) -> Nil {
 }
 
 /// Record a SkillCreated event after the gate accepts a proposal.
+/// `agents` records the agent scope so the gate's same-scope cooldown
+/// check can find recent promotions targeting the same agents without
+/// re-walking the skills directory.
 pub fn append_created(
   dir: String,
   proposal_id: String,
   skill_id: String,
   skill_path: String,
+  agents: List(String),
 ) -> Nil {
   append(
     dir,
@@ -56,8 +61,49 @@ pub fn append_created(
       proposal_id: proposal_id,
       skill_id: skill_id,
       skill_path: skill_path,
+      agents: agents,
     ),
   )
+}
+
+/// Load timestamps of recent SkillCreated events whose agent scope
+/// overlaps `agents`. Returns ISO timestamps in append order. Used by
+/// the safety gate to enforce min_hours_between_same_scope.
+pub fn recent_created_for_scope(
+  dir: String,
+  date: String,
+  agents: List(String),
+) -> List(String) {
+  load_lines_for_date(dir, date)
+  |> list.filter_map(fn(line) {
+    case json.parse(line, created_event_decoder()) {
+      Ok(#(timestamp, entry_agents)) -> {
+        let overlaps =
+          list.any(entry_agents, fn(a) { list.contains(agents, a) })
+        case overlaps {
+          True -> Ok(timestamp)
+          False -> Error(Nil)
+        }
+      }
+      Error(_) -> Error(Nil)
+    }
+  })
+}
+
+fn created_event_decoder() -> decode.Decoder(#(String, List(String))) {
+  use event <- decode.field("event", decode.string)
+  case event {
+    "created" -> {
+      use timestamp <- decode.field("timestamp", decode.string)
+      use agents <- decode.optional_field(
+        "agents",
+        [],
+        decode.list(decode.string),
+      )
+      decode.success(#(timestamp, agents))
+    }
+    _ -> decode.failure(#("", []), "not a created event")
+  }
 }
 
 /// Record a SkillRejected event after the gate rejects a proposal.

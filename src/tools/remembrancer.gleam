@@ -31,6 +31,8 @@ import paths
 import remembrancer/consolidation
 import remembrancer/query as rquery
 import remembrancer/reader as rreader
+import skills
+import skills/body_gen as skills_body_gen
 import skills/pattern as skills_pattern
 import skills/proposal_log
 import skills/safety_gate
@@ -556,16 +558,26 @@ fn run_propose_skills_from_patterns(
           min_utility: min_utility,
         )
       let clusters = skills_pattern.find_clusters(scoped, cfg)
-      // Novelty check is structural only in PR-C — no skills loaded here.
-      // PR-D's gate runs the LLM-driven conflict classifier with full
-      // access to existing Active skills.
-      let proposals =
+      // Discover existing skills so the gate's conflict classifier has
+      // something to compare against.
+      let existing_skills = skills.discover([ctx.skills_dir])
+      let raw_proposals =
         skills_pattern.clusters_to_proposals(
           clusters,
-          [],
+          existing_skills,
           get_datetime(),
           ctx.agent_id,
         )
+      // Upgrade the structural-template body to LLM-written prose when
+      // a provider is wired in. Falls back to the template silently on
+      // any failure — body quality, not safety.
+      let proposals = case ctx.gate_provider {
+        Some(p) ->
+          list.map(raw_proposals, fn(prop) {
+            skills_body_gen.enrich(prop, p, ctx.gate_model)
+          })
+        None -> raw_proposals
+      }
       let log_dir = paths.skills_log_dir()
       // Log every proposal as Proposed so the audit trail is complete
       // before the gate starts making decisions.
@@ -578,7 +590,7 @@ fn run_propose_skills_from_patterns(
         list.map(proposals, fn(p) {
           safety_gate.gate_proposal(
             p,
-            [],
+            existing_skills,
             ctx.skills_dir,
             log_dir,
             gate_config,

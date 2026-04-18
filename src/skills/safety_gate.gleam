@@ -1,19 +1,22 @@
-//// Promotion Safety Gate — three layers between a SkillProposal and an
+//// Promotion Safety Gate — four layers between a SkillProposal and an
 //// Active skill on disk:
 ////
 //// 1. Deterministic pre-filter — regex rules that auto-reject proposals
 ////    leaking credentials, internal URLs, absolute paths, or env var refs.
 ////    Runs first, no LLM cost, fastest path to rejection.
-//// 2. Rate limit — hard cap on accepted promotions per rolling 24h window.
-////    Excess proposals are dropped silently with a logged audit trail.
-//// 3. D' scorer — LLM evaluates the proposal body against skill-specific
+//// 2. Rate limit — both `max_proposals_per_day` (hard daily cap) and
+////    `min_hours_between_same_scope` (cooldown between promotions
+////    targeting the same agent set). Excess proposals are dropped
+////    silently with a logged audit trail.
+//// 3. Conflict classifier — LLM compares the proposal body against
+////    every Active skill scoped to the same agents. A `Contradictory`
+////    classification rejects (the agent must propose a new version of
+////    the existing skill instead). `Supersedes` / `Redundant` /
+////    `Complementary` proceed; their classification is recorded on the
+////    proposal for the audit trail.
+//// 4. D' scorer — LLM evaluates the proposal body against skill-specific
 ////    features (credential_exposure, pii_exposure, internal_url_exposure,
 ////    system_internals, character_violation). High score → reject.
-////
-//// Conflict classification (Complementary / Redundant / Supersedes /
-//// Contradictory) is stubbed in this module — the LLM-driven classifier
-//// is a follow-up. Until then proposals carry `Unknown` and the gate
-//// treats them as Complementary.
 ////
 //// On Accept: writes `<skill_dir>/SKILL.md` + `<skill_dir>/skill.toml`
 //// and appends a `SkillCreated` event to the proposal log.
@@ -37,7 +40,8 @@ import gleam/string
 import llm/provider.{type Provider}
 import simplifile
 import skills.{type SkillMeta}
-import skills/proposal.{type SkillProposal}
+import skills/conflict
+import skills/proposal.{type SkillProposal, Contradictory, SkillProposal}
 import skills/proposal_log
 import slog
 
@@ -53,9 +57,10 @@ pub type GateConfig {
     /// Hard cap on Accepted promotions per rolling 24h window
     /// (spec default: 3).
     max_proposals_per_day: Int,
-    /// Min hours between proposals targeting the same agent scope
-    /// (spec default: 6). Currently advisory — full enforcement is a
-    /// follow-up.
+    /// Min hours between accepted promotions targeting the same agent
+    /// scope (spec default: 6). Enforced by `same_scope_cooldown_active`
+    /// — proposals hitting an in-window match are dropped with a
+    /// SkillRejected entry layered as `rate_limit`.
     min_hours_between_same_scope: Int,
     /// D' threshold above which a proposal is rejected. Inherits from
     /// comms gate defaults if unset (spec default: 0.50).
@@ -223,6 +228,91 @@ pub fn rate_limited(skills_log_dir: String, config: GateConfig) -> Bool {
   promotions_today(skills_log_dir) >= config.max_proposals_per_day
 }
 
+@external(erlang, "springdrift_ffi", "get_datetime")
+fn get_datetime() -> String
+
+/// Same-scope cooldown — has any skill targeting `agents` been promoted
+/// within the last `min_hours` hours? Pure read against today's
+/// proposal log. Returns True when at least one matching SkillCreated
+/// event sits inside the window.
+pub fn same_scope_cooldown_active(
+  skills_log_dir: String,
+  agents: List(String),
+  min_hours: Int,
+) -> Bool {
+  case agents {
+    [] -> False
+    _ -> {
+      let now = get_datetime()
+      proposal_log.recent_created_for_scope(skills_log_dir, get_date(), agents)
+      |> list.any(fn(ts) {
+        case minutes_between(ts, now) {
+          Ok(mins) -> mins < min_hours * 60
+          Error(_) -> False
+        }
+      })
+    }
+  }
+}
+
+/// Difference in whole minutes between two ISO 8601-ish timestamps.
+/// Returns Error when either timestamp can't be parsed.
+fn minutes_between(earlier: String, later: String) -> Result(Int, Nil) {
+  case parse_iso_minutes(earlier), parse_iso_minutes(later) {
+    Ok(a), Ok(b) -> Ok(b - a)
+    _, _ -> Error(Nil)
+  }
+}
+
+/// Lossy ISO parser — extracts the YYYY-MM-DDTHH:MM portion and
+/// converts to whole minutes since 1970-01-01. Avoids depending on a
+/// full datetime library; good enough for cooldown windows measured
+/// in hours.
+fn parse_iso_minutes(ts: String) -> Result(Int, Nil) {
+  let core = string.slice(ts, 0, 16)
+  case string.split(core, "T") {
+    [date_part, time_part] ->
+      case string.split(date_part, "-"), string.split(time_part, ":") {
+        [y, m, d], [hh, mm] ->
+          case
+            int.parse(y),
+            int.parse(m),
+            int.parse(d),
+            int.parse(hh),
+            int.parse(mm)
+          {
+            Ok(yi), Ok(mi), Ok(di), Ok(hi), Ok(mmi) -> {
+              // Days from epoch using Howard Hinnant's algorithm
+              let days = days_from_civil(yi, mi, di)
+              Ok({ days * 24 + hi } * 60 + mmi)
+            }
+            _, _, _, _, _ -> Error(Nil)
+          }
+        _, _ -> Error(Nil)
+      }
+    _ -> Error(Nil)
+  }
+}
+
+fn days_from_civil(y: Int, m: Int, d: Int) -> Int {
+  let y = case m <= 2 {
+    True -> y - 1
+    False -> y
+  }
+  let era = case y >= 0 {
+    True -> y / 400
+    False -> { y - 399 } / 400
+  }
+  let yoe = y - era * 400
+  let mp = case m > 2 {
+    True -> m - 3
+    False -> m + 9
+  }
+  let doy = { 153 * mp + 2 } / 5 + d - 1
+  let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
+  era * 146_097 + doe - 719_468
+}
+
 // ---------------------------------------------------------------------------
 // D' scoring
 // ---------------------------------------------------------------------------
@@ -350,7 +440,7 @@ fn toml_string_array(items: List(String)) -> String {
 /// summary.
 pub fn gate_proposal(
   proposal: SkillProposal,
-  _existing_skills: List(SkillMeta),
+  existing_skills: List(SkillMeta),
   skills_dir: String,
   log_dir: String,
   config: GateConfig,
@@ -378,7 +468,7 @@ pub fn gate_proposal(
       )
     }
     DeterministicPass -> {
-      // 2. Rate limit
+      // 2a. Daily rate limit
       case rate_limited(log_dir, config) {
         True -> {
           let reason =
@@ -403,19 +493,23 @@ pub fn gate_proposal(
             skill_path: "",
           )
         }
-        False -> {
-          // 3. D' scorer (when enabled and a provider is wired in)
-          let score = case config.enable_llm_scorer, provider {
-            True, Some(p) -> score_with_dprime(proposal, p, model)
-            _, _ -> 0.0
-          }
-          case score >=. config.reject_threshold {
+        False ->
+          // 2b. Same-scope cooldown — prevents back-to-back promotions
+          // targeting the same agent set within min_hours_between_same_scope.
+          case
+            same_scope_cooldown_active(
+              log_dir,
+              proposal.agents,
+              config.min_hours_between_same_scope,
+            )
+          {
             True -> {
               let reason =
-                "D' score "
-                <> float.to_string(score)
-                <> " >= reject threshold "
-                <> float.to_string(config.reject_threshold)
+                "same-scope cooldown ("
+                <> int.to_string(config.min_hours_between_same_scope)
+                <> "h between proposals targeting "
+                <> string.join(proposal.agents, ", ")
+                <> ")"
               proposal_log.append_rejected(
                 log_dir,
                 proposal.proposal_id,
@@ -424,18 +518,32 @@ pub fn gate_proposal(
               GateOutcome(
                 proposal_id: proposal.proposal_id,
                 decision: dprime_types.Reject,
-                score: score,
-                layer: "dprime",
+                score: 0.0,
+                layer: "rate_limit",
                 reason: reason,
                 skill_path: "",
               )
             }
             False -> {
-              // Accept — write to disk and log
-              case promote_to_disk(proposal, skills_dir) {
-                Error(e) -> {
-                  let reason =
-                    "promotion write failed: " <> simplifile.describe_error(e)
+              // 3. Conflict classifier — LLM compares the proposal body
+              // against every Active skill scoped to the same agents. A
+              // Contradictory result rejects; Supersedes / Redundant /
+              // Complementary are attached to the proposal and the gate
+              // continues. Skipped when LLM scoring is disabled or no
+              // provider is wired in.
+              let classification = case
+                config.enable_llm_scorer,
+                provider,
+                existing_skills
+              {
+                True, Some(p), [_, ..] ->
+                  conflict.classify(proposal, existing_skills, p, model)
+                _, _, _ -> proposal.conflict
+              }
+              let proposal = SkillProposal(..proposal, conflict: classification)
+              case classification {
+                Contradictory(target_id:) -> {
+                  let reason = "contradicts existing skill " <> target_id
                   proposal_log.append_rejected(
                     log_dir,
                     proposal.proposal_id,
@@ -444,37 +552,101 @@ pub fn gate_proposal(
                   GateOutcome(
                     proposal_id: proposal.proposal_id,
                     decision: dprime_types.Reject,
-                    score: score,
-                    layer: "promotion",
+                    score: 1.0,
+                    layer: "conflict",
                     reason: reason,
                     skill_path: "",
                   )
                 }
-                Ok(path) -> {
-                  proposal_log.append_created(
+                _ ->
+                  gate_after_conflict(
+                    proposal,
+                    skills_dir,
                     log_dir,
-                    proposal.proposal_id,
-                    proposal.proposal_id,
-                    path,
+                    config,
+                    provider,
+                    model,
                   )
-                  slog.info(
-                    "skills/safety_gate",
-                    "gate_proposal",
-                    "Accepted " <> proposal.proposal_id <> " -> " <> path,
-                    None,
-                  )
-                  GateOutcome(
-                    proposal_id: proposal.proposal_id,
-                    decision: dprime_types.Accept,
-                    score: score,
-                    layer: "accept",
-                    reason: "passed all gates",
-                    skill_path: path,
-                  )
-                }
               }
             }
           }
+      }
+    }
+  }
+}
+
+/// Continue the gate pipeline after the conflict classifier has run
+/// (and not rejected). Runs the D' scorer and writes the SKILL.md on
+/// accept. Split out so the conflict-rejection branch above doesn't
+/// nest the gate three more levels deep.
+fn gate_after_conflict(
+  proposal: SkillProposal,
+  skills_dir: String,
+  log_dir: String,
+  config: GateConfig,
+  provider: Option(Provider),
+  model: String,
+) -> GateOutcome {
+  // 4. D' scorer (when enabled and a provider is wired in)
+  let score = case config.enable_llm_scorer, provider {
+    True, Some(p) -> score_with_dprime(proposal, p, model)
+    _, _ -> 0.0
+  }
+  case score >=. config.reject_threshold {
+    True -> {
+      let reason =
+        "D' score "
+        <> float.to_string(score)
+        <> " >= reject threshold "
+        <> float.to_string(config.reject_threshold)
+      proposal_log.append_rejected(log_dir, proposal.proposal_id, reason)
+      GateOutcome(
+        proposal_id: proposal.proposal_id,
+        decision: dprime_types.Reject,
+        score: score,
+        layer: "dprime",
+        reason: reason,
+        skill_path: "",
+      )
+    }
+    False -> {
+      // Accept — write to disk and log
+      case promote_to_disk(proposal, skills_dir) {
+        Error(e) -> {
+          let reason =
+            "promotion write failed: " <> simplifile.describe_error(e)
+          proposal_log.append_rejected(log_dir, proposal.proposal_id, reason)
+          GateOutcome(
+            proposal_id: proposal.proposal_id,
+            decision: dprime_types.Reject,
+            score: score,
+            layer: "promotion",
+            reason: reason,
+            skill_path: "",
+          )
+        }
+        Ok(path) -> {
+          proposal_log.append_created(
+            log_dir,
+            proposal.proposal_id,
+            proposal.proposal_id,
+            path,
+            proposal.agents,
+          )
+          slog.info(
+            "skills/safety_gate",
+            "gate_proposal",
+            "Accepted " <> proposal.proposal_id <> " -> " <> path,
+            None,
+          )
+          GateOutcome(
+            proposal_id: proposal.proposal_id,
+            decision: dprime_types.Accept,
+            score: score,
+            layer: "accept",
+            reason: "passed all gates",
+            skill_path: path,
+          )
         }
       }
     }
