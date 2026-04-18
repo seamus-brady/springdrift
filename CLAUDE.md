@@ -818,9 +818,13 @@ keyword dissimilarity) — data the Curator can't derive itself.
 ambient perception block injected at every cycle start (no tool calls needed). It
 also gains a `<strategies>` section once the Strategy Registry has any active
 strategies — top 3 by Laplace-smoothed success rate (omitted when registry empty) —
-and an `<affect_warnings>` block surfacing strong negative
+an `<affect_warnings>` block surfacing strong negative
 correlations (r ≤ -0.4) between affect dimensions and outcome success per
-domain (Phase D; sourced from facts written by `analyze_affect_performance`).
+domain (Phase D; sourced from facts written by `analyze_affect_performance`),
+and a `<skill_procedures>` block mapping action classes (delegate, create_task,
+send_email, etc.) to the skill the agent should consult before acting — the
+structured nudge for Curragh's "skills as passive reference, not active
+procedure" gap (omitted when no matching skills are loaded).
 Sections:
 1. `<clock>` — `now` (ISO timestamp), `session_uptime`, optional `last_cycle` elapsed
 2. `<situation>` — `input` source ("user"/"scheduler"), `queue_depth`,
