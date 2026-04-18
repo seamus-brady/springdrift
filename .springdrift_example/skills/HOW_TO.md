@@ -203,12 +203,12 @@ When verification fails, use `recall_cases` to check if this is a known pattern.
 
 - **agent_researcher** — web research and fact gathering (web + artifact + builtin tools)
 - **agent_planner** — pure plan reasoning: task decomposition, steps, dependencies, risks (no tools, XML output, max 5 turns)
-- **agent_project_manager** — full work management: endeavours, phases, sessions, blockers, forecaster config, task/endeavour editing and deletion (22 planner tools, max 8 turns)
+- **agent_project_manager** — full work management: endeavours, phases, sessions, blockers, forecaster config, task/endeavour editing and deletion (24 planner tools incl. complete_task_step, max 8 turns)
 - **agent_coder** — code writing, debugging, refactoring (builtin tools, max 10 turns)
 - **agent_writer** — long-form writing, structured reports, drafts via document library (knowledge draft tools + artifacts + builtin, max 5 turns)
 - **agent_observer** — diagnostic memory examination, CBR curation (18 diagnostic tools, max 6 turns)
 - **agent_comms** — email send/receive via AgentMail (comms tools, max 6 turns, requires `comms_enabled`)
-- **agent_remembrancer** — deep memory consolidation across months/years; reads full JSONL archive, bypasses Librarian ETS window (8 tools: deep_search, fact_archaeology, mine_patterns, resurrect_thread, consolidate_memory, restore_confidence, find_connections, write_consolidation_report; max 8 turns; requires `remembrancer_enabled`). Use for: historical precedent, dormant threads, pattern mining over months, consolidating a period into a report, re-verifying old facts.
+- **agent_remembrancer** — deep memory consolidation across months/years; reads full JSONL archive, bypasses Librarian ETS window (9 tools: deep_search, fact_archaeology, mine_patterns, resurrect_thread, consolidate_memory, restore_confidence, find_connections, write_consolidation_report, propose_skills_from_patterns; max 8 turns; requires `remembrancer_enabled`). Use for: historical precedent, dormant threads, pattern mining over months, consolidating a period into a report, re-verifying old facts, proposing new skills from recurring CBR patterns.
 
 ### Agent error surfacing
 

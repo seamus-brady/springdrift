@@ -2,24 +2,23 @@
 
 **Status**: Planned
 **Parent**: `docs/roadmap/implemented/remembrancer.md` (Phases 1–10 shipped 2026-04-16)
-**Related**: `docs/roadmap/planned/meta-learning.md`, `docs/roadmap/planned/skills-management.md`
+**Related**: `docs/roadmap/planned/meta-learning.md`, `docs/roadmap/implemented/skills-management.md`
 
 This captures the work deferred from the original Remembrancer roadmap. Revised 2026-04-17 to reflect the agent-led meta-learning direction.
 
 ---
 
-## 1. Skills-proposal pipeline (Phase 11) — BLOCKED
+## 1. Skills-proposal pipeline (Phase 11) — SHIPPED 2026-04-18
 
-When `mine_patterns` finds recurring approaches or pitfalls across CBR cases, those clusters should become promoted Skills.
-
-**Blocked by**: `docs/roadmap/planned/skills-management.md`. The skills substrate must ship before the Remembrancer can promote into it.
-
-**Remembrancer work required once unblocked** (agent-led, revised):
-- Add a `propose_skill` tool (or extend `mine_patterns`) that writes the Active skill directly, subject to the D' gate and rate limit.
-- No operator inbox, no approve/reject step. The consolidation report lists what was promoted.
-- Works hand-in-hand with meta-learning Phase B.
-
-**Workaround until then**: consolidation reports describe recurring patterns in prose. The operator can manually codify a skill if warranted. Agent learning happens via CBR utility scoring in the meantime.
+`propose_skills_from_patterns` lives in `src/tools/remembrancer.gleam`. It
+mines CBR cases via `src/skills/pattern.gleam`, generates `SkillProposal`s
+(LLM-written bodies via `src/skills/body_gen.gleam` with template
+fallback), and runs each through the Promotion Safety Gate
+(`src/skills/safety_gate.gleam`: deterministic + rate limit +
+same-scope cooldown + LLM conflict classifier + D' scorer). Accepted
+proposals become Active skills on disk; rejected ones are logged with
+a reason. No operator inbox; the consolidation report shows what was
+promoted.
 
 ---
 
