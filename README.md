@@ -641,18 +641,23 @@ process with its own react loop, tool set, and context window.
 | Agent | Tools | Turns | Purpose |
 |---|---|---|---|
 | Planner | none (pure XML reasoning) | 5 | Plan decomposition, steps, dependencies, risk identification |
-| Project Manager | planner (22 tools) | 15 | Full work management: tasks, endeavours, phases, sessions, blockers, forecaster |
+| Project Manager | planner (24 tools) | 8 | Full work management: tasks, endeavours, phases, sessions, blockers, forecaster |
 | Researcher | web + artifacts + builtin | 8 | Gather information via search and extraction |
 | Coder | sandbox + builtin | 10 | Write and execute code in isolated Podman containers |
 | Writer | builtin | 6 | Draft and edit text |
 | Comms | email (AgentMail) | 6 | Send and receive email to allowed recipients |
 | Observer | diagnostic + CBR curation (18 tools) | 6 | Cycle forensics, pattern detection, CBR curation, D' feedback |
 | Scheduler | scheduler (6 tools) | 6 | Create and manage scheduled jobs, reminders, and todos |
+| Remembrancer | deep memory + skill proposals (9 tools) | 8 | Cross-archive search, pattern mining, consolidation, agent-led skill proposals |
 
 The **sandbox** provides isolated Podman containers for code execution. The
 **comms agent** sends and receives email via AgentMail with three independent
 safety layers (hard allowlist, deterministic rules, tighter D' thresholds).
 Skills follow the [agentskills.io](https://agentskills.io) open standard.
+The **Remembrancer** can mine recurring CBR patterns into skill proposals and
+promote them through a Promotion Safety Gate (deterministic + rate limit +
+LLM conflict classifier + D' scorer) — agent-led evolution with an
+operator-auditable lifecycle log.
 
 See [architecture/agents.md](docs/architecture/agents.md) for delegation
 management, teams, structured output, and error surfacing.
@@ -715,6 +720,8 @@ Everything lives in `.springdrift/`:
 │   ├── artifacts/           Large content (daily-rotated, 50KB truncation)
 │   ├── planner/             Tasks and endeavours
 │   ├── comms/               Sent and received emails
+│   ├── consolidation/       Remembrancer run records (date-rotated JSONL)
+│   ├── skills/              Skill lifecycle log (proposals, promotions, archivals)
 │   └── affect/              Functional emotion snapshots
 ├── schemas/                 XStructor XSD schemas (compiled at runtime)
 ├── skills/                  Skill definitions + HOW_TO.md operator guide
