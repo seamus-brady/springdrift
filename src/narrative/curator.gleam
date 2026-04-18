@@ -1134,12 +1134,13 @@ fn build_sensorium(
   let memory_section = render_sensorium_memory()
   let strategies_section = render_sensorium_strategies()
   let affect_warnings_section = render_sensorium_affect_warnings(state)
+  let skill_procedures_section = render_sensorium_skill_procedures(state.skills)
 
   let sections =
     [
       clock, situation, schedule, vitals, sandbox_section, delegations, events,
       tasks_section, strategies_section, affect_warnings_section,
-      knowledge_section, memory_section,
+      skill_procedures_section, knowledge_section, memory_section,
     ]
     |> list.filter(fn(s) { s != "" })
     |> string.join("\n")
@@ -1708,6 +1709,42 @@ pub fn render_sensorium_strategies() -> String {
       <> "\">\n"
       <> rows
       <> "\n  </strategies>"
+    }
+  }
+}
+
+/// Render the <skill_procedures> element — a quick-reference card mapping
+/// action classes to the skill the agent should consult before acting.
+/// Addresses Curragh's "skills as passive reference, not active procedure"
+/// gap (2026-04-18). Only rows whose skill is actually loaded are emitted;
+/// the whole block is omitted if none match.
+pub fn render_sensorium_skill_procedures(skills: List(SkillMeta)) -> String {
+  let procedures = [
+    #("delegate_to_agent", "delegation-strategy"),
+    #("create_task", "planner-patterns"),
+    #("send_email", "email-response"),
+    #("deep_memory_work", "memory-management"),
+    #("web_research", "web-research"),
+    #("self_diagnostic", "self-diagnostic"),
+    #("appraisal", "task-appraisal"),
+    #("affect_check", "affect-monitoring"),
+  ]
+  let loaded_ids = list.map(skills, fn(s) { s.id })
+  let active = list.filter(procedures, fn(p) { list.contains(loaded_ids, p.1) })
+  case active {
+    [] -> ""
+    _ -> {
+      let rows =
+        active
+        |> list.map(fn(p) {
+          "    <procedure action=\""
+          <> xml_attr_escape(p.0)
+          <> "\" skill=\""
+          <> xml_attr_escape(p.1)
+          <> "\"/>"
+        })
+        |> string.join("\n")
+      "  <skill_procedures>\n" <> rows <> "\n  </skill_procedures>"
     }
   }
 }
