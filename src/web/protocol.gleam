@@ -52,6 +52,9 @@ pub type ClientMessage {
   /// Reads from the cycle log directly — the actual chat, not the
   /// Archivist's narrative summary.
   RequestChatHistoryDay(date: String)
+  /// Read-only skills audit panel — discover skills, read per-skill
+  /// metrics, load recent proposal-log events.
+  RequestSkillsData
 }
 
 pub type ServerMessage {
@@ -109,6 +112,9 @@ pub type ServerMessage {
   /// Raw user/assistant chat pairs for a specific day, chronological order.
   /// Each pair: {timestamp, user_text, assistant_text}.
   ChatHistoryDay(date: String, pairs_json: String)
+  /// Skills audit data — every discovered skill with metadata, usage
+  /// counts, last-used timestamp, and proposal-log events.
+  SkillsData(skills_json: String, log_json: String)
 }
 
 pub type CycleDataJson {
@@ -163,6 +169,7 @@ pub fn decode_client_message(json_string: String) -> Result(ClientMessage, Nil) 
         use date <- decode.field("date", decode.string)
         decode.success(RequestChatHistoryDay(date:))
       }
+      "request_skills_data" -> decode.success(RequestSkillsData)
       _ -> decode.failure(UserMessage(""), "Unknown client message type")
     }
   }
@@ -365,6 +372,12 @@ pub fn encode_server_message(msg: ServerMessage) -> String {
       <> date
       <> "\",\"pairs\":"
       <> pairs_json
+      <> "}"
+    SkillsData(skills_json:, log_json:) ->
+      "{\"type\":\"skills_data\",\"skills\":"
+      <> skills_json
+      <> ",\"log\":"
+      <> log_json
       <> "}"
   }
 }
