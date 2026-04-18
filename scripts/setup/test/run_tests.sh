@@ -3,14 +3,14 @@
 # Springdrift setup test runner
 #
 # Usage:
-#   bash tests/setup/run_tests.sh               # Unit tests only (fast, no Docker)
-#   bash tests/setup/run_tests.sh --integration  # Include Docker integration test
+#   bash scripts/setup/test/run_tests.sh               # Unit tests only (fast, no Docker)
+#   bash scripts/setup/test/run_tests.sh --integration  # Include Docker integration test
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -45,11 +45,11 @@ echo -e "${BOLD}Springdrift Setup Tests${NC}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # Unit tests (always run)
-run_suite "1. Preflight checks"     "tests/setup/test_preflight.sh"     || true
-run_suite "2. Gleam version"        "tests/setup/test_gleam_version.sh" || true
-run_suite "3. Config generation"    "tests/setup/test_config_gen.sh"    || true
-run_suite "4. Env file generation"  "tests/setup/test_env_gen.sh"       || true
-run_suite "5. Port check"           "tests/setup/test_port_check.sh"    || true
+run_suite "1. Preflight checks"     "scripts/setup/test/test_preflight.sh"     || true
+run_suite "2. Gleam version"        "scripts/setup/test/test_gleam_version.sh" || true
+run_suite "3. Config generation"    "scripts/setup/test/test_config_gen.sh"    || true
+run_suite "4. Env file generation"  "scripts/setup/test/test_env_gen.sh"       || true
+run_suite "5. Port check"           "scripts/setup/test/test_port_check.sh"    || true
 
 # Integration tests (opt-in)
 if [[ "${1:-}" == "--integration" ]]; then
@@ -60,7 +60,7 @@ if [[ "${1:-}" == "--integration" ]]; then
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo -e "${BOLD}6. macOS integration test (native)${NC}"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    run_suite "macOS Integration" "tests/setup/test_integration_macos.sh" || true
+    run_suite "macOS Integration" "scripts/setup/test/test_integration_macos.sh" || true
   fi
 
   # Linux integration test (Docker)
@@ -71,7 +71,7 @@ if [[ "${1:-}" == "--integration" ]]; then
 
   if command -v docker &>/dev/null && docker info &>/dev/null; then
     echo "  Building test container..."
-    if docker build -f tests/setup/Dockerfile.integration -t springdrift-setup-test . -q; then
+    if docker build -f scripts/setup/test/Dockerfile.integration -t springdrift-setup-test . -q; then
       echo "  Running integration test..."
       if docker run --rm springdrift-setup-test; then
         echo ""
@@ -84,7 +84,7 @@ if [[ "${1:-}" == "--integration" ]]; then
     fi
   else
     echo "  Docker not available — skipping Linux integration test"
-    echo "  Start colima or Docker Desktop, then: bash tests/setup/run_tests.sh --integration"
+    echo "  Start colima or Docker Desktop, then: bash scripts/setup/test/run_tests.sh --integration"
   fi
 fi
 

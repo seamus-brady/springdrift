@@ -1,6 +1,6 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Springdrift setup integration test — Erlang 27 + Gleam container
-# Build:  docker build -f tests/setup/Dockerfile.integration -t springdrift-setup-test .
+# Build:  docker build -f scripts/setup/test/Dockerfile.integration -t springdrift-setup-test .
 # Run:    docker run --rm springdrift-setup-test
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -35,4 +35,4 @@ USER testuser
 # Pre-build so the integration test doesn't need network for deps
 RUN gleam build
 
-CMD ["bash", "tests/setup/test_integration.sh"]
+CMD ["bash", "scripts/setup/test/test_integration.sh"]

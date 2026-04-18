@@ -3,16 +3,16 @@
 # macOS integration test — fresh install in /tmp, boot, verify HTTP
 #
 # Run standalone:
-#   bash tests/setup/test_integration_macos.sh
+#   bash scripts/setup/test/test_integration_macos.sh
 #
 # Or from the test runner:
-#   bash tests/setup/run_tests.sh --integration
+#   bash scripts/setup/test/run_tests.sh --integration
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 source "$SCRIPT_DIR/harness.sh"
 
 WORK_DIR=$(mktemp -d /tmp/springdrift-test-XXXXXX)
@@ -56,7 +56,7 @@ INPUT_FILE=$(mktemp)
   echo ""                                     # Git remote URL
 } > "$INPUT_FILE"
 
-bash scripts/setup-macos.sh < "$INPUT_FILE" 2>&1 || true
+bash scripts/setup/macos.sh < "$INPUT_FILE" 2>&1 || true
 rm -f "$INPUT_FILE"
 
 # ── Verify setup output ─────────────────────────────────────────────────────

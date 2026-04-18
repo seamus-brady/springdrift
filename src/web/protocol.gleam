@@ -42,6 +42,16 @@ pub type ClientMessage {
   RequestDprimeConfig
   RequestCommsData
   RequestAffectData
+  /// List of dated JSONL files in the narrative dir, each with cycle
+  /// counts + last activity. Drives the chat-history sidebar.
+  RequestHistoryIndex
+  /// Load all narrative entries for a given YYYY-MM-DD date. Drives
+  /// the read-only day view in the chat-history sidebar.
+  RequestHistoryDay(date: String)
+  /// Load raw user/assistant message pairs for a given YYYY-MM-DD date.
+  /// Reads from the cycle log directly — the actual chat, not the
+  /// Archivist's narrative summary.
+  RequestChatHistoryDay(date: String)
 }
 
 pub type ServerMessage {
@@ -63,6 +73,42 @@ pub type ServerMessage {
   SessionHistory(messages_json: String)
   CommsData(messages_json: String)
   AffectData(snapshots_json: String)
+  /// Live progress update from a delegated agent — emitted every react turn.
+  /// Surfaces in the chat tab's status strip so the operator sees what's
+  /// actually happening instead of an opaque "thinking" spinner.
+  AgentProgressNotification(
+    agent_name: String,
+    turn: Int,
+    max_turns: Int,
+    tokens: Int,
+    current_tool: Option(String),
+    elapsed_ms: Int,
+  )
+  /// Cognitive loop status transition. Drives the status strip's label and
+  /// the inline status bubble's step list.
+  /// status: "idle" | "thinking" | "classifying" | "waiting_for_agents"
+  ///       | "waiting_for_user" | "evaluating_safety"
+  StatusTransition(status: String, detail: Option(String))
+  /// Per-cycle affect snapshot, fans out to the web UI once per cycle.
+  /// Drives the ambient background: hue from pressure, saturation from
+  /// calm, opacity from confidence, breathing rhythm from status.
+  AffectTick(
+    desperation: Float,
+    calm: Float,
+    confidence: Float,
+    frustration: Float,
+    pressure: Float,
+    trend: String,
+    status: String,
+  )
+  /// Day-grouped list of past conversations. One entry per day that
+  /// has a narrative JSONL file, newest first.
+  HistoryIndex(days_json: String)
+  /// Full narrative entries for a specific day, chronological order.
+  HistoryDay(date: String, entries_json: String)
+  /// Raw user/assistant chat pairs for a specific day, chronological order.
+  /// Each pair: {timestamp, user_text, assistant_text}.
+  ChatHistoryDay(date: String, pairs_json: String)
 }
 
 pub type CycleDataJson {
@@ -108,6 +154,15 @@ pub fn decode_client_message(json_string: String) -> Result(ClientMessage, Nil) 
       "request_dprime_config" -> decode.success(RequestDprimeConfig)
       "request_comms_data" -> decode.success(RequestCommsData)
       "request_affect_data" -> decode.success(RequestAffectData)
+      "request_history_index" -> decode.success(RequestHistoryIndex)
+      "request_history_day" -> {
+        use date <- decode.field("date", decode.string)
+        decode.success(RequestHistoryDay(date:))
+      }
+      "request_chat_history_day" -> {
+        use date <- decode.field("date", decode.string)
+        decode.success(RequestChatHistoryDay(date:))
+      }
       _ -> decode.failure(UserMessage(""), "Unknown client message type")
     }
   }
@@ -237,6 +292,80 @@ pub fn encode_server_message(msg: ServerMessage) -> String {
       "{\"type\":\"comms_data\",\"messages\":" <> messages_json <> "}"
     AffectData(snapshots_json:) ->
       "{\"type\":\"affect_data\",\"snapshots\":" <> snapshots_json <> "}"
+
+    AgentProgressNotification(
+      agent_name:,
+      turn:,
+      max_turns:,
+      tokens:,
+      current_tool:,
+      elapsed_ms:,
+    ) ->
+      json.object([
+        #("type", json.string("notification")),
+        #("kind", json.string("agent_progress")),
+        #("agent_name", json.string(agent_name)),
+        #("turn", json.int(turn)),
+        #("max_turns", json.int(max_turns)),
+        #("tokens", json.int(tokens)),
+        #("current_tool", case current_tool {
+          None -> json.null()
+          Some(t) -> json.string(t)
+        }),
+        #("elapsed_ms", json.int(elapsed_ms)),
+      ])
+      |> json.to_string
+
+    StatusTransition(status:, detail:) ->
+      json.object([
+        #("type", json.string("notification")),
+        #("kind", json.string("status_transition")),
+        #("status", json.string(status)),
+        #("detail", case detail {
+          None -> json.null()
+          Some(d) -> json.string(d)
+        }),
+      ])
+      |> json.to_string
+
+    AffectTick(
+      desperation:,
+      calm:,
+      confidence:,
+      frustration:,
+      pressure:,
+      trend:,
+      status:,
+    ) ->
+      json.object([
+        #("type", json.string("notification")),
+        #("kind", json.string("affect_tick")),
+        #("desperation", json.float(desperation)),
+        #("calm", json.float(calm)),
+        #("confidence", json.float(confidence)),
+        #("frustration", json.float(frustration)),
+        #("pressure", json.float(pressure)),
+        #("trend", json.string(trend)),
+        #("status", json.string(status)),
+      ])
+      |> json.to_string
+
+    HistoryIndex(days_json:) ->
+      "{\"type\":\"history_index\",\"days\":" <> days_json <> "}"
+
+    HistoryDay(date:, entries_json:) ->
+      "{\"type\":\"history_day\",\"date\":\""
+      <> date
+      <> "\",\"entries\":"
+      <> entries_json
+      <> "}"
+
+    ChatHistoryDay(date:, pairs_json:) ->
+      "{\"type\":\"chat_history_day\",\"date\":\""
+      <> date
+      <> "\",\"pairs\":"
+      <> pairs_json
+      <> "}"
   }
 }
 

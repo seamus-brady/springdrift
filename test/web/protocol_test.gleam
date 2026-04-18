@@ -128,6 +128,78 @@ pub fn encode_save_notification_test() {
   json_str |> should_contain("\"message\":\"Save failed\"")
 }
 
+pub fn encode_agent_progress_notification_test() {
+  let msg =
+    protocol.AgentProgressNotification(
+      agent_name: "researcher",
+      turn: 2,
+      max_turns: 8,
+      tokens: 4200,
+      current_tool: Some("brave_answer"),
+      elapsed_ms: 12_400,
+    )
+  let json_str = protocol.encode_server_message(msg)
+  json_str |> should_contain("\"kind\":\"agent_progress\"")
+  json_str |> should_contain("\"agent_name\":\"researcher\"")
+  json_str |> should_contain("\"turn\":2")
+  json_str |> should_contain("\"max_turns\":8")
+  json_str |> should_contain("\"tokens\":4200")
+  json_str |> should_contain("\"current_tool\":\"brave_answer\"")
+  json_str |> should_contain("\"elapsed_ms\":12400")
+}
+
+pub fn encode_agent_progress_notification_no_tool_test() {
+  let msg =
+    protocol.AgentProgressNotification(
+      agent_name: "writer",
+      turn: 1,
+      max_turns: 5,
+      tokens: 800,
+      current_tool: None,
+      elapsed_ms: 2100,
+    )
+  let json_str = protocol.encode_server_message(msg)
+  json_str |> should_contain("\"current_tool\":null")
+}
+
+pub fn encode_status_transition_test() {
+  let msg =
+    protocol.StatusTransition(status: "thinking", detail: Some("claude-haiku"))
+  let json_str = protocol.encode_server_message(msg)
+  json_str |> should_contain("\"kind\":\"status_transition\"")
+  json_str |> should_contain("\"status\":\"thinking\"")
+  json_str |> should_contain("\"detail\":\"claude-haiku\"")
+}
+
+pub fn encode_status_transition_no_detail_test() {
+  let msg = protocol.StatusTransition(status: "idle", detail: None)
+  let json_str = protocol.encode_server_message(msg)
+  json_str |> should_contain("\"status\":\"idle\"")
+  json_str |> should_contain("\"detail\":null")
+}
+
+pub fn encode_affect_tick_test() {
+  let msg =
+    protocol.AffectTick(
+      desperation: 12.5,
+      calm: 72.0,
+      confidence: 65.5,
+      frustration: 18.0,
+      pressure: 35.0,
+      trend: "rising",
+      status: "thinking",
+    )
+  let json_str = protocol.encode_server_message(msg)
+  json_str |> should_contain("\"kind\":\"affect_tick\"")
+  json_str |> should_contain("\"desperation\":12.5")
+  json_str |> should_contain("\"calm\":72.0")
+  json_str |> should_contain("\"confidence\":65.5")
+  json_str |> should_contain("\"frustration\":18.0")
+  json_str |> should_contain("\"pressure\":35.0")
+  json_str |> should_contain("\"trend\":\"rising\"")
+  json_str |> should_contain("\"status\":\"thinking\"")
+}
+
 // ---------------------------------------------------------------------------
 // Source helpers
 // ---------------------------------------------------------------------------

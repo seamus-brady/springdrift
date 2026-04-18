@@ -879,10 +879,13 @@ fn do_dispatch_agents(
 
 /// Handle mid-flight progress update from an agent's react loop.
 /// Updates the active_delegations dict so the sensorium can display it.
+/// Also fans out an `AgentProgressNotice` so the web UI's live status strip
+/// can render what the agent is actually doing instead of an opaque spinner.
 pub fn handle_agent_progress(
   state: CognitiveState,
   progress: DelegationProgress,
 ) -> CognitiveState {
+  let now_ms = monotonic_now_ms()
   let info = case dict.get(state.active_delegations, progress.task_id) {
     Ok(existing) ->
       DelegationInfo(
@@ -901,11 +904,27 @@ pub fn handle_agent_progress(
         input_tokens: progress.input_tokens,
         output_tokens: progress.output_tokens,
         last_tool: progress.last_tool,
-        started_at_ms: monotonic_now_ms(),
+        started_at_ms: now_ms,
         depth: progress.depth,
         violation_count: 0,
       )
   }
+  let elapsed_ms = now_ms - info.started_at_ms
+  let current_tool = case progress.last_tool {
+    "" -> option.None
+    t -> option.Some(t)
+  }
+  process.send(
+    state.notify,
+    types.AgentProgressNotice(
+      agent_name: progress.agent,
+      turn: progress.turn,
+      max_turns: progress.max_turns,
+      tokens: progress.input_tokens + progress.output_tokens,
+      current_tool:,
+      elapsed_ms:,
+    ),
+  )
   CognitiveState(
     ..state,
     active_delegations: dict.insert(

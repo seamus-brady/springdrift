@@ -6,9 +6,9 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 source "$SCRIPT_DIR/harness.sh"
-source "$REPO_ROOT/scripts/lib/setup-common.sh"
+source "$REPO_ROOT/scripts/setup/lib/common.sh"
 
 echo -e "${BOLD}Gleam version checks${NC}"
 

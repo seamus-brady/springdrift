@@ -106,10 +106,10 @@ GitHub/GitLab repo ready if you want offsite backup of agent memory.
 
 ```bash
 # macOS
-bash scripts/setup-macos.sh
+bash scripts/setup/macos.sh
 
 # Linux (Ubuntu/Debian)
-bash scripts/setup-linux.sh
+bash scripts/setup/linux.sh
 ```
 
 Takes about 5 minutes.

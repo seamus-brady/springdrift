@@ -4,13 +4,13 @@
 # Run from the repo root after cloning:
 #   git clone https://github.com/seamus-brady/springdrift.git
 #   cd springdrift
-#   bash scripts/setup-linux.sh
+#   bash scripts/setup/linux.sh
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/lib/setup-common.sh"
+source "$SCRIPT_DIR/lib/common.sh"
 
 ask()  { read -rp "  $1: " "$2" <&3; }
 ask_default() { read -rp "  $1 [$2]: " val <&3; eval "$3=\${val:-$2}"; }
