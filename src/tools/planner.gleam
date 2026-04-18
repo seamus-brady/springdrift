@@ -59,9 +59,17 @@ pub fn all() -> List(llm_types.Tool) {
 }
 
 /// Tools for the Planner agent — heavier planning operations that
-/// warrant a full agent delegation.
+/// warrant a full agent delegation. Also carries the lightweight
+/// step-completion + activation tools so a PM delegation can close its
+/// own work without bouncing back to the cognitive loop.
 pub fn planner_agent_tools() -> List(llm_types.Tool) {
   [
+    // Lightweight lifecycle — also present on the cognitive loop, but
+    // replicated here so a PM delegation can complete the work it just
+    // did without needing the orchestrator to make the close call.
+    complete_task_step_tool(),
+    activate_task_tool(),
+    // Heavier operations — the original planner-agent-only set.
     create_endeavour_tool(),
     add_task_to_endeavour_tool(),
     flag_risk_tool(),
