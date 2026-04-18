@@ -21,6 +21,7 @@ import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
+import llm/provider
 import llm/tool
 import llm/types.{
   type Tool, type ToolCall, type ToolResult, ToolFailure, ToolSuccess,
@@ -32,6 +33,7 @@ import remembrancer/query as rquery
 import remembrancer/reader as rreader
 import skills/pattern as skills_pattern
 import skills/proposal_log
+import skills/safety_gate
 import slog
 
 @external(erlang, "springdrift_ffi", "get_datetime")
@@ -66,6 +68,15 @@ pub type RemembrancerContext {
     /// Half-life (days) for fact confidence decay. Used when computing
     /// decayed_facts_count at consolidation write time.
     fact_decay_half_life_days: Int,
+    /// Provider used by the skills safety gate when evaluating
+    /// auto-generated proposals. None disables the LLM scorer
+    /// (deterministic + rate limit still run).
+    gate_provider: Option(provider.Provider),
+    /// Model name for the safety gate LLM scorer.
+    gate_model: String,
+    /// Directory where Accepted skill proposals are written
+    /// (typically `.springdrift/skills/`).
+    skills_dir: String,
   )
 }
 
@@ -555,27 +566,63 @@ fn run_propose_skills_from_patterns(
           get_datetime(),
           ctx.agent_id,
         )
-      let dir = paths.skills_log_dir()
-      list.each(proposals, fn(p) { proposal_log.append_proposed(dir, p) })
+      let log_dir = paths.skills_log_dir()
+      // Log every proposal as Proposed so the audit trail is complete
+      // before the gate starts making decisions.
+      list.each(proposals, fn(p) { proposal_log.append_proposed(log_dir, p) })
+      // Run each proposal through the Promotion Safety Gate. The gate
+      // writes SKILL.md + skill.toml on Accept and logs the outcome
+      // either way.
+      let gate_config = safety_gate.default_config()
+      let outcomes =
+        list.map(proposals, fn(p) {
+          safety_gate.gate_proposal(
+            p,
+            [],
+            ctx.skills_dir,
+            log_dir,
+            gate_config,
+            ctx.gate_provider,
+            ctx.gate_model,
+          )
+        })
+      let accepted = list.filter(outcomes, fn(o) { o.skill_path != "" })
+      let rejected = list.filter(outcomes, fn(o) { o.skill_path == "" })
       let summary =
-        "propose_skills_from_patterns: "
+        "propose_skills_from_patterns + gate: "
         <> int.to_string(list.length(clusters))
         <> " cluster(s), "
         <> int.to_string(list.length(proposals))
-        <> " proposal(s) logged to "
-        <> dir
-        <> "\n\nDomain filter: "
+        <> " proposal(s), "
+        <> int.to_string(list.length(accepted))
+        <> " accepted, "
+        <> int.to_string(list.length(rejected))
+        <> " rejected\n\n"
+        <> "Domain filter: "
         <> domain_filter
         <> "\nMin cases: "
         <> int.to_string(min_cases)
         <> "\nMin utility: "
         <> float.to_string(min_utility)
-        <> case proposals {
-          [] -> "\n\nNo qualifying proposals."
+        <> case accepted {
+          [] -> ""
           _ ->
-            "\n\nProposals:\n"
+            "\n\nAccepted:\n"
             <> string.join(
-              list.map(proposals, fn(p) { "  - " <> p.name }),
+              list.map(accepted, fn(o) {
+                "  + " <> o.proposal_id <> " -> " <> o.skill_path
+              }),
+              "\n",
+            )
+        }
+        <> case rejected {
+          [] -> ""
+          _ ->
+            "\n\nRejected:\n"
+            <> string.join(
+              list.map(rejected, fn(o) {
+                "  - " <> o.proposal_id <> " (" <> o.layer <> "): " <> o.reason
+              }),
               "\n",
             )
         }
