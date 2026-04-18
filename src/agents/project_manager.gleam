@@ -52,6 +52,9 @@ before you start.
 - Use advance_phase to progress through endeavour phases
 - Use update_endeavour to adjust goals, deadlines, cadence
 - Use update_task, add_task_step, remove_task_step to edit task structure
+- Use complete_task_step to close a step you've actually completed — don't
+  leave this for the orchestrator; if you did the work, mark it done
+- Use activate_task to pick up the next task in a sequence
 
 Report clearly what you changed and why. Include IDs for all created items."
 

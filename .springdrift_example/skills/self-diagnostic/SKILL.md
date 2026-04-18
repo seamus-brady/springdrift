@@ -9,6 +9,17 @@ agents: observer, cognitive
 Run these checks in order. Report results as a structured summary. Flag any
 issues as sensory events.
 
+### Voice and delegation notes
+
+- The sensorium and these steps address the agent as "you"; that's skill
+  grammar. The **final report to the operator is written in first person**
+  about the agent's own state. "My affect is stable", "I have 4 active
+  tasks" — not "your affect is stable", "your active work".
+- Pattern-detection tools (`detect_patterns`, `query_tool_activity`,
+  `memory_trace_fact`, CBR curation) live on the **Observer agent**, not
+  the cognitive loop. When the cognitive loop needs them, delegate via
+  `agent_observer`. Calling them at root returns "Unknown tool".
+
 ### Step 1: System State
 
 Call `introspect`. Verify:
