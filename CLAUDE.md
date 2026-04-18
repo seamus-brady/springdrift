@@ -115,6 +115,8 @@ src/
 │   ├── types.gleam            Strategy + StrategyEvent (Created/Used/Outcome/Archived) + StrategySource
 │   └── log.gleam              Per-day JSONL log + resolve_from_events + active_ranked + Laplace success_rate
 │
+├── affect/correlation.gleam   Affect-Performance Engine — meta-learning Phase D. Pure Pearson math + (snapshot, entry) join + fact key encoding
+│
 ├── comms/                     Communications — email via AgentMail
 │   ├── types.gleam            CommsMessage, CommsChannel (Email), Direction, DeliveryStatus, CommsConfig
 │   ├── email.gleam            AgentMail HTTP client: send_message, list_messages, get_message
@@ -581,7 +583,7 @@ agent. Heavy planner operations moved to the Planner agent.
 | `check_inbox` | Comms | List recent messages in inbox |
 | `read_message` | Comms | Read full message content by ID |
 
-**Remembrancer tools** (9 tools in `tools/remembrancer.gleam`, on Remembrancer agent):
+**Remembrancer tools** (10 tools in `tools/remembrancer.gleam`, on Remembrancer agent):
 
 | Tool | Store(s) | Purpose |
 |---|---|---|
@@ -594,6 +596,7 @@ agent. Heavy planner operations moved to the Planner agent.
 | `find_connections` | Narrative+CBR+Facts | Cross-reference a topic across all memory stores with hit counts |
 | `write_consolidation_report` | Knowledge + Consolidation | Persist markdown report + append ConsolidationRun log entry |
 | `propose_skills_from_patterns` | CBR + Skills | Mine CBR clusters, generate skill proposals (LLM body + template fallback), run through the Promotion Safety Gate, promote accepted ones to Active skills on disk |
+| `analyze_affect_performance` | Affect + Narrative + Facts | Phase D. Compute Pearson r between each affect dimension and outcome success per task domain; persist significant correlations as facts under `affect_corr_<dim>_<domain>`; sensorium reads them as `<affect_warning>` |
 
 **Remembrancer** (`agents/remembrancer.gleam`) is a deep-memory specialist. Unlike
 Observer (recent-cycle diagnostics via Librarian), the Remembrancer reads raw JSONL
@@ -662,7 +665,7 @@ exposes this (and other system state) to the LLM.
 | Writer | knowledge (drafts) + artifacts + builtin | 5 | unlimited | Permanent | Draft structured reports; create/update/promote drafts via document library |
 | Observer | diagnostic + CBR curation (18 tools) | 6 | 20 | Transient | Cycle forensics, pattern detection, CBR curation, fact tracing, D' feedback |
 | Comms | comms (4 tools) | 6 | 20 | Permanent | Send and receive email via AgentMail |
-| Remembrancer | remembrancer (8 tools) | 8 | 30 | Transient | Deep-memory consolidation across months. Search, trace, cluster, resurrect dormant threads, restore verified confidence, cross-reference, persist reports |
+| Remembrancer | remembrancer (10 tools) | 8 | 30 | Transient | Deep-memory consolidation + skills proposals + affect-performance correlation. Search, trace, cluster, resurrect dormant threads, restore verified confidence, cross-reference, persist reports |
 
 **Structured output** — when an agent completes, the framework populates
 `AgentSuccess.structured_result` with typed `AgentFindings` based on the agent name
@@ -814,7 +817,10 @@ keyword dissimilarity) — data the Curator can't derive itself.
 `build_sensorium` assembles a self-describing XML `{{sensorium}}` slot — the agent's
 ambient perception block injected at every cycle start (no tool calls needed). It
 also gains a `<strategies>` section once the Strategy Registry has any active
-strategies — top 3 by Laplace-smoothed success rate (omitted when registry empty).
+strategies — top 3 by Laplace-smoothed success rate (omitted when registry empty) —
+and an `<affect_warnings>` block surfacing strong negative
+correlations (r ≤ -0.4) between affect dimensions and outcome success per
+domain (Phase D; sourced from facts written by `analyze_affect_performance`).
 Sections:
 1. `<clock>` — `now` (ISO timestamp), `session_uptime`, optional `last_cycle` elapsed
 2. `<situation>` — `input` source ("user"/"scheduler"), `queue_depth`,

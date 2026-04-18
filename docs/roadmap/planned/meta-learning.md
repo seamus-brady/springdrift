@@ -1,6 +1,6 @@
 # Meta-Learning System — Design Specification
 
-**Status**: Partially shipped (Phases A + B 2026-04-18); Phases C, D, E, F planned
+**Status**: Partially shipped (Phases A + B + D 2026-04-18); Phases C, E, F planned
 **Date**: 2026-04-17 (last revised 2026-04-18)
 **Author**: Drafted by Curragh (Springdrift instance a62fa947), revised for agent-led operation
 **Related**: `docs/roadmap/implemented/skills-management.md` (Phase B, the skills layer)
@@ -175,24 +175,44 @@ intrinsic from extrinsic motivation.
 
 **Dependency**: Phase A.
 
-### 4.4 Phase D — Affect-Performance Correlation Engine
+### 4.4 Phase D — Affect-Performance Correlation Engine — SHIPPED 2026-04-18
+
+**Status**: Shipped end-to-end. Pure correlation engine + Remembrancer
+tool + sensorium surface. D' input-gate hook deferred as a small
+follow-up.
 
 **Purpose**: Correlate affect dimensions with task outcomes. Lets the agent
 detect its own maladaptive emotional patterns.
 
 **Storage**: Analytical pipeline over existing stores; results cached in
-facts (`affect_correlation_<dimension>_<domain>`).
+facts under the key prefix `affect_corr_<dimension>_<domain>` with a
+compact `<r>|<n>|<inconclusive>` value.
 
-**Output model**:
-- `affect_dimension`, `task_domain`, `correlation` (-1.0 to 1.0)
-- `sample_size`, `time_period`, `notable_patterns`
+**Output model** (`src/affect/correlation.gleam`):
+- `AffectCorrelation` — `dimension`, `domain`, `correlation` (-1.0 to 1.0),
+  `sample_size`, `inconclusive`.
+- `pearson(xs, ys)` — pure Pearson r, returns `(r, inconclusive)` so callers
+  can distinguish "no signal" from "definitely no relationship". Constant
+  inputs (zero variance) and singletons return inconclusive.
+- `compute_correlations(snapshots, entries, min_sample)` — joins by
+  cycle_id, groups by domain, returns one result per (dim × domain) pair
+  with sample_size ≥ `min_sample`.
 
-**Integration**:
-- Reads existing affect + narrative stores; no new memory required.
-- Remembrancer runs analysis during consolidation.
-- Sensorium flags known failure patterns:
-  `<affect_warning pattern="..." historical_failure_rate="..."/>`.
-- D' input gate can reference affect warnings as context.
+**Integration shipped**:
+- New Remembrancer tool `analyze_affect_performance` (`src/tools/remembrancer.gleam`).
+  Reads affect snapshots + narrative entries from disk, computes correlations,
+  persists significant results (default |r| ≥ 0.4) as facts.
+- Sensorium `<affect_warnings>` block (`src/narrative/curator.gleam`)
+  surfaces strong negative correlations (r ≤ -0.4) so the agent sees
+  maladaptive patterns at every cycle. Omitted when no warnings meet the
+  threshold so new installs see no noise.
+- 12 unit tests in `test/affect/correlation_test.gleam` cover Pearson math,
+  the join, fact-key encoding, and edge cases.
+
+**Not yet shipped (Phase D follow-ups)**:
+- D' input-gate consumes affect warnings as escalation context.
+- Auto-trigger from the Metacognitive Scheduler (Phase F) — currently the
+  agent invokes `analyze_affect_performance` on demand.
 
 **Reference**: Liu & van der Schaar (2025) metacognitive monitoring.
 Distinguishes productive pressure from counterproductive stress.
@@ -334,14 +354,14 @@ Full chain auditable via DAG replay.
 | A — Strategy Registry | None | Small-Medium | ✅ SHIPPED 2026-04-18 |
 | B — Skills Management | `skills-management.md` shipped | Medium-Large | ✅ SHIPPED 2026-04-18 |
 | C — Learning Goals Store | Phase A | Small-Medium | Unblocked |
-| D — Affect-Performance Engine | ~50 cycles of data (exists) | Small | ✅ Ready |
+| D — Affect-Performance Engine | ~50 cycles of data (exists) | Small | ✅ SHIPPED 2026-04-18 |
 | E — Study-Cycle Pipeline | A + B (narrow version only needs A) | Medium | Unblocked (A + B done) |
 | F — Metacognitive Scheduler | A–E | Medium | Capstone |
 
-**Recommended order (revised 2026-04-18, A + B shipped)**: D → C → E → F.
+**Recommended order (revised 2026-04-18, A + B + D shipped)**: C → E → F.
 
-**Phases ready to start immediately**: D (and the small A follow-ups —
-strategy proposer, per-domain sensorium filtering, config-gate enforcement).
+**Ready to start immediately**: C (Learning Goals Store), plus the small
+follow-ups for A and D listed in their respective sections.
 
 ---
 
