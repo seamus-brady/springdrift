@@ -52,6 +52,7 @@ fn make_entry(
     ),
     observations: [],
     redacted: False,
+    strategy_used: option.None,
   )
 }
 

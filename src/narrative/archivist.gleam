@@ -43,6 +43,8 @@ import narrative/types.{
 }
 import paths
 import slog
+import strategy/log as strategy_log
+import strategy/types as strategy_types
 import xstructor
 import xstructor/schemas
 
@@ -423,6 +425,7 @@ pub fn spawn(
               )
           }
           narrative_log.append(narrative_dir, final_entry)
+          emit_strategy_events(final_entry)
           // Notify the Librarian to index the new entry
           case lib {
             Some(l) -> {
@@ -563,7 +566,9 @@ RULES:
 
 INTENT CLASSIFICATIONS: data_report, data_query, comparison, trend_analysis, monitoring_check, exploration, clarification, system_command, conversation
 
-OUTCOME STATUS: success, partial, failure"
+OUTCOME STATUS: success, partial, failure
+
+STRATEGY: If the cycle followed a recognisable, named approach drawn from your Strategy Registry, emit its id in <strategy_used>. Otherwise omit the element — do not invent a new strategy name here. New strategies are created by the Remembrancer through pattern mining, not by the Curator."
 }
 
 fn build_curation_prompt(ctx: ArchivistContext, reflection: String) -> String {
@@ -668,7 +673,9 @@ RULES:
 
 INTENT CLASSIFICATIONS: data_report, data_query, comparison, trend_analysis, monitoring_check, exploration, clarification, system_command, conversation
 
-OUTCOME STATUS: success, partial, failure"
+OUTCOME STATUS: success, partial, failure
+
+STRATEGY: If the cycle followed a recognisable, named approach drawn from your Strategy Registry, emit its id in <strategy_used>. Otherwise omit the element — do not invent a new strategy name here. New strategies are created by the Remembrancer through pattern mining, not by the Curator."
 }
 
 fn build_prompt(ctx: ArchivistContext) -> String {
@@ -753,7 +760,53 @@ fn extract_narrative_entry(
     metrics: extract_metrics(elements),
     observations: extract_observations(elements),
     redacted: False,
+    strategy_used: extract_strategy_used(elements),
   )
+}
+
+fn extract_strategy_used(elements: Dict(String, String)) -> Option(String) {
+  case dict.get(elements, "narrative_entry.strategy_used") {
+    Ok(v) ->
+      case string.trim(v) {
+        "" -> None
+        s -> Some(s)
+      }
+    Error(_) -> None
+  }
+}
+
+/// Emit Used + Outcome events for the Strategy Registry when the entry
+/// named a strategy. The registry's resolver silently drops events for
+/// unknown strategy ids, so emitting an unseen id is safe — the
+/// Remembrancer's pattern miner surfaces those as candidates for
+/// proposal.
+fn emit_strategy_events(entry: NarrativeEntry) -> Nil {
+  case entry.strategy_used {
+    None -> Nil
+    Some(id) -> {
+      let dir = paths.strategy_log_dir()
+      let ts = get_datetime()
+      strategy_log.append(
+        dir,
+        strategy_types.StrategyUsed(
+          timestamp: ts,
+          strategy_id: id,
+          cycle_id: entry.cycle_id,
+          affect_pressure: None,
+        ),
+      )
+      let success = entry.outcome.status == Success
+      strategy_log.append(
+        dir,
+        strategy_types.StrategyOutcome(
+          timestamp: ts,
+          strategy_id: id,
+          cycle_id: entry.cycle_id,
+          success: success,
+        ),
+      )
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1229,6 +1282,7 @@ fn extract_cbr_case(
     redacted: False,
     category: category,
     usage_stats: None,
+    strategy_id: entry.strategy_used,
   )
 }
 
@@ -1438,6 +1492,7 @@ fn fallback_entry(ctx: ArchivistContext) -> NarrativeEntry {
     ),
     observations: [],
     redacted: False,
+    strategy_used: None,
   )
 }
 

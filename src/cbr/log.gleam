@@ -151,6 +151,10 @@ pub fn encode_case(c: CbrCase) -> json.Json {
       option.Some(stats) -> encode_usage_stats(stats)
       option.None -> json.null()
     }),
+    #("strategy_id", case c.strategy_id {
+      option.Some(id) -> json.string(id)
+      option.None -> json.null()
+    }),
   ])
 }
 
@@ -276,6 +280,11 @@ pub fn case_decoder() -> decode.Decoder(CbrCase) {
     option.None,
     usage_stats_decoder(),
   )
+  use strategy_id <- decode.optional_field(
+    "strategy_id",
+    option.None,
+    decode.optional(decode.string),
+  )
   decode.success(CbrCase(
     case_id:,
     timestamp:,
@@ -288,6 +297,7 @@ pub fn case_decoder() -> decode.Decoder(CbrCase) {
     redacted:,
     category:,
     usage_stats:,
+    strategy_id:,
   ))
 }
 

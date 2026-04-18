@@ -242,6 +242,7 @@ pub fn encode_entry(entry: NarrativeEntry) -> json.Json {
     #("metrics", encode_metrics(entry.metrics)),
     #("observations", json.array(entry.observations, encode_observation)),
     #("redacted", json.bool(entry.redacted)),
+    #("strategy_used", encode_optional_string(entry.strategy_used)),
   ])
 }
 
@@ -479,6 +480,11 @@ pub fn entry_decoder() -> decode.Decoder(NarrativeEntry) {
     decode.list(observation_decoder()),
   )
   use redacted <- decode.optional_field("redacted", False, decode.bool)
+  use strategy_used <- decode.optional_field(
+    "strategy_used",
+    None,
+    decode.optional(decode.string),
+  )
   decode.success(NarrativeEntry(
     schema_version:,
     cycle_id:,
@@ -498,6 +504,7 @@ pub fn entry_decoder() -> decode.Decoder(NarrativeEntry) {
     metrics:,
     observations:,
     redacted:,
+    strategy_used:,
   ))
 }
 

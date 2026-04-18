@@ -1,6 +1,6 @@
 # Meta-Learning System — Design Specification
 
-**Status**: Partially shipped (Phase B 2026-04-18); Phases A, C, D, E, F planned
+**Status**: Partially shipped (Phases A + B 2026-04-18); Phases C, D, E, F planned
 **Date**: 2026-04-17 (last revised 2026-04-18)
 **Author**: Drafted by Curragh (Springdrift instance a62fa947), revised for agent-led operation
 **Related**: `docs/roadmap/implemented/skills-management.md` (Phase B, the skills layer)
@@ -74,26 +74,50 @@ The missing pieces are **connective tissue**, not new substrates.
 Each component is small, ships independently or in a clear order, and flows
 through existing infrastructure.
 
-### 4.1 Phase A — Strategy Registry
+### 4.1 Phase A — Strategy Registry — SHIPPED 2026-04-18
+
+**Status**: Substrate + integration shipped. Remembrancer auto-proposal
+(creating `StrategyCreated` events from mined CBR clusters) lands later as a
+small follow-up to this phase.
 
 **Purpose**: Named, reusable approaches with tracked outcomes. Separates
 "which approach works" from "which case worked."
 
 **Storage**: `.springdrift/memory/strategies/YYYY-MM-DD-strategies.jsonl`
 
-**Data model**:
-- `id`, `name`, `description`, `domain_tags`
-- `success_count`, `failure_count`, `total_uses`
-- `avg_affect` (average affect snapshot during use)
-- `source`: `observed` | `proposed` | `operator_defined`
-- `active`: Bool (false = archived)
+**Data model** (in `src/strategy/types.gleam`):
+- `Strategy` — derived state: `id`, `name`, `description`, `domain_tags`,
+  `success_count`, `failure_count`, `total_uses`, `avg_pressure`,
+  `source` (Observed / Proposed / OperatorDefined), `active`,
+  `last_event_at`.
+- `StrategyEvent` — append-only log entries: `StrategyCreated`,
+  `StrategyUsed`, `StrategyOutcome`, `StrategyArchived`. Replay derives
+  the `Strategy` list (`strategy/log.resolve_from_events`).
 
-**Integration**:
-- Archivist tags each `NarrativeEntry` with `strategy_used` (new field).
-- Curator injects matching strategies into context (budget-aware).
-- CBR cases gain `strategy_id` field.
-- Remembrancer `mine_patterns` proposes new strategies from recurring
-  unnamed approaches.
+**Integration shipped**:
+- `NarrativeEntry` gains `strategy_used: Option(String)`. Backward-compatible
+  decoder defaults to `None` for pre-Phase-A entries.
+- `CbrCase` gains `strategy_id: Option(String)`, populated by the Archivist
+  from the narrative entry.
+- Archivist's curation prompt teaches the LLM to emit `<strategy_used>`
+  only for recognisable Registry approaches (no inventing names).
+- Archivist appends `StrategyUsed` + `StrategyOutcome` events after writing
+  the narrative entry. Events for unknown strategy ids are silently
+  dropped by the resolver — orphan ids become future proposal candidates.
+- Curator's `<strategies>` sensorium block surfaces the top 3 active
+  strategies ranked by Laplace-smoothed success rate; omitted when the
+  registry is empty.
+- `[meta_learning] strategy_registry_enabled` config field parses today;
+  enforcement (no-op when False) is a follow-up.
+
+**Not yet shipped (Phase A follow-ups)**:
+- Remembrancer `propose_strategies_from_patterns` tool (analogous to
+  `propose_skills_from_patterns`).
+- Per-domain strategy filtering in the sensorium (current top 3 is global).
+- Affect-pressure capture: the `affect_pressure` slot in `StrategyUsed`
+  is plumbed but currently always `None` — Phase D will populate it.
+- Strict honoring of `strategy_registry_enabled = false` in the Archivist
+  emit path.
 
 **Reference**: Liu & van der Schaar (2025) "metacognitive knowledge" —
 strategy evaluation. Andrychowicz et al. (2016) — learning how to optimise
@@ -307,17 +331,17 @@ Full chain auditable via DAG replay.
 
 | Phase | Prereqs | Effort | Status |
 |---|---|---|---|
-| A — Strategy Registry | None | Small-Medium | ✅ Ready |
+| A — Strategy Registry | None | Small-Medium | ✅ SHIPPED 2026-04-18 |
 | B — Skills Management | `skills-management.md` shipped | Medium-Large | ✅ SHIPPED 2026-04-18 |
-| C — Learning Goals Store | Phase A | Small-Medium | After A |
+| C — Learning Goals Store | Phase A | Small-Medium | Unblocked |
 | D — Affect-Performance Engine | ~50 cycles of data (exists) | Small | ✅ Ready |
-| E — Study-Cycle Pipeline | A + B (narrow version only needs A) | Medium | Partially (B done) |
+| E — Study-Cycle Pipeline | A + B (narrow version only needs A) | Medium | Unblocked (A + B done) |
 | F — Metacognitive Scheduler | A–E | Medium | Capstone |
 
-**Recommended order (revised 2026-04-18, B already shipped)**: A → D
-(parallel) → C → E-full → F.
+**Recommended order (revised 2026-04-18, A + B shipped)**: D → C → E → F.
 
-**Phases ready to start immediately**: A and D.
+**Phases ready to start immediately**: D (and the small A follow-ups —
+strategy proposer, per-domain sensorium filtering, config-gate enforcement).
 
 ---
 

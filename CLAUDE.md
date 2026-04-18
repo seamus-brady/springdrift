@@ -111,6 +111,10 @@ src/
 │   ├── conflict.gleam         LLM classifier: Complementary/Redundant/Supersedes/Contradictory
 │   └── safety_gate.gleam      Four-layer gate: deterministic + rate limit + conflict + D'
 │
+├── strategy/                  Strategy Registry — meta-learning Phase A
+│   ├── types.gleam            Strategy + StrategyEvent (Created/Used/Outcome/Archived) + StrategySource
+│   └── log.gleam              Per-day JSONL log + resolve_from_events + active_ranked + Laplace success_rate
+│
 ├── comms/                     Communications — email via AgentMail
 │   ├── types.gleam            CommsMessage, CommsChannel (Email), Direction, DeliveryStatus, CommsConfig
 │   ├── email.gleam            AgentMail HTTP client: send_message, list_messages, get_message
@@ -441,6 +445,7 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `remembrancer_review_confidence_threshold` | — | 0.3 | Decayed confidence floor for fact review |
 | `remembrancer_dormant_thread_days` | — | 7 | Min days idle before a thread is dormant |
 | `remembrancer_min_pattern_cases` | — | 3 | Min cases to form a mined pattern |
+| `strategy_registry_enabled` | — | True | Meta-Learning Phase A. Future config gate; field parses today, no-op without seeded strategies |
 
 ## Memory architecture
 
@@ -459,6 +464,7 @@ indexed in ETS by the Librarian actor for fast queries.
 | DAG nodes | (in-memory ETS, populated from cycle log) | `CycleNode` | Operational telemetry: token counts, tool calls, D' gates, agent output per cycle |
 | Comms | `.springdrift/memory/comms/YYYY-MM-DD-comms.jsonl` | `CommsMessage` | Sent and received email messages with delivery status |
 | Consolidation | `.springdrift/memory/consolidation/YYYY-MM-DD-consolidation.jsonl` | `ConsolidationRun` | Remembrancer run records: period, counts, report path |
+| Strategies | `.springdrift/memory/strategies/YYYY-MM-DD-strategies.jsonl` | `StrategyEvent` | Meta-learning Phase A. Append-only Created/Used/Outcome/Archived events; `Strategy` derived by replay |
 
 **How they relate:** Narrative entries are the atomic record of each cycle. Threads
 group entries by topic using overlap scoring (location=3, domain=2, keyword=1;
@@ -807,7 +813,9 @@ keyword dissimilarity) — data the Curator can't derive itself.
 
 `build_sensorium` assembles a self-describing XML `{{sensorium}}` slot — the agent's
 ambient perception block injected at every cycle start (no tool calls needed). It
-contains four sections:
+also gains a `<strategies>` section once the Strategy Registry has any active
+strategies — top 3 by Laplace-smoothed success rate (omitted when registry empty).
+Sections:
 1. `<clock>` — `now` (ISO timestamp), `session_uptime`, optional `last_cycle` elapsed
 2. `<situation>` — `input` source ("user"/"scheduler"), `queue_depth`,
    `conversation_depth` (message count), optional `thread` (most recent active thread)

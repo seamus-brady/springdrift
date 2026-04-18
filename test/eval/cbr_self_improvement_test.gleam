@@ -68,6 +68,7 @@ fn make_case_with_stats(
       helpful_count:,
       harmful_count:,
     )),
+    strategy_id: None,
   )
 }
 
@@ -101,6 +102,7 @@ fn make_case_no_stats(case_id: String, timestamp: String) -> CbrCase {
     redacted: False,
     category: None,
     usage_stats: None,
+    strategy_id: None,
   )
 }
 

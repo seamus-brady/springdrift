@@ -57,6 +57,7 @@ fn make_case(
     redacted: False,
     category: None,
     usage_stats: None,
+    strategy_id: None,
   )
 }
 
@@ -389,6 +390,7 @@ pub fn retain_case_with_empty_fields_test() {
       redacted: False,
       category: None,
       usage_stats: None,
+      strategy_id: None,
     )
 
   let base = bridge.retain_case(base, empty_case)

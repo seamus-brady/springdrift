@@ -52,6 +52,7 @@ fn make_entry(cycle_id: String, summary_text: String) -> NarrativeEntry {
     ),
     observations: [],
     redacted: False,
+    strategy_used: option.None,
   )
 }
 

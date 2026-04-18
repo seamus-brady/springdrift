@@ -305,6 +305,7 @@ fn build_summary_entry(
     ),
     observations: [],
     redacted: False,
+    strategy_used: option.None,
   )
 }
 

@@ -87,6 +87,7 @@ fn make_case(
     category: None,
     redacted: False,
     usage_stats: None,
+    strategy_id: None,
   )
 }
 

@@ -36,6 +36,10 @@ pub type NarrativeEntry {
     metrics: Metrics,
     observations: List(Observation),
     redacted: Bool,
+    /// Strategy Registry id of the named approach used during this cycle,
+    /// when the agent selected one. None when the cycle was unstrategised.
+    /// Set by the Archivist's curation phase from the reflection text.
+    strategy_used: Option(String),
   )
 }
 

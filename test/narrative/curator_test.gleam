@@ -896,5 +896,6 @@ fn narrative_entry_stub(ts: String) -> narrative_types.NarrativeEntry {
     ),
     observations: [],
     redacted: False,
+    strategy_used: option.None,
   )
 }
