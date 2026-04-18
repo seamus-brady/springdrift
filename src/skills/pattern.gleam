@@ -235,6 +235,7 @@ fn empty_case() -> cbr_types.CbrCase {
     redacted: False,
     category: None,
     usage_stats: None,
+    strategy_id: None,
   )
 }
 

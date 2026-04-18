@@ -271,6 +271,12 @@ pub type AppConfig {
     agentlair_api_key: Option(String),
     agentlair_endpoint_url: Option(String),
     agentlair_trust_query: Option(Bool),
+    // ── Meta-Learning: Strategy Registry (Phase A) ──
+    /// Enable the Strategy Registry. Default: True. When disabled, no
+    /// strategies are loaded, no events appended, the sensorium
+    /// <strategies> block is omitted, and Archivist XSD emissions of
+    /// <strategy_used> are ignored.
+    strategy_registry_enabled: Option(Bool),
   )
 }
 
@@ -466,6 +472,7 @@ pub fn default() -> AppConfig {
     agentlair_api_key: None,
     agentlair_endpoint_url: None,
     agentlair_trust_query: None,
+    strategy_registry_enabled: None,
   )
 }
 
@@ -1109,6 +1116,10 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       override_cfg.agentlair_trust_query,
       base.agentlair_trust_query,
     ),
+    strategy_registry_enabled: option.or(
+      override_cfg.strategy_registry_enabled,
+      base.strategy_registry_enabled,
+    ),
   )
 }
 
@@ -1252,6 +1263,10 @@ pub fn to_string(cfg: AppConfig) -> String {
     }),
     option.map(cfg.agentlair_trust_query, fn(v) {
       "agentlair_trust_query: " <> bool_str(v)
+    }),
+    // Meta-Learning Phase A
+    option.map(cfg.strategy_registry_enabled, fn(v) {
+      "strategy_registry_enabled: " <> bool_str(v)
     }),
     // Redaction
     option.map(cfg.redact_secrets, fn(v) { "redact_secrets: " <> bool_str(v) }),
@@ -1788,6 +1803,11 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     agentlair_api_key: get_toml_str(table, ["agentlair", "api_key"]),
     agentlair_endpoint_url: get_toml_str(table, ["agentlair", "endpoint_url"]),
     agentlair_trust_query: get_toml_bool(table, ["agentlair", "trust_query"]),
+    // ── [meta_learning] — Phase A, Strategy Registry ──
+    strategy_registry_enabled: get_toml_bool(table, [
+      "meta_learning",
+      "strategy_registry_enabled",
+    ]),
   )
 }
 
@@ -1894,7 +1914,7 @@ const known_keys = [
   "housekeeper", "cbr", "agents", "web", "services", "scheduler", "xstructor",
   "forecaster", "sandbox", "delegation", "escalation", "dprime", "vertex",
   "anthropic", "mistral", "local", "backup", "comms", "appraisal", "affect",
-  "teams", "knowledge", "remembrancer", "agentlair",
+  "teams", "knowledge", "remembrancer", "agentlair", "meta_learning",
 ]
 
 const known_narrative_keys = [

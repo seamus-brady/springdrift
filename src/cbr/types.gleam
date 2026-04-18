@@ -48,6 +48,9 @@ pub type CbrCase {
     redacted: Bool,
     category: Option(CbrCategory),
     usage_stats: Option(CbrUsageStats),
+    /// Strategy Registry id linking the case to a named approach, when one
+    /// was selected for this cycle. None for unstrategised cases.
+    strategy_id: Option(String),
   )
 }
 

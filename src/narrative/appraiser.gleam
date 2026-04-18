@@ -594,6 +594,7 @@ fn create_cbr_case(
       redacted: False,
       category:,
       usage_stats: None,
+      strategy_id: None,
     )
 
   cbr_log.append(ctx.cbr_dir, case_record)

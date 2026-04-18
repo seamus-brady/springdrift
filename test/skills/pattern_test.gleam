@@ -86,6 +86,7 @@ fn case_with_usage(
       helpful_count: 0,
       harmful_count: 0,
     )),
+    strategy_id: None,
   )
 }
 

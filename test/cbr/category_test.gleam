@@ -44,6 +44,7 @@ fn make_case_with_outcome(
     redacted: False,
     category:,
     usage_stats: None,
+    strategy_id: None,
   )
 }
 

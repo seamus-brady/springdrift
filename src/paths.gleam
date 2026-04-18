@@ -123,6 +123,11 @@ pub fn skills_log_dir() -> String {
   project_dir() <> "/memory/skills"
 }
 
+/// Strategy Registry event log directory: .springdrift/memory/strategies/
+pub fn strategy_log_dir() -> String {
+  project_dir() <> "/memory/strategies"
+}
+
 /// Communications log directory: .springdrift/memory/comms/
 pub fn comms_dir() -> String {
   project_dir() <> "/memory/comms"

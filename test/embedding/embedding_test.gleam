@@ -47,6 +47,7 @@ fn make_test_case(id: String, intent: String, domain: String) -> CbrCase {
     redacted: False,
     category: None,
     usage_stats: None,
+    strategy_id: None,
   )
 }
 

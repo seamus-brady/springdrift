@@ -325,6 +325,18 @@ summary_schedule = "weekly"
 # Minimum CBR cases to form a pattern (default: 3)
 # min_pattern_cases = 3
 
+# ── Meta-Learning ───────────────────────────────────────────────────────────
+# Phase A: Strategy Registry — named, reusable approaches with tracked
+# outcomes, replayed from .springdrift/memory/strategies/.
+# The Archivist tags narrative entries with strategy_used; the Curator
+# surfaces the top 3 active strategies in the sensorium <strategies> block.
+# New strategies enter the registry only via Remembrancer pattern mining
+# or operator seed events — the Curator does not invent names.
+
+[meta_learning]
+# strategy_registry_enabled = true   # Default: true. Field parses today;
+                                     # config-gate enforcement is a follow-up.
+
 # ── AgentLair (behavioral trust network) ────────────────────────────────────
 
 [agentlair]

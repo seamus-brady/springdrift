@@ -68,6 +68,7 @@ fn make_entry(cycle_id: String, timestamp: String) -> NarrativeEntry {
     ),
     observations: [],
     redacted: False,
+    strategy_used: option.None,
   )
 }
 

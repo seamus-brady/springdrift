@@ -99,6 +99,7 @@ fn make_entry(cycle_id: String, summary: String) -> types.NarrativeEntry {
     ),
     observations: [],
     redacted: False,
+    strategy_used: option.None,
   )
 }
 
@@ -132,6 +133,7 @@ fn make_cbr_case(id: String) -> cbr_types.CbrCase {
     category: None,
     usage_stats: None,
     redacted: False,
+    strategy_id: None,
   )
 }
 

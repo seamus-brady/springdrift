@@ -46,6 +46,8 @@ import scheduler/types as scheduler_types
 import skills.{type SkillMeta}
 import skills/metrics as skills_metrics
 import slog
+import strategy/log as strategy_log
+import strategy/types as strategy_types
 
 // ---------------------------------------------------------------------------
 // Cycle context — ephemeral per-call data from the cognitive loop
@@ -1128,11 +1130,12 @@ fn build_sensorium(
 
   let knowledge_section = render_sensorium_knowledge(state)
   let memory_section = render_sensorium_memory()
+  let strategies_section = render_sensorium_strategies()
 
   let sections =
     [
       clock, situation, schedule, vitals, sandbox_section, delegations, events,
-      tasks_section, knowledge_section, memory_section,
+      tasks_section, strategies_section, knowledge_section, memory_section,
     ]
     |> list.filter(fn(s) { s != "" })
     |> string.join("\n")
@@ -1618,6 +1621,59 @@ fn render_sensorium_memory() -> String {
       <> "\"/>"
     }
   }
+}
+
+/// Render the <strategies> element — top active strategies from the
+/// Registry, ranked by Laplace-smoothed success rate. Omitted when the
+/// registry is empty so new installs see no noise. Budget: at most 3
+/// strategies, each on its own line.
+pub fn render_sensorium_strategies() -> String {
+  let dir = paths.strategy_log_dir()
+  let ranked = strategy_log.active_ranked(strategy_log.resolve_current(dir))
+  case ranked {
+    [] -> ""
+    _ -> {
+      let top = list.take(ranked, 3)
+      let rows =
+        top
+        |> list.map(render_strategy_row)
+        |> string.join("\n")
+      "  <strategies count=\""
+      <> int.to_string(list.length(ranked))
+      <> "\">\n"
+      <> rows
+      <> "\n  </strategies>"
+    }
+  }
+}
+
+fn render_strategy_row(s: strategy_types.Strategy) -> String {
+  let sr = strategy_log.success_rate(s)
+  let sr_text = float.to_string(round_to_2dp(sr))
+  "    <strategy id=\""
+  <> xml_attr_escape(s.id)
+  <> "\" name=\""
+  <> xml_attr_escape(s.name)
+  <> "\" success_rate=\""
+  <> sr_text
+  <> "\" uses=\""
+  <> int.to_string(s.total_uses)
+  <> "\"/>"
+}
+
+fn round_to_2dp(f: Float) -> Float {
+  let hundred = 100.0
+  let scaled = f *. hundred
+  let floored = float.floor(scaled +. 0.5)
+  floored /. hundred
+}
+
+fn xml_attr_escape(s: String) -> String {
+  s
+  |> string.replace("&", "&amp;")
+  |> string.replace("<", "&lt;")
+  |> string.replace(">", "&gt;")
+  |> string.replace("\"", "&quot;")
 }
 
 fn render_sensorium_knowledge(_state: CuratorState) -> String {

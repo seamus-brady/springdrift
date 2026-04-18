@@ -391,6 +391,7 @@ pub const narrative_entry_xsd = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
             </xs:sequence>
           </xs:complexType>
         </xs:element>
+        <xs:element name=\"strategy_used\" type=\"xs:string\" minOccurs=\"0\"/>
       </xs:sequence>
     </xs:complexType>
   </xs:element>
@@ -432,6 +433,7 @@ pub const narrative_entry_example = "<narrative_entry>
     <agent_delegations>1</agent_delegations>
     <model_used>claude-haiku-4-5-20251001</model_used>
   </metrics>
+  <strategy_used>delegate-then-synthesise</strategy_used>
 </narrative_entry>"
 
 // ---------------------------------------------------------------------------
