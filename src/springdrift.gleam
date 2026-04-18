@@ -88,6 +88,29 @@ fn default_skill_dirs() -> List(String) {
   paths.default_skills_dirs()
 }
 
+/// Append the agent-scoped skills XML to a spec's system_prompt. Specialists
+/// only see "always-inject" skills (empty contexts list) — domain-scoped
+/// skills require the live cycle context that only the Curator (cognitive
+/// loop) has access to.
+fn append_skills_to_spec(
+  spec: agent_types.AgentSpec,
+  discovered: List(skills.SkillMeta),
+) -> agent_types.AgentSpec {
+  let scoped =
+    discovered
+    |> skills.for_agent(spec.name)
+    |> skills.for_context([])
+    |> skills.to_system_prompt_xml
+  case scoped {
+    "" -> spec
+    xml ->
+      agent_types.AgentSpec(
+        ..spec,
+        system_prompt: spec.system_prompt <> "\n\n" <> xml,
+      )
+  }
+}
+
 pub fn main() -> Nil {
   // Load .env file from project root (silently ignored if missing)
   dot_env.new()
@@ -311,9 +334,16 @@ fn run(cfg: AppConfig) -> Nil {
 
   let skill_dirs = option.unwrap(cfg.skills_dirs, default_skill_dirs())
   let discovered = skills.discover(skill_dirs)
+  // Cognitive-loop fallback prompt: scoped to skills the cognitive loop
+  // should see. The Curator builds the richer per-cycle prompt with
+  // context filtering; this is only used when Curator falls back (no
+  // persona/preamble files present).
   let system = case discovered {
     [] -> ""
-    _ -> skills.to_system_prompt_xml(discovered)
+    _ ->
+      discovered
+      |> skills.for_agent("cognitive")
+      |> skills.to_system_prompt_xml
   }
   let agent_name = option.unwrap(cfg.agent_name, "Springdrift")
   let agent_version = option.unwrap(cfg.agent_version, "")
@@ -584,7 +614,10 @@ fn run(cfg: AppConfig) -> Nil {
     }
   }
 
-  // Build agent specs
+  // Build agent specs, then append the agent-scoped skills XML to each
+  // spec's system_prompt. Specialists only see "always-inject" skills
+  // (empty contexts list); domain-scoped skills require live cycle
+  // context which the Curator handles for the cognitive loop.
   let agent_specs =
     default_agent_specs(
       cfg,
@@ -597,6 +630,7 @@ fn run(cfg: AppConfig) -> Nil {
       brave_cache_ttl_ms,
       sandbox_mgr,
     )
+    |> list.map(fn(spec) { append_skills_to_spec(spec, discovered) })
 
   // Build agent tools for the cognitive loop (includes scheduler)
   let scheduler_tool =
@@ -678,6 +712,9 @@ fn run(cfg: AppConfig) -> Nil {
       panic as "Curator startup failed"
     }
   }
+
+  // Hand the discovered skills to the Curator so it can filter per-cycle.
+  curator.set_skills(curator_subj, discovered)
 
   // Load or create stable agent identity
   let stable_identity = agent_identity.load_or_create()

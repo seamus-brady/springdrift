@@ -43,6 +43,7 @@ import paths
 import planner/types as planner_types
 import remembrancer/consolidation
 import scheduler/types as scheduler_types
+import skills.{type SkillMeta}
 import slog
 
 // ---------------------------------------------------------------------------
@@ -153,6 +154,10 @@ pub type CuratorMessage {
   SetHousekeeper(housekeeper: Subject(housekeeper.HousekeeperMessage))
   /// Update the affect reading slot (called after each cycle).
   UpdateAffectSnapshot(reading: String)
+  /// Set the discovered skills list. Called once at startup; the Curator
+  /// filters by `for_agent("cognitive")` and `for_context(query_domains)`
+  /// each cycle when assembling the system prompt.
+  SetSkills(skills: List(SkillMeta))
   /// Shutdown the Curator.
   Shutdown
 }
@@ -178,6 +183,10 @@ type CuratorState {
     preamble_budget_chars: Int,
     housekeeper: Option(Subject(housekeeper.HousekeeperMessage)),
     affect_reading: String,
+    /// All discovered skills. Filtered per-cycle by `for_agent("cognitive")`
+    /// and `for_context(query_domains)` when building the system prompt.
+    /// Empty list = no skills available (legacy behaviour).
+    skills: List(SkillMeta),
   )
 }
 
@@ -237,6 +246,7 @@ pub fn start_with_identity(
         preamble_budget_chars: 8000,
         housekeeper: None,
         affect_reading: "",
+        skills: [],
       )
 
     slog.info("narrative/curator", "start", "Curator ready", None)
@@ -408,6 +418,16 @@ pub fn set_housekeeper(
   process.send(curator, SetHousekeeper(housekeeper:))
 }
 
+/// Set the discovered skills list (fire-and-forget). Called once at
+/// startup after skill discovery; the Curator filters on each
+/// `BuildSystemPrompt` call.
+pub fn set_skills(
+  curator: Subject(CuratorMessage),
+  skills: List(SkillMeta),
+) -> Nil {
+  process.send(curator, SetSkills(skills:))
+}
+
 // ---------------------------------------------------------------------------
 // Message loop
 // ---------------------------------------------------------------------------
@@ -432,6 +452,8 @@ fn loop(state: CuratorState) -> Nil {
 
         SetHousekeeper(housekeeper:) ->
           loop(CuratorState(..state, housekeeper: Some(housekeeper)))
+
+        SetSkills(skills:) -> loop(CuratorState(..state, skills: skills))
 
         InjectContext(task:, reply_to:) -> {
           let enriched = do_inject_context(state, task)
@@ -721,6 +743,12 @@ fn format_elapsed_since(iso_timestamp: String) -> String {
 
 /// Returns #(prompt, budget_truncated) where budget_truncated is True when
 /// the preamble budget caused any memory slots to be truncated or cleared.
+///
+/// The assembled prompt has three parts in order: persona, an
+/// `<available_skills>` block (filtered by `for_agent("cognitive")` and
+/// `for_context(query_domains)`), and the rendered preamble inside the
+/// memory tag. Identity and skills together describe what the agent IS
+/// and CAN DO; the preamble is the live working context.
 fn do_build_system_prompt(
   state: CuratorState,
   fallback: String,
@@ -729,8 +757,21 @@ fn do_build_system_prompt(
   let persona = identity.load_persona(state.identity_dirs)
   let template = identity.load_preamble_template(state.identity_dirs)
 
+  let query_domains = derive_query_domains(state, context)
+  let skills_xml = case state.skills {
+    [] -> ""
+    all ->
+      all
+      |> skills.for_agent("cognitive")
+      |> skills.for_context(query_domains)
+      |> skills.to_system_prompt_xml
+  }
+
   case persona, template {
-    None, None -> #(fallback, False)
+    None, None ->
+      // No identity files — fall back to the legacy startup prompt
+      // (which already contains the unfiltered skills XML built at boot).
+      #(fallback, False)
     _, _ -> {
       let #(rendered_preamble, truncated) = case template {
         None -> #(None, False)
@@ -743,7 +784,7 @@ fn do_build_system_prompt(
           }
         }
       }
-      let prompt = case
+      let assembled = case
         identity.assemble_system_prompt(
           persona,
           rendered_preamble,
@@ -753,9 +794,28 @@ fn do_build_system_prompt(
         Some(p) -> p
         None -> fallback
       }
+      let prompt = case skills_xml {
+        "" -> assembled
+        xml -> assembled <> "\n\n" <> xml
+      }
       #(prompt, truncated)
     }
   }
+}
+
+/// Domain tags used by `for_context` to activate domain-scoped skills.
+/// Phase 4 minimum: returns the active thread name and the agent's recent
+/// narrative entries. Real Intent.domain extraction (the spec's preferred
+/// source) lands in a later phase when the cycle context carries it
+/// explicitly.
+fn derive_query_domains(
+  _state: CuratorState,
+  _context: Option(CycleContext),
+) -> List(String) {
+  // Conservative default: empty domain list. Skills with empty `contexts`
+  // still inject (no filter); skills with non-empty `contexts` won't fire
+  // until the domain extraction wires up.
+  []
 }
 
 /// Returns #(budgeted_slots, was_truncated).

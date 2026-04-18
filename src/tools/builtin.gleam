@@ -16,6 +16,7 @@ import llm/types.{
   type Tool, type ToolCall, type ToolResult, ToolFailure, ToolSuccess,
 }
 import simplifile
+import skills/metrics as skills_metrics
 import slog
 
 // ---------------------------------------------------------------------------
@@ -165,7 +166,15 @@ fn run_read_skill(call: ToolCall) -> ToolResult {
                 error: "read_skill: could not read file: "
                   <> simplifile.describe_error(e),
               )
-            Ok(content) -> ToolSuccess(tool_use_id: call.id, content:)
+            Ok(content) -> {
+              // Record an intentional read for the audit panel. cycle_id
+              // and agent name aren't available at the executor level
+              // today; later phases can plumb cycle context through
+              // ToolCall to enable per-cycle attribution.
+              let skill_dir = string.replace(path, "/SKILL.md", "")
+              skills_metrics.append_read(skill_dir, "", "unknown")
+              ToolSuccess(tool_use_id: call.id, content:)
+            }
           }
       }
   }
