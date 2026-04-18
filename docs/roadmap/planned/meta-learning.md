@@ -3,7 +3,7 @@
 **Status**: Planned
 **Date**: 2026-04-17
 **Author**: Drafted by Curragh (Springdrift instance a62fa947), revised for agent-led operation
-**Related**: `docs/roadmap/planned/skills-management-revisions.md` (the skills layer of this design)
+**Related**: `docs/roadmap/planned/skills-management.md` (the skills layer of this design)
 
 ---
 
@@ -106,7 +106,7 @@ outperforms fixed optimisation.
 **Purpose**: Replace flat `SKILL.md` with structured, versioned,
 evidence-based skill documents.
 
-**See**: `skills-management-revisions.md` for the full design (agent-led
+**See**: `skills-management.md` for the full design (agent-led
 flavour). This phase implements that revised design end-to-end.
 
 **Key properties**:
@@ -117,7 +117,7 @@ flavour). This phase implements that revised design end-to-end.
 - `character.json` + D' config express the operator's standing mandate.
 
 **Dependency**: The skills-management foundation (Phases 1-6 of
-`skills-management-revisions.md` implementation order) must ship before
+`skills-management.md` implementation order) must ship before
 the Remembrancer can promote into it.
 
 ### 4.3 Phase C — Learning Goals Store
@@ -300,7 +300,7 @@ Full chain auditable via DAG replay.
 | Phase | Prereqs | Effort | Can start now? |
 |---|---|---|---|
 | A — Strategy Registry | None | Small-Medium | ✅ |
-| B — Skills Management | `skills-management.md` + revisions shipped | Medium-Large | ❌ (blocked) |
+| B — Skills Management | `skills-management.md` shipped | Medium-Large | ❌ (blocked) |
 | C — Learning Goals Store | Phase A | Small-Medium | After A |
 | D — Affect-Performance Engine | ~50 cycles of data (exists) | Small | ✅ |
 | E — Study-Cycle Pipeline | A + B (narrow version only needs A) | Medium | Partially |

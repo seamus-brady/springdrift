@@ -2,7 +2,7 @@
 
 **Status**: Planned
 **Parent**: `docs/roadmap/implemented/remembrancer.md` (Phases 1–10 shipped 2026-04-16)
-**Related**: `docs/roadmap/planned/meta-learning.md`, `docs/roadmap/planned/skills-management-revisions.md`
+**Related**: `docs/roadmap/planned/meta-learning.md`, `docs/roadmap/planned/skills-management.md`
 
 This captures the work deferred from the original Remembrancer roadmap. Revised 2026-04-17 to reflect the agent-led meta-learning direction.
 
@@ -12,7 +12,7 @@ This captures the work deferred from the original Remembrancer roadmap. Revised 
 
 When `mine_patterns` finds recurring approaches or pitfalls across CBR cases, those clusters should become promoted Skills.
 
-**Blocked by**: `docs/roadmap/planned/skills-management.md` + `skills-management-revisions.md`. The skills substrate must ship before the Remembrancer can promote into it.
+**Blocked by**: `docs/roadmap/planned/skills-management.md`. The skills substrate must ship before the Remembrancer can promote into it.
 
 **Remembrancer work required once unblocked** (agent-led, revised):
 - Add a `propose_skill` tool (or extend `mine_patterns`) that writes the Active skill directly, subject to the D' gate and rate limit.
