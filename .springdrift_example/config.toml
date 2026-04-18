@@ -73,7 +73,10 @@ version = "Springdrift Mk-3"
 threading = true
 summaries = false
 summary_schedule = "weekly"
-# max_days = 30
+# Days of narrative + CBR + facts history the Librarian replays into ETS at
+# startup. Bound on housekeeping reach (dedup, conflict resolution, pruning).
+# Bigger window = longer reach + slower startup. Default 180.
+# max_days = 180
 # archivist_model = ""
 # archivist_max_tokens = 4096
 # redact_secrets = true
