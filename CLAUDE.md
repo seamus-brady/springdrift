@@ -700,7 +700,9 @@ framework also applies `context.trim` per-agent via `max_context_messages` on
 is public and unit-testable (pure function, no I/O). `to_system_prompt_xml` returns `""`
 for an empty list so callers never need to special-case it. Skill names, descriptions, and
 paths are XML-escaped (`&<>"'`) before injection via `xml_escape`. The `read_skill` tool
-validates that `path` ends with `SKILL.md` before reading.
+validates that `path` ends with `SKILL.md` before reading. Discovery automatically reads
+an optional `skill.toml` sidecar in the same directory and merges it over the frontmatter
+(see Skill directory format below for the sidecar schema).
 
 **System logging** — `slog` provides `debug`, `info`, `warn`, `log_error` functions.
 All take `(module, function, message, cycle_id)`. Logs write to `.springdrift/logs/YYYY-MM-DD.jsonl`
@@ -1292,6 +1294,44 @@ description: Search and extraction strategy
 agents: researcher, cognitive
 ---
 ```
+
+### Optional `skill.toml` sidecar
+
+Skills may include a `skill.toml` alongside `SKILL.md` to extend the
+metadata with versioning, status, context tags, provenance, and other
+managed fields. Where both formats specify the same field, `skill.toml`
+wins. Skills without a sidecar continue to work via frontmatter alone.
+
+```toml
+id = "web-research"             # Defaults to directory name
+name = "Web Research Patterns"
+description = "Decision tree for tool selection during web research"
+version = 3                     # Defaults to 1
+status = "active"               # active | archived (defaults to active)
+
+[scoping]
+agents = ["researcher", "cognitive"]   # Omit → ["cognitive"] (conservative)
+contexts = ["research", "web"]         # Omit → [] (always inject)
+
+[provenance]
+author = "operator"             # operator | system | agent
+# agent_name = "remembrancer"   # Required when author = "agent"
+# cycle_id = "abc-123"          # Required when author = "agent"
+created_at = "2026-03-20T10:00:00Z"
+updated_at = "2026-03-25T16:00:00Z"
+# derived_from = "case-id"      # CBR case ID(s) for auto-generated skills
+```
+
+`SkillMeta` (in `src/skills.gleam`) carries 13 fields covering id, name,
+description, path, version, status, agents, contexts,
+`token_cost_estimate` (computed at discovery from body length), author,
+created_at, updated_at, and `derived_from`. The `for_agent` filter
+honours three special tokens: `"all"` (cognitive + every specialist),
+`"all_specialists"` (specialists only, not the cognitive loop), and an
+empty list (legacy frontmatter "all" semantics for backward compat).
+The `for_context(skills, query_domains)` filter selects skills whose
+`contexts` overlap the active query's domain tags; an empty `contexts`
+list means "always inject".
 
 ## Documentation maintenance
 

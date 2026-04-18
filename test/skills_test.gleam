@@ -5,13 +5,44 @@
 // by the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 
+import gleam/list
+import gleam/option.{None}
 import gleam/string
 import gleeunit
 import gleeunit/should
-import skills.{SkillMeta}
+import skills.{type SkillMeta, Active, Operator, SkillMeta}
 
 pub fn main() -> Nil {
   gleeunit.main()
+}
+
+// ---------------------------------------------------------------------------
+// Test helpers
+// ---------------------------------------------------------------------------
+
+/// Build a SkillMeta with sensible defaults so tests can override only the
+/// fields they care about. Without this every test would have to know about
+/// 13 fields.
+fn skill(
+  name: String,
+  agents: List(String),
+  contexts: List(String),
+) -> SkillMeta {
+  SkillMeta(
+    id: name,
+    name: name,
+    description: "A test skill",
+    path: "/path/" <> name <> "/SKILL.md",
+    version: 1,
+    status: Active,
+    agents: agents,
+    contexts: contexts,
+    token_cost_estimate: 0,
+    author: Operator,
+    created_at: "",
+    updated_at: "",
+    derived_from: None,
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -63,39 +94,90 @@ pub fn parse_extra_fields_ignored_test() {
 // ---------------------------------------------------------------------------
 
 pub fn for_agent_filters_correctly_test() {
-  let skills = [
-    SkillMeta(name: "web-research", description: "Search", path: "/a", agents: [
-      "researcher",
-      "cognitive",
-    ]),
-    SkillMeta(name: "code-review", description: "Code", path: "/b", agents: [
-      "coder",
-    ]),
-    SkillMeta(name: "how-to", description: "Guide", path: "/c", agents: []),
+  let all_skills = [
+    skill("web-research", ["researcher", "cognitive"], []),
+    skill("code-review", ["coder"], []),
+    skill("how-to", [], []),
   ]
 
-  let researcher_skills = skills.for_agent(skills, "researcher")
+  let researcher_skills = skills.for_agent(all_skills, "researcher")
   list.length(researcher_skills) |> should.equal(2)
 
-  let coder_skills = skills.for_agent(skills, "coder")
+  let coder_skills = skills.for_agent(all_skills, "coder")
   list.length(coder_skills) |> should.equal(2)
 
-  let planner_skills = skills.for_agent(skills, "planner")
+  let planner_skills = skills.for_agent(all_skills, "planner")
   list.length(planner_skills) |> should.equal(1)
 }
 
 pub fn for_agent_all_keyword_test() {
-  let skills = [
-    SkillMeta(
-      name: "universal",
-      description: "For everyone",
-      path: "/a",
-      agents: ["all"],
-    ),
-  ]
-
-  let result = skills.for_agent(skills, "anything")
+  let all_skills = [skill("universal", ["all"], [])]
+  let result = skills.for_agent(all_skills, "anything")
   list.length(result) |> should.equal(1)
+}
+
+pub fn for_agent_all_specialists_keyword_test() {
+  let all_skills = [skill("specialists-only", ["all_specialists"], [])]
+  // cognitive is NOT a specialist
+  list.length(skills.for_agent(all_skills, "cognitive")) |> should.equal(0)
+  // any non-cognitive name is treated as a specialist
+  list.length(skills.for_agent(all_skills, "researcher")) |> should.equal(1)
+  list.length(skills.for_agent(all_skills, "coder")) |> should.equal(1)
+}
+
+// ---------------------------------------------------------------------------
+// for_context
+// ---------------------------------------------------------------------------
+
+pub fn for_context_empty_means_always_inject_test() {
+  let all_skills = [skill("unscoped", [], [])]
+  // No contexts on the skill → injected regardless of query domains
+  list.length(skills.for_context(all_skills, [])) |> should.equal(1)
+  list.length(skills.for_context(all_skills, ["legal"])) |> should.equal(1)
+}
+
+pub fn for_context_matches_domain_test() {
+  let all_skills = [
+    skill("legal-research", [], ["legal"]),
+    skill("web-research", [], ["research", "web"]),
+  ]
+  let legal = skills.for_context(all_skills, ["legal"])
+  list.length(legal) |> should.equal(1)
+  let web = skills.for_context(all_skills, ["web"])
+  list.length(web) |> should.equal(1)
+  let none_match = skills.for_context(all_skills, ["finance"])
+  list.length(none_match) |> should.equal(0)
+}
+
+pub fn for_context_all_keyword_test() {
+  let all_skills = [skill("ambient", [], ["all"])]
+  list.length(skills.for_context(all_skills, [])) |> should.equal(1)
+  list.length(skills.for_context(all_skills, ["anything"])) |> should.equal(1)
+}
+
+// ---------------------------------------------------------------------------
+// status helpers
+// ---------------------------------------------------------------------------
+
+pub fn status_round_trip_test() {
+  skills.status_to_string(skills.Active) |> should.equal("active")
+  skills.status_to_string(skills.Archived) |> should.equal("archived")
+  skills.status_from_string("active") |> should.equal(skills.Active)
+  skills.status_from_string("ARCHIVED") |> should.equal(skills.Archived)
+  // Unknown values default to Active so a typo never silently archives.
+  skills.status_from_string("garbage") |> should.equal(skills.Active)
+}
+
+// ---------------------------------------------------------------------------
+// estimate_token_cost
+// ---------------------------------------------------------------------------
+
+pub fn estimate_token_cost_test() {
+  // Empty body → zero
+  skills.estimate_token_cost("") |> should.equal(0)
+  // Rough chars/token ratio of 4
+  skills.estimate_token_cost("abcd") |> should.equal(1)
+  skills.estimate_token_cost("12345678") |> should.equal(2)
 }
 
 // ---------------------------------------------------------------------------
@@ -107,14 +189,23 @@ pub fn to_system_prompt_xml_empty_test() {
 }
 
 pub fn to_system_prompt_xml_single_skill_test() {
-  let skill =
+  let s =
     SkillMeta(
+      id: "pdf-processing",
       name: "pdf-processing",
       description: "Extracts text from PDFs",
       path: "/abs/path/pdf-processing/SKILL.md",
+      version: 1,
+      status: Active,
       agents: [],
+      contexts: [],
+      token_cost_estimate: 0,
+      author: Operator,
+      created_at: "",
+      updated_at: "",
+      derived_from: None,
     )
-  let xml = skills.to_system_prompt_xml([skill])
+  let xml = skills.to_system_prompt_xml([s])
   string.contains(xml, "<available_skills>") |> should.be_true
   string.contains(xml, "<name>pdf-processing</name>") |> should.be_true
   string.contains(xml, "<description>Extracts text from PDFs</description>")
@@ -151,14 +242,9 @@ pub fn xml_escape_all_special_chars_test() {
 }
 
 pub fn to_system_prompt_xml_escapes_special_chars_test() {
-  let skill =
-    SkillMeta(
-      name: "R&D <tool>",
-      description: "Does \"stuff\" & 'things'",
-      path: "/path/to/SKILL.md",
-      agents: [],
-    )
-  let xml = skills.to_system_prompt_xml([skill])
+  let s = skill("R&D <tool>", [], [])
+  let s_with_desc = SkillMeta(..s, description: "Does \"stuff\" & 'things'")
+  let xml = skills.to_system_prompt_xml([s_with_desc])
   string.contains(xml, "<name>R&amp;D &lt;tool&gt;</name>") |> should.be_true
   string.contains(
     xml,
@@ -168,23 +254,11 @@ pub fn to_system_prompt_xml_escapes_special_chars_test() {
 }
 
 pub fn to_system_prompt_xml_multiple_skills_test() {
-  let skill1 =
-    SkillMeta(
-      name: "skill-one",
-      description: "First skill",
-      path: "/path/skill-one/SKILL.md",
-      agents: [],
-    )
-  let skill2 =
-    SkillMeta(
-      name: "skill-two",
-      description: "Second skill",
-      path: "/path/skill-two/SKILL.md",
-      agents: [],
-    )
-  let xml = skills.to_system_prompt_xml([skill1, skill2])
+  let xml =
+    skills.to_system_prompt_xml([
+      skill("skill-one", [], []),
+      skill("skill-two", [], []),
+    ])
   string.contains(xml, "<name>skill-one</name>") |> should.be_true
   string.contains(xml, "<name>skill-two</name>") |> should.be_true
 }
-
-import gleam/list
