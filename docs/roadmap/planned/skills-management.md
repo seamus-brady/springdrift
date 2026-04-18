@@ -1,58 +1,83 @@
 # Skills Management — Specification
 
 **Status**: Planned
-**Date**: 2026-03-26
-**Dependencies**: CBR self-improvement (implemented), Archivist split (implemented), Autonomous Endeavours (planned)
+**Date**: 2026-03-26 (original), 2026-04-17 (agent-led revisions folded in), 2026-04-18 (consolidated)
+**Dependencies**: CBR self-improvement (implemented), Archivist split (implemented), Autonomous Endeavours (implemented), Remembrancer Phase 1-10 (implemented 2026-04-16)
+**Unblocks**: Remembrancer Phase 11 (skills-proposal pipeline), Meta-Learning Phase B
 
 ---
 
 ## Table of Contents
 
+- [Design Principle: Agent-Led, Operator-Audited](#design-principle-agent-led-operator-audited)
 - [Overview](#overview)
 - [Current State](#current-state)
 - [Problems](#problems)
-- [Proposed Architecture](#proposed-architecture)
-  - [Skill Type Enhancement](#skill-type-enhancement)
-  - [Skill Metadata File](#skill-metadata-file)
+- [Architecture](#architecture)
+  - [Skill Type](#skill-type)
+  - [Persistence Layout](#persistence-layout)
 - [Agent-Specific Skills](#agent-specific-skills)
-  - [The Problem](#the-problem)
-  - [The Solution](#the-solution)
-  - [Implementation](#implementation)
-  - [Context Activation](#context-activation)
-- [Effectiveness Measurement](#effectiveness-measurement)
-  - [How It Works](#how-it-works)
-  - [Decay](#decay)
-  - [Surfacing](#surfacing)
-  - [SD Audit Integration](#sd-audit-integration)
-- [Skill Learning from CBR](#skill-learning-from-cbr)
-  - [The Feedback Loop](#the-feedback-loop)
-  - [Auto-Generated Skills](#auto-generated-skills)
-  - [Skill Evolution](#skill-evolution)
-  - [Implementation](#implementation)
-- [Skill Versioning](#skill-versioning)
-  - [History](#history)
-  - [Diff](#diff)
-  - [Rollback](#rollback)
+- [Context Activation](#context-activation)
+- [Usage Tracking](#usage-tracking)
 - [Skill Lifecycle](#skill-lifecycle)
-- [Web GUI: Skills Management](#web-gui-skills-management)
-  - [Skills Tab (admin)](#skills-tab-admin)
-  - [Skill Detail View](#skill-detail-view)
-  - [Skill Editor](#skill-editor)
-  - [Skill Proposals](#skill-proposals)
+- [Skill Proposal Generation](#skill-proposal-generation)
+  - [Pattern Detection Algorithm](#pattern-detection-algorithm)
+  - [Conflict Detection](#conflict-detection)
+- [Promotion Safety Gate](#promotion-safety-gate)
+  - [Deterministic Pre-filter](#deterministic-pre-filter)
+  - [D' Gate](#d-gate)
+  - [Rate Limiting](#rate-limiting)
+- [Skill Versioning](#skill-versioning)
+- [Cost Tracking](#cost-tracking)
+- [Operator Role: Standing Mandate](#operator-role-standing-mandate)
+- [Web GUI: Audit Panel](#web-gui-audit-panel)
 - [Tools](#tools)
-  - [Updated Tools](#updated-tools)
-  - [New Tools](#new-tools)
-- [Persistence](#persistence)
 - [Configuration](#configuration)
+- [Test Strategy](#test-strategy)
 - [Implementation Order](#implementation-order)
 - [What This Enables](#what-this-enables)
+- [Open Questions](#open-questions)
 
+---
+
+## Design Principle: Agent-Led, Operator-Audited
+
+**The agent leads. The operator sets standing policy and audits outcomes.**
+
+This is a first-principles decision, not a cost-cutting one. The operator's
+continuous mandate is expressed through three upfront artifacts, not per-item
+approval:
+
+1. **`identity/character.json`** — the agent's highest endeavour and virtues.
+   Governs what the agent will and will not incorporate into its skill set.
+2. **`dprime.json`** — safety thresholds, deterministic rules, normative
+   calculus configuration. Governs what passes the promotion gate.
+3. **Rate-limit config** — the cap on how fast skills can evolve. Governs
+   the pace of change.
+
+Once those are set, the agent manages its own development within them. No
+approval inbox. No "Draft → Reviewed" queue. D' review gates promotion; the
+rate limit caps drift; append-only supersession makes every change
+reversible. The operator reads consolidation reports to stay informed and
+can revert any change by writing a supersession record.
+
+This matches the "AI retainer" framing. A professional retainer works
+within a clear remit, exercises judgment, reports back, gets
+course-corrected if they drift — but isn't micro-managed. The approvals
+happen once, via policy, not continuously via workflow.
+
+---
 
 ## Overview
 
-Skills are currently static instruction files (SKILL.md with YAML frontmatter) discovered at startup and injected into the system prompt. They work — but they don't learn, they don't adapt, they can't be scoped to specific agents, and there's no way to measure whether a skill is helping.
+Skills are currently static instruction files (`SKILL.md` with YAML
+frontmatter) discovered at startup and injected into the system prompt.
+They work — but they don't learn, they don't adapt, they can't be scoped
+to specific agents, and there's no way to measure how often they're used.
 
-This spec elevates skills from static instructions to a managed, measurable, agent-aware capability system.
+This spec elevates skills from static instructions to a managed,
+agent-aware capability system that the agent itself extends through
+Remembrancer-driven pattern mining.
 
 ---
 
@@ -64,33 +89,37 @@ This spec elevates skills from static instructions to a managed, measurable, age
     └── SKILL.md       # YAML frontmatter (name, description) + markdown body
 ```
 
-- Discovered at startup by `skills.discover(dirs)`
-- Injected into every system prompt via `to_system_prompt_xml`
-- Available to the cognitive loop via `read_skill` tool
-- Same skills given to every agent
-- No usage tracking, no effectiveness measurement
-- No versioning, no A/B testing
-- No agent-specific skills
+- Discovered at startup by `skills.discover(dirs)`.
+- Injected into every system prompt via `to_system_prompt_xml`.
+- Available to the cognitive loop via `read_skill` tool.
+- Same skills given to every agent (modulo the existing `agents:` filter).
+- No usage tracking, no versioning, no proposal pipeline.
 
 ---
 
 ## Problems
 
-1. **One size fits all.** The researcher gets coding instructions. The coder gets research instructions. Every agent gets every skill, wasting context tokens and adding noise.
-
-2. **No measurement.** Did the web-research skill actually improve research quality? There's no data. Skills are added based on operator intuition, never validated.
-
-3. **No learning.** When the agent discovers a better approach through experience (captured in CBR), that knowledge stays in CBR. It doesn't flow back into skills. The agent might have 50 cases showing that `brave_answer` beats `web_search` for factual queries, but the skill still lists both equally.
-
-4. **No versioning.** Editing a skill replaces it. There's no history of what the skill said before, no way to compare versions, no rollback.
-
-5. **No lifecycle.** Skills are either present or absent. There's no draft, review, active, deprecated lifecycle.
+1. **One size fits all.** The existing `agents:` filter helps but is
+   coarse. Every cognitive cycle gets every cognitive-scoped skill
+   regardless of context. Wastes context tokens, adds noise.
+2. **No usage signal.** Operator and agent both fly blind on which
+   skills are read versus dead weight.
+3. **No learning.** When the agent discovers a better approach via
+   experience (captured in CBR), that knowledge stays in CBR. It does
+   not flow back into skills. The agent might have 50 cases showing
+   `brave_answer` beats `web_search` for factual queries, but the
+   skill still lists both equally.
+4. **No versioning.** Editing a skill replaces it. No history, no diff,
+   no rollback.
+5. **No promotion gate.** Even if proposals existed, there is no safety
+   pipeline to keep an auto-promoted skill from leaking credentials,
+   contradicting the agent's character spec, or growing without bound.
 
 ---
 
-## Proposed Architecture
+## Architecture
 
-### Skill Type Enhancement
+### Skill Type
 
 ```gleam
 pub type Skill {
@@ -102,48 +131,65 @@ pub type Skill {
     status: SkillStatus,
     body: String,                  // Markdown instruction content
     // ── Scoping ──
-    agents: List(String),          // Which agents receive this skill: ["researcher", "cognitive"]
-    contexts: List(String),        // When to activate: ["research", "web", "all"]
-    // ── Metrics ──
-    usage_count: Int,              // Times read_skill was called
-    effectiveness_score: Float,    // Derived from CBR outcomes when skill was active
-    last_used: Option(String),     // ISO timestamp
+    agents: List(String),          // Which agents receive this skill
+    contexts: List(String),        // When to activate (domain tags)
+    // ── Cost ──
+    token_cost_estimate: Int,      // Tokenised body length, computed at save
     // ── Provenance ──
     author: SkillAuthor,
     created_at: String,
     updated_at: String,
-    derived_from: Option(String),  // CBR case ID if auto-generated
+    derived_from: Option(String),  // CBR case ID(s) if auto-generated
   )
 }
 
 pub type SkillStatus {
-  Draft          // Being written, not active
-  Active         // In use
-  Experimental   // Active but tracking effectiveness for comparison
-  Deprecated     // Still readable but not injected into prompts
-  Archived       // Removed from discovery
+  Active        // Injected into scoped agent prompts
+  Archived      // Removed from discovery; retained in history for audit
 }
 
 pub type SkillAuthor {
-  Operator               // Written by the human operator
-  Agent(cycle_id: String)  // Generated by the agent from CBR patterns
-  System                 // Built-in default skill
+  Operator
+  Agent(agent_name: String, cycle_id: String)
+  System
 }
 ```
 
-### Skill Metadata File
+Two states only — `Active` and `Archived`. No `Draft`, `Experimental`, or
+`Deprecated`. The agent-led model has no counterfactual A/B mechanism, so
+no Experimental staging. No "Draft → Reviewed" queue, so no Draft.
+Deprecation is just archival.
 
-Replace YAML frontmatter with a richer TOML sidecar:
+`SkillAuthor::Agent` carries `agent_name` (which agent produced the
+proposal — typically `"remembrancer"`) and `cycle_id` (the originating
+cycle for audit trail).
+
+Usage and outcome correlations live in a separate metrics log, not on
+the skill record (see [Persistence Layout](#persistence-layout)).
+
+### Persistence Layout
 
 ```
-.springdrift/skills/
-└── web-research/
-    ├── SKILL.md          # Pure markdown — the instruction body
-    └── skill.toml        # Metadata, scoping, metrics
+.springdrift/skills/web-research/
+├── SKILL.md                       # Operator-owned: markdown body
+├── skill.toml                     # Operator-owned: id, name, description,
+│                                  #   version, status, agents, contexts, author
+├── skill.metrics.jsonl            # Manager-owned: append-only usage events
+│                                  #   {timestamp, cycle_id, event: read|inject|outcome}
+└── history/
+    ├── v1.md + v1.toml            # Immutable snapshots of earlier versions
+    ├── v2.md + v2.toml
+    └── archive.jsonl              # Compacted older versions (see Versioning)
 ```
+
+**Strict ownership split.** The skills manager never writes to
+`skill.toml` (operator-editable config). The operator never writes to
+`skill.metrics.jsonl` (manager-owned append-only log). Usage counts and
+last-used timestamps are computed from the metrics log at read time
+(Librarian cache).
 
 ```toml
-# skill.toml
+# skill.toml — operator-editable config
 id = "web-research"
 name = "Web Research Patterns"
 description = "Decision tree for tool selection during web research"
@@ -151,13 +197,8 @@ version = 3
 status = "active"
 
 [scoping]
-agents = ["researcher", "cognitive"]    # Only these agents receive this skill
-contexts = ["research", "web"]          # Activated when query involves these domains
-
-[metrics]
-usage_count = 47
-effectiveness_score = 0.78
-last_used = "2026-03-26T14:30:00Z"
+agents = ["researcher", "cognitive"]
+contexts = ["research", "web"]
 
 [provenance]
 author = "operator"
@@ -165,47 +206,68 @@ created_at = "2026-03-20T10:00:00Z"
 updated_at = "2026-03-25T16:00:00Z"
 ```
 
-Backward compatible: skills without `skill.toml` continue to work using frontmatter parsing. The new format is additive.
+```jsonl
+# skill.metrics.jsonl — manager-only, append-only
+{"timestamp":"2026-04-18T10:30:00Z","cycle_id":"abc123","event":"inject","agent":"researcher"}
+{"timestamp":"2026-04-18T10:30:42Z","cycle_id":"abc123","event":"read","agent":"researcher"}
+{"timestamp":"2026-04-18T10:31:15Z","cycle_id":"abc123","event":"outcome","outcome":"success"}
+```
+
+Backward compatible: skills without `skill.toml` continue to work via
+existing frontmatter parsing. The new format is additive.
 
 ---
 
 ## Agent-Specific Skills
 
-### The Problem
+Skills declare which agents should receive them via the `agents` field.
 
-Currently all skills are injected into every system prompt. The researcher gets coder instructions. The coder gets research instructions. This wastes tokens and adds noise.
+### Semantics
 
-### The Solution
-
-Skills declare which agents should receive them via the `agents` field:
-
-| Skill | Agents |
+| Value | Meaning |
 |---|---|
-| `web-research` | researcher, cognitive |
-| `legal-research` | researcher |
-| `code-review` | coder |
-| `report-writing` | writer, cognitive |
-| `system-diagnostics` | observer |
-| `scheduling-patterns` | scheduler |
-| `HOW_TO` | cognitive (always) |
+| `["cognitive"]` | Injected only into the cognitive loop's system prompt |
+| `["researcher", "writer"]` | Injected into these specialist agents only |
+| `["all"]` | Shorthand for every registered specialist agent + the cognitive loop |
+| `["all_specialists"]` | Every registered specialist agent, but NOT the cognitive loop |
+
+Omitting `agents` in `skill.toml` defaults to `["cognitive"]` — conservative
+choice that prevents accidental leakage into agents that didn't declare a
+need for the skill.
 
 ### Implementation
 
-`skills.discover` returns all skills. A new `skills.for_agent(all_skills, agent_name)` filters by the `agents` field. The agent framework calls this when building each agent's system prompt.
+`skills.discover` returns all skills. `skills.for_agent(all_skills, agent_name)`
+filters by `agents`. The agent framework calls this when building each
+agent's system prompt.
 
 ```gleam
 pub fn for_agent(skills: List(Skill), agent_name: String) -> List(Skill) {
   list.filter(skills, fn(s) {
-    list.contains(s.agents, agent_name) || list.contains(s.agents, "all")
+    list.contains(s.agents, agent_name)
+    || list.contains(s.agents, "all")
+    || { agent_name != "cognitive" && list.contains(s.agents, "all_specialists") }
   })
 }
 ```
 
-The cognitive loop uses skills scoped to `"cognitive"`. Each specialist agent gets its own subset.
+---
 
-### Context Activation
+## Context Activation
 
-Skills with `contexts` are only injected when the current query matches a context:
+Skills with `contexts` are only injected when the current cycle's domain
+matches a context tag.
+
+**Source of `query_domains` at injection time** (priority-ordered fallbacks):
+
+1. Current thread's domain (if a thread is active).
+2. `Intent.domain` from the Archivist's per-cycle XStructor output
+   (cached by Librarian).
+3. Top-domain from recent narrative entries (last 3 cycles).
+4. `"general"` as final fallback.
+
+Query complexity (Simple/Complex) is **not** a domain signal — it's a
+routing signal for model selection.
 
 ```gleam
 pub fn for_context(skills: List(Skill), query_domains: List(String)) -> List(Skill) {
@@ -216,164 +278,251 @@ pub fn for_context(skills: List(Skill), query_domains: List(String)) -> List(Ski
 }
 ```
 
-The Curator determines `query_domains` from the active thread, CBR retrieval domain, and query complexity classification. Legal queries activate legal skills. Research queries activate research skills. General queries get "all"-context skills only.
+---
+
+## Usage Tracking
+
+**No effectiveness score.** A naive `successes / uses` ratio on an Active
+skill measures the agent's success rate while the skill was present.
+Since the skill is *always* present (for its scoped agents on matching
+contexts), there is no counterfactual. The score correlates skill
+presence with success but does not establish that the skill caused the
+success. In the agent-led model there is no Experimental A/B staging
+either, so no counterfactual is available anywhere in the system.
+A metric that looks like effectiveness but doesn't measure it is worse
+than no metric.
+
+**What we track** (all derived from `skill.metrics.jsonl`):
+
+- `usage_count` — times `read_skill` was explicitly called. Meaningful
+  because an agent that reads a skill did so intentionally.
+- `inject_count` — times the skill was placed in a system prompt.
+  Reported as context, not as measurement.
+- `last_used` — for dead-skill detection; feeds the decay recommender.
+- `active_during_success_rate` (optional) — reported in audit views with
+  an explicit caveat that it's a correlation, not an attribution.
+
+The agent can notice "this skill was present in many successful cycles"
+and use it as a signal for whether to keep it. The operator sees the same
+signal in audit. Neither pretends it is measured effectiveness.
+
+Archived skills carry their final `usage_count` and `last_used` frozen
+at archival time.
 
 ---
 
-## Effectiveness Measurement
-
-### How It Works
-
-1. When `read_skill` is called during a cycle, record the skill ID on the cycle context (alongside `retrieved_case_ids`)
-2. The Archivist notes which skills were active during the cycle
-3. When the cycle outcome is assessed (success/failure/partial), correlate with active skills
-4. Update `effectiveness_score` on each skill:
+## Skill Lifecycle
 
 ```
-effectiveness = (successful_cycles_with_skill / total_cycles_with_skill)
+Active ──── promoted/edited ────► Active (new version)
+   │
+   └── archived ──► Archived (final state, retained for audit)
 ```
 
-With Laplace smoothing (same as CBR utility):
-```
-effectiveness = (successes + 1) / (uses + 2)
-```
+Two states. No intermediate staging.
 
-### Decay
+**Transitions to Active:**
+- A Remembrancer proposal passes the [Promotion Safety Gate](#promotion-safety-gate).
+- The operator writes a `skill.toml` directly.
 
-Effectiveness scores decay over time (same half-life model as CBR cases). A skill that was effective 3 months ago but hasn't been used since should not retain a high score.
+**Transitions to Archived:**
+- The operator archives via CLI, web GUI, or directly editing `status`.
+- A Remembrancer supersession promotes a new version that replaces an
+  older skill (the old version moves to Archived).
+- The decay recommender flags a skill as stale and cost-heavy
+  (operator can confirm or override).
 
-### Surfacing
-
-The web GUI's admin panel shows skill effectiveness:
-
-```
-Skills
-=======
-Name                  Agents          Status    Uses  Effectiveness  Last Used
-──────────────────────────────────────────────────────────────────────────────
-web-research          researcher,cog  active    47    0.78           2h ago
-legal-research        researcher      active    23    0.82           5h ago
-code-review           coder           active    12    0.65           1d ago
-matter-analysis       researcher      exper.    8     0.71           3d ago
-old-search-patterns   researcher      depr.     2     0.33           30d ago
-```
-
-The operator sees which skills are earning their context tokens and which are dead weight.
-
-### SD Audit Integration
-
-```sh
-$ sd-audit skills --from 2026-03-20
-
-Skills Effectiveness Report
-============================
-
-Active skills: 5
-Deprecated: 1
-Total reads: 92
-
-Top performers:
-  1. legal-research (0.82, 23 uses) — high correlation with successful research cycles
-  2. web-research (0.78, 47 uses) — stable, widely used
-
-Underperformers:
-  ⚠ code-review (0.65, 12 uses) — below average, review for improvement
-  ⚠ old-search-patterns (0.33, 2 uses) — rarely used, low effectiveness, candidate for deprecation
-
-Unused skills:
-  report-writing — 0 reads in 7 days (is it scoped correctly?)
-```
+Existing operator-authored `SKILL.md` files start as Active on migration —
+they have the operator's implicit blessing.
 
 ---
 
-## Skill Learning from CBR
+## Skill Proposal Generation
 
-### The Feedback Loop
+**Owner: the Remembrancer.** Not the Archivist.
 
-When CBR patterns emerge — the same approach succeeds repeatedly — that knowledge should flow back into skills. Currently CBR cases and skills are separate systems. The learning loop connects them.
+The Archivist is already doing Reflection + Curation in a tight deadline
+after each cycle. Adding pattern-detection-over-N-cases would increase
+cycle-completion latency. Pattern detection over months is a batch
+operation; the Remembrancer already runs weekly consolidation, and its
+`mine_patterns` tool is designed for this. Batch detection produces
+higher-quality patterns (more data, less noise) than per-cycle detection.
 
-### Auto-Generated Skills
-
-The Archivist (Phase 1: Reflector) already identifies "what to remember for future similar tasks." When a CBR category accumulates enough consistent cases, the system can propose a new skill:
-
-```
-Detected pattern: 5 Strategy cases with >0.80 utility all recommend
-"use brave_answer for single-fact queries, web_search for multi-source"
-
-Proposed skill:
-  Name: "Search Tool Selection"
-  Body: "For single factual questions, use brave_answer (fastest, most accurate).
-         For multi-source research, start with web_search for breadth, then
-         fetch_url for depth on promising results."
-  Agents: [researcher]
-  Status: Experimental
-  Derived from: cases [a1b2, c3d4, e5f6, g7h8, i9j0]
-
-Action:
-  1. Create as Experimental skill
-  2. Track effectiveness alongside the existing web-research skill
-  3. After 20 cycles, compare: if new skill outperforms, promote to Active
-  4. Notify operator of the comparison result
-```
-
-### Skill Evolution
+**Flow:**
 
 ```
-CBR cases accumulate → Pattern detected → Experimental skill generated
-  → A/B comparison against existing skill → Winner promoted
-  → Losing skill deprecated → Agent improves
+Remembrancer (during consolidation)
+  → mine_patterns finds clusters
+  → generate SkillProposal for each qualifying cluster
+  → Promotion Safety Gate (deterministic + D' + rate limit)
+  → accepted proposals become Active skills immediately
+  → append entry to .springdrift/memory/skills/YYYY-MM-DD-skills.jsonl
+  → consolidation report lists what was added (operator audit trail)
 ```
 
-This is the closed learning loop applied to instructions, not just cases.
+The Archivist continues its existing role (narrative + CBR generation).
+It does NOT propose skills.
 
-### Implementation
-
-New scheduled job (via Forecaster or Housekeeper):
+`mine_patterns` in `src/tools/remembrancer.gleam` gains either an
+`--emit_proposals` flag or a companion `propose_skill_from_pattern`
+tool that writes the Active skill directly, having passed through the
+gate.
 
 ```gleam
-pub type SkillSynthesisMessage {
-  CheckForPatterns          // Periodic check for CBR patterns worth codifying
-  ProposeSkill(proposal: SkillProposal)
-  PromoteSkill(skill_id: String)
-  DeprecateSkill(skill_id: String)
-}
-
 pub type SkillProposal {
   SkillProposal(
     name: String,
     body: String,
     agents: List(String),
+    contexts: List(String),
     source_cases: List(String),
     confidence: Float,
+    proposed_by: String,         // Always "remembrancer" for now
+    proposed_at: String,
   )
 }
 ```
 
-Pattern detection criteria:
-- At least 5 CBR cases in the same category with utility > 0.70
-- Cases share common approach elements (keyword overlap > 0.6)
-- No existing Active skill covers the same pattern (dedup against current skills)
+### Pattern Detection Algorithm
+
+A cluster qualifies for proposal when **all** of the following hold:
+
+| Criterion | Measure |
+|---|---|
+| Minimum cluster size | ≥ `min_cases_for_proposal` cases (default 5) |
+| Cases per category | All cases share `CbrCategory` (Strategy, Pitfall, etc.) |
+| Tool overlap | Jaccard similarity of `solution.tools_used` ≥ 0.50 (averaged pairwise) |
+| Agent overlap | Jaccard of `solution.agents_used` ≥ 0.50 (averaged pairwise) |
+| Domain coherence | All cases share `problem.domain` or share ≥ 2 keywords |
+| Utility floor | Mean `outcome.confidence` × Laplace-smoothed utility ≥ `min_utility_for_proposal` (default 0.70) |
+| Novelty | No existing Active skill scoped to the same agents+domain |
+
+Computed on **structured fields**, not free-text keyword overlap. Free-text
+overlap thresholds are meaningless when applied to descriptions of varying
+length and writing style.
+
+**Dedup against existing skills** uses a second Jaccard on the proposed
+body's keywords against existing skills' bodies, threshold 0.40 → treat
+as "update existing skill" (supersession) rather than "propose new."
+
+### Conflict Detection
+
+The original spec assumed skills are complementary. They might not be.
+Example: existing `web-research` says "try `web_search` first";
+auto-proposed `search-tool-selection` says "prefer `brave_answer`". Both
+Active for the researcher → agent gets contradictory guidance.
+
+**Agent-led resolution:**
+
+At proposal time, compare the new proposal's body against existing Active
+skills scoped to the same agents. Use an XStructor-validated LLM call to
+classify the relationship:
+
+| Classification | Resolution |
+|---|---|
+| Complementary | Accepted as a new skill (subject to D' and rate limit). |
+| Redundant | Auto-merge as a supersession (update) of the existing skill, preserving version history. |
+| Supersedes | New proposal replaces the older skill; older skill moves to Archived. |
+| Contradictory | D' gate rejects the proposal. Logged in the consolidation report as "proposal X rejected: contradicts active skill Y." If the agent wants to replace Y, it must propose a new version of Y (Supersedes), not a contradictory separate skill. |
+
+The classification becomes a feature in the D' gate, not a separate
+review stage. The operator sees all four outcomes in the consolidation
+report.
+
+---
+
+## Promotion Safety Gate
+
+Auto-generated skill bodies are a leakage vector: they are *permanent
+system prompt content* for all scoped agents. Worse than narrative,
+which is consulted on demand via `recall_*` tools.
+
+The agent-led safety stack runs on every proposal — no operator
+approval step.
+
+### Deterministic Pre-filter
+
+Same shape as the comms gate. Proposals containing the following are
+auto-rejected with no LLM cost:
+
+- Credential patterns (API key shapes, bearer tokens, private key headers)
+- Internal URLs (`localhost:`, `127.0.0.1:`, `.internal`, `.local`)
+- Absolute file paths
+- Environment variable references (`$VAR`, `${VAR}`)
+
+### D' Gate
+
+LLM scorer with skill-specific features:
+
+| Feature | Concern |
+|---|---|
+| `credential_exposure` | Body leaks credentials, tokens, secrets |
+| `pii_exposure` | Body contains personal information |
+| `internal_url_exposure` | Body references internal services |
+| `system_internals` | Body describes internal implementation details |
+| `character_violation` | Body conflicts with `character.json` highest endeavour |
+| `contradiction_with_active_skill` | Body contradicts an existing Active skill (see Conflict Detection) |
+
+Same scorer infrastructure as the comms gate, different feature set.
+
+```toml
+[skills.safety]
+# D' thresholds for proposal gate (inherits from comms defaults if unset)
+# proposal_modify_threshold = 0.30
+# proposal_reject_threshold = 0.50
+```
+
+### Rate Limiting
+
+Hard cap on promotions per window. Exceeding the limit silently drops
+additional proposals; the Remembrancer logs the drop in the consolidation
+report so the operator can raise limits if they're being hit
+legitimately.
+
+```toml
+[skills.proposals]
+# Max auto-proposals accepted per rolling 24h window (default: 3)
+# max_proposals_per_day = 3
+
+# Min hours between proposals for the same agent scope (default: 6)
+# min_hours_between_same_scope = 6
+```
+
+Rate limiting is the **primary** drift-control mechanism, not a
+secondary helper. D' catches unsafe content; rate limits cap the pace of
+change so a runaway proposal loop can't reshape the skill set in a
+single consolidation.
 
 ---
 
 ## Skill Versioning
 
-### History
-
-Every edit to a skill creates a new version. Previous versions are retained:
+Every edit creates a new version. Previous versions are retained in
+`history/`.
 
 ```
 .springdrift/skills/web-research/
 ├── SKILL.md              # Current version (v3)
-├── skill.toml            # Current metadata
+├── skill.toml
 └── history/
-    ├── v1.md             # Original version
-    ├── v1.toml
-    ├── v2.md             # Previous version
-    └── v2.toml
+    ├── v1.md + v1.toml
+    ├── v2.md + v2.toml
+    └── archive.jsonl     # Older versions compacted here
 ```
 
-### Diff
+**Retention.** Keep the most recent `skill_version_retention` versions
+(default 5) on disk. Older versions are compacted into
+`history/archive.jsonl` with schema:
+
+```json
+{"version": 1, "archived_at": "...", "skill_md": "...", "skill_toml": "..."}
+```
+
+Allows unbounded history without unbounded working-directory bloat.
+Rollback works from either location (reads archive if version not in
+`history/`).
+
+**Diff** (via SD Audit):
 
 ```sh
 $ sd-audit skills --diff web-research v2 v3
@@ -382,12 +531,10 @@ web-research: v2 → v3
 + Added: "For single factual questions, prefer brave_answer over web_search"
 - Removed: "Try web_search first for all queries"
   Changed: tool priority order reversed
-  Reason: CBR data showed brave_answer 40% faster with higher accuracy on factual queries
+  Source cases: a1b2, c3d4, e5f6, g7h8, i9j0
 ```
 
-### Rollback
-
-If a skill version performs worse (effectiveness drops after update), the operator or the auto-management system can roll back:
+**Rollback:**
 
 ```gleam
 pub fn rollback_skill(skill_id: String, to_version: Int) -> Result(Skill, String)
@@ -395,74 +542,118 @@ pub fn rollback_skill(skill_id: String, to_version: Int) -> Result(Skill, String
 
 ---
 
-## Skill Lifecycle
+## Cost Tracking
+
+Skills eat context tokens. A skill that costs 500 tokens per inject and
+shows mild benefit is worse than a 100-token skill with similar benefit.
+
+`token_cost_estimate` on `Skill` is computed at save time
+(`tokenize(body)` approximate count).
+
+The decay recommender prioritises archival of expensive, stale, or
+unused skills:
 
 ```
-Draft → Active → (optionally) Experimental → Active or Deprecated → Archived
-
-           ┌──────────────────────────────────┐
-           │                                  │
-  Draft → Active ←─── promoted ──── Experimental
-           │                              │
-           │                              │ underperforms
-           ▼                              ▼
-       Deprecated ──────────────────► Archived
+decay_priority =
+  (1.0 - normalised_usage) * 0.5
+  + (token_cost_estimate / 1000.0) * 0.3
+  + days_since_last_used * 0.2
 ```
 
-- **Draft**: Being written. Not injected into any prompts. Visible in admin only.
-- **Active**: In use. Injected into scoped agent prompts. Effectiveness tracked.
-- **Experimental**: Active but being compared against an existing skill. Both run simultaneously. After N cycles, the winner is promoted.
-- **Deprecated**: Still readable via `read_skill` but not injected automatically. Kept for reference.
-- **Archived**: Removed from discovery entirely. Retained in history for audit.
+(`normalised_usage` uses inject_count rather than effectiveness, since
+we explicitly don't have an effectiveness number.)
+
+SD Audit's skills command surfaces `tokens_per_cycle` and
+`total_tokens_burned` across the audit window.
 
 ---
 
-## Web GUI: Skills Management
+## Operator Role: Standing Mandate
+
+The operator's role in the agent-led model has three components, all
+expressed through durable artifacts rather than runtime interventions.
+
+### Set Standing Policy (upfront)
+
+| Artifact | Governs |
+|---|---|
+| `identity/character.json` | What the agent will and will not incorporate — its highest endeavour and virtues. D' normative calculus maps proposals against it. |
+| `dprime.json` | Safety thresholds, deterministic rules, feature weights. Governs what passes the promotion gate. |
+| `[skills.proposals]` rate-limit config | How fast the skill set can evolve. |
+
+When the operator wants to change the agent's trajectory, they change
+these. The agent picks up the new policy on the next consolidation.
+
+### Audit Retrospectively (continuous)
+
+Consolidation reports
+(`.springdrift/knowledge/consolidation/YYYY-MM-DD-*.md`) list every
+skill / strategy / goal promoted in the period, with evidence chains.
+The operator reads them to stay informed. No blocking on approval.
+
+The web GUI Skills audit panel surfaces the same data as a live view
+with filters and a timeline, but is strictly read-only.
+
+### Revert by Supersession (any time)
+
+Every store is append-only with supersession semantics. To retract a
+skill, the operator writes a supersession record (via CLI, web GUI, or
+directly editing — doesn't matter). The next Curator build drops the
+skill from the system prompt. There is no "undo window" — the ability
+to revert is permanent.
+
+### What the Operator Does NOT Do
+
+- Review and approve each auto-generated skill before it activates.
+- Wait for an inbox to empty before the agent progresses.
+- Micro-manage skill bodies or wording (unless they choose to).
+
+If the operator wants more control, they tighten the rate limit or
+the character spec. Both are standing-policy levers.
+
+---
+
+## Web GUI: Audit Panel
+
+Read-only audit, not an approval inbox.
 
 ### Skills Tab (admin)
 
 | Column | Content |
 |---|---|
-| Name | Skill name (click to view/edit) |
+| Name | Skill name (click to view detail) |
 | Agents | Which agents receive it |
-| Status | Draft / Active / Experimental / Deprecated |
+| Status | Active / Archived |
 | Version | Current version number |
-| Uses | read_skill call count |
-| Effectiveness | Score with trend indicator |
+| Author | Operator / Agent(name) / System |
+| Reads | `read_skill` call count (from metrics log) |
+| Token Cost | Estimated tokens per inject |
 | Last Used | Relative timestamp |
 
 ### Skill Detail View
 
 - Full markdown body (rendered)
 - Version history with diff
-- Effectiveness chart over time
+- Usage timeline (read events from metrics log)
 - CBR cases that correlate with this skill's usage
-- Agent breakdown (which agents use it most, which have best outcomes with it)
+- Provenance: who proposed, which consolidation run, source cases
+- "Archive this skill" button (operator-only; writes a supersession)
 
-### Skill Editor
+### Consolidation Report View
 
-- Markdown editor for skill body
-- Agent scoping checkboxes
-- Context tags
-- Save creates new version (never overwrites)
-- Preview shows which agents would receive the skill and estimated token cost
+For each consolidation run, list:
+- Skills proposed (and which gate result: accepted / rejected /
+  superseded existing)
+- Pattern evidence (cluster of source cases)
+- D' scores and reasoning
+- Rate-limit hits (proposals dropped)
 
-### Skill Proposals
+This is the operator's primary audit surface.
 
-When the system proposes an auto-generated skill from CBR patterns:
-
-```
-🔔 Skill Proposal: "Search Tool Selection"
-
-Based on 5 successful research cases, the system suggests a new skill:
-
-"For single factual questions, use brave_answer (fastest).
- For multi-source research, use web_search then fetch_url."
-
-Source cases: a1b2, c3d4, e5f6, g7h8, i9j0 (avg utility: 0.84)
-
-[Accept as Experimental] [Edit First] [Dismiss]
-```
+**No approval inbox.** Earlier drafts of this spec described an inbox
+where the operator approved each auto-generated skill before activation.
+Dropped: the agent-led model puts that decision under D' + rate limit
+instead.
 
 ---
 
@@ -472,30 +663,22 @@ Source cases: a1b2, c3d4, e5f6, g7h8, i9j0 (avg utility: 0.84)
 
 | Tool | Change |
 |---|---|
-| `read_skill` | Records skill_id on cycle context for effectiveness tracking |
+| `read_skill` | Records skill_id on cycle context for usage tracking |
 | `introspect` | Shows active skill count and agent-specific skill assignments |
+| `mine_patterns` (Remembrancer) | Gains `--emit_proposals` mode that writes Active skills via the gate |
 
 ### New Tools
 
-| Tool | Purpose |
-|---|---|
-| `list_skills` | List available skills with status, scoping, and effectiveness |
-| `suggest_skill` | Agent proposes a new skill based on its experience (creates Draft) |
+| Tool | Owner | Purpose |
+|---|---|---|
+| `list_skills` | cognitive, observer | List skills with status, scoping, usage, cost |
+| `propose_skill_from_pattern` | Remembrancer | Take a pattern cluster, produce a proposal, run it through the gate |
+| `archive_skill` | observer (operator-driven) | Move a skill to Archived with reason |
+| `rollback_skill` | observer (operator-driven) | Restore an earlier version |
 
-The agent can propose skills but cannot activate them — activation requires operator approval (or the auto-promotion path via Experimental → effectiveness comparison).
-
----
-
-## Persistence
-
-Skill metadata persisted in `skill.toml` files (not JSONL — skills are configuration, not events). Effectiveness metrics and usage counts updated in place (these are derived metrics, not immutable records).
-
-Skill proposals and lifecycle transitions logged to:
-```
-.springdrift/memory/skills/YYYY-MM-DD-skills.jsonl
-```
-
-Operations: `SkillProposed`, `SkillCreated`, `SkillActivated`, `SkillDeprecated`, `SkillVersioned`, `SkillRolledBack`, `SkillUsed(skill_id, cycle_id, outcome)`.
+`propose_skill_from_pattern` does not need operator approval — it goes
+through the gate and either commits or is dropped, with the outcome
+logged in the consolidation report.
 
 ---
 
@@ -503,51 +686,121 @@ Operations: `SkillProposed`, `SkillCreated`, `SkillActivated`, `SkillDeprecated`
 
 ```toml
 [skills]
-# Enable skill effectiveness tracking (default: true)
-# effectiveness_tracking = true
+# Default: True. When False, manager runs but no proposals fire.
+# proposals_enabled = true
 
-# Enable auto-generated skill proposals from CBR patterns (default: false)
-# auto_propose = false
-
-# Minimum CBR cases before proposing a skill (default: 5)
+# Used by pattern detection (see §Pattern Detection Algorithm).
 # min_cases_for_proposal = 5
-
-# Minimum utility score for cases to be considered (default: 0.70)
 # min_utility_for_proposal = 0.70
 
-# Cycles to compare Experimental vs Active before deciding (default: 20)
-# experimental_comparison_cycles = 20
+# Number of versions to keep on disk before compaction to archive.jsonl.
+# skill_version_retention = 5
+
+[skills.safety]
+# D' thresholds for the proposal gate. Inherits from comms defaults if unset.
+# proposal_modify_threshold = 0.30
+# proposal_reject_threshold = 0.50
+
+[skills.proposals]
+# Hard rate limit on auto-promotions. Primary drift-control mechanism.
+# max_proposals_per_day = 3
+# min_hours_between_same_scope = 6
 ```
+
+---
+
+## Test Strategy
+
+Test deterministically. The promotion pipeline involves a clock, an LLM
+call, and a rate limiter — all of which need to be controllable in tests.
+
+- **Mock clock** for the manager actor (`Timekeeper` subject injected;
+  tests advance the clock explicitly).
+- **Fixture builder** for synthetic CBR cases with controlled
+  utility / tools / agents / domain.
+- **Golden-output test** for the `mine_patterns → propose → promote`
+  pipeline: feed a known set of fixture cases, assert the promoted
+  skill body matches a snapshot.
+- **D' gate integration test**: known leakage patterns in proposal body
+  are rejected before promotion.
+- **Rate-limit test**: N+1 proposals in a window → Nth is accepted,
+  (N+1)th is dropped with a log entry.
+- **Supersession test**: write a skill, write a supersession, confirm
+  the skill no longer injects on next Curator build.
+- **Conflict detection test**: propose a contradictory skill against an
+  existing Active skill, assert classification + rejection.
 
 ---
 
 ## Implementation Order
 
-| Phase | What | Effort |
-|---|---|---|
-| 1 | Enhanced Skill type with agents, contexts, metrics | Small |
-| 2 | skill.toml sidecar (backward compat with frontmatter) | Small |
-| 3 | Agent-specific skill filtering (`for_agent`, `for_context`) | Small |
-| 4 | Wire agent-specific skills into framework + Curator | Medium |
-| 5 | Effectiveness tracking (record usage, correlate with outcomes) | Medium |
-| 6 | Skill versioning and history | Medium |
-| 7 | Web GUI: Skills tab, detail view, editor | Large |
-| 8 | CBR → Skill proposal generation | Medium |
-| 9 | Experimental A/B comparison and auto-promotion | Medium |
-| 10 | SD Audit skills command | Small |
+| Phase | What | Effort | Notes |
+|---|---|---|---|
+| 1 | Enhanced `Skill` type + `skill.toml` sidecar (with backward-compat frontmatter) | Small | Ship independently |
+| 2 | Agent-specific scoping (`for_agent`) with revised `agents` semantics | Small | Immediate context-token win |
+| 3 | Context activation (`for_context`) sourced from Intent.domain | Small | |
+| 4 | Wire scoping + context activation into Curator + agent framework | Medium | |
+| 5 | Persistence split: `skill.metrics.jsonl`, `read_skill` instrumentation | Small | Usage tracking only — no effectiveness score |
+| 6 | Versioning + `history/` + retention compaction to `archive.jsonl` | Medium | |
+| 7 | Remembrancer proposal generation: pattern detection on structured fields | Medium | Replaces original Phase 8 |
+| 8 | Promotion Safety Gate: deterministic + D' + rate limit | Medium | Sole gate; no operator review stage |
+| 9 | Conflict detection (D' feature, not separate UI) | Small | |
+| 10 | Operator web GUI: Skills audit panel (read-only) + consolidation report view | Medium | Audit surface, not approval inbox |
+| 11 | Cost tracking + decay recommender | Small | |
+| 12 | SD Audit `skills` command (effectiveness, diff, deprecation) | Small | |
 
-Phase 1-4 can ship independently and immediately reduce context token waste by scoping skills to relevant agents.
+Phases 1-6 ship the scoping + versioning wins without the learning loop.
+Phases 7-9 enable the agent-led proposal pipeline (which unblocks
+**Remembrancer Phase 11**). Phase 10 gives the operator the audit
+surface to review and revert. Phases 11-12 are analytic add-ons.
+
+**Dropped from the original spec:**
+- Experimental A/B phase (no counterfactual available in the agent-led
+  model).
+- Approval inbox UI (replaced by audit panel + consolidation reports).
+- Effectiveness score field (no honest causal measurement available).
 
 ---
 
 ## What This Enables
 
-The agent's instructions improve with use. Not because a human rewrites them — because the system detects patterns in what works and proposes better instructions. The operator reviews and approves. The feedback loop is:
+The agent's instructions improve with use. Not because a human rewrites
+them — because the system detects patterns in what works, generates
+candidate skills, runs them through the same safety pipeline as every
+other agent action, and either commits or drops. The operator reads the
+consolidation reports and adjusts standing policy if the trajectory
+drifts.
 
 ```
-Agent uses skill → Outcomes tracked → CBR patterns emerge →
-  Skill proposed → Operator approves → Agent gets better instructions →
-  Agent uses improved skill → Better outcomes → Rinse and repeat
+Agent uses skill → Outcomes correlate → CBR patterns emerge →
+  Remembrancer proposes during consolidation → D' + rate limit gate →
+  Skill promoted (or dropped) → Agent gets refined instructions →
+  Operator audits in next consolidation report → Adjusts policy if needed
 ```
 
-That's not a static prompt. That's institutional knowledge codified and continuously refined.
+That's institutional knowledge codified and continuously refined,
+within an explicit standing mandate. No micro-management, no approval
+queue, full reversibility.
+
+---
+
+## Open Questions
+
+- **Profile-scoping for promoted skills?** The existing profiles
+  directory has a `skills/` subdir. Are auto-promoted skills bound to
+  a profile, or global? Suggested default: auto-promotions land in the
+  active profile's skills dir. If the operator wants them global, they
+  manually move the files.
+- **Privacy review of pre-existing skills?** Existing operator-authored
+  skills bypass the D' gate on migration (they were already approved by
+  virtue of being written). Flagging for awareness; consider an
+  optional `--audit-existing` pass that runs the D' gate over current
+  skills and reports findings (no auto-archival).
+- **Re-evaluation when `character.json` changes?** If the operator
+  edits the highest endeavour to tighten it, should previously-promoted
+  skills be re-checked against the new spec? Suggested behaviour: the
+  next consolidation run does a background re-scan of Active skills
+  and archives any that no longer pass D'. The report lists what was
+  archived and why.
+- **Internationalisation of skill bodies?** Not addressed. Defer;
+  single-operator, single-language is fine for now.
