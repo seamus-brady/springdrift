@@ -1,9 +1,9 @@
 # Meta-Learning System — Design Specification
 
-**Status**: Planned
-**Date**: 2026-04-17
+**Status**: Partially shipped (Phase B 2026-04-18); Phases A, C, D, E, F planned
+**Date**: 2026-04-17 (last revised 2026-04-18)
 **Author**: Drafted by Curragh (Springdrift instance a62fa947), revised for agent-led operation
-**Related**: `docs/roadmap/planned/skills-management.md` (the skills layer of this design)
+**Related**: `docs/roadmap/implemented/skills-management.md` (Phase B, the skills layer)
 
 ---
 
@@ -101,24 +101,31 @@ outperforms fixed optimisation.
 
 **Dependency**: None. Ships first.
 
-### 4.2 Phase B — Skills Management System
+### 4.2 Phase B — Skills Management System — SHIPPED 2026-04-18
+
+**Status**: Shipped end-to-end via `docs/roadmap/implemented/skills-management.md`
+(all 12 phases) on 2026-04-18.
 
 **Purpose**: Replace flat `SKILL.md` with structured, versioned,
 evidence-based skill documents.
 
-**See**: `skills-management.md` for the full design (agent-led
-flavour). This phase implements that revised design end-to-end.
+**What landed**:
+- Two-state lifecycle (`Active`, `Archived`) — `src/skills.gleam` `SkillStatus`.
+- `skill.toml` sidecar with versioning, scoping, provenance — `src/skills.gleam`.
+- Per-skill metrics (read / inject / outcome) — `src/skills/metrics.gleam`.
+- Snapshots, archive compaction, rollback — `src/skills/versioning.gleam`.
+- Pattern detector (Jaccard over CBR clusters) — `src/skills/pattern.gleam`.
+- LLM-written skill bodies with template fallback — `src/skills/body_gen.gleam`.
+- LLM conflict classifier — `src/skills/conflict.gleam`.
+- Promotion Safety Gate — `src/skills/safety_gate.gleam` (deterministic +
+  rate limit + same-scope cooldown + LLM conflict + D').
+- Remembrancer `propose_skills_from_patterns` tool — mines, generates, gates,
+  promotes accepted proposals to Active skills on disk.
+- Per-day skills lifecycle JSONL log — `.springdrift/memory/skills/`.
+- Web GUI audit panel reading the lifecycle log.
 
-**Key properties**:
-- Two states: `Active`, `Archived`. No Draft / Experimental / Deprecated.
-- Promotion via D' gate + rate limit. No operator approval step.
-- Proficiency inferred from usage + outcome correlation, reported honestly
-  (correlation, not causation).
-- `character.json` + D' config express the operator's standing mandate.
-
-**Dependency**: The skills-management foundation (Phases 1-6 of
-`skills-management.md` implementation order) must ship before
-the Remembrancer can promote into it.
+**Operator's standing mandate** is expressed via `identity/character.json` +
+`dprime.json` + rate-limit config — no per-item approval inbox.
 
 ### 4.3 Phase C — Learning Goals Store
 
@@ -189,7 +196,8 @@ step 4 happens automatically if step 3 passes.
 **What gets promoted**:
 - New CBR cases (from validated pattern clusters).
 - Fact updates (from restored-confidence events).
-- Skill proposals (Phase B — unblocked once skills-management ships).
+- Skill proposals (Phase B — shipped 2026-04-18; the pipeline already
+  promotes via Remembrancer's `propose_skills_from_patterns`).
 - Strategy proposals (Phase A).
 
 **Integration**:
@@ -297,17 +305,17 @@ Full chain auditable via DAG replay.
 
 ## 7. Implementation sequencing
 
-| Phase | Prereqs | Effort | Can start now? |
+| Phase | Prereqs | Effort | Status |
 |---|---|---|---|
-| A — Strategy Registry | None | Small-Medium | ✅ |
-| B — Skills Management | `skills-management.md` shipped | Medium-Large | ❌ (blocked) |
+| A — Strategy Registry | None | Small-Medium | ✅ Ready |
+| B — Skills Management | `skills-management.md` shipped | Medium-Large | ✅ SHIPPED 2026-04-18 |
 | C — Learning Goals Store | Phase A | Small-Medium | After A |
-| D — Affect-Performance Engine | ~50 cycles of data (exists) | Small | ✅ |
-| E — Study-Cycle Pipeline | A + B (narrow version only needs A) | Medium | Partially |
+| D — Affect-Performance Engine | ~50 cycles of data (exists) | Small | ✅ Ready |
+| E — Study-Cycle Pipeline | A + B (narrow version only needs A) | Medium | Partially (B done) |
 | F — Metacognitive Scheduler | A–E | Medium | Capstone |
 
-**Recommended order**: A → D (parallel) → E-narrow (CBR/facts only) → B
-→ C → E-full → F.
+**Recommended order (revised 2026-04-18, B already shipped)**: A → D
+(parallel) → C → E-full → F.
 
 **Phases ready to start immediately**: A and D.
 
