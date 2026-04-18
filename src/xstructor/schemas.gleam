@@ -703,6 +703,59 @@ pub const endeavour_post_mortem_example = "<endeavour_post_mortem>
 </endeavour_post_mortem>"
 
 // ---------------------------------------------------------------------------
+// 9. Skill conflict classification (skills/conflict.gleam)
+// ---------------------------------------------------------------------------
+
+pub const skill_conflict_xsd = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">
+  <xs:element name=\"conflict\">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name=\"kind\">
+          <xs:simpleType>
+            <xs:restriction base=\"xs:string\">
+              <xs:enumeration value=\"complementary\"/>
+              <xs:enumeration value=\"redundant\"/>
+              <xs:enumeration value=\"supersedes\"/>
+              <xs:enumeration value=\"contradictory\"/>
+            </xs:restriction>
+          </xs:simpleType>
+        </xs:element>
+        <xs:element name=\"reasoning\" type=\"xs:string\"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>"
+
+pub const skill_conflict_example = "<conflict>
+  <kind>complementary</kind>
+  <reasoning>The new skill addresses single-fact queries while the existing skill covers multi-source research. They apply to disjoint situations.</reasoning>
+</conflict>"
+
+// ---------------------------------------------------------------------------
+// 10. Skill body generation (skills/body_gen.gleam)
+// ---------------------------------------------------------------------------
+
+pub const skill_body_xsd = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">
+  <xs:element name=\"skill_body\">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name=\"heading\" type=\"xs:string\"/>
+        <xs:element name=\"description\" type=\"xs:string\"/>
+        <xs:element name=\"guidance\" type=\"xs:string\"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>"
+
+pub const skill_body_example = "<skill_body>
+  <heading>Search Tool Selection</heading>
+  <description>When to choose brave_answer over web_search for research queries.</description>
+  <guidance>For single factual questions, prefer brave_answer (fastest, most accurate single-shot answer). For multi-source research where you need to compare sources, start with web_search for breadth then fetch_url for depth on promising hits.</guidance>
+</skill_body>"
+
+// ---------------------------------------------------------------------------
 // System prompt fragments
 // ---------------------------------------------------------------------------
 

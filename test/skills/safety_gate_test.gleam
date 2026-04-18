@@ -218,6 +218,55 @@ pub fn skill_features_includes_critical_set_test() {
 }
 
 // ---------------------------------------------------------------------------
+// Same-scope cooldown
+// ---------------------------------------------------------------------------
+
+pub fn cooldown_inactive_with_empty_agents_test() {
+  // Empty agent list short-circuits — there's nothing to compare.
+  let dir = fresh_dir("cooldown_empty")
+  safety_gate.same_scope_cooldown_active(dir, [], 6) |> should.be_false
+}
+
+pub fn cooldown_inactive_with_no_log_file_test() {
+  let dir = fresh_dir("cooldown_nolog")
+  safety_gate.same_scope_cooldown_active(dir, ["researcher"], 6)
+  |> should.be_false
+}
+
+pub fn cooldown_active_after_recent_promotion_test() {
+  // A proposal targeting researcher; promote one for researcher; the
+  // cooldown should now block another proposal in the same scope.
+  let skills_dir = fresh_dir("cooldown_active_skills")
+  let log_dir = fresh_dir("cooldown_active_log")
+  let cfg =
+    safety_gate.GateConfig(
+      ..safety_gate.default_config(),
+      enable_llm_scorer: False,
+    )
+  let p1 = make_proposal("first", "Use brave_answer for facts.")
+  let _ = safety_gate.gate_proposal(p1, [], skills_dir, log_dir, cfg, None, "")
+  // Cooldown window of 24h means any same-scope proposal in the next
+  // day should hit this guard.
+  safety_gate.same_scope_cooldown_active(log_dir, ["researcher"], 24)
+  |> should.be_true
+}
+
+pub fn cooldown_inactive_for_disjoint_scope_test() {
+  let skills_dir = fresh_dir("cooldown_disjoint_skills")
+  let log_dir = fresh_dir("cooldown_disjoint_log")
+  let cfg =
+    safety_gate.GateConfig(
+      ..safety_gate.default_config(),
+      enable_llm_scorer: False,
+    )
+  let p1 = make_proposal("first", "Use brave_answer for facts.")
+  let _ = safety_gate.gate_proposal(p1, [], skills_dir, log_dir, cfg, None, "")
+  // Different agent scope — cooldown should NOT trip.
+  safety_gate.same_scope_cooldown_active(log_dir, ["coder"], 24)
+  |> should.be_false
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

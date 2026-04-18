@@ -44,6 +44,7 @@ import planner/types as planner_types
 import remembrancer/consolidation
 import scheduler/types as scheduler_types
 import skills.{type SkillMeta}
+import skills/metrics as skills_metrics
 import slog
 
 // ---------------------------------------------------------------------------
@@ -758,13 +759,28 @@ fn do_build_system_prompt(
   let template = identity.load_preamble_template(state.identity_dirs)
 
   let query_domains = derive_query_domains(state, context)
-  let skills_xml = case state.skills {
-    [] -> ""
+  let scoped_skills = case state.skills {
+    [] -> []
     all ->
       all
       |> skills.for_agent("cognitive")
       |> skills.for_context(query_domains)
-      |> skills.to_system_prompt_xml
+  }
+  // Record an inject event per scoped skill so the audit panel can show
+  // "this skill was placed in front of the LLM N times" alongside reads.
+  // We have cycle_id from CycleContext when present; if absent, skip
+  // logging (no useful attribution).
+  case context {
+    Some(ctx) ->
+      list.each(scoped_skills, fn(s: skills.SkillMeta) {
+        let skill_dir = string.replace(s.path, "/SKILL.md", "")
+        skills_metrics.append_inject(skill_dir, ctx.cycle_id, "cognitive")
+      })
+    None -> Nil
+  }
+  let skills_xml = case scoped_skills {
+    [] -> ""
+    list -> skills.to_system_prompt_xml(list)
   }
 
   case persona, template {
