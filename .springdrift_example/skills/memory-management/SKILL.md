@@ -26,6 +26,9 @@ when the cognitive memory tools answer.
 | "Mine recurring patterns across cases" | Delegate to **Remembrancer** (`mine_patterns`) | Cross-case clustering. |
 | "Cross-reference a topic across all stores" | Delegate to **Remembrancer** (`find_connections`) | Hits narrative + CBR + facts in one pass. |
 | "Consolidate a period and write a report" | Delegate to **Remembrancer** (`consolidate_memory` + `write_consolidation_report`) | Owns the consolidation pipeline. |
+| "Are my emotional states predicting failures?" | Delegate to **Remembrancer** (`analyze_affect_performance`) | Phase D. Pearson r between affect dimensions and outcome success per domain; persisted as `affect_corr_*` facts. |
+| "Extract candidate insights from a period" | Delegate to **Remembrancer** (`extract_insights` then `promote_insight`) | Phase E. Synthesis tool returns candidates; promote each with `promote_insight` (rate-limited 3/day). |
+| "Mine new strategies from CBR patterns" | Delegate to **Remembrancer** (`propose_strategies_from_patterns`) | Phase A follow-up. Auto-creates StrategyCreated events from clusters. Rate-limited 3/day. |
 
 **Rule of thumb:**
 - Cognitive memory tools → working set, recent activity, fast lookups.
