@@ -42,9 +42,19 @@ Built in [Gleam](https://gleam.run) on the Erlang/OTP runtime.
 
 ## Status
 
-Beta. In active development. Running in daily use. ~62,000 lines of Gleam across 136 source files, 1,490 tests passing. Core systems (cognitive loop, multi-agent delegation, D' safety gates, normative calculus, CBR memory, narrative threading, sensorium, scheduler, comms, web GUI) are implemented and relatively stable. There are probably bugs though.
+Beta. In active development. Running in daily use. ~62,000 lines of Gleam across 136 source files, 1,649 tests passing. Core systems (cognitive loop, multi-agent delegation, D' safety gates, normative calculus, CBR memory, narrative threading, sensorium, scheduler, comms, meta-learning, web GUI) are implemented and relatively stable. There are probably bugs though.
 
 See [docs/roadmap/](docs/roadmap/) for planned work including federation, learner ingestion, and metacognition reporting.
+
+### Versioning
+
+Springdrift follows [semver](https://semver.org/) starting from
+**0.8.0** (April 2026). While the version stays in `0.x.y`, breaking
+changes can land in any minor bump; patch releases (`0.8.1`, `0.8.2`,
+…) are backwards-compatible bug fixes only. Before 0.8.0 the project
+was tagged informally as `Mk-1` through `Mk-4` (prototype era; no
+compatibility promises). Each release is summarised in
+[CHANGELOG.md](CHANGELOG.md).
 
 ### Arxiv Paper
 
