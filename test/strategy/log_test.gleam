@@ -11,8 +11,8 @@ import gleam/option.{None, Some}
 import gleeunit/should
 import strategy/log as strategy_log
 import strategy/types.{
-  type Strategy, type StrategyEvent, Observed, Proposed, Strategy,
-  StrategyArchived, StrategyCreated, StrategyOutcome, StrategyUsed,
+  type StrategyEvent, Observed, Proposed, Strategy, StrategyArchived,
+  StrategyCreated, StrategyOutcome, StrategyUsed,
 }
 
 // ---------------------------------------------------------------------------
