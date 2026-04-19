@@ -437,6 +437,43 @@ pub const narrative_entry_example = "<narrative_entry>
 </narrative_entry>"
 
 // ---------------------------------------------------------------------------
+// 5b. Study-Cycle insights (tools/remembrancer.gleam — Phase E)
+// ---------------------------------------------------------------------------
+
+pub const insights_xsd = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">
+  <xs:element name=\"insights\">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name=\"insight\" minOccurs=\"0\" maxOccurs=\"unbounded\">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name=\"summary\" type=\"xs:string\"/>
+              <xs:element name=\"evidence\" type=\"xs:string\" minOccurs=\"0\"/>
+              <xs:element name=\"category\" type=\"xs:string\" minOccurs=\"0\"/>
+              <xs:element name=\"confidence\" type=\"xs:decimal\" minOccurs=\"0\"/>
+              <xs:element name=\"target_store\" type=\"xs:string\" minOccurs=\"0\"/>
+              <xs:element name=\"target_key\" type=\"xs:string\" minOccurs=\"0\"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>"
+
+pub const insights_example = "<insights>
+  <insight>
+    <summary>Web research delegations consistently take 3+ turns when query lacks a specific source domain.</summary>
+    <evidence>Cycles c-001, c-014, c-022 all hit max_turns=8 with broad queries; c-005 and c-018 with explicit domains finished in under 4 turns.</evidence>
+    <category>delegation_pattern</category>
+    <confidence>0.8</confidence>
+    <target_store>fact</target_store>
+    <target_key>research_query_specificity</target_key>
+  </insight>
+</insights>"
+
+// ---------------------------------------------------------------------------
 // 6. Planner output (agent/framework.gleam)
 // ---------------------------------------------------------------------------
 

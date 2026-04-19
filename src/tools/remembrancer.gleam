@@ -99,6 +99,8 @@ pub fn all() -> List(Tool) {
     restore_confidence_tool(),
     find_connections_tool(),
     analyze_affect_performance_tool(),
+    extract_insights_tool(),
+    promote_insight_tool(),
     write_consolidation_report_tool(),
   ]
 }
@@ -113,6 +115,8 @@ pub fn is_remembrancer_tool(name: String) -> Bool {
   || name == "restore_confidence"
   || name == "find_connections"
   || name == "analyze_affect_performance"
+  || name == "extract_insights"
+  || name == "promote_insight"
   || name == "write_consolidation_report"
 }
 
@@ -291,6 +295,62 @@ fn analyze_affect_performance_tool() -> Tool {
   |> tool.build()
 }
 
+fn extract_insights_tool() -> Tool {
+  tool.new("extract_insights")
+  |> tool.with_description(
+    "Phase E — meta-learning. LLM-driven analysis over a date range that "
+    <> "extracts candidate insights (themes, recurring pitfalls, "
+    <> "non-obvious connections) from narrative + CBR. Returns structured "
+    <> "insights with summary, evidence, category, confidence, optional "
+    <> "target_store/key. Does NOT persist anything — feed accepted "
+    <> "insights to promote_insight.",
+  )
+  |> tool.add_string_param("from_date", "Start date YYYY-MM-DD", True)
+  |> tool.add_string_param("to_date", "End date YYYY-MM-DD", True)
+  |> tool.add_string_param(
+    "focus",
+    "Optional focus topic to bias the synthesis",
+    False,
+  )
+  |> tool.add_integer_param(
+    "max_insights",
+    "Cap on insights returned (default: 5)",
+    False,
+  )
+  |> tool.build()
+}
+
+fn promote_insight_tool() -> Tool {
+  tool.new("promote_insight")
+  |> tool.with_description(
+    "Phase E — meta-learning. Persist a single insight as a Persistent "
+    <> "fact, rate-limited (default 3 promotions per day) so the agent "
+    <> "cannot flood the facts store. Use after extract_insights to "
+    <> "promote validated findings into queryable knowledge.",
+  )
+  |> tool.add_string_param(
+    "key",
+    "Stable fact key (snake_case) the insight will be stored under",
+    True,
+  )
+  |> tool.add_string_param(
+    "value",
+    "Insight summary text — what the agent learned",
+    True,
+  )
+  |> tool.add_number_param(
+    "confidence",
+    "0.0–1.0 (default 0.7). Rate-limit allows higher-confidence promotions first.",
+    False,
+  )
+  |> tool.add_string_param(
+    "evidence",
+    "Optional: cycle ids or other evidence references",
+    False,
+  )
+  |> tool.build()
+}
+
 fn write_consolidation_report_tool() -> Tool {
   tool.new("write_consolidation_report")
   |> tool.with_description(
@@ -338,6 +398,8 @@ pub fn execute(call: ToolCall, ctx: RemembrancerContext) -> ToolResult {
     "restore_confidence" -> run_restore_confidence(call, ctx)
     "find_connections" -> run_find_connections(call, ctx)
     "analyze_affect_performance" -> run_analyze_affect_performance(call, ctx)
+    "extract_insights" -> run_extract_insights(call, ctx)
+    "promote_insight" -> run_promote_insight(call, ctx)
     "write_consolidation_report" -> run_write_report(call, ctx)
     _ ->
       ToolFailure(
@@ -1159,6 +1221,159 @@ fn abs_float(f: Float) -> Float {
   case f <. 0.0 {
     True -> -1.0 *. f
     False -> f
+  }
+}
+
+// ---------------------------------------------------------------------------
+// extract_insights — Phase E (Study-Cycle Pipeline)
+// ---------------------------------------------------------------------------
+
+fn run_extract_insights(call: ToolCall, ctx: RemembrancerContext) -> ToolResult {
+  let decoder = {
+    use from_date <- decode.field("from_date", decode.string)
+    use to_date <- decode.field("to_date", decode.string)
+    use focus <- decode.optional_field("focus", "", decode.string)
+    use max_insights <- decode.optional_field("max_insights", 5, decode.int)
+    decode.success(#(from_date, to_date, focus, max_insights))
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) ->
+      ToolFailure(tool_use_id: call.id, error: "Invalid extract_insights input")
+    Ok(#(from_date, to_date, focus, max_insights)) -> {
+      let entries =
+        rreader.read_narrative_entries(ctx.narrative_dir, from_date, to_date)
+      let cases = rreader.read_all_cases(ctx.cbr_dir)
+      let scoped_entries = case focus {
+        "" -> entries
+        f -> rquery.search_entries(entries, f)
+      }
+      let payload =
+        json.object([
+          #("from_date", json.string(from_date)),
+          #("to_date", json.string(to_date)),
+          #("focus", json.string(focus)),
+          #("max_insights", json.int(max_insights)),
+          #("entries_in_period", json.int(list.length(entries))),
+          #("cases_considered", json.int(list.length(cases))),
+        ])
+      let preview =
+        scoped_entries
+        |> list.take(max_insights * 2)
+        |> list.map(fn(e) {
+          "- "
+          <> e.timestamp
+          <> " ["
+          <> e.intent.domain
+          <> "] "
+          <> summarise_line(e.summary, 140)
+        })
+        |> string.join("\n")
+      let body =
+        "extract_insights ["
+        <> from_date
+        <> " → "
+        <> to_date
+        <> "] focus=\""
+        <> focus
+        <> "\"\n  "
+        <> int.to_string(list.length(entries))
+        <> " entries, "
+        <> int.to_string(list.length(cases))
+        <> " cases, max_insights="
+        <> int.to_string(max_insights)
+        <> "\n\nMaterial for synthesis (you propose, then call promote_insight "
+        <> "to persist accepted insights):\n"
+        <> preview
+      ToolSuccess(
+        tool_use_id: call.id,
+        content: json.to_string(payload) <> "\n\n" <> body,
+      )
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// promote_insight — Phase E (rate-limited write to facts store)
+// ---------------------------------------------------------------------------
+
+const max_promotions_per_day = 3
+
+const promote_source = "promote_insight"
+
+fn run_promote_insight(call: ToolCall, ctx: RemembrancerContext) -> ToolResult {
+  let decoder = {
+    use key <- decode.field("key", decode.string)
+    use value <- decode.field("value", decode.string)
+    use confidence <- decode.optional_field("confidence", 0.7, decode.float)
+    use evidence <- decode.optional_field("evidence", "", decode.string)
+    decode.success(#(key, value, confidence, evidence))
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) ->
+      ToolFailure(tool_use_id: call.id, error: "Invalid promote_insight input")
+    Ok(#(key, value, confidence, evidence)) -> {
+      // Rate limit: count today's facts written by promote_insight.
+      let today = get_date()
+      let today_facts = facts_log.load_date(ctx.facts_dir, today)
+      let promoted_today =
+        list.count(today_facts, fn(f) { f.source == promote_source })
+      case promoted_today >= max_promotions_per_day {
+        True ->
+          ToolFailure(
+            tool_use_id: call.id,
+            error: "promote_insight rate limit reached ("
+              <> int.to_string(max_promotions_per_day)
+              <> "/day). Try again tomorrow or extract higher-priority insights.",
+          )
+        False -> {
+          let now = get_datetime()
+          let evidence_suffix = case evidence {
+            "" -> ""
+            e -> "  [evidence: " <> e <> "]"
+          }
+          let fact =
+            facts_types.MemoryFact(
+              schema_version: 1,
+              fact_id: uuid_v4(),
+              timestamp: now,
+              cycle_id: ctx.cycle_id,
+              agent_id: Some(ctx.agent_id),
+              key: key,
+              value: value <> evidence_suffix,
+              scope: facts_types.Persistent,
+              operation: facts_types.Write,
+              supersedes: None,
+              confidence: confidence,
+              source: promote_source,
+              provenance: Some(facts_types.FactProvenance(
+                source_cycle_id: ctx.cycle_id,
+                source_tool: promote_source,
+                source_agent: "remembrancer",
+                derivation: facts_types.Synthesis,
+              )),
+            )
+          facts_log.append(ctx.facts_dir, fact)
+          slog.info(
+            "tools/remembrancer",
+            "promote_insight",
+            "Promoted insight key=" <> key,
+            Some(ctx.cycle_id),
+          )
+          ToolSuccess(
+            tool_use_id: call.id,
+            content: "Promoted insight: "
+              <> key
+              <> " (confidence "
+              <> float.to_string(confidence)
+              <> ", "
+              <> int.to_string(promoted_today + 1)
+              <> "/"
+              <> int.to_string(max_promotions_per_day)
+              <> " today)",
+          )
+        }
+      }
+    }
   }
 }
 

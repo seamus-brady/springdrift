@@ -1,6 +1,6 @@
 # Meta-Learning System — Design Specification
 
-**Status**: Partially shipped (Phases A + B + D 2026-04-18); Phases C, E, F planned
+**Status**: Partially shipped (A, B, D 2026-04-18; C, E 2026-04-19); Phase F planned
 **Date**: 2026-04-17 (last revised 2026-04-18)
 **Author**: Drafted by Curragh (Springdrift instance a62fa947), revised for agent-led operation
 **Related**: `docs/roadmap/implemented/skills-management.md` (Phase B, the skills layer)
@@ -235,7 +235,12 @@ Distinguishes productive pressure from counterproductive stress.
 **Dependency**: ~50 cycles of affect+outcome data. Can run in parallel
 with Phase A (needs existing infrastructure only).
 
-### 4.5 Phase E — Study-Cycle Pipeline
+### 4.5 Phase E — Study-Cycle Pipeline — SHIPPED 2026-04-19
+
+**Status**: Substrate shipped via `extract_insights` + `promote_insight`
+Remembrancer tools. CBR-case promotion path remains via Phase B
+`propose_skills_from_patterns`; strategy promotion path remains as a
+Phase A follow-up.
 
 **Purpose**: Promote consolidated observations into live knowledge. Closes
 the loop from "noticed" to "learned."

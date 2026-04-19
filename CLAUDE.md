@@ -591,7 +591,7 @@ agent. Heavy planner operations moved to the Planner agent.
 | `check_inbox` | Comms | List recent messages in inbox |
 | `read_message` | Comms | Read full message content by ID |
 
-**Remembrancer tools** (10 tools in `tools/remembrancer.gleam`, on Remembrancer agent):
+**Remembrancer tools** (12 tools in `tools/remembrancer.gleam`, on Remembrancer agent):
 
 | Tool | Store(s) | Purpose |
 |---|---|---|
@@ -605,6 +605,8 @@ agent. Heavy planner operations moved to the Planner agent.
 | `write_consolidation_report` | Knowledge + Consolidation | Persist markdown report + append ConsolidationRun log entry |
 | `propose_skills_from_patterns` | CBR + Skills | Mine CBR clusters, generate skill proposals (LLM body + template fallback), run through the Promotion Safety Gate, promote accepted ones to Active skills on disk |
 | `analyze_affect_performance` | Affect + Narrative + Facts | Phase D. Compute Pearson r between each affect dimension and outcome success per task domain; persist significant correlations as facts under `affect_corr_<dim>_<domain>`; sensorium reads them as `<affect_warning>` |
+| `extract_insights` | Narrative + CBR | Phase E. Returns scoped narrative + CBR material in a date range so the agent can synthesise insights. No persistence. |
+| `promote_insight` | Facts | Phase E. Persist a single insight as a Persistent fact with provenance derivation=Synthesis. Rate-limited (default 3/day) to prevent flooding. |
 
 **Remembrancer** (`agents/remembrancer.gleam`) is a deep-memory specialist. Unlike
 Observer (recent-cycle diagnostics via Librarian), the Remembrancer reads raw JSONL
