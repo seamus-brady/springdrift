@@ -790,8 +790,14 @@ pub fn how_to_unknown_topic_returns_full_guide_test() {
 
 pub fn observer_tools_count_test() {
   let tools = memory.observer_tools()
-  // 18 tools: 7 diagnostic + 5 shared memory + 5 CBR curation + 1 safety feedback
-  tools |> list.length |> should.equal(18)
+  // 19 tools: 7 diagnostic + 5 shared memory + 5 CBR curation + 1 safety
+  // feedback + 1 review_learning_goals (Phase C follow-up)
+  tools |> list.length |> should.equal(19)
+}
+
+pub fn observer_tools_has_review_learning_goals_test() {
+  let names = list.map(memory.observer_tools(), fn(t) { t.name })
+  list.contains(names, "review_learning_goals") |> should.be_true
 }
 
 pub fn observer_tools_has_reflect_test() {

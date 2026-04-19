@@ -950,6 +950,7 @@ fn run(cfg: AppConfig) -> Nil {
         <> " recurring jobs",
       )
   }
+  let meta_budget_pct = option.unwrap(cfg.meta_max_reflection_budget_pct, 25)
   let runner_result =
     scheduler_runner.start(
       meta_tasks,
@@ -958,6 +959,7 @@ fn run(cfg: AppConfig) -> Nil {
       stuck_timeout_ms,
       max_cycles_per_hour,
       token_budget_per_hour,
+      meta_budget_pct,
     )
   let scheduler_subj = case runner_result {
     Ok(runner_subj) -> {

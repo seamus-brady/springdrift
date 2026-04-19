@@ -17,6 +17,7 @@ import gleam/erlang/process.{type Subject}
 import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/string
 import scheduler/delivery
 import scheduler/log as schedule_log
 import scheduler/types.{
@@ -43,6 +44,7 @@ pub fn start(
   stuck_timeout_ms: Int,
   max_cycles_per_hour: Int,
   token_budget_per_hour: Int,
+  meta_max_reflection_budget_pct: Int,
 ) -> Result(Subject(SchedulerMessage), Nil) {
   let setup = process.new_subject()
   process.spawn_unlinked(fn() {
@@ -166,6 +168,8 @@ pub fn start(
       stuck_timeout_ms,
       max_cycles_per_hour,
       token_budget_per_hour,
+      meta_max_reflection_budget_pct,
+      [],
       [],
       [],
     )
@@ -193,7 +197,9 @@ fn scheduler_loop(
   stuck_timeout_ms: Int,
   max_cycles_per_hour: Int,
   token_budget_per_hour: Int,
+  meta_max_reflection_budget_pct: Int,
   cycle_timestamps: List(Int),
+  meta_cycle_timestamps: List(Int),
   token_usage: List(#(Int, Int)),
 ) -> Nil {
   let selector =
@@ -210,11 +216,13 @@ fn scheduler_loop(
       stuck_timeout_ms,
       max_cycles_per_hour,
       token_budget_per_hour,
+      meta_max_reflection_budget_pct,
       cycle_timestamps,
+      meta_cycle_timestamps,
       token_usage,
     )
   }
-  let loop_with_tracking = fn(j, cts, tu) {
+  let loop_with_tracking = fn(j, cts, mts, tu) {
     scheduler_loop(
       self,
       j,
@@ -223,7 +231,9 @@ fn scheduler_loop(
       stuck_timeout_ms,
       max_cycles_per_hour,
       token_budget_per_hour,
+      meta_max_reflection_budget_pct,
       cts,
+      mts,
       tu,
     )
   }
@@ -262,6 +272,8 @@ fn scheduler_loop(
               let hour_ago = now - 3_600_000
               let recent_cycles =
                 list.filter(cycle_timestamps, fn(ts) { ts > hour_ago })
+              let recent_meta =
+                list.filter(meta_cycle_timestamps, fn(ts) { ts > hour_ago })
               let recent_tokens =
                 list.filter(token_usage, fn(tu) { tu.0 > hour_ago })
               let total_tokens =
@@ -272,13 +284,32 @@ fn scheduler_loop(
               let tokens_at_limit =
                 token_budget_per_hour > 0
                 && total_tokens >= token_budget_per_hour
-              case cycles_at_limit || tokens_at_limit {
+              // Phase F follow-up: meta-learning budget cap. Enforces
+              // the % cap when this tick is for a meta_learning_* job.
+              let is_meta = is_meta_learning_job(name)
+              let total_in_hour = list.length(recent_cycles)
+              let meta_in_hour = list.length(recent_meta)
+              let projected_pct = case is_meta, total_in_hour {
+                True, t if t > 0 ->
+                  { meta_in_hour + 1 } * 100 / { total_in_hour + 1 }
+                _, _ -> 0
+              }
+              let meta_at_limit =
+                is_meta
+                && meta_max_reflection_budget_pct > 0
+                && projected_pct > meta_max_reflection_budget_pct
+              case cycles_at_limit || tokens_at_limit || meta_at_limit {
                 True -> {
-                  let reason = case cycles_at_limit, tokens_at_limit {
-                    True, True -> "cycle + token budget"
-                    True, False -> "cycle limit"
-                    False, True -> "token budget"
-                    False, False -> "rate limit"
+                  let reason = case
+                    cycles_at_limit,
+                    tokens_at_limit,
+                    meta_at_limit
+                  {
+                    _, _, True -> "meta-learning budget"
+                    True, True, _ -> "cycle + token budget"
+                    True, False, _ -> "cycle limit"
+                    False, True, _ -> "token budget"
+                    False, False, _ -> "rate limit"
                   }
                   slog.warn(
                     "scheduler",
@@ -316,9 +347,14 @@ fn scheduler_loop(
 
                   // Track this cycle for rate limiting
                   let new_timestamps = [now, ..recent_cycles]
+                  let new_meta_timestamps = case is_meta {
+                    True -> [now, ..recent_meta]
+                    False -> recent_meta
+                  }
                   loop_with_tracking(
                     updated_jobs,
                     new_timestamps,
+                    new_meta_timestamps,
                     recent_tokens,
                   )
                 }
@@ -480,7 +516,12 @@ fn scheduler_loop(
             True -> [#(now, tokens_used), ..recent_tokens]
             False -> recent_tokens
           }
-          loop_with_tracking(updated_jobs, cycle_timestamps, new_tokens)
+          loop_with_tracking(
+            updated_jobs,
+            cycle_timestamps,
+            meta_cycle_timestamps,
+            new_tokens,
+          )
         }
       }
     }
@@ -726,6 +767,9 @@ fn scheduler_loop(
   }
 }
 
+/// Phase F follow-up. Cap on the % of recent cycles that may be
+/// meta-learning fires (jobs whose name starts with `meta_learning_`).
+/// 0 disables the cap.
 fn status_eq(a: types.JobStatus, b: types.JobStatus) -> Bool {
   case a, b {
     Pending, Pending -> True
@@ -797,6 +841,13 @@ import gleam/int
 
 fn int_to_string(n: Int) -> String {
   int.to_string(n)
+}
+
+/// Phase F follow-up: meta-learning budget cap. Recognises jobs by the
+/// `meta_learning_` name prefix (the convention from
+/// `src/meta_learning/scheduler.gleam`).
+fn is_meta_learning_job(name: String) -> Bool {
+  string.starts_with(name, "meta_learning_")
 }
 
 fn build_webhook_payload(
