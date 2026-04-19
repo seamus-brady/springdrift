@@ -32,6 +32,7 @@ import narrative/types as narrative_types
 import normative/character as normative_character
 import paths
 import planner/types as planner_types
+import remembrancer/consolidation
 import scheduler/types as scheduler_types
 import simplifile
 import skills
@@ -669,6 +670,41 @@ fn ws_handler(
                     skills_json:,
                     log_json:,
                   )),
+                )
+              mist.continue(state)
+            }
+            Ok(protocol.RequestMemoryData) -> {
+              // Read-only Memory tab — list Remembrancer consolidation
+              // runs from .springdrift/memory/consolidation/.
+              let runs = consolidation.load_all(paths.consolidation_log_dir())
+              let runs_json =
+                json.to_string(
+                  json.array(runs, fn(r: consolidation.ConsolidationRun) {
+                    json.object([
+                      #("run_id", json.string(r.run_id)),
+                      #("timestamp", json.string(r.timestamp)),
+                      #("from_date", json.string(r.from_date)),
+                      #("to_date", json.string(r.to_date)),
+                      #("summary", json.string(r.summary)),
+                      #("entries_reviewed", json.int(r.entries_reviewed)),
+                      #("cases_reviewed", json.int(r.cases_reviewed)),
+                      #("facts_reviewed", json.int(r.facts_reviewed)),
+                      #("patterns_found", json.int(r.patterns_found)),
+                      #("facts_restored", json.int(r.facts_restored)),
+                      #("threads_resurrected", json.int(r.threads_resurrected)),
+                      #("decayed_facts_count", json.int(r.decayed_facts_count)),
+                      #(
+                        "dormant_threads_count",
+                        json.int(r.dormant_threads_count),
+                      ),
+                      #("report_path", json.string(r.report_path)),
+                    ])
+                  }),
+                )
+              let _ =
+                mist.send_text_frame(
+                  conn,
+                  protocol.encode_server_message(protocol.MemoryData(runs_json:)),
                 )
               mist.continue(state)
             }
