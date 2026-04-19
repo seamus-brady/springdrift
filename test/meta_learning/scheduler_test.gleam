@@ -26,12 +26,13 @@ fn enabled_cfg() -> config.AppConfig {
 }
 
 // ---------------------------------------------------------------------------
-// Disabled by default
+// Enabled by default — operator opts out
 // ---------------------------------------------------------------------------
 
-pub fn disabled_when_unset_test() {
-  meta_scheduler.build_tasks(base_cfg())
-  |> should.equal([])
+pub fn enabled_when_unset_test() {
+  // Default config (no meta_scheduler_enabled set) emits the full task list.
+  let tasks = meta_scheduler.build_tasks(base_cfg())
+  list.length(tasks) |> should.equal(5)
 }
 
 pub fn disabled_when_explicitly_false_test() {

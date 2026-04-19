@@ -45,6 +45,7 @@ fn create(id: String, title: String, priority: Float) {
     strategy_id: None,
     priority: priority,
     source: SelfIdentified,
+    affect_baseline: None,
   )
 }
 
@@ -185,6 +186,7 @@ pub fn create_with_strategy_link_test() {
       strategy_id: Some("strat-1"),
       priority: 0.6,
       source: OperatorDirected,
+      affect_baseline: None,
     )
   case goal_log.resolve_from_events([event]) {
     [g] -> g.strategy_id |> should.equal(Some("strat-1"))

@@ -14,6 +14,7 @@
 // by the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 
+import affect/store as affect_store
 import gleam/dynamic/decode
 import gleam/float
 import gleam/int
@@ -204,6 +205,12 @@ fn run_create(call: ToolCall, _ctx: LearningGoalContext) -> ToolResult {
       source_str,
     )) -> {
       let goal_id = "goal-" <> uuid_v4()
+      // Phase C follow-up: snapshot affect pressure at goal creation so
+      // future progress reviews can compare against the baseline state.
+      let affect_baseline = case affect_store.latest(paths.affect_dir()) {
+        Some(s) -> Some(s.pressure)
+        None -> None
+      }
       let event =
         goal_types.GoalCreated(
           timestamp: get_datetime(),
@@ -214,6 +221,7 @@ fn run_create(call: ToolCall, _ctx: LearningGoalContext) -> ToolResult {
           strategy_id: strategy_id,
           priority: priority,
           source: goal_log.decode_source(source_str),
+          affect_baseline: affect_baseline,
         )
       goal_log.append(paths.learning_goals_dir(), event)
       ToolSuccess(

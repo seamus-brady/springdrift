@@ -334,15 +334,18 @@ summary_schedule = "weekly"
 # or operator seed events — the Curator does not invent names.
 
 [meta_learning]
-# strategy_registry_enabled = true   # Default: true. Field parses today;
-                                     # config-gate enforcement is a follow-up.
+# Phase A - Strategy Registry. When True, Archivist records strategy_used
+# events from the curation prompt and the sensorium <strategies> block
+# surfaces top-N active strategies. Default: true.
+# strategy_registry_enabled = true
 
-# Phase F - Metacognitive Scheduler. When enabled, recurring meta-learning
-# jobs (consolidation, goal review, skill decay, affect correlation,
-# strategy review) are added to the scheduler at startup. Each job fires
-# as a SchedulerInput cycle; the cognitive loop receives a natural-language
-# instruction telling it which Remembrancer tool to invoke.
-# scheduler_enabled = false                     # Default: false (operator opt-in)
+# Phase F - Metacognitive Scheduler. When True (the default), five
+# recurring meta-learning jobs are added to the scheduler at startup:
+# consolidation (weekly), goal review (daily), skill decay (weekly),
+# affect correlation (weekly), strategy review (fortnightly). Each fires
+# as a SchedulerInput cycle; the cognitive loop delegates to the
+# appropriate Remembrancer tool. Set to false to disable entirely.
+# scheduler_enabled = true                      # Default: true
 # consolidation_interval_hours = 168            # Default: 168 (weekly)
 # goal_review_interval_hours = 24               # Default: 24 (daily)
 # skill_decay_interval_hours = 168              # Default: 168 (weekly)

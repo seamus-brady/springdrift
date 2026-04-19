@@ -58,6 +58,11 @@ pub type LearningGoal {
     created_at: String,
     /// ISO timestamp of the most recent event for this goal.
     last_event_at: String,
+    /// Affect pressure (0.0–100.0) at the time the goal was created.
+    /// None when no affect snapshot was available. Lets the agent
+    /// later compare goal-progress affect against the baseline state
+    /// when the goal was set.
+    affect_baseline: Option(Float),
   )
 }
 
@@ -76,6 +81,9 @@ pub type GoalEvent {
     strategy_id: Option(String),
     priority: Float,
     source: GoalSource,
+    /// Pressure (0.0–100.0) snapshot from the latest affect reading at
+    /// creation time. None when no snapshot was available.
+    affect_baseline: Option(Float),
   )
   /// A cycle contributed evidence toward (or against) the goal.
   GoalEvidenceAdded(timestamp: String, goal_id: String, cycle_id: String)

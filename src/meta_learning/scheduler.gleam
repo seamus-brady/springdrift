@@ -10,8 +10,8 @@
 //// period — keeping the orchestration entirely in plain text rather
 //// than wiring tool calls directly from the scheduler.
 ////
-//// Disabling: when `meta_scheduler_enabled` is False (the default), this
-//// module returns []. Operators opt in by setting it True.
+//// Default: enabled. Operators opt out by setting
+//// `[meta_learning] scheduler_enabled = false` in their config.toml.
 
 // Copyright (C) 2026 Seamus Brady <seamus@corvideon.ie>
 //
@@ -46,9 +46,10 @@ const default_strategy_review_hours = 336
 // ---------------------------------------------------------------------------
 
 /// Build the list of meta-learning recurring tasks from config. Returns
-/// [] when `meta_scheduler_enabled` is False or unset.
+/// [] only when the operator explicitly disables via
+/// `[meta_learning] scheduler_enabled = false`.
 pub fn build_tasks(cfg: AppConfig) -> List(ScheduleTaskConfig) {
-  case option.unwrap(cfg.meta_scheduler_enabled, False) {
+  case option.unwrap(cfg.meta_scheduler_enabled, True) {
     False -> []
     True -> {
       let delivery =
