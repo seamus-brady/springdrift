@@ -1654,34 +1654,60 @@ fn handle_planner_output(
               librarian.notify_task_op(lib, op)
               tid
             }
-            // Create new task
+            // Create new task — only when we actually got steps from
+            // the planner. An empty plan_steps list signals the
+            // upstream XML extraction failed (validation error, no
+            // matching schema, or LLM emitted unparseable output).
+            // Creating a "Planned task" placeholder with zero steps
+            // pollutes the active-task list with rows that can never
+            // make progress, and masks the planner failure. Skip
+            // instead and log loudly so the failure is investigable.
             None ->
-              planner_tools.create_task(
+              case plan_steps {
+                [] -> {
+                  slog.warn(
+                    "agent/cognitive/agents",
+                    "handle_planner_output",
+                    "Planner returned no steps — refusing to create empty task. "
+                      <> "Likely cause: XStructor validation failure or "
+                      <> "malformed planner XML output.",
+                    Some(actual_cycle_id),
+                  )
+                  ""
+                }
+                [_, ..] ->
+                  planner_tools.create_task(
+                    state.planner_dir,
+                    lib,
+                    case plan_steps {
+                      [first, ..] -> first
+                      [] -> "Planned task"
+                    },
+                    string.join(plan_steps, "; "),
+                    plan_steps,
+                    verifications,
+                    dependencies,
+                    complexity,
+                    risks,
+                    planner_types.SystemTask,
+                    endeavour_id,
+                    actual_cycle_id,
+                  )
+              }
+          }
+          case task_id_result {
+            "" -> state
+            _ -> {
+              // Apply forecaster config if the planner suggested one.
+              apply_planner_forecaster_config(
                 state.planner_dir,
                 lib,
-                case plan_steps {
-                  [first, ..] -> first
-                  [] -> "Planned task"
-                },
-                string.join(plan_steps, "; "),
-                plan_steps,
-                verifications,
-                dependencies,
-                complexity,
-                risks,
-                planner_types.SystemTask,
-                endeavour_id,
-                actual_cycle_id,
+                task_id_result,
+                forecaster_config,
               )
+              CognitiveState(..state, active_task_id: Some(task_id_result))
+            }
           }
-          // Apply forecaster config if the planner suggested one
-          apply_planner_forecaster_config(
-            state.planner_dir,
-            lib,
-            task_id_result,
-            forecaster_config,
-          )
-          CognitiveState(..state, active_task_id: Some(task_id_result))
         }
         None -> state
       }

@@ -115,11 +115,26 @@ pub fn extract(xml: String) -> Result(Dict(String, String), String) {
 /// Extract a list of string values for repeated elements with indexed paths.
 /// Given elements like {"root.items.0": "a", "root.items.1": "b"},
 /// extract_list(elements, "root.items") returns ["a", "b"].
+///
+/// Single-element fallback: the Erlang FFI's xmerl walker only generates
+/// indexed paths (`prefix.0`, `prefix.1`, ...) when the same element
+/// name appears more than once in the XML at parse time. If a
+/// `maxOccurs="unbounded"` element appears exactly once, the FFI emits
+/// the bare prefix instead, with no `.0` suffix. Without the fallback,
+/// `extract_list` returned `[]` for single-step plans — a real bug
+/// hit by the Planner agent when emitting one-step plans.
 pub fn extract_list(
   elements: Dict(String, String),
   prefix: String,
 ) -> List(String) {
-  extract_list_loop(elements, prefix, 0, [])
+  case extract_list_loop(elements, prefix, 0, []) {
+    [] ->
+      case dict.get(elements, prefix) {
+        Ok(value) -> [value]
+        Error(_) -> []
+      }
+    found -> found
+  }
 }
 
 /// Validate XML against a compiled schema.

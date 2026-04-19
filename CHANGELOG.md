@@ -12,40 +12,43 @@ For implementation history beyond what's user-visible, see
 
 ---
 
-## [0.9.3] — 2026-04-18
+## [0.9.5] — 2026-04-20
 
-Forecaster returns real per-task scores. Every task (through the tool
-path) scored exactly `0.3333333…` in production regardless of state —
-23 of 23 forecast updates in the local planner log carried the same
-constant value.
+Planner output extraction. A real bug observed in production: the
+auto-create hook produced "Planned task" rows with empty `plan_steps`,
+empty `description`, empty `complexity`, polluting the active-task
+list with garbage that could never make progress. 25 of 49 tasks in
+the local memory store were empty shells.
 
 ### Fixed
 
-- **Forecaster no longer returns a constant 0.3333 for every task.**
-  `tools/planner.compute_task_forecasts` had its own copy of the
-  heuristic computation using magnitudes on a 1–9 scale (step_rate:
-  1/4/7, dep: 1/5+blocked, complexity: 1/5, risk: 1/3+n\*2/9,
-  scope_creep: 1) with **a default value of 1** for every feature
-  when no signal was present. The D' engine clamps magnitudes to
-  `[0, 3]`, so the high values collapsed to 3 while all the "default"
-  1s stayed at 1. With five features all at magnitude 1 and
-  importances `[3, 3, 2, 2, 1]`, every task landed at
-  `(3·1 + 3·1 + 2·1 + 2·1 + 1·1) / ((3+3+2+2+1)·3) = 11/33 ≈ 0.3333`.
-  Tasks with stalled progress, blocked dependencies, or materialised
-  risks all scored identically to fresh tasks. The tool path now
-  delegates to the Forecaster actor's heuristic, which uses the
-  correct 0–3 scale and zero as the "no signal" default.
+- **`xstructor.extract_list` now handles single-element lists.** The
+  Erlang FFI's xmerl walker only generates indexed paths
+  (`prefix.0`, `prefix.1`, …) when the same element name appears
+  more than once in the XML at parse time. With exactly one
+  `<step>` inside `<steps>`, the FFI emitted `plan.steps.step`
+  (no `.0` suffix), and `extract_list` returned `[]`. The function
+  now falls back to checking the bare prefix when the indexed scan
+  comes up empty, returning a one-element list. This fixes
+  silent-failure in any planner agent output that happens to
+  contain exactly one repeated child element.
+- **Auto-create hook refuses to create empty placeholder tasks.**
+  When the planner returns no steps (XStructor validation failure,
+  malformed LLM output, or any extraction failure), the cognitive
+  loop now logs a warning and skips task creation instead of
+  producing a "Planned task" row with no description, no
+  complexity, and no progress path.
 
 ### Why this matters
 
-A forecaster that returns the same score for every task isn't a
-forecaster — it's a constant. The replan-threshold trigger
-(`forecaster_replan_threshold`, default 0.55) never fired, and the
-per-feature breakdown couldn't distinguish healthy tasks from ones
-that needed replanning. Fixing the heuristic restores per-task
-variation: empty tasks score 0.0; stalled tasks score proportionally
-to the number and severity of problem signals; truly broken tasks
-can exceed the replan threshold and produce suggestion events.
+The "Planned task" placeholders made the planner appear to be
+working while quietly dropping real plans. The active-task list
+filled with empty shells, the forecaster scored them as failing
+work, and operators saw a busy-but-broken planner. The fix is
+purely additive: legitimate planner output that previously worked
+continues to work; previously-silent extraction failures now either
+succeed (single-element lists) or are visibly skipped.
+
 ---
 
 ## [0.9.4] — 2026-04-20
@@ -90,6 +93,43 @@ before they decay into long silences.
   states the tool is for one-shot items (Reminder/Todo/Appointment)
   and refuses recurring tasks, redirecting the agent to `cancel_item`
   for intentional recurrence termination.
+
+---
+
+## [0.9.3] — 2026-04-18
+
+Forecaster returns real per-task scores. Every task (through the tool
+path) scored exactly `0.3333333…` in production regardless of state —
+23 of 23 forecast updates in the local planner log carried the same
+constant value.
+
+### Fixed
+
+- **Forecaster no longer returns a constant 0.3333 for every task.**
+  `tools/planner.compute_task_forecasts` had its own copy of the
+  heuristic computation using magnitudes on a 1–9 scale (step_rate:
+  1/4/7, dep: 1/5+blocked, complexity: 1/5, risk: 1/3+n\*2/9,
+  scope_creep: 1) with **a default value of 1** for every feature
+  when no signal was present. The D' engine clamps magnitudes to
+  `[0, 3]`, so the high values collapsed to 3 while all the "default"
+  1s stayed at 1. With five features all at magnitude 1 and
+  importances `[3, 3, 2, 2, 1]`, every task landed at
+  `(3·1 + 3·1 + 2·1 + 2·1 + 1·1) / ((3+3+2+2+1)·3) = 11/33 ≈ 0.3333`.
+  Tasks with stalled progress, blocked dependencies, or materialised
+  risks all scored identically to fresh tasks. The tool path now
+  delegates to the Forecaster actor's heuristic, which uses the
+  correct 0–3 scale and zero as the "no signal" default.
+
+### Why this matters
+
+A forecaster that returns the same score for every task isn't a
+forecaster — it's a constant. The replan-threshold trigger
+(`forecaster_replan_threshold`, default 0.55) never fired, and the
+per-feature breakdown couldn't distinguish healthy tasks from ones
+that needed replanning. Fixing the heuristic restores per-task
+variation: empty tasks score 0.0; stalled tasks score proportionally
+to the number and severity of problem signals; truly broken tasks
+can exceed the replan threshold and produce suggestion events.
 
 ---
 
