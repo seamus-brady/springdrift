@@ -23,6 +23,8 @@ import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
+import learning_goal/log as goal_log
+import learning_goal/types as goal_types
 import llm/provider
 import llm/tool
 import llm/types.{
@@ -109,6 +111,7 @@ pub fn all() -> List(Tool) {
     extract_insights_tool(),
     promote_insight_tool(),
     propose_strategies_from_patterns_tool(),
+    propose_learning_goals_from_patterns_tool(),
     write_consolidation_report_tool(),
   ]
 }
@@ -126,6 +129,7 @@ pub fn is_remembrancer_tool(name: String) -> Bool {
   || name == "extract_insights"
   || name == "promote_insight"
   || name == "propose_strategies_from_patterns"
+  || name == "propose_learning_goals_from_patterns"
   || name == "write_consolidation_report"
 }
 
@@ -382,6 +386,34 @@ fn propose_strategies_from_patterns_tool() -> Tool {
   |> tool.build()
 }
 
+fn propose_learning_goals_from_patterns_tool() -> Tool {
+  tool.new("propose_learning_goals_from_patterns")
+  |> tool.with_description(
+    "Phase C follow-up — meta-learning. Mine CBR clusters of failure or "
+    <> "low-confidence cases and emit `GoalCreated` events for the recurring "
+    <> "domains. Source = `pattern_mined`. Rate-limited (default 2 new goals "
+    <> "per day) so the goals store cannot flood. Skips clusters whose "
+    <> "derived id duplicates an existing active goal.",
+  )
+  |> tool.add_string_param(
+    "domain",
+    "Domain to mine, or 'all' for every domain (default: all)",
+    False,
+  )
+  |> tool.add_integer_param(
+    "min_cases",
+    "Minimum cases to form a pattern (default: from config)",
+    False,
+  )
+  |> tool.add_number_param(
+    "max_avg_confidence",
+    "Only propose goals when cluster avg_confidence is below this "
+      <> "(default: 0.55) — i.e. struggle clusters worth a goal.",
+    False,
+  )
+  |> tool.build()
+}
+
 fn write_consolidation_report_tool() -> Tool {
   tool.new("write_consolidation_report")
   |> tool.with_description(
@@ -433,6 +465,8 @@ pub fn execute(call: ToolCall, ctx: RemembrancerContext) -> ToolResult {
     "promote_insight" -> run_promote_insight(call, ctx)
     "propose_strategies_from_patterns" ->
       run_propose_strategies_from_patterns(call, ctx)
+    "propose_learning_goals_from_patterns" ->
+      run_propose_learning_goals_from_patterns(call, ctx)
     "write_consolidation_report" -> run_write_report(call, ctx)
     _ ->
       ToolFailure(
@@ -1669,6 +1703,179 @@ fn derive_strategy_description(cluster: skills_pattern.Cluster) -> String {
   <> " similar CBR cases in domain '"
   <> cluster.domain
   <> "' (avg confidence "
+  <> float.to_string(cluster.avg_confidence)
+  <> ")."
+}
+
+// ---------------------------------------------------------------------------
+// propose_learning_goals_from_patterns — Phase C follow-up
+// ---------------------------------------------------------------------------
+
+const max_goal_proposals_per_day = 2
+
+fn run_propose_learning_goals_from_patterns(
+  call: ToolCall,
+  ctx: RemembrancerContext,
+) -> ToolResult {
+  let decoder = {
+    use domain <- decode.optional_field("domain", "all", decode.string)
+    use min_cases_in <- decode.optional_field("min_cases", 0, decode.int)
+    use max_avg_confidence <- decode.optional_field(
+      "max_avg_confidence",
+      0.55,
+      decode.float,
+    )
+    decode.success(#(domain, min_cases_in, max_avg_confidence))
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "Invalid propose_learning_goals_from_patterns input",
+      )
+    Ok(#(domain, min_cases_in, max_avg_conf)) -> {
+      let cases_all = rreader.read_all_cases(ctx.cbr_dir)
+      let cases = case domain {
+        "all" -> cases_all
+        d ->
+          list.filter(cases_all, fn(c) {
+            string.lowercase(c.problem.domain) == string.lowercase(d)
+          })
+      }
+      let min_cases = case min_cases_in {
+        0 -> ctx.min_pattern_cases
+        n -> n
+      }
+      let pattern_cfg =
+        skills_pattern.PatternConfig(
+          ..skills_pattern.default_config(),
+          min_cases: min_cases,
+        )
+      let clusters =
+        skills_pattern.find_clusters(cases, pattern_cfg)
+        |> list.filter(fn(c) { c.avg_confidence <. max_avg_conf })
+      // Existing active goals — skip clusters whose derived id already
+      // exists as an active goal.
+      let existing =
+        goal_log.resolve_current(paths.learning_goals_dir())
+        |> list.filter(fn(g) { g.status == goal_types.ActiveGoal })
+      let existing_ids = list.map(existing, fn(g) { g.id })
+      let candidate_events =
+        list.filter_map(clusters, fn(cluster) {
+          let id = derive_goal_id(cluster)
+          case list.contains(existing_ids, id) {
+            True -> Error(Nil)
+            False ->
+              Ok(goal_types.GoalCreated(
+                timestamp: get_datetime(),
+                goal_id: id,
+                title: derive_goal_title(cluster),
+                rationale: derive_goal_rationale(cluster),
+                acceptance_criteria: derive_goal_acceptance(cluster),
+                strategy_id: None,
+                priority: 0.6,
+                source: goal_types.PatternMined,
+                affect_baseline: None,
+              ))
+          }
+        })
+      // Rate limit: count today's pattern_mined goal creations.
+      let today = get_date()
+      let today_events = goal_log.load_date(paths.learning_goals_dir(), today)
+      let proposed_today =
+        list.count(today_events, fn(ev) {
+          case ev {
+            goal_types.GoalCreated(source: goal_types.PatternMined, ..) -> True
+            _ -> False
+          }
+        })
+      let budget = case max_goal_proposals_per_day - proposed_today {
+        n if n > 0 -> n
+        _ -> 0
+      }
+      let to_create = list.take(candidate_events, budget)
+      list.each(to_create, fn(ev) {
+        goal_log.append(paths.learning_goals_dir(), ev)
+      })
+      let summary =
+        "propose_learning_goals_from_patterns: "
+        <> int.to_string(list.length(clusters))
+        <> " struggle cluster(s), "
+        <> int.to_string(list.length(candidate_events))
+        <> " novel candidate(s), "
+        <> int.to_string(list.length(to_create))
+        <> " created (rate-limit "
+        <> int.to_string(proposed_today)
+        <> "/"
+        <> int.to_string(max_goal_proposals_per_day)
+        <> " today)."
+      slog.info(
+        "tools/remembrancer",
+        "propose_learning_goals_from_patterns",
+        summary,
+        Some(ctx.cycle_id),
+      )
+      let payload =
+        json.object([
+          #("clusters_found", json.int(list.length(clusters))),
+          #("novel_candidates", json.int(list.length(candidate_events))),
+          #("created", json.int(list.length(to_create))),
+          #(
+            "new_goal_ids",
+            json.array(to_create, fn(ev) {
+              case ev {
+                goal_types.GoalCreated(goal_id:, ..) -> json.string(goal_id)
+                _ -> json.string("")
+              }
+            }),
+          ),
+        ])
+      ToolSuccess(
+        tool_use_id: call.id,
+        content: json.to_string(payload) <> "\n\n" <> summary,
+      )
+    }
+  }
+}
+
+fn derive_goal_id(cluster: skills_pattern.Cluster) -> String {
+  let dom = case cluster.domain {
+    "" -> "general"
+    d -> string.replace(string.lowercase(d), " ", "-")
+  }
+  let kw = case cluster.common_keywords {
+    [first, ..] -> string.replace(string.lowercase(first), " ", "-")
+    [] -> "improve"
+  }
+  "goal-mined-" <> dom <> "-" <> kw
+}
+
+fn derive_goal_title(cluster: skills_pattern.Cluster) -> String {
+  let dom = case cluster.domain {
+    "" -> "general"
+    d -> d
+  }
+  let kw = case cluster.common_keywords {
+    [first, ..] -> first
+    [] -> "approach"
+  }
+  "Improve handling of " <> dom <> " (" <> kw <> ")"
+}
+
+fn derive_goal_rationale(cluster: skills_pattern.Cluster) -> String {
+  "Recurring struggle pattern: "
+  <> int.to_string(list.length(cluster.cases))
+  <> " CBR cases in domain '"
+  <> cluster.domain
+  <> "' with avg outcome confidence "
+  <> float.to_string(cluster.avg_confidence)
+  <> ". Worth a deliberate goal to lift performance."
+}
+
+fn derive_goal_acceptance(cluster: skills_pattern.Cluster) -> String {
+  "Next 5+ cases in '"
+  <> cluster.domain
+  <> "' achieve avg outcome confidence >= 0.75 (current cluster avg "
   <> float.to_string(cluster.avg_confidence)
   <> ")."
 }

@@ -528,7 +528,7 @@ agent. Heavy planner operations moved to the Planner agent.
 | `update_learning_goal` | Learning Goals | Add evidence cycle_id and/or change status (active/achieved/abandoned/paused) with reason |
 | `list_learning_goals` | Learning Goals | List goals filtered by status; default returns active ranked by priority |
 
-**Observer agent tools** (18 tools — diagnostic, forensic, CBR curation):
+**Observer agent tools** (19 tools — diagnostic, forensic, CBR curation, Phase C goal review):
 
 | Tool | Store | Purpose |
 |---|---|---|
@@ -544,6 +544,7 @@ agent. Heavy planner operations moved to the Planner agent.
 | `unsuppress_case` | CBR | Restore a previously suppressed case to retrieval |
 | `boost_case` | CBR | Adjust a case's confidence score |
 | `report_false_positive` | Meta | Flag a D' rejection as a false positive (cycle_id + reason) |
+| `review_learning_goals` | Learning Goals | Phase C follow-up. Independent goal evaluation — returns goals + evidence; does NOT mutate state. |
 | `recall_recent` | Narrative | (shared — Observer can also search memory) |
 | `recall_search` | Narrative | (shared) |
 | `recall_threads` | Threads | (shared) |
@@ -600,7 +601,7 @@ agent. Heavy planner operations moved to the Planner agent.
 | `check_inbox` | Comms | List recent messages in inbox |
 | `read_message` | Comms | Read full message content by ID |
 
-**Remembrancer tools** (12 tools in `tools/remembrancer.gleam`, on Remembrancer agent):
+**Remembrancer tools** (13 tools in `tools/remembrancer.gleam`, on Remembrancer agent):
 
 | Tool | Store(s) | Purpose |
 |---|---|---|
@@ -616,6 +617,8 @@ agent. Heavy planner operations moved to the Planner agent.
 | `analyze_affect_performance` | Affect + Narrative + Facts | Phase D. Compute Pearson r between each affect dimension and outcome success per task domain; persist significant correlations as facts under `affect_corr_<dim>_<domain>`; sensorium reads them as `<affect_warning>` |
 | `extract_insights` | Narrative + CBR | Phase E. Returns scoped narrative + CBR material in a date range so the agent can synthesise insights. No persistence. |
 | `promote_insight` | Facts | Phase E. Persist a single insight as a Persistent fact with provenance derivation=Synthesis. Rate-limited (default 3/day) to prevent flooding. |
+| `propose_strategies_from_patterns` | CBR + Strategies | Phase A follow-up. Mine CBR clusters and emit `StrategyCreated` events. Rate-limited 3/day. |
+| `propose_learning_goals_from_patterns` | CBR + Learning Goals | Phase C follow-up. Mine CBR struggle clusters (avg_confidence < 0.55) and emit `GoalCreated` events with source=PatternMined. Rate-limited 2/day. |
 
 **Remembrancer** (`agents/remembrancer.gleam`) is a deep-memory specialist. Unlike
 Observer (recent-cycle diagnostics via Librarian), the Remembrancer reads raw JSONL

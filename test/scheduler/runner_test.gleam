@@ -126,6 +126,7 @@ pub fn start_returns_subject_test() {
       600_000,
       20,
       500_000,
+      0,
     )
 
   let status_subj = process.new_subject()
@@ -145,6 +146,7 @@ pub fn start_with_multiple_tasks_test() {
       600_000,
       20,
       500_000,
+      0,
     )
 
   let status_subj = process.new_subject()
@@ -168,6 +170,7 @@ pub fn stop_all_terminates_test() {
       600_000,
       20,
       500_000,
+      0,
     )
 
   process.send(sched, StopAll)
@@ -185,7 +188,7 @@ pub fn auto_execution_completes_job_test() {
   // initial_delay returns 0, so tick fires at 1ms
   let tasks = [make_task("auto-run", 600_000)]
   let assert Ok(sched) =
-    runner.start(tasks, cognitive, cp, 600_000, 20, 500_000)
+    runner.start(tasks, cognitive, cp, 600_000, 20, 500_000, 0)
 
   // Poll until the job has run at least once. Recurring tasks return to Pending
   // after each completion, so we check run_count rather than status.
@@ -222,6 +225,7 @@ pub fn unknown_job_complete_ignored_test() {
       600_000,
       20,
       500_000,
+      0,
     )
 
   process.send(
@@ -247,6 +251,7 @@ pub fn unknown_job_failed_ignored_test() {
       600_000,
       20,
       500_000,
+      0,
     )
 
   process.send(sched, JobFailed(name: "ghost-job", reason: "phantom"))
@@ -272,6 +277,7 @@ pub fn start_with_no_tasks_test() {
       600_000,
       20,
       500_000,
+      0,
     )
 
   let status_subj = process.new_subject()
@@ -290,7 +296,7 @@ pub fn job_transitions_through_running_test() {
   let cognitive = auto_reply_cognitive()
   let tasks = [make_task("transitions", 600_000)]
   let assert Ok(sched) =
-    runner.start(tasks, cognitive, cp, 600_000, 20, 500_000)
+    runner.start(tasks, cognitive, cp, 600_000, 20, 500_000, 0)
 
   // Poll until the job has left Pending (Running, Completed, or back to Pending
   // with run_count > 0 for recurring tasks).
@@ -323,7 +329,7 @@ pub fn multiple_tasks_all_complete_test() {
   let cognitive = auto_reply_cognitive()
   let tasks = [make_task("task-1", 600_000), make_task("task-2", 600_000)]
   let assert Ok(sched) =
-    runner.start(tasks, cognitive, cp, 600_000, 20, 500_000)
+    runner.start(tasks, cognitive, cp, 600_000, 20, 500_000, 0)
 
   // Poll until both jobs have run at least once (recurring tasks return to
   // Pending after completion, so check run_count).

@@ -32,6 +32,8 @@ import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
+import learning_goal/log as goal_log
+import learning_goal/types as goal_types
 import llm/tool
 import llm/types.{
   type Tool, type ToolCall, type ToolResult, ToolFailure, ToolSuccess,
@@ -161,6 +163,8 @@ pub fn observer_tools() -> List(Tool) {
     boost_case_tool(),
     // Safety feedback
     report_false_positive_tool(),
+    // Phase C follow-up — independent goal evaluation
+    review_learning_goals_tool(),
   ]
 }
 
@@ -465,6 +469,7 @@ pub fn is_memory_tool(name: String) -> Bool {
   || name == "how_to"
   || name == "cancel_agent"
   || name == "list_affect_history"
+  || name == "review_learning_goals"
 }
 
 /// Context for facts-based memory tools.
@@ -632,6 +637,7 @@ pub fn execute_with_how_to(
     "cancel_agent" -> run_cancel_agent(call, agent_mgmt)
     "report_false_positive" -> run_report_false_positive(call)
     "list_affect_history" -> run_list_affect_history(call)
+    "review_learning_goals" -> run_review_learning_goals(call)
     _ -> ToolFailure(tool_use_id: call.id, error: "Unknown tool: " <> call.name)
   }
 }
@@ -3131,6 +3137,107 @@ fn run_boost_case(
 // ---------------------------------------------------------------------------
 // report_false_positive
 // ---------------------------------------------------------------------------
+
+fn review_learning_goals_tool() -> Tool {
+  tool.new("review_learning_goals")
+  |> tool.with_description(
+    "Phase C follow-up — independent goal evaluation. Returns all active "
+    <> "learning goals plus their evidence cycles for you (the Observer) "
+    <> "to assess against acceptance criteria. Does NOT mutate goal state. "
+    <> "Use to provide outside judgement that the cognitive agent's own "
+    <> "self-review may miss (status drift, criteria-mismatched evidence).",
+  )
+  |> tool.add_enum_param(
+    "status_filter",
+    "Filter goals by status. Default: active.",
+    ["active", "achieved", "abandoned", "paused", "all"],
+    False,
+  )
+  |> tool.build()
+}
+
+fn run_review_learning_goals(call: ToolCall) -> ToolResult {
+  let decoder = {
+    use status_filter <- decode.optional_field(
+      "status_filter",
+      "active",
+      decode.string,
+    )
+    decode.success(status_filter)
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "Invalid review_learning_goals input",
+      )
+    Ok(filter) -> {
+      let dir = paths.learning_goals_dir()
+      let all = goal_log.resolve_current(dir)
+      let filtered = case filter {
+        "all" -> all
+        "active" ->
+          list.filter(all, fn(g) { g.status == goal_types.ActiveGoal })
+        "achieved" ->
+          list.filter(all, fn(g) { g.status == goal_types.AchievedGoal })
+        "abandoned" ->
+          list.filter(all, fn(g) { g.status == goal_types.AbandonedGoal })
+        "paused" ->
+          list.filter(all, fn(g) { g.status == goal_types.PausedGoal })
+        _ -> list.filter(all, fn(g) { g.status == goal_types.ActiveGoal })
+      }
+      let body = case filtered {
+        [] -> "(no goals matching filter '" <> filter <> "')"
+        _ ->
+          string.join(
+            list.map(filtered, fn(g) {
+              "## "
+              <> g.title
+              <> " ("
+              <> g.id
+              <> ")\n"
+              <> "Status: "
+              <> goal_log.encode_status(g.status)
+              <> " | priority="
+              <> float.to_string(g.priority)
+              <> " | source="
+              <> goal_log.encode_source(g.source)
+              <> "\nRationale: "
+              <> g.rationale
+              <> "\nAcceptance criteria: "
+              <> g.acceptance_criteria
+              <> "\nEvidence ("
+              <> int.to_string(list.length(g.evidence))
+              <> " cycles): "
+              <> case g.evidence {
+                [] -> "(none yet)"
+                ids -> string.join(ids, ", ")
+              }
+              <> "\nAffect baseline: "
+              <> case g.affect_baseline {
+                Some(p) -> float.to_string(p)
+                None -> "(none captured)"
+              }
+            }),
+            "\n\n",
+          )
+      }
+      let payload =
+        json.object([
+          #("filter", json.string(filter)),
+          #("count", json.int(list.length(filtered))),
+        ])
+      ToolSuccess(
+        tool_use_id: call.id,
+        content: json.to_string(payload)
+          <> "\n\nGoals for independent review (you judge progress against "
+          <> "acceptance criteria; you do NOT change status — that remains "
+          <> "the cognitive agent's call):\n\n"
+          <> body,
+      )
+    }
+  }
+}
 
 fn report_false_positive_tool() -> Tool {
   tool.new("report_false_positive")

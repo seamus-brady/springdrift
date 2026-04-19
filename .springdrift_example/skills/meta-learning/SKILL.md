@@ -52,6 +52,16 @@ evaluate, not a wish list.
 - `list_learning_goals` — filter by status; default returns active
   ranked by priority.
 
+Two more bring goals in from the outside:
+
+- Remembrancer's `propose_learning_goals_from_patterns` mines CBR
+  failure clusters (avg_confidence < 0.55) and creates
+  `pattern_mined`-source goals. Rate-limited 2/day.
+- Observer's `review_learning_goals` returns active goals + evidence
+  for an independent assessment. Observer doesn't change status — that
+  remains your call. Use it as outside judgement when self-review may
+  drift.
+
 Operator-directed goals are privileged — do not abandon them without
 explicit justification.
 
