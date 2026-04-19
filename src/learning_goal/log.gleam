@@ -116,6 +116,7 @@ fn apply_event(
       strategy_id:,
       priority:,
       source:,
+      affect_baseline:,
     ) ->
       dict.insert(
         state,
@@ -132,6 +133,7 @@ fn apply_event(
           source: source,
           created_at: timestamp,
           last_event_at: timestamp,
+          affect_baseline: affect_baseline,
         ),
       )
     GoalEvidenceAdded(timestamp:, goal_id:, cycle_id:) ->
@@ -210,6 +212,7 @@ pub fn encode_event(event: GoalEvent) -> json.Json {
       strategy_id:,
       priority:,
       source:,
+      affect_baseline:,
     ) ->
       json.object([
         #("event", json.string("created")),
@@ -224,6 +227,10 @@ pub fn encode_event(event: GoalEvent) -> json.Json {
         }),
         #("priority", json.float(priority)),
         #("source", json.string(encode_source(source))),
+        #("affect_baseline", case affect_baseline {
+          Some(p) -> json.float(p)
+          None -> json.null()
+        }),
       ])
     GoalEvidenceAdded(timestamp:, goal_id:, cycle_id:) ->
       json.object([
@@ -321,6 +328,11 @@ fn created_decoder() -> decode.Decoder(GoalEvent) {
     decode.optional(decode.string)
       |> decode.map(fn(s) { decode_source(option.unwrap(s, "self_identified")) }),
   )
+  use affect_baseline <- decode.optional_field(
+    "affect_baseline",
+    None,
+    decode.optional(decode.float),
+  )
   decode.success(GoalCreated(
     timestamp:,
     goal_id:,
@@ -330,6 +342,7 @@ fn created_decoder() -> decode.Decoder(GoalEvent) {
     strategy_id:,
     priority:,
     source:,
+    affect_baseline:,
   ))
 }
 

@@ -73,6 +73,9 @@ pub type ArchivistContext {
     dprime_decisions: List(String),
     thread_index_json: String,
     retrieved_case_ids: List(String),
+    /// Phase A — when False, the Archivist drops strategy_used emissions
+    /// and skips StrategyUsed/StrategyOutcome event logging.
+    strategy_registry_enabled: Bool,
   )
 }
 
@@ -425,7 +428,10 @@ pub fn spawn(
               )
           }
           narrative_log.append(narrative_dir, final_entry)
-          emit_strategy_events(final_entry)
+          case ctx.strategy_registry_enabled {
+            True -> emit_strategy_events(final_entry)
+            False -> Nil
+          }
           // Notify the Librarian to index the new entry
           case lib {
             Some(l) -> {

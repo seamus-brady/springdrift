@@ -37,6 +37,7 @@ fn test_context() -> ArchivistContext {
     dprime_decisions: [],
     thread_index_json: "{}",
     retrieved_case_ids: [],
+    strategy_registry_enabled: True,
   )
 }
 

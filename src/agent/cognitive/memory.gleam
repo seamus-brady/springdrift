@@ -63,6 +63,7 @@ pub fn maybe_spawn_archivist(
       ),
       thread_index_json: "",
       retrieved_case_ids: state.retrieved_case_ids,
+      strategy_registry_enabled: state.config.strategy_registry_enabled,
     )
   archivist.spawn(
     ctx,

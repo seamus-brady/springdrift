@@ -873,6 +873,10 @@ fn run(cfg: AppConfig) -> Nil {
         max_debate_rounds: option.unwrap(cfg.team_max_debate_rounds, 3),
       ),
       agentlair_config: build_agentlair_config(cfg),
+      strategy_registry_enabled: option.unwrap(
+        cfg.strategy_registry_enabled,
+        True,
+      ),
     ))
   {
     Ok(subj) -> subj

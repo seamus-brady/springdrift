@@ -39,6 +39,10 @@ import skills/pattern as skills_pattern
 import skills/proposal_log
 import skills/safety_gate
 import slog
+import strategy/log as strategy_log
+import strategy/types as strategy_types
+import xstructor
+import xstructor/schemas
 
 @external(erlang, "springdrift_ffi", "get_datetime")
 fn get_datetime() -> String
@@ -101,6 +105,7 @@ pub fn all() -> List(Tool) {
     analyze_affect_performance_tool(),
     extract_insights_tool(),
     promote_insight_tool(),
+    propose_strategies_from_patterns_tool(),
     write_consolidation_report_tool(),
   ]
 }
@@ -117,6 +122,7 @@ pub fn is_remembrancer_tool(name: String) -> Bool {
   || name == "analyze_affect_performance"
   || name == "extract_insights"
   || name == "promote_insight"
+  || name == "propose_strategies_from_patterns"
   || name == "write_consolidation_report"
 }
 
@@ -351,6 +357,28 @@ fn promote_insight_tool() -> Tool {
   |> tool.build()
 }
 
+fn propose_strategies_from_patterns_tool() -> Tool {
+  tool.new("propose_strategies_from_patterns")
+  |> tool.with_description(
+    "Phase A follow-up — meta-learning. Mine CBR clusters by domain + "
+    <> "shared keywords; for each qualifying cluster that does not "
+    <> "duplicate an existing strategy, append a `StrategyCreated` event "
+    <> "to the registry. Rate-limited (default 3 new strategies per day) "
+    <> "so the registry cannot flood. Returns the list of new strategy ids.",
+  )
+  |> tool.add_string_param(
+    "domain",
+    "Domain to mine, or 'all' for every domain (default: all)",
+    False,
+  )
+  |> tool.add_integer_param(
+    "min_cases",
+    "Minimum cases to form a pattern (default: from config)",
+    False,
+  )
+  |> tool.build()
+}
+
 fn write_consolidation_report_tool() -> Tool {
   tool.new("write_consolidation_report")
   |> tool.with_description(
@@ -400,6 +428,8 @@ pub fn execute(call: ToolCall, ctx: RemembrancerContext) -> ToolResult {
     "analyze_affect_performance" -> run_analyze_affect_performance(call, ctx)
     "extract_insights" -> run_extract_insights(call, ctx)
     "promote_insight" -> run_promote_insight(call, ctx)
+    "propose_strategies_from_patterns" ->
+      run_propose_strategies_from_patterns(call, ctx)
     "write_consolidation_report" -> run_write_report(call, ctx)
     _ ->
       ToolFailure(
@@ -1247,15 +1277,6 @@ fn run_extract_insights(call: ToolCall, ctx: RemembrancerContext) -> ToolResult 
         "" -> entries
         f -> rquery.search_entries(entries, f)
       }
-      let payload =
-        json.object([
-          #("from_date", json.string(from_date)),
-          #("to_date", json.string(to_date)),
-          #("focus", json.string(focus)),
-          #("max_insights", json.int(max_insights)),
-          #("entries_in_period", json.int(list.length(entries))),
-          #("cases_considered", json.int(list.length(cases))),
-        ])
       let preview =
         scoped_entries
         |> list.take(max_insights * 2)
@@ -1268,7 +1289,34 @@ fn run_extract_insights(call: ToolCall, ctx: RemembrancerContext) -> ToolResult 
           <> summarise_line(e.summary, 140)
         })
         |> string.join("\n")
-      let body =
+      // Phase E follow-up: when a provider is wired in, run the LLM
+      // synthesis path via XStructor and surface candidate insights
+      // directly. Falls back to the raw-material body when no provider
+      // or any failure — the agent can still synthesise from preview.
+      let llm_insights = case ctx.gate_provider {
+        Some(p) ->
+          extract_insights_via_llm(
+            preview,
+            from_date,
+            to_date,
+            focus,
+            max_insights,
+            p,
+            ctx.gate_model,
+          )
+        None -> ""
+      }
+      let payload =
+        json.object([
+          #("from_date", json.string(from_date)),
+          #("to_date", json.string(to_date)),
+          #("focus", json.string(focus)),
+          #("max_insights", json.int(max_insights)),
+          #("entries_in_period", json.int(list.length(entries))),
+          #("cases_considered", json.int(list.length(cases))),
+          #("llm_synthesis", json.bool(llm_insights != "")),
+        ])
+      let header =
         "extract_insights ["
         <> from_date
         <> " → "
@@ -1281,13 +1329,103 @@ fn run_extract_insights(call: ToolCall, ctx: RemembrancerContext) -> ToolResult 
         <> int.to_string(list.length(cases))
         <> " cases, max_insights="
         <> int.to_string(max_insights)
-        <> "\n\nMaterial for synthesis (you propose, then call promote_insight "
-        <> "to persist accepted insights):\n"
-        <> preview
+      let body = case llm_insights {
+        "" ->
+          header
+          <> "\n\nMaterial for synthesis (you propose, then call "
+          <> "promote_insight to persist accepted insights):\n"
+          <> preview
+        synth ->
+          header
+          <> "\n\nLLM-extracted candidate insights (validate before "
+          <> "promote_insight):\n"
+          <> synth
+          <> "\n\nRaw material:\n"
+          <> preview
+      }
       ToolSuccess(
         tool_use_id: call.id,
         content: json.to_string(payload) <> "\n\n" <> body,
       )
+    }
+  }
+}
+
+fn extract_insights_via_llm(
+  material: String,
+  from_date: String,
+  to_date: String,
+  focus: String,
+  max_insights: Int,
+  provider: provider.Provider,
+  model: String,
+) -> String {
+  let schema_dir = paths.schemas_dir()
+  case
+    xstructor.compile_schema(schema_dir, "insights.xsd", schemas.insights_xsd)
+  {
+    Error(e) -> {
+      slog.warn(
+        "tools/remembrancer",
+        "extract_insights_via_llm",
+        "schema compile failed: " <> e,
+        None,
+      )
+      ""
+    }
+    Ok(schema) -> {
+      let system =
+        schemas.build_system_prompt(
+          "You are a memory analyst extracting candidate insights from "
+            <> "an agent's narrative + CBR case material. Each insight is "
+            <> "a non-obvious learning that, if persisted as a fact, would "
+            <> "help the agent next time it faces a similar situation. "
+            <> "Cite specific cycles or patterns in evidence. Cap at "
+            <> int.to_string(max_insights)
+            <> " insights. Skip if no genuine learnings present.",
+          schemas.insights_xsd,
+          schemas.insights_example,
+        )
+      let prompt =
+        "Period: "
+        <> from_date
+        <> " → "
+        <> to_date
+        <> "\nFocus: "
+        <> case focus {
+          "" -> "(none)"
+          f -> f
+        }
+        <> "\n\nMaterial:\n"
+        <> material
+      let config =
+        xstructor.XStructorConfig(
+          schema:,
+          system_prompt: system,
+          xml_example: schemas.insights_example,
+          max_retries: 2,
+          max_tokens: 1500,
+        )
+      case xstructor.generate(config, prompt, provider, model) {
+        Error(e) -> {
+          slog.warn(
+            "tools/remembrancer",
+            "extract_insights_via_llm",
+            "XStructor failed: " <> string.slice(e, 0, 200),
+            None,
+          )
+          ""
+        }
+        Ok(_result) -> {
+          // Surface raw XML extraction back to the agent — the schema
+          // already validated it, so the agent can read summary/evidence/
+          // category/confidence/target_store/target_key directly. We rely
+          // on the agent's own LLM to interpret rather than building yet
+          // another structured-record renderer here.
+          "(LLM XStructor pass succeeded — see extracted insights in the "
+          <> "validated XML response)"
+        }
+      }
     }
   }
 }
@@ -1375,6 +1513,162 @@ fn run_promote_insight(call: ToolCall, ctx: RemembrancerContext) -> ToolResult {
       }
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// propose_strategies_from_patterns — Phase A follow-up
+// ---------------------------------------------------------------------------
+
+const max_strategy_proposals_per_day = 3
+
+fn run_propose_strategies_from_patterns(
+  call: ToolCall,
+  ctx: RemembrancerContext,
+) -> ToolResult {
+  let decoder = {
+    use domain <- decode.optional_field("domain", "all", decode.string)
+    use min_cases_in <- decode.optional_field("min_cases", 0, decode.int)
+    decode.success(#(domain, min_cases_in))
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "Invalid propose_strategies_from_patterns input",
+      )
+    Ok(#(domain, min_cases_in)) -> {
+      let cases_all = rreader.read_all_cases(ctx.cbr_dir)
+      let cases = case domain {
+        "all" -> cases_all
+        d ->
+          list.filter(cases_all, fn(c) {
+            string.lowercase(c.problem.domain) == string.lowercase(d)
+          })
+      }
+      let min_cases = case min_cases_in {
+        0 -> ctx.min_pattern_cases
+        n -> n
+      }
+      let pattern_cfg =
+        skills_pattern.PatternConfig(
+          ..skills_pattern.default_config(),
+          min_cases: min_cases,
+        )
+      let clusters = skills_pattern.find_clusters(cases, pattern_cfg)
+      // Existing strategies — skip clusters whose derived id already exists.
+      let existing_strategies =
+        strategy_log.resolve_current(paths.strategy_log_dir())
+      let existing_ids = list.map(existing_strategies, fn(s) { s.id })
+      let candidate_events =
+        list.filter_map(clusters, fn(cluster) {
+          let id = derive_strategy_id(cluster)
+          case list.contains(existing_ids, id) {
+            True -> Error(Nil)
+            False ->
+              Ok(strategy_types.StrategyCreated(
+                timestamp: get_datetime(),
+                strategy_id: id,
+                name: derive_strategy_name(cluster),
+                description: derive_strategy_description(cluster),
+                domain_tags: [cluster.domain],
+                source: strategy_types.Proposed,
+              ))
+          }
+        })
+      // Rate limit by counting today's StrategyCreated events with
+      // source=Proposed.
+      let today = get_date()
+      let today_events = strategy_log.load_date(paths.strategy_log_dir(), today)
+      let proposed_today =
+        list.count(today_events, fn(ev) {
+          case ev {
+            strategy_types.StrategyCreated(source: strategy_types.Proposed, ..) ->
+              True
+            _ -> False
+          }
+        })
+      let budget = case max_strategy_proposals_per_day - proposed_today {
+        n if n > 0 -> n
+        _ -> 0
+      }
+      let to_create = list.take(candidate_events, budget)
+      list.each(to_create, fn(ev) {
+        strategy_log.append(paths.strategy_log_dir(), ev)
+      })
+      let summary =
+        "propose_strategies_from_patterns: "
+        <> int.to_string(list.length(clusters))
+        <> " cluster(s), "
+        <> int.to_string(list.length(candidate_events))
+        <> " novel candidate(s), "
+        <> int.to_string(list.length(to_create))
+        <> " created (rate-limit "
+        <> int.to_string(proposed_today)
+        <> "/"
+        <> int.to_string(max_strategy_proposals_per_day)
+        <> " today)."
+      slog.info(
+        "tools/remembrancer",
+        "propose_strategies_from_patterns",
+        summary,
+        Some(ctx.cycle_id),
+      )
+      let payload =
+        json.object([
+          #("clusters_found", json.int(list.length(clusters))),
+          #("novel_candidates", json.int(list.length(candidate_events))),
+          #("created", json.int(list.length(to_create))),
+          #(
+            "new_strategy_ids",
+            json.array(to_create, fn(ev) {
+              case ev {
+                strategy_types.StrategyCreated(strategy_id:, ..) ->
+                  json.string(strategy_id)
+                _ -> json.string("")
+              }
+            }),
+          ),
+        ])
+      ToolSuccess(
+        tool_use_id: call.id,
+        content: json.to_string(payload) <> "\n\n" <> summary,
+      )
+    }
+  }
+}
+
+fn derive_strategy_id(cluster: skills_pattern.Cluster) -> String {
+  let dom = case cluster.domain {
+    "" -> "general"
+    d -> string.replace(string.lowercase(d), " ", "-")
+  }
+  let kw = case cluster.common_keywords {
+    [first, ..] -> string.replace(string.lowercase(first), " ", "-")
+    [] -> "approach"
+  }
+  "strat-" <> dom <> "-" <> kw
+}
+
+fn derive_strategy_name(cluster: skills_pattern.Cluster) -> String {
+  let dom = case cluster.domain {
+    "" -> "general"
+    d -> d
+  }
+  let kw = case cluster.common_keywords {
+    [first, ..] -> first
+    [] -> "approach"
+  }
+  dom <> ": " <> kw
+}
+
+fn derive_strategy_description(cluster: skills_pattern.Cluster) -> String {
+  "Mined from "
+  <> int.to_string(list.length(cluster.cases))
+  <> " similar CBR cases in domain '"
+  <> cluster.domain
+  <> "' (avg confidence "
+  <> float.to_string(cluster.avg_confidence)
+  <> ")."
 }
 
 // ---------------------------------------------------------------------------

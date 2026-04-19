@@ -93,6 +93,8 @@ pub type RuntimeConfig {
     character_spec: Option(normative_types.CharacterSpec),
     team_guards: team.TeamGuards,
     agentlair_config: Option(agentlair_types.AgentLairConfig),
+    /// Phase A — when False, Archivist drops strategy_used emissions.
+    strategy_registry_enabled: Bool,
   )
 }
 

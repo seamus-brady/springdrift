@@ -5,11 +5,8 @@
 // by the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 
+import affect/correlation as affect_correlation
 import agent/cognitive/llm as cognitive_llm
-
-@external(erlang, "springdrift_ffi", "get_datetime")
-fn get_datetime() -> String
-
 import agent/cognitive/memory as cognitive_memory
 import agent/cognitive_state.{type CognitiveState, CognitiveState}
 import agent/types.{
@@ -26,6 +23,8 @@ import dprime/gate
 import dprime/meta
 import dprime/output_gate
 import dprime/types as dprime_types
+import facts/log as facts_log
+import facts/types as facts_types
 import gleam/dict
 import gleam/erlang/process.{type Subject}
 import gleam/float
@@ -38,7 +37,11 @@ import llm/types as llm_types
 import narrative/librarian
 import normative/drift as normative_drift
 import normative/types as normative_types
+import paths
 import slog
+
+@external(erlang, "springdrift_ffi", "get_datetime")
+fn get_datetime() -> String
 
 /// Add a synthetic assistant message to state so message history stays
 /// well-formed (alternating user/assistant) when going to Idle after an error.
@@ -597,7 +600,15 @@ pub fn spawn_input_safety_gate(
   let scorer_model = state.task_model
   let verbose = state.verbose
   let instruction = text
-  let ctx = build_context_string(state.messages, 2000)
+  let base_ctx = build_context_string(state.messages, 2000)
+  // Phase D follow-up — meta-learning. Prepend any persisted
+  // affect-performance correlation warnings (negative r ≤ -0.4) so the
+  // input gate's LLM scorer can weight risk against the agent's known
+  // maladaptive emotional patterns. Empty when no warnings exist.
+  let ctx = case affect_warnings_context() {
+    "" -> base_ctx
+    w -> w <> "\n\n" <> base_ctx
+  }
   let det_config = state.config.deterministic_config
   let redact_secrets = state.redact_secrets
   let gate_timeout_ms = state.config.gate_timeout_ms
@@ -1608,6 +1619,47 @@ pub fn handle_gate_timeout(
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
+
+/// Build the affect-warnings context block — meta-learning Phase D
+/// follow-up. Reads `affect_corr_*` facts written by the Remembrancer's
+/// `analyze_affect_performance` tool and produces a short prompt block
+/// listing strongly negative correlations (r ≤ -0.4) so the input D'
+/// gate scorer can factor them into risk evaluation. Returns "" when
+/// no warnings meet the threshold.
+fn affect_warnings_context() -> String {
+  let facts = facts_log.resolve_current(paths.facts_dir(), None)
+  let warnings =
+    facts
+    |> list.filter(fn(f) {
+      string.starts_with(f.key, "affect_corr_")
+      && f.operation == facts_types.Write
+    })
+    |> list.filter_map(fn(f) {
+      case affect_correlation.parse_fact_value(f.value) {
+        Ok(#(r, n, inconclusive)) ->
+          case inconclusive || r >. -0.4 {
+            True -> Error(Nil)
+            False ->
+              Ok(
+                "- "
+                <> f.key
+                <> ": r="
+                <> float.to_string(r)
+                <> " (n="
+                <> int.to_string(n)
+                <> ")",
+              )
+          }
+        Error(_) -> Error(Nil)
+      }
+    })
+  case warnings {
+    [] -> ""
+    _ ->
+      "[affect_warnings — historical maladaptive patterns, weight risk accordingly]\n"
+      <> string.join(warnings, "\n")
+  }
+}
 
 /// Build a context string from messages using a character budget (BF-04).
 /// Walks messages most-recent-first, includes all content types (text,

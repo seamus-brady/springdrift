@@ -82,6 +82,10 @@ pub type CognitiveConfig {
     team_specs: List(team.TeamSpec),
     team_guards: team.TeamGuards,
     agentlair_config: Option(agentlair_types.AgentLairConfig),
+    /// Meta-learning Phase A — when False, the Archivist drops
+    /// strategy_used emissions and skips StrategyUsed/StrategyOutcome
+    /// event logging. Default True.
+    strategy_registry_enabled: Bool,
   )
 }
 
@@ -147,5 +151,6 @@ pub fn default_test_config(
     team_specs: [],
     team_guards: team.default_guards(),
     agentlair_config: None,
+    strategy_registry_enabled: True,
   )
 }
