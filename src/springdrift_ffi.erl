@@ -31,7 +31,7 @@
          identity/1,
          sign_rs256/2, unix_now/0,
          ets_new/1, ets_insert/3, ets_lookup/2,
-         count_lines/1]).
+         count_lines/1, package_version/0]).
 
 %% Read one line from stdin.
 %% Returns {ok, Binary} (including trailing newline) or {error, nil} on EOF.
@@ -801,3 +801,14 @@ count_lines_loop(Fd, Acc) ->
 unix_now() ->
     calendar:datetime_to_gregorian_seconds(calendar:universal_time())
     - calendar:datetime_to_gregorian_seconds({{1970, 1, 1}, {0, 0, 0}}).
+
+%% Package version, read from the OTP application metadata that the Gleam
+%% build derives from gleam.toml. Single source of truth — bumping
+%% gleam.toml updates this automatically. Falls back to "unknown" when
+%% the application isn't loaded (e.g. some test environments).
+package_version() ->
+    application:load(springdrift),
+    case application:get_key(springdrift, vsn) of
+        {ok, Vsn} -> list_to_binary(Vsn);
+        undefined -> <<"unknown">>
+    end.
