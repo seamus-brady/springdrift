@@ -919,6 +919,7 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
   <button class=\"tab-btn\" data-tab=\"comms\">Comms</button>
   <button class=\"tab-btn\" data-tab=\"affect\">Affect</button>
   <button class=\"tab-btn\" data-tab=\"skills\">Skills</button>
+  <button class=\"tab-btn\" data-tab=\"memory\">Memory</button>
 </div>
 <div id=\"content-area\">
   <div id=\"narrative-tab\" class=\"tab-content active\">
@@ -1040,6 +1041,22 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
       </div>
     </div>
   </div>
+  <div id=\"memory-tab\" class=\"tab-content\">
+    <div class=\"filter-bar\">
+      <button class=\"refresh-btn\" id=\"memory-refresh\">Refresh</button>
+      <input class=\"filter-input\" id=\"memory-search\" type=\"text\" placeholder=\"Search runs...\">
+      <span class=\"filter-count\" id=\"memory-count\"></span>
+    </div>
+    <div id=\"memory-container\">
+      <table class=\"admin-table\"><thead><tr>
+        <th>Run At</th><th>Period</th><th>Patterns</th><th>Facts Restored</th><th>Threads Resurrected</th><th>Decayed Facts</th><th>Dormant Threads</th><th>Report</th>
+      </tr></thead><tbody id=\"memory-body\"><tr><td colspan=\"8\" style=\"text-align:center;opacity:.5\">Loading...</td></tr></tbody></table>
+      <div id=\"memory-summary-box\" style=\"margin-top:24px;padding:12px;background:var(--card-bg);border:1px solid var(--border);border-radius:6px;display:none\">
+        <h3 style=\"margin:0 0 8px;font-size:15px;color:var(--text-secondary)\">Run summary</h3>
+        <div id=\"memory-summary-text\" style=\"font-size:13px;line-height:1.5\"></div>
+      </div>
+    </div>
+  </div>
 </div>
 </div>
 </div>
@@ -1064,6 +1081,7 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
   var skillsRaw = [];
   var skillsLogRaw = [];
   var affectDataRaw = [];
+  var memoryRunsRaw = [];
 
   tabBtns.forEach(function(btn) {
     btn.addEventListener('click', function() {
@@ -1082,6 +1100,7 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
       else if (tab === 'comms') requestCommsData();
       else if (tab === 'affect') requestAffectData();
       else if (tab === 'skills') requestSkillsData();
+      else if (tab === 'memory') requestMemoryData();
     });
   });
 
@@ -1095,6 +1114,7 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
   document.getElementById('comms-refresh').addEventListener('click', requestCommsData);
   document.getElementById('affect-refresh').addEventListener('click', requestAffectData);
   document.getElementById('skills-refresh').addEventListener('click', requestSkillsData);
+  document.getElementById('memory-refresh').addEventListener('click', requestMemoryData);
 
   // Filter event listeners
   ['change'].forEach(function(ev) {
@@ -1119,6 +1139,7 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
     document.getElementById('dprime-search').addEventListener(ev, applyDprimeFilter);
     document.getElementById('comms-search').addEventListener(ev, applyCommsFilter);
     document.getElementById('skills-search').addEventListener(ev, applySkillsFilter);
+    document.getElementById('memory-search').addEventListener(ev, applyMemoryFilter);
   });
 
   function filterCount(id, shown, total) {
@@ -1183,6 +1204,12 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
   function requestSkillsData() {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'request_skills_data' }));
+    }
+  }
+
+  function requestMemoryData() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'request_memory_data' }));
     }
   }
 
@@ -1375,6 +1402,62 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
         '<td style=\"font-size:12px;color:var(--text-dim)\">' + escapeHtml(detail) + '</td>' +
         '</tr>';
     }).join('');
+  }
+
+  function renderMemoryData(runs) {
+    memoryRunsRaw = runs || [];
+    applyMemoryFilter();
+  }
+
+  function applyMemoryFilter() {
+    var q = (document.getElementById('memory-search').value || '').toLowerCase();
+    var filtered = memoryRunsRaw.filter(function(r) {
+      if (!q) return true;
+      var h = [r.from_date, r.to_date, r.summary, r.report_path].join(' ').toLowerCase();
+      return h.indexOf(q) >= 0;
+    });
+    // Newest first
+    filtered.sort(function(a, b) { return (b.timestamp || '').localeCompare(a.timestamp || ''); });
+    filterCount('memory-count', filtered.length, memoryRunsRaw.length);
+    var body = document.getElementById('memory-body');
+    if (filtered.length === 0) {
+      body.innerHTML = '<tr><td colspan=\"8\" style=\"text-align:center;opacity:.5\">' + (memoryRunsRaw.length === 0 ? 'No consolidation runs yet — the Remembrancer fires when scheduled or when invoked' : 'No runs match filter') + '</td></tr>';
+      var box = document.getElementById('memory-summary-box');
+      if (box) box.style.display = 'none';
+      return;
+    }
+    body.innerHTML = filtered.map(function(r) {
+      var ts = (r.timestamp || '').substring(0, 19).replace('T', ' ');
+      var period = (r.from_date || '?') + ' \\u2192 ' + (r.to_date || '?');
+      var pathDisplay = r.report_path ? r.report_path.split('/').slice(-1)[0] : '\\u2014';
+      return '<tr style=\"cursor:pointer\" data-run=\"' + escapeHtml(r.run_id || '') + '\">' +
+        '<td style=\"font-family:monospace;font-size:12px\">' + escapeHtml(ts) + '</td>' +
+        '<td style=\"font-size:12px\">' + escapeHtml(period) + '</td>' +
+        '<td style=\"text-align:right\">' + (r.patterns_found || 0) + '</td>' +
+        '<td style=\"text-align:right\">' + (r.facts_restored || 0) + '</td>' +
+        '<td style=\"text-align:right\">' + (r.threads_resurrected || 0) + '</td>' +
+        '<td style=\"text-align:right;color:var(--text-dim)\">' + (r.decayed_facts_count || 0) + '</td>' +
+        '<td style=\"text-align:right;color:var(--text-dim)\">' + (r.dormant_threads_count || 0) + '</td>' +
+        '<td style=\"font-family:monospace;font-size:11px;color:var(--text-dim)\" title=\"' + escapeHtml(r.report_path || '') + '\">' + escapeHtml(pathDisplay) + '</td>' +
+        '</tr>';
+    }).join('');
+    // Click handler — show summary in the side box
+    Array.prototype.forEach.call(body.querySelectorAll('tr[data-run]'), function(row) {
+      row.addEventListener('click', function() {
+        var runId = row.getAttribute('data-run');
+        var run = memoryRunsRaw.find(function(r) { return r.run_id === runId; });
+        if (!run) return;
+        var box = document.getElementById('memory-summary-box');
+        var txt = document.getElementById('memory-summary-text');
+        if (!box || !txt) return;
+        txt.innerHTML =
+          '<div style=\"margin-bottom:6px\"><strong>Period:</strong> ' + escapeHtml(run.from_date) + ' \\u2192 ' + escapeHtml(run.to_date) + '</div>' +
+          '<div style=\"margin-bottom:6px\"><strong>Reviewed:</strong> ' + (run.entries_reviewed || 0) + ' entries, ' + (run.cases_reviewed || 0) + ' CBR cases, ' + (run.facts_reviewed || 0) + ' facts</div>' +
+          '<div style=\"margin-bottom:6px;font-family:monospace;font-size:11px;color:var(--text-dim)\"><strong>Report:</strong> ' + escapeHtml(run.report_path || '\\u2014') + '</div>' +
+          '<div style=\"margin-top:8px;white-space:pre-wrap\">' + escapeHtml(run.summary || '(no summary)') + '</div>';
+        box.style.display = 'block';
+      });
+    });
   }
 
   function affectColor(v) {
@@ -1794,6 +1877,9 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
         break;
       case 'skills_data':
         renderSkillsData(data.skills, data.log);
+        break;
+      case 'memory_data':
+        renderMemoryData(data.runs);
         break;
       case 'notification':
         if (data.kind === 'safety') {

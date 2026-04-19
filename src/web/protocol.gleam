@@ -55,6 +55,9 @@ pub type ClientMessage {
   /// Read-only skills audit panel — discover skills, read per-skill
   /// metrics, load recent proposal-log events.
   RequestSkillsData
+  /// Read-only memory tab — list Remembrancer consolidation runs from
+  /// .springdrift/memory/consolidation/. Drives the admin Memory tab.
+  RequestMemoryData
 }
 
 pub type ServerMessage {
@@ -115,6 +118,9 @@ pub type ServerMessage {
   /// Skills audit data — every discovered skill with metadata, usage
   /// counts, last-used timestamp, and proposal-log events.
   SkillsData(skills_json: String, log_json: String)
+  /// Memory tab data — Remembrancer consolidation runs (date, period,
+  /// counts, report path) for read-only audit.
+  MemoryData(runs_json: String)
 }
 
 pub type CycleDataJson {
@@ -170,6 +176,7 @@ pub fn decode_client_message(json_string: String) -> Result(ClientMessage, Nil) 
         decode.success(RequestChatHistoryDay(date:))
       }
       "request_skills_data" -> decode.success(RequestSkillsData)
+      "request_memory_data" -> decode.success(RequestMemoryData)
       _ -> decode.failure(UserMessage(""), "Unknown client message type")
     }
   }
@@ -379,6 +386,8 @@ pub fn encode_server_message(msg: ServerMessage) -> String {
       <> ",\"log\":"
       <> log_json
       <> "}"
+    MemoryData(runs_json:) ->
+      "{\"type\":\"memory_data\",\"runs\":" <> runs_json <> "}"
   }
 }
 

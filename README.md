@@ -685,9 +685,12 @@ see `.springdrift_example/config.toml` for the full surface.
 alternate-screen rendering. `gleam run` or `gleam run -- --gui tui`.
 
 **Web GUI** -- browser-based chat with an admin dashboard (Narrative, Log,
-Scheduler, Cycles tabs). D' Config panel shows gate configurations, normative
-calculus status, and character spec. `gleam run -- --gui web` (default port
-8080). Supports bearer token authentication via `SPRINGDRIFT_WEB_TOKEN`.
+Scheduler, Cycles, Planner, D' Safety, D' Config, Comms, Affect, Skills, and
+Memory tabs). The Memory tab lists Remembrancer consolidation runs with
+counts, decayed-fact / dormant-thread snapshots, and report paths. D' Config
+panel shows gate configurations, normative calculus status, and character
+spec. `gleam run -- --gui web` (default port 8080). Supports bearer token
+authentication via `SPRINGDRIFT_WEB_TOKEN`.
 
 **Autonomous scheduler** -- BEAM-native task scheduling with
 `process.send_after`. Profiles define recurring tasks with delivery to file or

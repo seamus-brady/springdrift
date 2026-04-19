@@ -34,25 +34,23 @@ The weekly-consolidation use case will be handled by Phase F at startup via the 
 
 ---
 
-## 3. Web GUI Memory Health panel — SCOPED DOWN
+## 3. Web GUI Memory Health panel — SHIPPED 2026-04-19
 
-**Revised scope (2026-04-17)**: ship a narrow consolidation-history view. Defer the broader "memory admin" surface to meta-learning Phase 10 (when strategies, skills, goals, and affect warnings all need a home).
+Shipped. New "Memory" admin tab in `src/web/html.gleam` lists Remembrancer
+consolidation runs (timestamp, period, patterns/facts/threads counts,
+decayed/dormant snapshots, report path). Clicking a row reveals the run
+summary in a side box. WebSocket messages
+`RequestMemoryData` / `MemoryData` in `src/web/protocol.gleam`; handler in
+`src/web/gui.gleam` reads `consolidation.load_all` from
+`.springdrift/memory/consolidation/`.
 
-**Scope — ship now**:
-- New admin tab in `src/web/html.gleam` ("Memory") showing:
-  - Consolidation run history (list from `.springdrift/memory/consolidation/`).
-  - Each row: date, period covered, patterns found, facts restored, threads resurrected, decayed/dormant counts, report path.
-  - Clickable report path that opens the markdown in a sidebar.
-- WebSocket messages `RequestConsolidationHistory` / `ConsolidationHistoryData` in `src/web/protocol.gleam`.
-- Read-only — no "Run Consolidation" button. The agent decides when to consolidate; the metacognitive scheduler (Phase F) will trigger it.
+Read-only by design — no "Run Consolidation" button. The agent decides
+when to consolidate; the Metacognitive Scheduler (Phase F) auto-fires it
+on a weekly cadence.
 
-**Out of scope — deferred to meta-learning admin work**:
-- Pattern-proposal queue (requires skills-management).
-- Strategy / learning-goals / affect-warning views (meta-learning Phases A, C, D).
-- Action buttons (conflict with agent-led autonomy — the agent initiates, not the operator).
-- Timeline visualisation (nice-to-have, not essential for audit).
-
-**Estimate**: Small-Medium. About 80–120 lines in `web/html.gleam` + `protocol.gleam` + a small handler in `web/gui.gleam`.
+The broader strategy / learning-goals / affect-warning admin surfaces
+were absorbed into the meta-learning sensorium blocks (Phases A, C, D),
+so no separate admin tabs are needed for them.
 
 ---
 
