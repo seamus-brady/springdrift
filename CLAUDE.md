@@ -21,6 +21,7 @@ Detailed architecture docs live in `docs/architecture/`:
 | [interfaces.md](docs/architecture/interfaces.md) | TUI and Web GUI — tabs, WebSocket protocol, admin dashboard, authentication |
 | [configuration.md](docs/architecture/configuration.md) | Three-layer config — TOML parsing, CLI flags, validation, team templates |
 | [logging.md](docs/architecture/logging.md) | System logs, cycle logs, DAG telemetry, pattern detection |
+| [meta-learning.md](docs/architecture/meta-learning.md) | Strategy Registry, Learning Goals, affect-performance correlation, study-cycle pipeline, metacognitive scheduler — what the agent uses to direct its own development |
 
 The Anthropic adapter supports **prompt caching** (system + tools cached via `cache_control: ephemeral`) and **extended thinking** (for reasoning model, configurable via `thinking_budget_tokens`). Both bypass the anthropic_gleam SDK using raw HTTP for full API feature access.
 

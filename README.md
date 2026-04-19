@@ -662,22 +662,35 @@ operator-auditable lifecycle log.
 See [architecture/agents.md](docs/architecture/agents.md) for delegation
 management, teams, structured output, and error surfacing.
 
-### Meta-Learning
+### The agent reviews its own work
 
-Six phases let the agent direct its own development. All shipped 2026-04-18/19.
+Springdrift schedules its own self-review without you having to prompt it.
+By default the agent runs five recurring jobs:
 
-| Phase | What | Surface |
-|---|---|---|
-| A — Strategy Registry | Named, reusable approaches with tracked success rates. Agent emits `<strategy_used>` in narrative entries; sensorium surfaces top 3 active by Laplace-smoothed success rate. | `src/strategy/`, sensorium `<strategies>` |
-| B — Skills Management | Agent-led skill evolution via Remembrancer's `propose_skills_from_patterns` and the four-layer Promotion Safety Gate (deterministic + rate limit + same-scope cooldown + LLM conflict + D'). | `src/skills/`, sensorium `<skill_procedures>` |
-| C — Learning Goals Store | Self-directed objectives with rationale, acceptance_criteria, optional strategy link, affect_baseline. Three cognitive-loop tools: `create_learning_goal`, `update_learning_goal`, `list_learning_goals`. | `src/learning_goal/`, sensorium `<learning_goals>` |
-| D — Affect-Performance Engine | Pearson r between affect dimensions and outcome success per task domain. Strong negative correlations surface as `<affect_warnings>` and feed the input D' gate as risk context. | `src/affect/correlation.gleam`, sensorium `<affect_warnings>` |
-| E — Study-Cycle Pipeline | Agent extracts candidate insights from a period (`extract_insights`, LLM-driven via XStructor when wired) and promotes accepted ones to facts (`promote_insight`, rate-limited). | `src/tools/remembrancer.gleam` |
-| F — Metacognitive Scheduler | Five recurring jobs auto-fire as `SchedulerInput` cycles: consolidation (weekly), goal review (daily), skill decay (weekly), affect correlation (weekly), strategy review (fortnightly). Plus ad-hoc `<meta_recommendations>` when sensorium signals (low success_rate, high novelty) cross thresholds. **Enabled by default.** | `src/meta_learning/scheduler.gleam` |
+- **Daily** — review any open learning goals it has set itself.
+- **Weekly** — write a consolidation report on the past week's work,
+  re-check whether emotional state is correlating with bad outcomes,
+  and audit the skill instructions it follows (archiving any it has
+  stopped using).
+- **Fortnightly** — review the named approaches it has been using and
+  judge whether each is still earning its keep.
 
-Disable Phase F entirely via `[meta_learning] scheduler_enabled = false`. Tune
-intervals, budget caps, and per-day promotion limits via the same TOML block —
-see `.springdrift_example/config.toml` for the full surface.
+Findings persist in `.springdrift/memory/` and surface in the agent's
+working context next cycle, so it acts on what it has learned rather
+than rediscovering it. The Web GUI's **Memory** tab shows the
+consolidation history for audit.
+
+To turn it off, or change the cadences, edit `.springdrift/config.toml`:
+
+```toml
+[meta_learning]
+scheduler_enabled = false             # Default: true
+consolidation_interval_hours = 168    # Default: 168 (weekly)
+goal_review_interval_hours = 24       # Default: 24 (daily)
+# ... see .springdrift_example/config.toml for the full surface
+```
+
+Architecture detail: [docs/architecture/meta-learning.md](docs/architecture/meta-learning.md).
 
 ### Interfaces
 
