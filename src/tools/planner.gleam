@@ -26,6 +26,7 @@ import narrative/appraiser
 import narrative/librarian.{type LibrarianMessage}
 import planner/config as planner_config
 import planner/features
+import planner/forecaster
 import planner/log as planner_log
 import planner/types.{
   Active, Blocker, EndeavourActive, EndeavourBlocked, Open, Pending, Phase,
@@ -1114,110 +1115,24 @@ fn do_forecast_review(
   }
 }
 
-/// Compute heuristic forecasts for a task (same logic as the Forecaster actor).
+/// Compute heuristic forecasts for a task. Delegates to the Forecaster
+/// actor's implementation so both tool-driven reviews and autonomous
+/// forecaster ticks produce identical scores.
+///
+/// This used to have its own copy of the heuristic with magnitudes on a
+/// 1–9 scale (step_rate: 1/4/7, dep: 1/5+blocked, complexity: 1/5,
+/// risk: 1/3+n*2/9, scope: 1). The D' engine clamps magnitudes to
+/// [0, 3], so all the high values collapsed to 3 while the "default
+/// case" values of 1 stayed at 1. With five features all defaulting to
+/// magnitude 1 and importances [3,3,2,2,1], every task received
+/// D' = (3+3+2+2+1) / ((3+3+2+2+1)*3) = 11/33 = 0.3333… regardless
+/// of actual state. The forecaster actor's implementation uses the
+/// correct 0–3 scale and zero as the "no signal" default, restoring
+/// per-task variation.
 fn compute_task_forecasts(
   task: types.PlannerTask,
 ) -> List(dprime_types.Forecast) {
-  let total_steps = list.length(task.plan_steps)
-  let completed_steps =
-    list.count(task.plan_steps, fn(s) { s.status == types.Complete })
-  let total_cycles = list.length(task.cycle_ids)
-
-  let step_rate_magnitude = case total_steps > 0 && total_cycles > 0 {
-    True -> {
-      let expected_rate =
-        int.to_float(total_cycles) /. int.to_float(total_steps)
-      case expected_rate >. 2.0 && completed_steps < total_steps / 2 {
-        True -> 7
-        False ->
-          case expected_rate >. 1.5 && completed_steps < total_steps {
-            True -> 4
-            False -> 1
-          }
-      }
-    }
-    False -> 1
-  }
-
-  let dep_magnitude = case task.dependencies {
-    [] -> 1
-    deps -> {
-      let blocked =
-        list.count(deps, fn(d) {
-          case
-            list.find(task.plan_steps, fn(s) { int.to_string(s.index) == d.0 })
-          {
-            Ok(step) -> step.status != types.Complete
-            Error(_) -> False
-          }
-        })
-      case blocked > 0 {
-        True -> 5 + blocked
-        False -> 1
-      }
-    }
-  }
-
-  let complexity_magnitude = case task.complexity {
-    "simple" ->
-      case total_cycles > 3 {
-        True -> 5
-        False -> 1
-      }
-    "medium" ->
-      case total_cycles > 6 {
-        True -> 5
-        False -> 1
-      }
-    _ ->
-      case total_cycles > 10 {
-        True -> 5
-        False -> 1
-      }
-  }
-
-  let risk_magnitude = case list.length(task.materialised_risks) {
-    0 -> 1
-    n -> int.min(3 + n * 2, 9)
-  }
-
-  [
-    dprime_types.Forecast(
-      feature_name: "step_completion_rate",
-      magnitude: step_rate_magnitude,
-      rationale: "Steps: "
-        <> int.to_string(completed_steps)
-        <> "/"
-        <> int.to_string(total_steps)
-        <> " in "
-        <> int.to_string(total_cycles)
-        <> " cycles",
-    ),
-    dprime_types.Forecast(
-      feature_name: "dependency_health",
-      magnitude: dep_magnitude,
-      rationale: int.to_string(list.length(task.dependencies))
-        <> " dependencies",
-    ),
-    dprime_types.Forecast(
-      feature_name: "complexity_drift",
-      magnitude: complexity_magnitude,
-      rationale: "Planned: " <> task.complexity,
-    ),
-    dprime_types.Forecast(
-      feature_name: "risk_materialization",
-      magnitude: risk_magnitude,
-      rationale: int.to_string(list.length(task.materialised_risks))
-        <> " risks materialised of "
-        <> int.to_string(list.length(task.risks))
-        <> " predicted",
-    ),
-    dprime_types.Forecast(
-      feature_name: "scope_creep",
-      magnitude: 1,
-      rationale: "No scope drift detected",
-    ),
-  ]
+  forecaster.compute_heuristic_forecasts(task)
 }
 
 // ---------------------------------------------------------------------------

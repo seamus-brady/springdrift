@@ -12,6 +12,43 @@ For implementation history beyond what's user-visible, see
 
 ---
 
+## [0.9.3] — 2026-04-18
+
+Forecaster returns real per-task scores. Every task (through the tool
+path) scored exactly `0.3333333…` in production regardless of state —
+23 of 23 forecast updates in the local planner log carried the same
+constant value.
+
+### Fixed
+
+- **Forecaster no longer returns a constant 0.3333 for every task.**
+  `tools/planner.compute_task_forecasts` had its own copy of the
+  heuristic computation using magnitudes on a 1–9 scale (step_rate:
+  1/4/7, dep: 1/5+blocked, complexity: 1/5, risk: 1/3+n\*2/9,
+  scope_creep: 1) with **a default value of 1** for every feature
+  when no signal was present. The D' engine clamps magnitudes to
+  `[0, 3]`, so the high values collapsed to 3 while all the "default"
+  1s stayed at 1. With five features all at magnitude 1 and
+  importances `[3, 3, 2, 2, 1]`, every task landed at
+  `(3·1 + 3·1 + 2·1 + 2·1 + 1·1) / ((3+3+2+2+1)·3) = 11/33 ≈ 0.3333`.
+  Tasks with stalled progress, blocked dependencies, or materialised
+  risks all scored identically to fresh tasks. The tool path now
+  delegates to the Forecaster actor's heuristic, which uses the
+  correct 0–3 scale and zero as the "no signal" default.
+
+### Why this matters
+
+A forecaster that returns the same score for every task isn't a
+forecaster — it's a constant. The replan-threshold trigger
+(`forecaster_replan_threshold`, default 0.55) never fired, and the
+per-feature breakdown couldn't distinguish healthy tasks from ones
+that needed replanning. Fixing the heuristic restores per-task
+variation: empty tasks score 0.0; stalled tasks score proportionally
+to the number and severity of problem signals; truly broken tasks
+can exceed the replan threshold and produce suggestion events.
+
+---
+
 ## [0.9.0] — 2026-04-19
 
 Strategy Registry bootstrap + curation. The substrate existed in 0.8.x
