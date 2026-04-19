@@ -119,6 +119,9 @@ src/
 │   ├── types.gleam            LearningGoal + GoalEvent (Created/EvidenceAdded/StatusChanged) + GoalSource + GoalStatus
 │   └── log.gleam              Per-day JSONL log + resolve_from_events + active_ranked (priority desc)
 │
+├── meta_learning/             Metacognitive Scheduler — meta-learning Phase F
+│   └── scheduler.gleam        Pure config -> List(ScheduleTaskConfig); 5 recurring jobs (consolidation, goal review, skill decay, affect correlation, strategy review); opt-in via [meta_learning] scheduler_enabled
+│
 ├── affect/correlation.gleam   Affect-Performance Engine — meta-learning Phase D. Pure Pearson math + (snapshot, entry) join + fact key encoding
 │
 ├── comms/                     Communications — email via AgentMail
@@ -452,6 +455,12 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `remembrancer_dormant_thread_days` | — | 7 | Min days idle before a thread is dormant |
 | `remembrancer_min_pattern_cases` | — | 3 | Min cases to form a mined pattern |
 | `strategy_registry_enabled` | — | True | Meta-Learning Phase A. Future config gate; field parses today, no-op without seeded strategies |
+| `meta_scheduler_enabled` | — | False | Phase F. Opt-in. Adds 5 recurring meta-learning jobs to the scheduler at startup |
+| `meta_consolidation_interval_hours` | — | 168 | Phase F. Weekly consolidation cadence |
+| `meta_goal_review_interval_hours` | — | 24 | Phase F. Daily goal-review cadence |
+| `meta_skill_decay_interval_hours` | — | 168 | Phase F. Weekly skill-decay audit cadence |
+| `meta_affect_correlation_interval_hours` | — | 168 | Phase F. Weekly affect-performance correlation cadence |
+| `meta_strategy_review_interval_hours` | — | 336 | Phase F. Fortnightly strategy review cadence |
 
 ## Memory architecture
 

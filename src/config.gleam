@@ -277,6 +277,22 @@ pub type AppConfig {
     /// <strategies> block is omitted, and Archivist XSD emissions of
     /// <strategy_used> are ignored.
     strategy_registry_enabled: Option(Bool),
+    // ── Meta-Learning: Metacognitive Scheduler (Phase F) ──
+    /// Enable the Phase F metacognitive scheduler. When True, recurring
+    /// learning jobs (consolidation, goal review, skill decay check,
+    /// affect correlation, strategy review) are added to the scheduler
+    /// at startup. Default: False (operator opt-in).
+    meta_scheduler_enabled: Option(Bool),
+    /// Hours between weekly consolidation runs. Default: 168 (7 days).
+    meta_consolidation_interval_hours: Option(Int),
+    /// Hours between learning-goal review runs. Default: 24 (daily).
+    meta_goal_review_interval_hours: Option(Int),
+    /// Hours between skill decay check runs. Default: 168 (weekly).
+    meta_skill_decay_interval_hours: Option(Int),
+    /// Hours between affect-performance correlation runs. Default: 168.
+    meta_affect_correlation_interval_hours: Option(Int),
+    /// Hours between strategy review runs. Default: 336 (fortnightly).
+    meta_strategy_review_interval_hours: Option(Int),
   )
 }
 
@@ -473,6 +489,12 @@ pub fn default() -> AppConfig {
     agentlair_endpoint_url: None,
     agentlair_trust_query: None,
     strategy_registry_enabled: None,
+    meta_scheduler_enabled: None,
+    meta_consolidation_interval_hours: None,
+    meta_goal_review_interval_hours: None,
+    meta_skill_decay_interval_hours: None,
+    meta_affect_correlation_interval_hours: None,
+    meta_strategy_review_interval_hours: None,
   )
 }
 
@@ -1119,6 +1141,30 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     strategy_registry_enabled: option.or(
       override_cfg.strategy_registry_enabled,
       base.strategy_registry_enabled,
+    ),
+    meta_scheduler_enabled: option.or(
+      override_cfg.meta_scheduler_enabled,
+      base.meta_scheduler_enabled,
+    ),
+    meta_consolidation_interval_hours: option.or(
+      override_cfg.meta_consolidation_interval_hours,
+      base.meta_consolidation_interval_hours,
+    ),
+    meta_goal_review_interval_hours: option.or(
+      override_cfg.meta_goal_review_interval_hours,
+      base.meta_goal_review_interval_hours,
+    ),
+    meta_skill_decay_interval_hours: option.or(
+      override_cfg.meta_skill_decay_interval_hours,
+      base.meta_skill_decay_interval_hours,
+    ),
+    meta_affect_correlation_interval_hours: option.or(
+      override_cfg.meta_affect_correlation_interval_hours,
+      base.meta_affect_correlation_interval_hours,
+    ),
+    meta_strategy_review_interval_hours: option.or(
+      override_cfg.meta_strategy_review_interval_hours,
+      base.meta_strategy_review_interval_hours,
     ),
   )
 }
@@ -1807,6 +1853,31 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     strategy_registry_enabled: get_toml_bool(table, [
       "meta_learning",
       "strategy_registry_enabled",
+    ]),
+    // ── [meta_learning] — Phase F, Metacognitive Scheduler ──
+    meta_scheduler_enabled: get_toml_bool(table, [
+      "meta_learning",
+      "scheduler_enabled",
+    ]),
+    meta_consolidation_interval_hours: get_toml_int(table, [
+      "meta_learning",
+      "consolidation_interval_hours",
+    ]),
+    meta_goal_review_interval_hours: get_toml_int(table, [
+      "meta_learning",
+      "goal_review_interval_hours",
+    ]),
+    meta_skill_decay_interval_hours: get_toml_int(table, [
+      "meta_learning",
+      "skill_decay_interval_hours",
+    ]),
+    meta_affect_correlation_interval_hours: get_toml_int(table, [
+      "meta_learning",
+      "affect_correlation_interval_hours",
+    ]),
+    meta_strategy_review_interval_hours: get_toml_int(table, [
+      "meta_learning",
+      "strategy_review_interval_hours",
     ]),
   )
 }
