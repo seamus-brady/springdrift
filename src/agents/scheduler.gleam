@@ -270,7 +270,13 @@ fn add_appointment_tool() -> Tool {
 
 fn complete_item_tool() -> Tool {
   tool.new("complete_item")
-  |> tool.with_description("Mark a scheduled item as completed.")
+  |> tool.with_description(
+    "Mark a one-shot scheduled item (Reminder, Todo, Appointment) as "
+    <> "completed. Refuses to act on recurring tasks that still have "
+    <> "fires remaining — calling complete_item on a recurring task "
+    <> "would silently kill its schedule. To terminate a recurring "
+    <> "task intentionally, use cancel_item instead.",
+  )
   |> tool.add_string_param("name", "Item ID to complete", True)
   |> tool.build()
 }

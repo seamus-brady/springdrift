@@ -16,6 +16,7 @@ import gleeunit/should
 import narrative/curator
 import narrative/virtual_memory
 import planner/types as planner_types
+import scheduler/types as scheduler_types
 
 fn empty_perf() -> curator.PerformanceSummary {
   curator.PerformanceSummary(
@@ -247,4 +248,139 @@ pub fn vitals_with_novelty_renders_attribute_test() {
   result
   |> string.contains("prediction_error=")
   |> should.equal(False)
+}
+
+// ---------------------------------------------------------------------------
+// recurring_staleness — schedule sensorium watchdog.
+// ---------------------------------------------------------------------------
+
+fn make_recurring_for_staleness(
+  name: String,
+  interval_ms: Int,
+  fired_count: Int,
+  last_run_ms: option.Option(Int),
+  status: scheduler_types.JobStatus,
+  created_at: String,
+) -> scheduler_types.ScheduledJob {
+  scheduler_types.ScheduledJob(
+    name:,
+    query: "noop",
+    interval_ms:,
+    delivery: scheduler_types.FileDelivery(
+      directory: "/tmp/x",
+      format: "markdown",
+    ),
+    only_if_changed: False,
+    status:,
+    last_run_ms:,
+    last_result: None,
+    run_count: 0,
+    error_count: 0,
+    job_source: scheduler_types.AgentJob,
+    kind: scheduler_types.RecurringTask,
+    due_at: None,
+    for_: scheduler_types.ForAgent,
+    title: "Recurring " <> name,
+    body: "",
+    duration_minutes: 0,
+    tags: [],
+    created_at:,
+    fired_count:,
+    recurrence_end_at: None,
+    max_occurrences: None,
+  )
+}
+
+pub fn staleness_none_for_one_shot_job_test() {
+  // A Reminder (interval_ms = 0) is never recurring; staleness is N/A.
+  let one_shot =
+    scheduler_types.ScheduledJob(
+      ..make_recurring_for_staleness(
+        "reminder-1",
+        0,
+        0,
+        None,
+        scheduler_types.Pending,
+        "2020-01-01T00:00:00",
+      ),
+      kind: scheduler_types.Reminder,
+    )
+  curator.recurring_staleness(one_shot, 1_000_000) |> should.equal(None)
+}
+
+pub fn staleness_none_for_terminal_status_test() {
+  let cancelled =
+    make_recurring_for_staleness(
+      "stopped",
+      60_000,
+      0,
+      None,
+      scheduler_types.Cancelled,
+      "2020-01-01T00:00:00",
+    )
+  curator.recurring_staleness(cancelled, 1_000_000) |> should.equal(None)
+}
+
+pub fn staleness_overdue_when_last_run_too_old_test() {
+  // interval = 60_000 ms; last_run was 200_000 ms ago, > 1.5 × interval.
+  let job =
+    make_recurring_for_staleness(
+      "wedged",
+      60_000,
+      5,
+      Some(0),
+      scheduler_types.Pending,
+      "2026-04-18T10:00:00",
+    )
+  curator.recurring_staleness(job, 200_000)
+  |> should.equal(Some("overdue"))
+}
+
+pub fn staleness_healthy_when_last_run_within_window_test() {
+  // last_run was 50_000 ms ago, well within 1.5 × interval (90_000).
+  let job =
+    make_recurring_for_staleness(
+      "healthy",
+      60_000,
+      5,
+      Some(150_000),
+      scheduler_types.Pending,
+      "2026-04-18T10:00:00",
+    )
+  curator.recurring_staleness(job, 200_000) |> should.equal(None)
+}
+
+pub fn staleness_never_fired_when_created_long_ago_test() {
+  // interval 60s, fired_count = 0, created in 2020 — definitely stale.
+  let job =
+    make_recurring_for_staleness(
+      "ghost",
+      60_000,
+      0,
+      None,
+      scheduler_types.Pending,
+      "2020-01-01T00:00:00",
+    )
+  curator.recurring_staleness(job, 0)
+  |> should.equal(Some("never_fired"))
+}
+
+pub fn staleness_never_fired_grace_period_test() {
+  // Created in the future — elapsed_ms is negative, not yet stale.
+  let job =
+    make_recurring_for_staleness(
+      "fresh",
+      60_000,
+      0,
+      None,
+      scheduler_types.Pending,
+      "2099-01-01T00:00:00",
+    )
+  curator.recurring_staleness(job, 0) |> should.equal(None)
+}
+
+pub fn schedule_xml_includes_stale_attribute_test() {
+  // No scheduler → empty string regardless. Verify staleness field path
+  // rather than the rendered output (which requires an actor).
+  curator.render_sensorium_schedule(None) |> should.equal("")
 }

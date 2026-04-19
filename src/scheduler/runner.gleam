@@ -59,8 +59,35 @@ pub fn start(
     // Build job state: start with ALL persisted jobs, then overlay config tasks
     let base_jobs =
       list.fold(persisted_jobs, dict.new(), fn(acc, job) {
-        dict.insert(acc, job.name, job)
+        // Recovery: a recurring job that was marked Completed
+        // (typically by an accidental complete_item call) but still has
+        // remaining fires gets re-armed as Pending. Without this, a
+        // single misuse silently kills the schedule forever — restart
+        // alone won't recover.
+        let recovered = case
+          job.status,
+          job.interval_ms > 0,
+          remaining_fires_left(job)
+        {
+          Completed, True, True -> {
+            slog.warn(
+              "scheduler",
+              "start",
+              "Recovering recurring job '"
+                <> job.name
+                <> "' from Completed status (fired_count="
+                <> int.to_string(job.fired_count)
+                <> "; remaining fires available). Was likely killed by "
+                <> "an accidental complete_item.",
+              None,
+            )
+            ScheduledJob(..job, status: Pending)
+          }
+          _, _, _ -> job
+        }
+        dict.insert(acc, recovered.name, recovered)
       })
+      |> apply_auto_purge()
 
     // Overlay config tasks (update query/interval/delivery if config changed)
     let jobs =
@@ -726,12 +753,45 @@ fn scheduler_loop(
           loop(jobs)
         }
         Ok(job) -> {
-          let completed_job = ScheduledJob(..job, status: Completed)
-          let updated_jobs = dict.insert(jobs, name, completed_job)
-          schedule_log.append(schedule_dir, completed_job, types.Complete)
-          process.send(reply_to, Ok(Nil))
-          slog.info("scheduler", "loop", "Completed job '" <> name <> "'", None)
-          loop(updated_jobs)
+          // Refuse to terminate recurring jobs that still have fires
+          // remaining. CompleteJob historically marked any job Completed,
+          // which silently killed recurring schedules when the agent
+          // tried to acknowledge a single fire. To terminate a recurring
+          // schedule deliberately, use cancel_item.
+          let has_remaining_fires =
+            job.interval_ms > 0 && remaining_fires_left(job)
+          case has_remaining_fires {
+            True -> {
+              let msg =
+                "Refusing to mark recurring job '"
+                <> name
+                <> "' as completed: it has remaining scheduled fires "
+                <> "(fired_count="
+                <> int.to_string(job.fired_count)
+                <> case job.max_occurrences {
+                  Some(max) -> ", max=" <> int.to_string(max)
+                  None -> ", unlimited"
+                }
+                <> "). Use cancel_item to terminate the recurrence "
+                <> "intentionally, or wait for it to exhaust on its own."
+              slog.warn("scheduler", "loop", msg, None)
+              process.send(reply_to, Error(msg))
+              loop(jobs)
+            }
+            False -> {
+              let completed_job = ScheduledJob(..job, status: Completed)
+              let updated_jobs = dict.insert(jobs, name, completed_job)
+              schedule_log.append(schedule_dir, completed_job, types.Complete)
+              process.send(reply_to, Ok(Nil))
+              slog.info(
+                "scheduler",
+                "loop",
+                "Completed job '" <> name <> "'",
+                None,
+              )
+              loop(updated_jobs)
+            }
+          }
         }
       }
     }
@@ -848,6 +908,68 @@ fn int_to_string(n: Int) -> String {
 /// `src/meta_learning/scheduler.gleam`).
 fn is_meta_learning_job(name: String) -> Bool {
   string.starts_with(name, "meta_learning_")
+}
+
+/// True when this recurring job still has fire budget left (max not
+/// reached, end-date not passed). Used by the startup recovery to
+/// detect Completed-but-shouldn't-be jobs, and by the CompleteJob
+/// handler to refuse termination of live recurrences.
+fn remaining_fires_left(job: ScheduledJob) -> Bool {
+  case job.max_occurrences {
+    Some(max) -> job.fired_count < max
+    None -> True
+  }
+  && {
+    case job.recurrence_end_at {
+      Some(end_at) -> ms_until_datetime(end_at) > 0
+      None -> True
+    }
+  }
+}
+
+/// Default retention window for terminal one-shot jobs. Configurable
+/// via the scheduler runner's start() arguments in a future hook;
+/// today the default applies uniformly.
+const purge_retention_ms = 2_592_000_000
+
+// 30 days in ms
+
+/// Drop one-shot Cancelled or Completed jobs older than the retention
+/// window. Recurring jobs are NEVER purged — their history is the
+/// schedule. Returns the trimmed dict.
+fn apply_auto_purge(
+  jobs: Dict(String, ScheduledJob),
+) -> Dict(String, ScheduledJob) {
+  let now = monotonic_now_ms()
+  let cutoff = now - purge_retention_ms
+  let #(kept, purged) =
+    dict.fold(jobs, #(dict.new(), 0), fn(acc, name, job) {
+      let #(keep, count) = acc
+      let purgeable = case job.status, job.interval_ms > 0 {
+        Cancelled, False -> True
+        Completed, False -> True
+        _, _ -> False
+      }
+      let last_active = case job.last_run_ms {
+        Some(ts) -> ts
+        None -> now
+      }
+      case purgeable && last_active < cutoff {
+        True -> #(keep, count + 1)
+        False -> #(dict.insert(keep, name, job), count)
+      }
+    })
+  case purged > 0 {
+    True ->
+      slog.info(
+        "scheduler",
+        "start",
+        "Auto-purged " <> int.to_string(purged) <> " stale terminal job(s)",
+        None,
+      )
+    False -> Nil
+  }
+  kept
 }
 
 fn build_webhook_payload(

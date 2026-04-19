@@ -46,6 +46,50 @@ that needed replanning. Fixing the heuristic restores per-task
 variation: empty tasks score 0.0; stalled tasks score proportionally
 to the number and severity of problem signals; truly broken tasks
 can exceed the replan threshold and produce suggestion events.
+---
+
+## [0.9.4] — 2026-04-20
+
+Scheduler resilience for recurring jobs. A live-fire incident showed
+that a recurring job could be silently and permanently killed by a
+single misuse of `complete_item`, and that the schedule accumulated
+dead one-shots indefinitely with no auto-cleanup. This release closes
+both gaps and adds a sensorium watchdog so future stalls are visible
+before they decay into long silences.
+
+### Fixed
+
+- **`CompleteJob` no longer kills recurring schedules.** The handler
+  now refuses to mark recurring jobs (`interval_ms > 0`) Completed
+  while they have remaining fires — the agent gets a descriptive
+  error pointing at `cancel_item`. Previously a single
+  `complete_item` call against a recurring task wrote a `Complete`
+  op to the schedule log and silently terminated the recurrence.
+- **Startup recovery for accidentally-killed recurrences.** On
+  startup, any recurring job persisted as `Completed` but still
+  carrying fire budget (`fired_count < max_occurrences`,
+  `recurrence_end_at` not passed) is automatically re-armed to
+  `Pending` and a warning logged. Naturally-exhausted recurrences
+  stay Completed.
+- **Auto-purge of stale one-shot terminal jobs.** At startup, one-shot
+  Completed/Cancelled jobs older than 30 days are dropped from the
+  in-memory state. Recurring jobs are never purged regardless of age.
+
+### Added
+
+- **Schedule sensorium watchdog.** The `<schedule>` block in the
+  ambient sensorium XML now flags recurring jobs that have stopped
+  firing (`stale="overdue"` when `last_run_ms` is more than 1.5 ×
+  interval in the past, `stale="never_fired"` when a job past its
+  first interval has `fired_count = 0`). Also surfaces an aggregate
+  `stale="N"` count on the `<schedule>` element.
+
+### Changed
+
+- **`complete_item` tool description rewritten.** Now explicitly
+  states the tool is for one-shot items (Reminder/Todo/Appointment)
+  and refuses recurring tasks, redirecting the agent to `cancel_item`
+  for intentional recurrence termination.
 
 ---
 

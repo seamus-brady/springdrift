@@ -1215,12 +1215,19 @@ pub fn render_sensorium_schedule(
   case jobs {
     [] -> ""
     _ -> {
+      let now_ms = monotonic_now_ms()
       let pending_count =
         list.count(jobs, fn(j) { status_is_pending(j.status) })
       let overdue_count = list.count(jobs, fn(j) { is_overdue(j) })
+      let stale_count =
+        list.count(jobs, fn(j) { recurring_staleness(j, now_ms) != None })
       let job_lines =
         jobs
         |> list.map(fn(j) {
+          let stale_attr = case recurring_staleness(j, now_ms) {
+            Some(reason) -> " stale=\"" <> reason <> "\""
+            None -> ""
+          }
           "    <job title=\""
           <> j.title
           <> "\" kind=\""
@@ -1232,16 +1239,86 @@ pub fn render_sensorium_schedule(
             Some(due) -> " due=\"" <> due <> "\""
             None -> ""
           }
+          <> stale_attr
           <> "/>"
         })
         |> string.join("\n")
+      let stale_attr_top = case stale_count {
+        0 -> ""
+        n -> " stale=\"" <> int.to_string(n) <> "\""
+      }
       "  <schedule pending=\""
       <> int.to_string(pending_count)
       <> "\" overdue=\""
       <> int.to_string(overdue_count)
-      <> "\">\n"
+      <> "\""
+      <> stale_attr_top
+      <> ">\n"
       <> job_lines
       <> "\n  </schedule>"
+    }
+  }
+}
+
+/// Detects a recurring job that has stopped firing. Returns:
+/// - `Some("never_fired")` — recurring job, fire budget remaining,
+///   created more than one interval ago, but `fired_count == 0`
+/// - `Some("overdue")` — recurring job, fire budget remaining,
+///   `last_run_ms` more than 1.5 × interval in the past
+/// - `None` — healthy, terminal, or non-recurring
+///
+/// Used by the schedule sensorium to surface accidentally-killed or
+/// wedged recurrences so the agent can investigate before they decay
+/// into long silences. Public so tests can drive the predicate without
+/// spinning up a scheduler actor.
+pub fn recurring_staleness(
+  job: scheduler_types.ScheduledJob,
+  now_ms: Int,
+) -> Option(String) {
+  let recurring = job.interval_ms > 0
+  let live = case job.status {
+    scheduler_types.Pending -> True
+    scheduler_types.Running -> True
+    _ -> False
+  }
+  let has_budget = remaining_fires_left(job)
+  case recurring && live && has_budget {
+    False -> None
+    True -> {
+      case job.last_run_ms {
+        None -> {
+          // Never fired. Compare wall clock created_at to interval.
+          let elapsed_ms = 0 - ms_until_datetime(job.created_at)
+          case elapsed_ms > job.interval_ms {
+            True -> Some("never_fired")
+            False -> None
+          }
+        }
+        Some(last) -> {
+          let since_last = now_ms - last
+          case since_last > job.interval_ms * 3 / 2 {
+            True -> Some("overdue")
+            False -> None
+          }
+        }
+      }
+    }
+  }
+}
+
+/// Mirror of `scheduler/runner.remaining_fires_left/1`. Duplicated here
+/// because the curator computes staleness from the read-only ScheduledJob
+/// snapshot returned by `GetJobs` and shouldn't take a runner dependency
+/// for one predicate.
+fn remaining_fires_left(job: scheduler_types.ScheduledJob) -> Bool {
+  case job.max_occurrences {
+    Some(max) -> job.fired_count < max
+    None -> True
+  }
+  && {
+    case job.recurrence_end_at {
+      Some(end_at) -> ms_until_datetime(end_at) > 0
+      None -> True
     }
   }
 }
