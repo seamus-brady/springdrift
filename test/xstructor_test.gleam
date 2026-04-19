@@ -123,6 +123,41 @@ pub fn extract_list_single_test() {
   |> should.equal(["only"])
 }
 
+/// Regression: when an XSD declares maxOccurs="unbounded" but the LLM
+/// emits exactly one repeated element, the FFI's xmerl walker generates
+/// the bare prefix instead of `prefix.0` (it can only see how many of
+/// the element appear in the XML, not the schema's intent). Without the
+/// fallback, extract_list returned `[]` and the planner agent's
+/// auto-create hook produced "Planned task" rows with no steps.
+pub fn extract_list_falls_back_to_bare_prefix_test() {
+  let elements = dict.from_list([#("plan.steps.step", "Only one step")])
+  xstructor.extract_list(elements, "plan.steps.step")
+  |> should.equal(["Only one step"])
+}
+
+pub fn extract_list_indexed_takes_precedence_over_bare_test() {
+  // If both indexed and bare keys are present (would never happen with
+  // the FFI in practice, but a defensive test), indexed wins.
+  let elements =
+    dict.from_list([
+      #("plan.steps.step", "should-be-ignored"),
+      #("plan.steps.step.0", "first"),
+      #("plan.steps.step.1", "second"),
+    ])
+  xstructor.extract_list(elements, "plan.steps.step")
+  |> should.equal(["first", "second"])
+}
+
+/// End-to-end: a single-element repeated XML element comes back as a
+/// one-element list. Locks the FFI + extract_list contract together
+/// against future regressions.
+pub fn extract_list_single_xml_element_round_trip_test() {
+  let xml = "<plan><steps><step>Just one</step></steps></plan>"
+  let assert Ok(elements) = xstructor.extract(xml)
+  xstructor.extract_list(elements, "plan.steps.step")
+  |> should.equal(["Just one"])
+}
+
 // ---------------------------------------------------------------------------
 // generate with mock provider
 // ---------------------------------------------------------------------------
