@@ -85,6 +85,12 @@ fn do_halt(code: Int) -> Nil
 @external(erlang, "springdrift_ffi", "get_date")
 fn get_date_ffi() -> String
 
+/// Read the package version from the OTP application metadata that
+/// Gleam derives from gleam.toml. Single source of truth — bumping
+/// gleam.toml updates the agent_version default automatically.
+@external(erlang, "springdrift_ffi", "package_version")
+fn package_version() -> String
+
 fn default_skill_dirs() -> List(String) {
   paths.default_skills_dirs()
 }
@@ -347,7 +353,7 @@ fn run(cfg: AppConfig) -> Nil {
       |> skills.to_system_prompt_xml
   }
   let agent_name = option.unwrap(cfg.agent_name, "Springdrift")
-  let agent_version = option.unwrap(cfg.agent_version, "")
+  let agent_version = option.unwrap(cfg.agent_version, package_version())
   let max_tokens = option.unwrap(cfg.max_tokens, 2048)
   let write_anywhere = option.unwrap(cfg.write_anywhere, False)
   case write_anywhere {

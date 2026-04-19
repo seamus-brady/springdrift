@@ -42,7 +42,10 @@ write_anywhere = false
 
 [agent]
 name = "Nemo"                # Substituted into {{agent_name}} in identity/persona.md
-version = "Springdrift Mk-3"
+# version = "..."            # Optional override. Defaults to the package
+                             # version read from gleam.toml at startup
+                             # (currently 0.8.0). Set this to give your
+                             # instance a custom version label.
 
 # ── Provider-specific models ─────────────────────────────────────────────────
 # Only the active provider's section is used at runtime.
