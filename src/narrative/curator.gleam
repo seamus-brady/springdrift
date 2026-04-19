@@ -1138,12 +1138,15 @@ fn build_sensorium(
   let goals_section = render_sensorium_learning_goals()
   let affect_warnings_section = render_sensorium_affect_warnings(state)
   let skill_procedures_section = render_sensorium_skill_procedures(state.skills)
+  let meta_recommendations_section =
+    render_sensorium_meta_recommendations(perf, novelty)
 
   let sections =
     [
       clock, situation, schedule, vitals, sandbox_section, delegations, events,
       tasks_section, strategies_section, goals_section, affect_warnings_section,
-      skill_procedures_section, knowledge_section, memory_section,
+      skill_procedures_section, meta_recommendations_section, knowledge_section,
+      memory_section,
     ]
     |> list.filter(fn(s) { s != "" })
     |> string.join("\n")
@@ -1713,6 +1716,38 @@ pub fn render_sensorium_strategies() -> String {
       <> rows
       <> "\n  </strategies>"
     }
+  }
+}
+
+/// Render the <meta_recommendations> element — Phase F follow-up.
+/// Surfaces ad-hoc meta-learning suggestions when sensorium signals
+/// (low success_rate, high novelty) cross thresholds. The agent decides
+/// whether to act. Omitted when no signal warrants a recommendation.
+pub fn render_sensorium_meta_recommendations(
+  perf: PerformanceSummary,
+  novelty: Float,
+) -> String {
+  let low_success = perf.success_rate <. 0.5 && perf.success_rate >. 0.0
+  let high_novelty = novelty >. 0.7
+  let recs = case low_success, high_novelty {
+    False, False -> []
+    True, False -> [
+      "<recommend trigger=\"low_success_rate\" tool=\"analyze_affect_performance\" reason=\"recent success_rate below 0.5 — check affect-performance correlations\"/>",
+    ]
+    False, True -> [
+      "<recommend trigger=\"high_novelty\" tool=\"consolidate_memory\" reason=\"novelty above 0.7 — recent inputs diverge from history; consider strategy review\"/>",
+    ]
+    True, True -> [
+      "<recommend trigger=\"low_success_rate\" tool=\"analyze_affect_performance\" reason=\"success_rate below 0.5\"/>",
+      "<recommend trigger=\"high_novelty\" tool=\"consolidate_memory\" reason=\"novelty above 0.7\"/>",
+    ]
+  }
+  case recs {
+    [] -> ""
+    rs ->
+      "  <meta_recommendations>\n    "
+      <> string.join(rs, "\n    ")
+      <> "\n  </meta_recommendations>"
   }
 }
 
