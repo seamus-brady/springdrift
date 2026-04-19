@@ -337,6 +337,18 @@ summary_schedule = "weekly"
 # strategy_registry_enabled = true   # Default: true. Field parses today;
                                      # config-gate enforcement is a follow-up.
 
+# Phase F - Metacognitive Scheduler. When enabled, recurring meta-learning
+# jobs (consolidation, goal review, skill decay, affect correlation,
+# strategy review) are added to the scheduler at startup. Each job fires
+# as a SchedulerInput cycle; the cognitive loop receives a natural-language
+# instruction telling it which Remembrancer tool to invoke.
+# scheduler_enabled = false                     # Default: false (operator opt-in)
+# consolidation_interval_hours = 168            # Default: 168 (weekly)
+# goal_review_interval_hours = 24               # Default: 24 (daily)
+# skill_decay_interval_hours = 168              # Default: 168 (weekly)
+# affect_correlation_interval_hours = 168       # Default: 168 (weekly)
+# strategy_review_interval_hours = 336          # Default: 336 (fortnightly)
+
 # ── AgentLair (behavioral trust network) ────────────────────────────────────
 
 [agentlair]

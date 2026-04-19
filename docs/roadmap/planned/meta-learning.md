@@ -1,6 +1,6 @@
 # Meta-Learning System — Design Specification
 
-**Status**: Partially shipped (A, B, D 2026-04-18; C, E 2026-04-19); Phase F planned
+**Status**: All six phases shipped (A, B, D 2026-04-18; C, E, F 2026-04-19). Small follow-ups remain per phase
 **Date**: 2026-04-17 (last revised 2026-04-18)
 **Author**: Drafted by Curragh (Springdrift instance a62fa947), revised for agent-led operation
 **Related**: `docs/roadmap/implemented/skills-management.md` (Phase B, the skills layer)
@@ -277,7 +277,12 @@ mechanism (van de Ven et al., 2024). D' addresses hallucination risk.
 **Dependency**: Phase A (strategies) + Phase B (skills) for full
 coverage. A narrow version (CBR + facts only) could ship earlier.
 
-### 4.6 Phase F — Metacognitive Scheduler
+### 4.6 Phase F — Metacognitive Scheduler — SHIPPED 2026-04-19
+
+**Status**: Substrate shipped. Operator-opt-in (defaults to disabled).
+Performance-signal-triggered ad-hoc jobs (low success_rate, high novelty)
+remain a follow-up; budget cap and rate limit are inherited from the
+existing scheduler runner.
 
 **Purpose**: Trigger learning activities based on intervals and performance
 signals. The capstone.

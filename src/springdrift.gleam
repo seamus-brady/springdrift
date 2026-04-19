@@ -51,6 +51,7 @@ import llm/adapters/vertex as vertex_adapter
 import llm/provider.{type Provider}
 import llm/retry
 import llm/types as llm_types
+import meta_learning/scheduler as meta_scheduler
 import narrative/appraiser
 import narrative/curator
 import narrative/housekeeper
@@ -935,9 +936,19 @@ fn run(cfg: AppConfig) -> Nil {
     option.unwrap(cfg.max_autonomous_cycles_per_hour, 20)
   let token_budget_per_hour =
     option.unwrap(cfg.autonomous_token_budget_per_hour, 500_000)
+  let meta_tasks = meta_scheduler.build_tasks(cfg)
+  case meta_tasks {
+    [] -> Nil
+    _ ->
+      io.println(
+        "Scheduler: meta-learning Phase F enabled, registering "
+        <> int.to_string(list.length(meta_tasks))
+        <> " recurring jobs",
+      )
+  }
   let runner_result =
     scheduler_runner.start(
-      [],
+      meta_tasks,
       cognitive_subj,
       paths.schedule_dir(),
       stuck_timeout_ms,
