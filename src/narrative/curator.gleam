@@ -1804,6 +1804,8 @@ pub fn render_sensorium_skill_procedures(skills: List(SkillMeta)) -> String {
     #("self_diagnostic", "self-diagnostic"),
     #("appraisal", "task-appraisal"),
     #("affect_check", "affect-monitoring"),
+    #("set_or_review_learning_goal", "meta-learning"),
+    #("strategy_or_insight_promotion", "meta-learning"),
   ]
   let loaded_ids = list.map(skills, fn(s) { s.id })
   let active = list.filter(procedures, fn(p) { list.contains(loaded_ids, p.1) })

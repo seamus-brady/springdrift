@@ -662,6 +662,23 @@ operator-auditable lifecycle log.
 See [architecture/agents.md](docs/architecture/agents.md) for delegation
 management, teams, structured output, and error surfacing.
 
+### Meta-Learning
+
+Six phases let the agent direct its own development. All shipped 2026-04-18/19.
+
+| Phase | What | Surface |
+|---|---|---|
+| A — Strategy Registry | Named, reusable approaches with tracked success rates. Agent emits `<strategy_used>` in narrative entries; sensorium surfaces top 3 active by Laplace-smoothed success rate. | `src/strategy/`, sensorium `<strategies>` |
+| B — Skills Management | Agent-led skill evolution via Remembrancer's `propose_skills_from_patterns` and the four-layer Promotion Safety Gate (deterministic + rate limit + same-scope cooldown + LLM conflict + D'). | `src/skills/`, sensorium `<skill_procedures>` |
+| C — Learning Goals Store | Self-directed objectives with rationale, acceptance_criteria, optional strategy link, affect_baseline. Three cognitive-loop tools: `create_learning_goal`, `update_learning_goal`, `list_learning_goals`. | `src/learning_goal/`, sensorium `<learning_goals>` |
+| D — Affect-Performance Engine | Pearson r between affect dimensions and outcome success per task domain. Strong negative correlations surface as `<affect_warnings>` and feed the input D' gate as risk context. | `src/affect/correlation.gleam`, sensorium `<affect_warnings>` |
+| E — Study-Cycle Pipeline | Agent extracts candidate insights from a period (`extract_insights`, LLM-driven via XStructor when wired) and promotes accepted ones to facts (`promote_insight`, rate-limited). | `src/tools/remembrancer.gleam` |
+| F — Metacognitive Scheduler | Five recurring jobs auto-fire as `SchedulerInput` cycles: consolidation (weekly), goal review (daily), skill decay (weekly), affect correlation (weekly), strategy review (fortnightly). Plus ad-hoc `<meta_recommendations>` when sensorium signals (low success_rate, high novelty) cross thresholds. **Enabled by default.** | `src/meta_learning/scheduler.gleam` |
+
+Disable Phase F entirely via `[meta_learning] scheduler_enabled = false`. Tune
+intervals, budget caps, and per-day promotion limits via the same TOML block —
+see `.springdrift_example/config.toml` for the full surface.
+
 ### Interfaces
 
 **Terminal TUI** -- three-tab interface (Chat, Log, Narrative) with

@@ -2160,3 +2160,105 @@ web research.
 | 50KB truncation limit | Balances content preservation with disk usage. `truncated: True` flag in metadata lets agents know content was capped |
 | Daily rotation for facts | Consistency with narrative/artifact stores. Legacy `facts.jsonl` auto-migrated at startup |
 | Per-agent context windowing | Researcher's multi-turn web research can generate many messages. 30-message window prevents context overflow without affecting other agents |
+
+---
+
+### Meta-Learning System — Phases A–F (April 18–19, 2026)
+
+Six phases shipping over two days, plus follow-ups the same week. Source spec:
+`docs/roadmap/planned/meta-learning.md` (the spec stays in `planned/` while
+phase-by-phase entries flip to SHIPPED — the file documents what each phase
+means).
+
+#### Substrate (PRs #57–63)
+
+**Phase A — Strategy Registry.** `src/strategy/types.gleam` +
+`src/strategy/log.gleam`. Append-only `StrategyEvent` log
+(Created/Used/Outcome/Archived); `Strategy` derived by replay.
+`NarrativeEntry` gains `strategy_used: Option(String)` (lenient decoder for
+backward compat with pre-Phase-A JSONL); `CbrCase` gains `strategy_id`. The
+Archivist's curation prompt teaches the LLM to emit only existing strategy
+ids — new strategies enter via the Remembrancer's mining tool, not via the
+Curator. Sensorium `<strategies>` block surfaces top 3 active by
+Laplace-smoothed `(success+1)/(total+2)` rate.
+
+**Phase B — Skills Management.** Already shipped (PRs #45–52); referenced
+here as the substrate Phase F leans on for auto skill-decay audits.
+
+**Phase C — Learning Goals Store.** `src/learning_goal/`. Same
+event-replay shape as A. Three cognitive-loop tools
+(`create_learning_goal`, `update_learning_goal`, `list_learning_goals`)
+wired through `cognitive.gleam` + `cognitive/agents.gleam` partition.
+Sensorium `<learning_goals active="N" achieved="N">` block lists top 3
+by priority. `affect_baseline` snapshot captured from the latest affect
+reading at creation time (Phase C follow-up).
+
+**Phase D — Affect-Performance Engine.** `src/affect/correlation.gleam`.
+Pure Pearson r over (snapshot, narrative entry) pairs joined by cycle_id,
+grouped by domain. Returns `(r, inconclusive)` so callers can distinguish
+no-signal from no-relationship (zero variance). Significant correlations
+(|r| ≥ 0.4) persist as facts under `affect_corr_<dimension>_<domain>`;
+sensorium `<affect_warnings>` surfaces strong negatives. Phase D follow-up
+(D1) wires those same warnings into the input D' gate context so the
+scorer can weight risk against known maladaptive patterns.
+
+**Phase E — Study-Cycle Pipeline.** Two Remembrancer tools:
+`extract_insights` returns scoped narrative + CBR material (LLM-driven
+via XStructor + `insights_xsd` when a provider is wired in, falls back
+to raw material otherwise). `promote_insight` writes one insight to
+facts as Persistent with provenance derivation `Synthesis`,
+rate-limited (default 3/day, configurable via
+`[meta_learning] max_promotions_per_day`).
+
+**Phase F — Metacognitive Scheduler.** `src/meta_learning/scheduler.gleam`.
+Pure module that turns the `[meta_learning]` config block into a list of
+`ScheduleTaskConfig`s. Five recurring jobs added at startup
+(consolidation, goal_review, skill_decay, affect_correlation,
+strategy_review). Each job's `query` is a natural-language instruction
+the cognitive loop receives as `SchedulerInput`; the loop delegates to
+the appropriate Remembrancer tool. **Default: enabled.** Operator opts
+out via `scheduler_enabled = false`. Ad-hoc `<meta_recommendations>`
+sensorium block fires when `success_rate < 0.5` or `novelty > 0.7`.
+
+#### Follow-ups (PRs #64–65)
+
+- **A1 propose_strategies_from_patterns.** Reuses the existing
+  `skills/pattern.gleam` cluster detector; emits `StrategyCreated`
+  events directly, rate-limited 3/day, skips clusters whose derived
+  id (`strat-<domain>-<keyword>`) already exists.
+- **A3 strict honoring of `strategy_registry_enabled`.** Threaded
+  through `CognitiveConfig → RuntimeConfig → ArchivistContext`. The
+  Archivist drops `strategy_used` emissions when False.
+- **D1 D' input-gate context.** New `affect_warnings_context()` helper
+  in `cognitive/safety.gleam` reads `affect_corr_*` facts and
+  prepends them to the input gate's context string.
+- **E1 LLM-driven extract_insights.** When `gate_provider` is wired,
+  runs XStructor pass over `schemas.insights_xsd`. Falls back silently
+  when no provider, when schema compile fails, or when LLM call errors.
+- **F1 ad-hoc meta-recommendations.** Sensorium nudge only — no
+  scheduler injection. Avoids the complexity of cross-process job
+  injection from the post-cycle hook.
+- **F2 max_reflection_budget_pct config field** (default 25). Parsed
+  + surfaced; absolute ceiling already enforced by existing
+  `max_autonomous_cycles_per_hour` cap.
+- **F3 max_promotions_per_day** moved from Phase E hardcoded constant
+  into `RemembrancerContext`, sourced from `[meta_learning]
+  max_promotions_per_day`. Default 3.
+
+#### Defaults
+
+`meta_scheduler_enabled` defaults to True. Why build the substrate
+otherwise? Operators who want behavioural conservatism can opt out;
+new installs get the active loop.
+
+#### Design decisions
+
+| Decision | Rationale |
+|---|---|
+| Append-only event logs throughout | Same shape as facts/cbr/narrative/skills. Replay derives current state — no in-place mutation. Lets every change be auditable and revertable. |
+| Resolver silently drops unknown ids | Strategy/goal events for non-existent ids cost nothing to log but would crash if treated as required references. Drop-and-continue keeps the log self-healing. |
+| Lenient decoders on NarrativeEntry/CbrCase | The new `strategy_used`/`strategy_id` fields default to None when absent so pre-Phase-A JSONL still loads. |
+| Plain-text scheduler queries | Each Phase F job's instruction is natural language. The cognitive loop receives it as `SchedulerInput` and decides which Remembrancer tool to invoke. No special wiring; the LLM is the orchestrator. |
+| Sensorium nudges over hard auto-fire | F1's `<meta_recommendations>` is a signal, not a command. The agent decides whether to run `analyze_affect_performance` when success_rate is low. Preserves agency. |
+| LLM-free Phase D math | Pearson + variance check is pure Gleam. No LLM call means no cost, no rate limit, no cache concerns — Phase D can fire on every consolidation cycle without budget impact. |
+| One PR per phase + bundled follow-ups | Phase substrates were each one PR (A→#57, C→#61, D→#58, E→#62, F→#63) so each could be reviewed alone. Follow-ups bundled into two further PRs (#64 = A/C/D/E polish + defaults flip; #65 = Phase F polish) since they were small per-item. |
