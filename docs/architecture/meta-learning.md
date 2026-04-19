@@ -57,23 +57,85 @@ src/tools/learning_goals.gleam   Cognitive-loop goal CRUD
 
 ### Strategy Registry (`src/strategy/`)
 
-Append-only event log of `StrategyEvent` records (Created, Used,
-Outcome, Archived). The current `Strategy` list is derived by replay
-through `strategy/log.resolve_from_events`. No in-place mutation —
-status changes are new events.
+**Conceptually.** A *strategy* is a named, reusable approach with
+tracked outcomes. Example: `verify-with-canary-before-trusting`. The
+id is the stable label; the description is a short account of when
+and how to use it; the registry tracks how often the agent used it
+and how often it worked. Strategies are separate from:
 
-The Archivist's curation prompt teaches the LLM to emit a
-`<strategy_used>` element on the narrative entry when the cycle
-followed a recognisable named approach. New strategies are NOT created
-by the Archivist; they enter the registry through:
+- *Facts* (discrete claims — "Dublin rent = 2,340"),
+- *Skills* (`SKILL.md` files — procedural instructions for *how* to
+  perform a class of action, not *which* procedure to pick), and
+- *CBR cases* (individual problem-solution-outcome records —
+  strategies are the abstract pattern many cases instantiate).
 
-- The Remembrancer's `propose_strategies_from_patterns` tool, which
-  mines CBR clusters by domain + shared keywords (rate-limited 3/day).
-- Operator seed (manual JSONL append).
+The point of the abstraction: naming creates the option of
+deliberately preferring or avoiding. Without named strategies, the
+agent just defaults to whatever the model would do next.
+
+**Mechanically.** Append-only event log of `StrategyEvent` records:
+
+| Event | Effect on derived state |
+|---|---|
+| `StrategyCreated` | New entry with counts at 0. |
+| `StrategyUsed` | Increments `total_uses`; updates `avg_pressure`. |
+| `StrategyOutcome` | Increments `success_count` or `failure_count`. |
+| `StrategyArchived` | Sets `active = False`. Counts preserved. |
+| `StrategyRenamed` | Updates `name`. Id stable. |
+| `StrategyDescriptionUpdated` | Updates `description`. |
+| `StrategySuperseded` | Successor inherits predecessor's counts. Predecessor goes inactive with `superseded_by` pointer. |
+
+Current state is derived by replay through
+`strategy/log.resolve_from_events`. No in-place mutation — every
+change is auditable.
+
+**How strategies enter the registry** (three paths):
+
+1. Agent-led deliberate seed via the `seed_strategy` cognitive-loop
+   tool. Rate-limited to 5/day.
+2. Remembrancer mining via `propose_strategies_from_patterns` — scans
+   CBR clusters by domain + shared keywords. Rate-limited to 3/day.
+3. Operator seed (manual JSONL append, or
+   `import_legacy_strategy_facts` for migrating existing
+   `strategy_pattern_*` facts).
+
+**How strategies get used.** The Archivist's curation prompt teaches
+the LLM to emit a `<strategy_used>` element on the narrative entry
+when the cycle followed a recognisable named approach already in the
+registry. The Archivist appends `StrategyUsed` + `StrategyOutcome`
+events based on the narrative outcome. Agents are instructed not to
+invent strategy names mid-cycle — unknown ids are silently dropped
+by the resolver.
+
+**How strategies get curated.** Four lifecycle tools on the cognitive
+loop (`rename_strategy`, `update_strategy_description`,
+`supersede_strategy`, `archive_strategy`) let the agent improve the
+registry without losing the audit trail. The fortnightly
+`meta_learning_strategy_review` scheduler job brings these to the
+agent's attention periodically.
+
+**Pruning.** The registry has three bounds to prevent unbounded
+growth:
+
+- Soft cap on active strategies (default 20). When exceeded, the
+  sensorium's `<strategies>` block gains `over_cap="true"` — a signal
+  for the agent to archive or supersede during review.
+- Low-success auto-archive: strategies with Laplace-smoothed success
+  rate < 0.4 after 10+ uses are candidates for automatic archival.
+- Stale auto-archive: strategies with no events for 60+ days are
+  candidates for automatic archival.
+
+`strategy_log.prune_candidates/4` returns the events to append but
+does not persist them — the scheduler-driven review job calls it and
+persists the subset the agent approves. All thresholds configurable
+via `[meta_learning]`.
 
 The Curator surfaces top 3 active strategies, ranked by
 Laplace-smoothed `(success+1)/(total+2)` rate, in the sensorium's
-`<strategies>` block.
+`<strategies>` block. When the registry is empty, a stub block
+appears with a one-line bootstrap pointer (`seed_strategy` or
+`propose_strategies_from_patterns`) so the agent doesn't face
+silence.
 
 ### Learning Goals Store (`src/learning_goal/`)
 

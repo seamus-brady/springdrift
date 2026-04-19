@@ -113,8 +113,8 @@ src/
 │   └── safety_gate.gleam      Four-layer gate: deterministic + rate limit + conflict + D'
 │
 ├── strategy/                  Strategy Registry — meta-learning Phase A
-│   ├── types.gleam            Strategy + StrategyEvent (Created/Used/Outcome/Archived) + StrategySource
-│   └── log.gleam              Per-day JSONL log + resolve_from_events + active_ranked + Laplace success_rate
+│   ├── types.gleam            Strategy + StrategyEvent (Created/Used/Outcome/Archived/Renamed/DescriptionUpdated/Superseded) + StrategySource
+│   └── log.gleam              Per-day JSONL log + resolve_from_events + active_ranked + Laplace success_rate + PruneConfig + prune_candidates + over_cap
 │
 ├── learning_goal/             Learning Goals Store — meta-learning Phase C
 │   ├── types.gleam            LearningGoal + GoalEvent (Created/EvidenceAdded/StatusChanged) + GoalSource + GoalStatus
@@ -528,6 +528,12 @@ agent. Heavy planner operations moved to the Planner agent.
 | `create_learning_goal` | Learning Goals | Phase C. Self-directed learning goal with title/rationale/acceptance_criteria, optional strategy_id |
 | `update_learning_goal` | Learning Goals | Add evidence cycle_id and/or change status (active/achieved/abandoned/paused) with reason |
 | `list_learning_goals` | Learning Goals | List goals filtered by status; default returns active ranked by priority |
+| `seed_strategy` | Strategies | Register a new strategy directly. Rate-limited 5/day. Used for bootstrap when the agent has a named approach in mind. |
+| `rename_strategy` | Strategies | Update name; id stays stable so existing references resolve. |
+| `update_strategy_description` | Strategies | Sharpen a vague description. |
+| `supersede_strategy` | Strategies | Declare one strategy absorbs another (dedup). Successor inherits counts; predecessor kept for audit with `superseded_by` pointer. |
+| `archive_strategy` | Strategies | Mark inactive. History preserved. |
+| `list_strategies` | Strategies | Default: active by success rate; filter active/inactive/all. |
 
 **Observer agent tools** (19 tools — diagnostic, forensic, CBR curation, Phase C goal review):
 
@@ -602,7 +608,7 @@ agent. Heavy planner operations moved to the Planner agent.
 | `check_inbox` | Comms | List recent messages in inbox |
 | `read_message` | Comms | Read full message content by ID |
 
-**Remembrancer tools** (13 tools in `tools/remembrancer.gleam`, on Remembrancer agent):
+**Remembrancer tools** (14 tools in `tools/remembrancer.gleam`, on Remembrancer agent):
 
 | Tool | Store(s) | Purpose |
 |---|---|---|
@@ -620,6 +626,7 @@ agent. Heavy planner operations moved to the Planner agent.
 | `promote_insight` | Facts | Phase E. Persist a single insight as a Persistent fact with provenance derivation=Synthesis. Rate-limited (default 3/day) to prevent flooding. |
 | `propose_strategies_from_patterns` | CBR + Strategies | Phase A follow-up. Mine CBR clusters and emit `StrategyCreated` events. Rate-limited 3/day. |
 | `propose_learning_goals_from_patterns` | CBR + Learning Goals | Phase C follow-up. Mine CBR struggle clusters (avg_confidence < 0.55) and emit `GoalCreated` events with source=PatternMined. Rate-limited 2/day. |
+| `import_legacy_strategy_facts` | Facts + Strategies | Strategy bootstrap. One-shot migration for facts named `strategy_pattern_*` left over from prior manual tracking. Idempotent; dry-run supported. |
 
 **Remembrancer** (`agents/remembrancer.gleam`) is a deep-memory specialist. Unlike
 Observer (recent-cycle diagnostics via Librarian), the Remembrancer reads raw JSONL

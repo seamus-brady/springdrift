@@ -12,6 +12,81 @@ For implementation history beyond what's user-visible, see
 
 ---
 
+## [0.9.0] — 2026-04-19
+
+Strategy Registry bootstrap + curation. The substrate existed in 0.8.x
+but had a chicken-and-egg problem: registry starts empty → agent
+can't emit strategies → registry stays empty → agent never realises
+the substrate exists. This release closes that loop and gives the
+agent tools to curate its own registry over time.
+
+### Added
+
+- **`seed_strategy` cognitive-loop tool.** The agent can now register
+  a new strategy directly when it has a named approach in mind,
+  without waiting for Remembrancer pattern mining. Rate-limited to
+  5/day — the registry is meant to be a small playbook.
+- **Curation tools** (`rename_strategy`, `update_strategy_description`,
+  `supersede_strategy`, `archive_strategy`, `list_strategies`). The
+  agent can improve its registry without losing the audit trail.
+  Supersession merges the old strategy's success/failure counts into
+  the successor.
+- **Three new event types** (`StrategyRenamed`,
+  `StrategyDescriptionUpdated`, `StrategySuperseded`) with append-only
+  application logic. The id is immutable (stable reference point);
+  name/description/status are mutable through events.
+- **Bootstrap sensorium stubs.** When the Strategy Registry or
+  Learning Goals are empty, the sensorium now shows a stub block
+  pointing at the right tools (`seed_strategy` /
+  `propose_strategies_from_patterns`, `create_learning_goal`) instead
+  of silent omission. Addresses the "agent doesn't realise the
+  substrate exists" failure mode.
+- **Soft-cap warning.** `<strategies over_cap="true">` appears when
+  the active count exceeds the cap. Signals the agent to archive
+  during the fortnightly review.
+- **Automatic pruning helpers** (`strategy_log.over_cap`,
+  `strategy_log.prune_candidates`). The helpers return
+  `StrategyArchived` events for strategies that are sustained-low-
+  success or stale; the scheduler-driven review job persists the
+  subset the agent approves.
+- **Remembrancer `import_legacy_strategy_facts` tool.** One-shot
+  migration for facts named `strategy_pattern_*` left over from prior
+  manual tracking. Idempotent; dry-run supported.
+
+### Documentation
+
+- **Meta-learning skill rewritten** with a "What a strategy is (and
+  isn't)" preamble and a "Day One: the registry is empty" section.
+  Sections now named by action ("Naming a strategy when you use one",
+  "Curating the registry") instead of assumed steady-state.
+- **README gains a "Strategies" subsection** explaining what a
+  strategy is and how to populate the registry, in plain English.
+- **`docs/architecture/meta-learning.md` Strategy Registry section**
+  gains the conceptual framing (what a strategy is, why it's separate
+  from facts/skills/CBR cases) at the top.
+
+### Configuration (new `[meta_learning]` fields)
+
+- `strategy_max_active` — soft cap (default 20). 0 disables.
+- `strategy_low_success_threshold` — Laplace success rate floor
+  (default 0.4).
+- `strategy_low_success_min_uses` — min uses before low-success
+  pruning fires (default 10; 0 disables).
+- `strategy_stale_archive_days` — auto-archive idle strategies
+  (default 60; 0 disables).
+
+All documented in both `.springdrift/config.toml` and the example.
+
+### Migration
+
+- **From 0.8.x: no action required.** New tools and sensorium stubs
+  appear automatically. Defaults flip on.
+- **If you had `strategy_pattern_*` facts from prior manual
+  tracking:** invoke the Remembrancer's `import_legacy_strategy_facts`
+  once to pull them into the Registry. Idempotent — safe to re-run.
+
+---
+
 ## [0.8.2] — 2026-04-19
 
 Patch release. Sandbox-slot recovery + warning sweep.

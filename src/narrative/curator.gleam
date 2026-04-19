@@ -1701,18 +1701,42 @@ fn render_affect_warning_row(w: #(String, Float, Int)) -> String {
 /// strategies, each on its own line.
 pub fn render_sensorium_strategies() -> String {
   let dir = paths.strategy_log_dir()
-  let ranked = strategy_log.active_ranked(strategy_log.resolve_current(dir))
+  let all = strategy_log.resolve_current(dir)
+  let ranked = strategy_log.active_ranked(all)
   case ranked {
-    [] -> ""
+    [] -> {
+      // Bootstrap stub — appears when the registry has no active
+      // strategies yet, so the agent sees a Day-One path rather than
+      // silence. Omitted entirely when the meta-learning subsystem
+      // isn't in use (inferred from zero strategies AND no seed events
+      // ever written — there's no cheap way to detect "off" so we
+      // always show the stub; cost is a few bytes of sensorium).
+      "  <strategies count=\"0\" state=\"empty\">\n"
+      <> "    <!-- Registry is empty. Either seed deliberate approaches "
+      <> "with seed_strategy, or mine from CBR via "
+      <> "propose_strategies_from_patterns. -->\n"
+      <> "  </strategies>"
+    }
     _ -> {
       let top = list.take(ranked, 3)
       let rows =
         top
         |> list.map(render_strategy_row)
         |> string.join("\n")
+      // Soft-cap warning when the active count exceeds the prune
+      // threshold. Surfaces as an attribute on the block so the agent
+      // sees it without an extra element.
+      let cap_attr = case
+        strategy_log.over_cap(all, strategy_log.default_prune_config())
+      {
+        True -> " over_cap=\"true\""
+        False -> ""
+      }
       "  <strategies count=\""
       <> int.to_string(list.length(ranked))
-      <> "\">\n"
+      <> "\""
+      <> cap_attr
+      <> ">\n"
       <> rows
       <> "\n  </strategies>"
     }
@@ -1761,7 +1785,15 @@ pub fn render_sensorium_learning_goals() -> String {
   let achieved_count =
     list.count(all, fn(g) { g.status == goal_types.AchievedGoal })
   case active {
-    [] -> ""
+    [] ->
+      // Bootstrap stub — same rationale as the empty-strategies block.
+      "  <learning_goals active=\"0\" achieved=\""
+      <> int.to_string(achieved_count)
+      <> "\" state=\"empty\">\n"
+      <> "    <!-- No active learning goals. Set one with "
+      <> "create_learning_goal when you notice a recurring gap worth "
+      <> "committing to. -->\n"
+      <> "  </learning_goals>"
     _ -> {
       let top = list.take(active, 3)
       let rows =

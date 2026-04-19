@@ -44,6 +44,7 @@ import tools/knowledge as knowledge_tools
 import tools/learning_goals as learning_goal_tools
 import tools/memory
 import tools/planner as planner_tools
+import tools/strategies as strategy_tools
 
 @external(erlang, "springdrift_ffi", "get_datetime")
 fn get_datetime() -> String
@@ -135,9 +136,13 @@ pub fn dispatch_tool_calls(
         list.partition(after_planner, fn(c) {
           knowledge_tools.is_knowledge_tool(c.name)
         })
-      let #(learning_goal_calls, remaining_calls) =
+      let #(learning_goal_calls, after_goals) =
         list.partition(after_knowledge, fn(c) {
           learning_goal_tools.is_learning_goal_tool(c.name)
+        })
+      let #(strategy_calls, remaining_calls) =
+        list.partition(after_goals, fn(c) {
+          strategy_tools.is_strategy_tool(c.name)
         })
       let sync_calls =
         list.flatten([
@@ -145,6 +150,7 @@ pub fn dispatch_tool_calls(
           planner_calls,
           knowledge_calls,
           learning_goal_calls,
+          strategy_calls,
         ])
       case sync_calls {
         [] ->
@@ -325,18 +331,26 @@ fn handle_memory_tools(
                     learning_goal_tools.LearningGoalContext(cycle_id: cycle_id),
                   )
                 False ->
-                  memory.execute_with_how_to(
-                    call,
-                    state.memory.narrative_dir,
-                    state.memory.librarian,
-                    facts_ctx,
-                    introspect_ctx,
-                    state.config.memory_limits,
-                    state.config.how_to_content,
-                    option.Some(memory.AgentManagementContext(
-                      supervisor: state.supervisor,
-                    )),
-                  )
+                  case strategy_tools.is_strategy_tool(call.name) {
+                    True ->
+                      strategy_tools.execute(
+                        call,
+                        strategy_tools.StrategyContext(cycle_id: cycle_id),
+                      )
+                    False ->
+                      memory.execute_with_how_to(
+                        call,
+                        state.memory.narrative_dir,
+                        state.memory.librarian,
+                        facts_ctx,
+                        introspect_ctx,
+                        state.config.memory_limits,
+                        state.config.how_to_content,
+                        option.Some(memory.AgentManagementContext(
+                          supervisor: state.supervisor,
+                        )),
+                      )
+                  }
               }
           }
       }

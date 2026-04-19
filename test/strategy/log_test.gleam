@@ -202,6 +202,7 @@ pub fn active_ranked_orders_by_success_rate_test() {
       source: Proposed,
       active: True,
       last_event_at: ts(1),
+      superseded_by: None,
     ),
     Strategy(
       id: "s_high",
@@ -215,6 +216,7 @@ pub fn active_ranked_orders_by_success_rate_test() {
       source: Proposed,
       active: True,
       last_event_at: ts(1),
+      superseded_by: None,
     ),
     Strategy(
       id: "s_archived",
@@ -228,6 +230,7 @@ pub fn active_ranked_orders_by_success_rate_test() {
       source: Observed,
       active: False,
       last_event_at: ts(1),
+      superseded_by: None,
     ),
   ]
   let ranked = strategy_log.active_ranked(strategies)

@@ -302,6 +302,20 @@ pub type AppConfig {
     /// (`promote_insight` writes, future strategy auto-promotions) per
     /// rolling 24-hour window. Default: 3.
     meta_max_promotions_per_day: Option(Int),
+    /// Strategy bootstrap follow-up. Soft cap on active strategies;
+    /// when exceeded the sensorium surfaces a warning. 0 disables.
+    /// Default: 20.
+    strategy_max_active: Option(Int),
+    /// Laplace-smoothed success-rate threshold below which a strategy
+    /// with at least `strategy_low_success_min_uses` total uses becomes
+    /// a candidate for auto-archival. Default: 0.4.
+    strategy_low_success_threshold: Option(Float),
+    /// Minimum total uses before low-success auto-archival can fire.
+    /// 0 disables low-success pruning. Default: 10.
+    strategy_low_success_min_uses: Option(Int),
+    /// Auto-archive strategies whose last event is older than this
+    /// many days. 0 disables stale pruning. Default: 60.
+    strategy_stale_archive_days: Option(Int),
   )
 }
 
@@ -506,6 +520,10 @@ pub fn default() -> AppConfig {
     meta_strategy_review_interval_hours: None,
     meta_max_reflection_budget_pct: None,
     meta_max_promotions_per_day: None,
+    strategy_max_active: None,
+    strategy_low_success_threshold: None,
+    strategy_low_success_min_uses: None,
+    strategy_stale_archive_days: None,
   )
 }
 
@@ -1184,6 +1202,22 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     meta_max_promotions_per_day: option.or(
       override_cfg.meta_max_promotions_per_day,
       base.meta_max_promotions_per_day,
+    ),
+    strategy_max_active: option.or(
+      override_cfg.strategy_max_active,
+      base.strategy_max_active,
+    ),
+    strategy_low_success_threshold: option.or(
+      override_cfg.strategy_low_success_threshold,
+      base.strategy_low_success_threshold,
+    ),
+    strategy_low_success_min_uses: option.or(
+      override_cfg.strategy_low_success_min_uses,
+      base.strategy_low_success_min_uses,
+    ),
+    strategy_stale_archive_days: option.or(
+      override_cfg.strategy_stale_archive_days,
+      base.strategy_stale_archive_days,
     ),
   )
 }
@@ -1905,6 +1939,22 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     meta_max_promotions_per_day: get_toml_int(table, [
       "meta_learning",
       "max_promotions_per_day",
+    ]),
+    strategy_max_active: get_toml_int(table, [
+      "meta_learning",
+      "strategy_max_active",
+    ]),
+    strategy_low_success_threshold: get_toml_float(table, [
+      "meta_learning",
+      "strategy_low_success_threshold",
+    ]),
+    strategy_low_success_min_uses: get_toml_int(table, [
+      "meta_learning",
+      "strategy_low_success_min_uses",
+    ]),
+    strategy_stale_archive_days: get_toml_int(table, [
+      "meta_learning",
+      "strategy_stale_archive_days",
     ]),
   )
 }

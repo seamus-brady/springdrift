@@ -26,7 +26,8 @@ import slog
 import strategy/types.{
   type Strategy, type StrategyEvent, type StrategySource, Observed,
   OperatorDefined, Proposed, Strategy, StrategyArchived, StrategyCreated,
-  StrategyOutcome, StrategyUsed,
+  StrategyDescriptionUpdated, StrategyOutcome, StrategyRenamed,
+  StrategySuperseded, StrategyUsed,
 }
 
 @external(erlang, "springdrift_ffi", "get_date")
@@ -66,6 +67,9 @@ fn event_kind(e: StrategyEvent) -> String {
     StrategyUsed(..) -> "used"
     StrategyOutcome(..) -> "outcome"
     StrategyArchived(..) -> "archived"
+    StrategyRenamed(..) -> "renamed"
+    StrategyDescriptionUpdated(..) -> "description_updated"
+    StrategySuperseded(..) -> "superseded"
   }
 }
 
@@ -148,6 +152,7 @@ fn apply_event(state: AccState, event: StrategyEvent) -> AccState {
             source: source,
             active: True,
             last_event_at: timestamp,
+            superseded_by: None,
           ),
           pressure_sum: 0.0,
           pressure_count: 0,
@@ -218,6 +223,89 @@ fn apply_event(state: AccState, event: StrategyEvent) -> AccState {
             ),
           )
       }
+    StrategyRenamed(timestamp:, strategy_id:, new_name:, reason: _) ->
+      case dict.get(state, strategy_id) {
+        Error(_) -> state
+        Ok(acc) ->
+          dict.insert(
+            state,
+            strategy_id,
+            StrategyAcc(
+              ..acc,
+              base: Strategy(
+                ..acc.base,
+                name: new_name,
+                last_event_at: timestamp,
+              ),
+            ),
+          )
+      }
+    StrategyDescriptionUpdated(
+      timestamp:,
+      strategy_id:,
+      new_description:,
+      reason: _,
+    ) ->
+      case dict.get(state, strategy_id) {
+        Error(_) -> state
+        Ok(acc) ->
+          dict.insert(
+            state,
+            strategy_id,
+            StrategyAcc(
+              ..acc,
+              base: Strategy(
+                ..acc.base,
+                description: new_description,
+                last_event_at: timestamp,
+              ),
+            ),
+          )
+      }
+    StrategySuperseded(
+      timestamp:,
+      old_strategy_id:,
+      new_strategy_id:,
+      reason: _,
+    ) ->
+      case dict.get(state, old_strategy_id), dict.get(state, new_strategy_id) {
+        Ok(old_acc), Ok(new_acc) -> {
+          // Successor inherits the predecessor's success/failure counts
+          // and pressure history. Old one goes inactive with a pointer
+          // to the successor.
+          let old_base = old_acc.base
+          let new_base = new_acc.base
+          let merged_new =
+            Strategy(
+              ..new_base,
+              success_count: new_base.success_count + old_base.success_count,
+              failure_count: new_base.failure_count + old_base.failure_count,
+              total_uses: new_base.total_uses + old_base.total_uses,
+              last_event_at: timestamp,
+            )
+          let merged_new_acc =
+            StrategyAcc(
+              base: merged_new,
+              pressure_sum: new_acc.pressure_sum +. old_acc.pressure_sum,
+              pressure_count: new_acc.pressure_count + old_acc.pressure_count,
+            )
+          let retired_old =
+            Strategy(
+              ..old_base,
+              active: False,
+              superseded_by: Some(new_strategy_id),
+              last_event_at: timestamp,
+            )
+          state
+          |> dict.insert(new_strategy_id, merged_new_acc)
+          |> dict.insert(
+            old_strategy_id,
+            StrategyAcc(..old_acc, base: retired_old),
+          )
+        }
+        // If either id is unknown, drop the event (resolver stays self-healing).
+        _, _ -> state
+      }
   }
 }
 
@@ -236,6 +324,105 @@ pub fn active_ranked(strategies: List(Strategy)) -> List(Strategy) {
     case float.compare(sb, sa) {
       Eq -> int.compare(b.total_uses, a.total_uses)
       order -> order
+    }
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Pruning helpers — Phase A follow-up. Bound the registry so it can't grow
+// without limit. Each helper returns the events that *should* be appended;
+// callers (the scheduler-driven review job, or test code) decide whether to
+// actually persist them.
+// ---------------------------------------------------------------------------
+
+pub type PruneConfig {
+  PruneConfig(
+    /// Soft cap on active strategies. When exceeded, the sensorium emits
+    /// a warning but no strategies are auto-archived. 0 disables.
+    max_active: Int,
+    /// Auto-archive a strategy when it has at least `low_success_min_uses`
+    /// total uses AND its Laplace-smoothed success rate is below
+    /// `low_success_threshold`. 0 for `low_success_min_uses` disables.
+    low_success_threshold: Float,
+    low_success_min_uses: Int,
+    /// Auto-archive a strategy when its `last_event_at` is older than
+    /// `stale_archive_days` days ago. 0 disables.
+    stale_archive_days: Int,
+  )
+}
+
+pub fn default_prune_config() -> PruneConfig {
+  PruneConfig(
+    max_active: 20,
+    low_success_threshold: 0.4,
+    low_success_min_uses: 10,
+    stale_archive_days: 60,
+  )
+}
+
+/// True when the count of active strategies exceeds the soft cap.
+pub fn over_cap(strategies: List(Strategy), config: PruneConfig) -> Bool {
+  let active_count = list.count(strategies, fn(s) { s.active })
+  config.max_active > 0 && active_count > config.max_active
+}
+
+/// Identify strategies that meet the auto-archive criteria. Returns
+/// `StrategyArchived` events to append. Pure — does NOT persist.
+/// Caller decides which subset to actually write (e.g. the periodic
+/// review job calling `append`).
+pub fn prune_candidates(
+  strategies: List(Strategy),
+  config: PruneConfig,
+  now_iso: String,
+  days_since: fn(String) -> Int,
+) -> List(StrategyEvent) {
+  list.flat_map(strategies, fn(s) {
+    case s.active {
+      False -> []
+      True -> {
+        let by_low_success = case
+          config.low_success_min_uses > 0
+          && s.total_uses >= config.low_success_min_uses
+          && success_rate(s) <. config.low_success_threshold
+        {
+          True -> [
+            StrategyArchived(
+              timestamp: now_iso,
+              strategy_id: s.id,
+              reason: "auto-archived: low success rate ("
+                <> int.to_string(s.success_count)
+                <> "/"
+                <> int.to_string(s.total_uses)
+                <> " over "
+                <> int.to_string(s.total_uses)
+                <> " uses)",
+            ),
+          ]
+          False -> []
+        }
+        let by_stale = case
+          config.stale_archive_days > 0
+          && days_since(s.last_event_at) >= config.stale_archive_days
+        {
+          True -> [
+            StrategyArchived(
+              timestamp: now_iso,
+              strategy_id: s.id,
+              reason: "auto-archived: idle "
+                <> int.to_string(days_since(s.last_event_at))
+                <> " days",
+            ),
+          ]
+          False -> []
+        }
+        // If both criteria hit, prefer the low-success reason (it's the
+        // more informative one — staleness on a low-success strategy is
+        // expected).
+        case by_low_success, by_stale {
+          [_, ..], _ -> by_low_success
+          [], events -> events
+        }
+      }
     }
   })
 }
@@ -313,6 +500,35 @@ pub fn encode_event(event: StrategyEvent) -> json.Json {
         #("strategy_id", json.string(strategy_id)),
         #("reason", json.string(reason)),
       ])
+    StrategyRenamed(timestamp:, strategy_id:, new_name:, reason:) ->
+      json.object([
+        #("event", json.string("renamed")),
+        #("timestamp", json.string(timestamp)),
+        #("strategy_id", json.string(strategy_id)),
+        #("new_name", json.string(new_name)),
+        #("reason", json.string(reason)),
+      ])
+    StrategyDescriptionUpdated(
+      timestamp:,
+      strategy_id:,
+      new_description:,
+      reason:,
+    ) ->
+      json.object([
+        #("event", json.string("description_updated")),
+        #("timestamp", json.string(timestamp)),
+        #("strategy_id", json.string(strategy_id)),
+        #("new_description", json.string(new_description)),
+        #("reason", json.string(reason)),
+      ])
+    StrategySuperseded(timestamp:, old_strategy_id:, new_strategy_id:, reason:) ->
+      json.object([
+        #("event", json.string("superseded")),
+        #("timestamp", json.string(timestamp)),
+        #("old_strategy_id", json.string(old_strategy_id)),
+        #("new_strategy_id", json.string(new_strategy_id)),
+        #("reason", json.string(reason)),
+      ])
   }
 }
 
@@ -344,6 +560,9 @@ pub fn event_decoder() -> decode.Decoder(StrategyEvent) {
     "used" -> used_decoder()
     "outcome" -> outcome_decoder()
     "archived" -> archived_decoder()
+    "renamed" -> renamed_decoder()
+    "description_updated" -> description_updated_decoder()
+    "superseded" -> superseded_decoder()
     _ -> decode.failure(StrategyArchived("", "", ""), "unknown event kind")
   }
 }
@@ -421,4 +640,47 @@ fn archived_decoder() -> decode.Decoder(StrategyEvent) {
     decode.optional(decode.string) |> decode.map(option.unwrap(_, "")),
   )
   decode.success(StrategyArchived(timestamp:, strategy_id:, reason:))
+}
+
+fn renamed_decoder() -> decode.Decoder(StrategyEvent) {
+  use timestamp <- decode.field("timestamp", decode.string)
+  use strategy_id <- decode.field("strategy_id", decode.string)
+  use new_name <- decode.field("new_name", decode.string)
+  use reason <- decode.field(
+    "reason",
+    decode.optional(decode.string) |> decode.map(option.unwrap(_, "")),
+  )
+  decode.success(StrategyRenamed(timestamp:, strategy_id:, new_name:, reason:))
+}
+
+fn description_updated_decoder() -> decode.Decoder(StrategyEvent) {
+  use timestamp <- decode.field("timestamp", decode.string)
+  use strategy_id <- decode.field("strategy_id", decode.string)
+  use new_description <- decode.field("new_description", decode.string)
+  use reason <- decode.field(
+    "reason",
+    decode.optional(decode.string) |> decode.map(option.unwrap(_, "")),
+  )
+  decode.success(StrategyDescriptionUpdated(
+    timestamp:,
+    strategy_id:,
+    new_description:,
+    reason:,
+  ))
+}
+
+fn superseded_decoder() -> decode.Decoder(StrategyEvent) {
+  use timestamp <- decode.field("timestamp", decode.string)
+  use old_strategy_id <- decode.field("old_strategy_id", decode.string)
+  use new_strategy_id <- decode.field("new_strategy_id", decode.string)
+  use reason <- decode.field(
+    "reason",
+    decode.optional(decode.string) |> decode.map(option.unwrap(_, "")),
+  )
+  decode.success(StrategySuperseded(
+    timestamp:,
+    old_strategy_id:,
+    new_strategy_id:,
+    reason:,
+  ))
 }

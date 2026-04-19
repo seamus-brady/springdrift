@@ -51,6 +51,7 @@ import tools/builtin
 import tools/learning_goals as learning_goal_tools
 import tools/memory
 import tools/planner as planner_tools
+import tools/strategies as strategy_tools
 
 @external(erlang, "springdrift_ffi", "rescue")
 fn rescue(body: fn() -> a) -> Result(a, String)
@@ -77,6 +78,7 @@ pub fn start(
       memory.all(),
       planner_tools.all(),
       learning_goal_tools.all(),
+      strategy_tools.all(),
       cfg.agent_tools,
       team_tools,
     ])

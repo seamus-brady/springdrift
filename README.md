@@ -690,6 +690,37 @@ working context next cycle, so it acts on what it has learned rather
 than rediscovering it. The Web GUI's **Memory** tab shows the
 consolidation history for audit.
 
+#### Strategies — the named approaches the agent tracks
+
+A **strategy** is a named, reusable approach with tracked outcomes.
+Example: `verify-with-canary-before-trusting`, or
+`delegate-then-synthesise`. The agent emits the id in its narrative
+entry when a cycle followed that approach; the registry tracks how
+often each one worked.
+
+Strategies are separate from facts (discrete claims about the world),
+skills (procedural instructions — *how* to do a thing), and CBR cases
+(individual past problem-solution records). A strategy is about
+*which procedure to pick* and *whether it's been paying off*.
+
+Three paths populate the registry:
+
+1. The agent seeds one directly via `seed_strategy` when it already
+   has a named approach in mind (rate-limited — the registry is meant
+   to be a small playbook, not a junk drawer).
+2. The Remembrancer mines CBR history for recurring patterns and
+   proposes them as strategies.
+3. Operator seed — an initial baseline set, as JSONL, if you want a
+   starting playbook.
+
+The agent can rename, sharpen descriptions, merge duplicates
+(supersede), and archive strategies that stopped earning their keep —
+all through its own tools, with a full audit trail. A soft cap
+(default 20 active) plus automatic archival of low-success or idle
+strategies keeps the registry a playbook rather than a junk drawer.
+Full detail in
+[docs/architecture/meta-learning.md](docs/architecture/meta-learning.md).
+
 To turn it off, or change the cadences, edit `.springdrift/config.toml`:
 
 ```toml
