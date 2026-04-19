@@ -1,5 +1,5 @@
 name = "springdrift"
-version = "0.9.3"
+version = "0.9.4"
 description = "A knowledge worker agent framework for the BEAM. Persistent memory, scheduled research, configurable safety."
 licences = ["MIT"]
 repository = { type = "github", user = "seamus-brady", repo = "springdrift" }
