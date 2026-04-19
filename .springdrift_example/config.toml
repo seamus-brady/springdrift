@@ -355,11 +355,25 @@ summary_schedule = "weekly"
 # affect_correlation_interval_hours = 168       # Default: 168 (weekly)
 # strategy_review_interval_hours = 336          # Default: 336 (fortnightly)
 
-# Budget caps (Phase F follow-ups)
+# Budget caps
 # max_reflection_budget_pct = 25     # Max % of recent cycles that may be
                                      # meta-learning fires. 0 disables. Default: 25.
 # max_promotions_per_day = 3         # Max promote_insight + auto-strategy
                                      # writes per rolling 24h window. Default: 3.
+
+# Strategy Registry pruning — bounds the registry so it can't grow
+# without limit. The periodic strategy_review job applies these.
+# strategy_max_active = 20                # Soft cap on active strategies.
+                                          # Sensorium warns when exceeded.
+                                          # 0 disables. Default: 20.
+# strategy_low_success_threshold = 0.4    # Laplace-smoothed success rate
+                                          # below which a strategy with
+                                          # enough uses becomes an
+                                          # auto-archive candidate.
+# strategy_low_success_min_uses = 10      # Min uses before low-success
+                                          # pruning can fire. 0 disables.
+# strategy_stale_archive_days = 60        # Auto-archive strategies idle
+                                          # for this many days. 0 disables.
 
 # ── AgentLair (behavioral trust network) ────────────────────────────────────
 

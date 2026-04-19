@@ -49,6 +49,11 @@ pub type Strategy {
     active: Bool,
     /// ISO timestamp of the most recent event for this strategy.
     last_event_at: String,
+    /// When this strategy has been superseded by another, the id of
+    /// the successor. None for live strategies. Superseded strategies
+    /// keep `active: False` and their counts are preserved for audit
+    /// but absorbed into the successor.
+    superseded_by: Option(String),
   )
 }
 
@@ -87,4 +92,31 @@ pub type StrategyEvent {
   )
   /// Strategy archived — no longer surfaces as Active.
   StrategyArchived(timestamp: String, strategy_id: String, reason: String)
+  /// Update the human-readable name. The id stays stable so existing
+  /// references (CBR cases, learning-goal strategy_id links, prior
+  /// events) continue to resolve.
+  StrategyRenamed(
+    timestamp: String,
+    strategy_id: String,
+    new_name: String,
+    reason: String,
+  )
+  /// Sharpen or clarify the description. Useful when a strategy's
+  /// success metric was vague at creation time.
+  StrategyDescriptionUpdated(
+    timestamp: String,
+    strategy_id: String,
+    new_description: String,
+    reason: String,
+  )
+  /// Declare that `old_strategy_id` is absorbed by `new_strategy_id`.
+  /// The successor inherits the predecessor's success/failure counts
+  /// (added to its own). The predecessor goes inactive and carries the
+  /// `superseded_by` pointer to the successor for audit.
+  StrategySuperseded(
+    timestamp: String,
+    old_strategy_id: String,
+    new_strategy_id: String,
+    reason: String,
+  )
 }

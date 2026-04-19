@@ -112,6 +112,7 @@ pub fn all() -> List(Tool) {
     promote_insight_tool(),
     propose_strategies_from_patterns_tool(),
     propose_learning_goals_from_patterns_tool(),
+    import_legacy_strategy_facts_tool(),
     write_consolidation_report_tool(),
   ]
 }
@@ -130,6 +131,7 @@ pub fn is_remembrancer_tool(name: String) -> Bool {
   || name == "promote_insight"
   || name == "propose_strategies_from_patterns"
   || name == "propose_learning_goals_from_patterns"
+  || name == "import_legacy_strategy_facts"
   || name == "write_consolidation_report"
 }
 
@@ -414,6 +416,30 @@ fn propose_learning_goals_from_patterns_tool() -> Tool {
   |> tool.build()
 }
 
+fn import_legacy_strategy_facts_tool() -> Tool {
+  tool.new("import_legacy_strategy_facts")
+  |> tool.with_description(
+    "Meta-learning self-repair — one-shot migration. Scans current facts "
+    <> "whose key starts with the given prefix (default 'strategy_pattern_') "
+    <> "and creates Strategy Registry entries from them. For when the "
+    <> "agent has been tracking 'strategies' as facts because it didn't "
+    <> "notice the actual Registry existed. The source facts are left in "
+    <> "place (no cleanup) — operator archives them manually once satisfied. "
+    <> "Idempotent: strategies with ids that already exist are skipped.",
+  )
+  |> tool.add_string_param(
+    "prefix",
+    "Fact key prefix to scan for (default: 'strategy_pattern_')",
+    False,
+  )
+  |> tool.add_boolean_param(
+    "dry_run",
+    "Report what would be imported without writing. Default: false.",
+    False,
+  )
+  |> tool.build()
+}
+
 fn write_consolidation_report_tool() -> Tool {
   tool.new("write_consolidation_report")
   |> tool.with_description(
@@ -467,6 +493,8 @@ pub fn execute(call: ToolCall, ctx: RemembrancerContext) -> ToolResult {
       run_propose_strategies_from_patterns(call, ctx)
     "propose_learning_goals_from_patterns" ->
       run_propose_learning_goals_from_patterns(call, ctx)
+    "import_legacy_strategy_facts" ->
+      run_import_legacy_strategy_facts(call, ctx)
     "write_consolidation_report" -> run_write_report(call, ctx)
     _ ->
       ToolFailure(
@@ -1878,6 +1906,114 @@ fn derive_goal_acceptance(cluster: skills_pattern.Cluster) -> String {
   <> "' achieve avg outcome confidence >= 0.75 (current cluster avg "
   <> float.to_string(cluster.avg_confidence)
   <> ")."
+}
+
+// ---------------------------------------------------------------------------
+// import_legacy_strategy_facts — Phase A self-repair
+// ---------------------------------------------------------------------------
+
+fn run_import_legacy_strategy_facts(
+  call: ToolCall,
+  ctx: RemembrancerContext,
+) -> ToolResult {
+  let decoder = {
+    use prefix <- decode.optional_field(
+      "prefix",
+      "strategy_pattern_",
+      decode.string,
+    )
+    use dry_run <- decode.optional_field("dry_run", False, decode.bool)
+    decode.success(#(prefix, dry_run))
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "Invalid import_legacy_strategy_facts input",
+      )
+    Ok(#(prefix, dry_run)) -> {
+      let facts = facts_log.resolve_current(ctx.facts_dir, None)
+      let matches =
+        list.filter(facts, fn(f) { string.starts_with(f.key, prefix) })
+      let existing =
+        strategy_log.resolve_current(paths.strategy_log_dir())
+        |> list.map(fn(s) { s.id })
+      let to_import =
+        list.filter(matches, fn(f) {
+          let id = derive_id_from_key(f.key, prefix)
+          !list.contains(existing, id)
+        })
+      let imported = case dry_run {
+        True -> []
+        False ->
+          list.map(to_import, fn(f) {
+            let id = derive_id_from_key(f.key, prefix)
+            let event =
+              strategy_types.StrategyCreated(
+                timestamp: get_datetime(),
+                strategy_id: id,
+                name: humanise_id(id),
+                description: f.value,
+                domain_tags: [],
+                source: strategy_types.OperatorDefined,
+              )
+            strategy_log.append(paths.strategy_log_dir(), event)
+            id
+          })
+      }
+      let summary =
+        "import_legacy_strategy_facts (prefix='"
+        <> prefix
+        <> "', dry_run="
+        <> case dry_run {
+          True -> "true"
+          False -> "false"
+        }
+        <> "): "
+        <> int.to_string(list.length(matches))
+        <> " matching fact(s), "
+        <> int.to_string(list.length(to_import))
+        <> " novel, "
+        <> case dry_run {
+          True -> "0 imported (dry run)"
+          False -> int.to_string(list.length(imported)) <> " imported"
+        }
+      slog.info(
+        "tools/remembrancer",
+        "import_legacy_strategy_facts",
+        summary,
+        Some(ctx.cycle_id),
+      )
+      let payload =
+        json.object([
+          #("matched_facts", json.int(list.length(matches))),
+          #("novel", json.int(list.length(to_import))),
+          #("imported", json.int(list.length(imported))),
+          #("imported_ids", json.array(imported, json.string)),
+          #("dry_run", json.bool(dry_run)),
+        ])
+      ToolSuccess(
+        tool_use_id: call.id,
+        content: json.to_string(payload) <> "\n\n" <> summary,
+      )
+    }
+  }
+}
+
+fn derive_id_from_key(key: String, prefix: String) -> String {
+  string.drop_start(key, string.length(prefix))
+}
+
+fn humanise_id(id: String) -> String {
+  // "sequential_clarification_then_action" -> "Sequential clarification then action"
+  case string.replace(id, "_", " ") {
+    "" -> id
+    s -> {
+      let first = string.slice(s, 0, 1)
+      let rest = string.drop_start(s, 1)
+      string.uppercase(first) <> rest
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
