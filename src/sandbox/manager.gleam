@@ -16,6 +16,7 @@ import gleam/erlang/process.{type Subject}
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/result
 import gleam/string
 import sandbox/diagnostics
 import sandbox/podman_ffi
@@ -583,6 +584,12 @@ fn execute_in_slot(
 ) -> Result(types.ExecResult, String) {
   let #(filename, interpreter) = language_config(language)
   let filepath = slot.workspace <> "/" <> filename
+  // Container writes run as root; the host (running as the operator's
+  // UID) cannot overwrite root-owned files left from previous cycles.
+  // Have root inside the container delete the file first; our own
+  // simplifile.write then creates a fresh one. Errors here are
+  // intentionally ignored — the file may not exist yet on first run.
+  let _ = clear_workspace_file(slot.container_id, filename)
 
   case simplifile.write(filepath, code) {
     Error(_) -> Error("Failed to write code to workspace")
@@ -601,6 +608,22 @@ fn execute_in_slot(
   }
 }
 
+/// Remove a file at /workspace/<filename> inside the container, running
+/// as the container's root. Lets us overwrite files that previous runs
+/// left root-owned. Result is intentionally discarded by callers — a
+/// missing file is fine.
+fn clear_workspace_file(
+  container_id: String,
+  filename: String,
+) -> Result(types.ExecResult, String) {
+  podman_ffi.run_cmd(
+    "podman",
+    ["exec", container_id, "rm", "-f", "/workspace/" <> filename],
+    5000,
+  )
+  |> result.map_error(fn(msg) { "clear_workspace_file: " <> msg })
+}
+
 fn serve_in_slot(
   slot: SandboxSlot,
   code: String,
@@ -614,6 +637,7 @@ fn serve_in_slot(
     True -> {
       let #(filename, interpreter) = language_config(language)
       let filepath = slot.workspace <> "/" <> filename
+      let _ = clear_workspace_file(slot.container_id, filename)
 
       case simplifile.write(filepath, code) {
         Error(_) -> Error("Failed to write code to workspace")

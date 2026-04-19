@@ -12,6 +12,37 @@ For implementation history beyond what's user-visible, see
 
 ---
 
+## [0.8.2] — 2026-04-19
+
+Patch release. Sandbox-slot recovery + warning sweep.
+
+### Fixed
+
+- **Sandbox slot blocked by root-owned workspace files.** The Python
+  container writes `/workspace/run.py` as root (the container's
+  default user). When Springdrift on the host (running as the
+  operator's UID) tries to overwrite the file on the next code
+  execution, `simplifile.write` fails with "Failed to write code to
+  workspace" because the operator can't replace a root-owned file.
+  `src/sandbox/manager.gleam` now runs `podman exec <container> rm -f
+  /workspace/<filename>` immediately before the write — root-inside-
+  container removes the previous file, then Springdrift's write
+  creates a fresh one. Applied to both `execute_in_slot` (run_code
+  path) and `serve_in_slot` (long-lived process path). Errors from
+  the pre-clear are intentionally ignored (the file may not exist on
+  first run).
+- **Removed unused `type Strategy` import** in
+  `test/strategy/log_test.gleam` — the only project-side warning
+  flagged by Gleam 1.15.4.
+
+### Migration
+
+- Existing stale workspace files (root-owned `run.py` left over from
+  pre-0.8.2 cycles) are cleared automatically next time the slot is
+  used. No operator action needed.
+
+---
+
 ## [0.8.1] — 2026-04-19
 
 Patch release. Two small fixes flagged after 0.8.0 cut.
