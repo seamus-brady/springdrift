@@ -250,7 +250,17 @@ fn evaluate_task(state: ForecasterState, task: planner_types.PlannerTask) -> Nil
 // Heuristic forecast scoring — no LLM needed
 // ---------------------------------------------------------------------------
 
-fn compute_heuristic_forecasts(
+/// Derive plan-health forecasts from a task's current state using
+/// deterministic rules. No LLM calls. Magnitudes are on the D' engine's
+/// canonical 0–3 scale (0 = no signal, 3 = maximum).
+///
+/// Exported so the `request_forecast_review` tool can share the same
+/// computation — having two divergent heuristic functions historically
+/// caused the forecaster to report different scores depending on which
+/// caller invoked it, and produced a hardcoded D' = 0.3333 for every
+/// task through the tool path because its defaults all landed at
+/// magnitude 1.
+pub fn compute_heuristic_forecasts(
   task: planner_types.PlannerTask,
 ) -> List(dprime_types.Forecast) {
   let total_steps = list.length(task.plan_steps)
