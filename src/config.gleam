@@ -293,6 +293,15 @@ pub type AppConfig {
     meta_affect_correlation_interval_hours: Option(Int),
     /// Hours between strategy review runs. Default: 336 (fortnightly).
     meta_strategy_review_interval_hours: Option(Int),
+    /// Phase F follow-up. Maximum percentage of recent cognitive cycles
+    /// that may be meta-learning fires (consolidation, goal review,
+    /// affect correlation, strategy review, skill decay). Default: 25.
+    /// 0 disables the cap.
+    meta_max_reflection_budget_pct: Option(Int),
+    /// Phase E + F follow-up. Maximum knowledge promotions
+    /// (`promote_insight` writes, future strategy auto-promotions) per
+    /// rolling 24-hour window. Default: 3.
+    meta_max_promotions_per_day: Option(Int),
   )
 }
 
@@ -495,6 +504,8 @@ pub fn default() -> AppConfig {
     meta_skill_decay_interval_hours: None,
     meta_affect_correlation_interval_hours: None,
     meta_strategy_review_interval_hours: None,
+    meta_max_reflection_budget_pct: None,
+    meta_max_promotions_per_day: None,
   )
 }
 
@@ -1165,6 +1176,14 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     meta_strategy_review_interval_hours: option.or(
       override_cfg.meta_strategy_review_interval_hours,
       base.meta_strategy_review_interval_hours,
+    ),
+    meta_max_reflection_budget_pct: option.or(
+      override_cfg.meta_max_reflection_budget_pct,
+      base.meta_max_reflection_budget_pct,
+    ),
+    meta_max_promotions_per_day: option.or(
+      override_cfg.meta_max_promotions_per_day,
+      base.meta_max_promotions_per_day,
     ),
   )
 }
@@ -1878,6 +1897,14 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     meta_strategy_review_interval_hours: get_toml_int(table, [
       "meta_learning",
       "strategy_review_interval_hours",
+    ]),
+    meta_max_reflection_budget_pct: get_toml_int(table, [
+      "meta_learning",
+      "max_reflection_budget_pct",
+    ]),
+    meta_max_promotions_per_day: get_toml_int(table, [
+      "meta_learning",
+      "max_promotions_per_day",
     ]),
   )
 }

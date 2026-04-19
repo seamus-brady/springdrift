@@ -85,6 +85,9 @@ pub type RemembrancerContext {
     /// Directory where Accepted skill proposals are written
     /// (typically `.springdrift/skills/`).
     skills_dir: String,
+    /// Phase E + F follow-up. Maximum knowledge promotions
+    /// (`promote_insight` writes) per rolling 24-hour window.
+    max_promotions_per_day: Int,
   )
 }
 
@@ -1434,8 +1437,6 @@ fn extract_insights_via_llm(
 // promote_insight — Phase E (rate-limited write to facts store)
 // ---------------------------------------------------------------------------
 
-const max_promotions_per_day = 3
-
 const promote_source = "promote_insight"
 
 fn run_promote_insight(call: ToolCall, ctx: RemembrancerContext) -> ToolResult {
@@ -1455,12 +1456,13 @@ fn run_promote_insight(call: ToolCall, ctx: RemembrancerContext) -> ToolResult {
       let today_facts = facts_log.load_date(ctx.facts_dir, today)
       let promoted_today =
         list.count(today_facts, fn(f) { f.source == promote_source })
-      case promoted_today >= max_promotions_per_day {
+      let cap = ctx.max_promotions_per_day
+      case promoted_today >= cap {
         True ->
           ToolFailure(
             tool_use_id: call.id,
             error: "promote_insight rate limit reached ("
-              <> int.to_string(max_promotions_per_day)
+              <> int.to_string(cap)
               <> "/day). Try again tomorrow or extract higher-priority insights.",
           )
         False -> {
@@ -1506,7 +1508,7 @@ fn run_promote_insight(call: ToolCall, ctx: RemembrancerContext) -> ToolResult {
               <> ", "
               <> int.to_string(promoted_today + 1)
               <> "/"
-              <> int.to_string(max_promotions_per_day)
+              <> int.to_string(cap)
               <> " today)",
           )
         }

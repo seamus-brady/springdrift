@@ -1620,6 +1620,10 @@ fn remembrancer_specs(
             [first, ..] -> first
             [] -> paths.project_dir() <> "/skills"
           },
+          max_promotions_per_day: option.unwrap(
+            cfg.meta_max_promotions_per_day,
+            3,
+          ),
         )
       [
         agent_types.AgentSpec(

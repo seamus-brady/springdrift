@@ -45,6 +45,7 @@ fn context(facts_dir: String) -> tools_remembrancer.RemembrancerContext {
     gate_provider: None,
     gate_model: "",
     skills_dir: facts_dir,
+    max_promotions_per_day: 3,
   )
 }
 
