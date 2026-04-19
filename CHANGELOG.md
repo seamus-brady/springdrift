@@ -12,6 +12,29 @@ For implementation history beyond what's user-visible, see
 
 ---
 
+## [0.8.1] — 2026-04-19
+
+Patch release. Two small fixes flagged after 0.8.0 cut.
+
+### Changed
+
+- **`agent_version` now reads from the package metadata.** New FFI
+  `springdrift_ffi:package_version/0` calls `application:get_key/2`,
+  which Gleam derives from `gleam.toml`. The default is now the
+  current build's version (`0.8.1` after this release). Operators
+  can still override via `[agent] version = "..."` in `config.toml`
+  to label a specific deployment. The hardcoded
+  `version = "Springdrift Mk-3"` line was removed from both the live
+  and example config files.
+
+### Fixed
+
+- **README web GUI port** corrected from `8080` to `12001` (the actual
+  default in `src/springdrift.gleam`). The 8080 reference was
+  introduced inadvertently in 0.8.0's docs rewrite.
+
+---
+
 ## [0.8.0] — 2026-04-19
 
 First semver release. Supersedes the prototype `Mk-1`–`Mk-4` tags. The
