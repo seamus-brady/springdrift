@@ -1014,6 +1014,13 @@ pub fn mobile_page(agent_name: String, agent_version: String) -> String {
     max-width: 90%;
     padding: 4px 12px;
   }
+  .msg.system.scheduler-divider {
+    font-size: 12px;
+    letter-spacing: 0.02em;
+    text-transform: lowercase;
+    opacity: 0.7;
+    padding: 12px 0 4px;
+  }
   .msg.question {
     align-self: flex-start;
     background: #fff8eb;
@@ -1208,6 +1215,25 @@ pub fn mobile_page(agent_name: String, agent_version: String) -> String {
     scrollBottom();
   }
 
+  // Compact divider for scheduler-triggered cycles. The cognitive loop
+  // injects the full <scheduler_context> XML as a user-role message;
+  // rendering it raw is unreadable on mobile. Show the job name as a
+  // thin divider so the operator can see autonomous work happened
+  // without drowning in markup.
+  function renderSchedulerDivider(text) {
+    clearEmpty();
+    var jobMatch = text.match(/<job_name>(.*?)<\\/job_name>/);
+    var titleMatch = text.match(/<title>(.*?)<\\/title>/);
+    var label = titleMatch && titleMatch[1] ? titleMatch[1]
+              : jobMatch && jobMatch[1] ? jobMatch[1]
+              : 'Scheduled task';
+    var el = document.createElement('div');
+    el.className = 'msg system scheduler-divider';
+    el.textContent = '\\u2014 ' + label + ' \\u2014';
+    msgs.appendChild(el);
+    scrollBottom();
+  }
+
   function showThinking() {
     if (thinkingEl) return;
     thinkingEl = document.createElement('div');
@@ -1268,12 +1294,30 @@ pub fn mobile_page(agent_name: String, agent_version: String) -> String {
       try { msg = JSON.parse(evt.data); } catch (e) { return; }
       switch (msg.type) {
         case 'session_history':
-          // Replay prior messages into the empty list.
+          // Replay prior messages. Filtering matches the desktop /chat
+          // page so the mobile view doesn't surface internal control
+          // messages as empty user bubbles or walls of XML.
           var entries = msg.messages || [];
           if (entries.length > 0) clearEmpty();
           entries.forEach(function(m) {
-            if (m.role === 'user') renderUser(m.text);
-            else if (m.role === 'assistant') renderAssistant(m.text);
+            if (m.role === 'user') {
+              var t = m.text || '';
+              // Synthetic bootstrap prompt that triggers the session
+              // greeting — operator never typed it, don't render it.
+              if (t.indexOf('[Session started.') === 0) return;
+              // Scheduler-injected prompt — render as a compact divider
+              // instead of dumping the raw <scheduler_context> XML.
+              if (t.indexOf('<scheduler_context>') === 0) {
+                renderSchedulerDivider(t);
+                return;
+              }
+              // Skip empty/whitespace-only user messages so they don't
+              // produce blank bubbles after scheduler cycles.
+              if (!t.trim()) return;
+              renderUser(t);
+            } else if (m.role === 'assistant') {
+              if (m.text && m.text.trim()) renderAssistant(m.text);
+            }
           });
           break;
         case 'thinking':
