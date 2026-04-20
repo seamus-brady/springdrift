@@ -84,6 +84,7 @@ compatibility promises). Each release is summarised in
 - [Why Gleam on the BEAM](#why-gleam-on-the-beam)
 - [Evaluation results](#evaluation-results)
 - [Documentation](#documentation)
+  - [Operators Manual](docs/operators-manual.md)
 - [Background reading](#background-reading)
 - [License](#license)
 - [Contributing](#contributing)
@@ -152,6 +153,10 @@ gleam run
 # Terminal TUI
 gleam run -- --gui tui
 ```
+
+Once it's up, the [Operators Manual](docs/operators-manual.md) covers
+the day-to-day: web UI tour, agent roster, diagnostic recipes,
+recovery procedures, and VPS deployment.
 
 ### API keys
 
@@ -884,6 +889,12 @@ not a statistical sample.
 ---
 
 ## Documentation
+
+**New to running one?** Start with the
+**[Operators Manual](docs/operators-manual.md)** -- practical guide to
+the daily rhythm, web UI, agent setup (including email), diagnostic
+recipes, recovery procedures, auditing, VPS deployment, and extending
+with Claude Code.
 
 **Architecture docs:** detailed design documents for each subsystem in [docs/architecture/](docs/architecture/):
 
