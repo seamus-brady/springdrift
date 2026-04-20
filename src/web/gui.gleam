@@ -202,6 +202,16 @@ fn handle_request(
             ),
           )
 
+        // Mobile-first chat page (stripped down for phone screens)
+        ["m"] ->
+          response.new(200)
+          |> response.set_header("content-type", "text/html; charset=utf-8")
+          |> response.set_body(
+            mist.Bytes(
+              bytes_tree.from_string(html.mobile_page(agent_name, agent_version)),
+            ),
+          )
+
         // Admin page (narrative + log)
         ["admin"] ->
           response.new(200)
