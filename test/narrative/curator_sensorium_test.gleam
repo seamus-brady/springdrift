@@ -288,6 +288,7 @@ fn make_recurring_for_staleness(
     fired_count:,
     recurrence_end_at: None,
     max_occurrences: None,
+    required_tools: [],
   )
 }
 

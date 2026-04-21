@@ -154,6 +154,7 @@ pub fn encode_job(job: ScheduledJob) -> json.Json {
       Some(n) -> json.int(n)
       None -> json.null()
     }),
+    #("required_tools", json.array(job.required_tools, json.string)),
   ])
 }
 
@@ -253,6 +254,11 @@ pub fn job_decoder() -> decode.Decoder(ScheduledJob) {
     None,
     decode.optional(decode.int),
   )
+  use required_tools <- decode.optional_field(
+    "required_tools",
+    [],
+    decode.list(decode.string),
+  )
   let status = parse_status(status_str)
   let job_source = parse_job_source(job_source_str)
   let kind = parse_kind(kind_str)
@@ -284,6 +290,7 @@ pub fn job_decoder() -> decode.Decoder(ScheduledJob) {
     fired_count:,
     recurrence_end_at:,
     max_occurrences:,
+    required_tools:,
   ))
 }
 

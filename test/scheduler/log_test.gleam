@@ -53,6 +53,7 @@ fn make_job(name: String, kind: types.JobKind) -> ScheduledJob {
     fired_count: 0,
     recurrence_end_at: None,
     max_occurrences: None,
+    required_tools: [],
   )
 }
 

@@ -229,6 +229,7 @@ pub fn handle_think_error(
               response: error_text,
               model: state.model,
               usage: None,
+              tools_fired: [],
             ),
           )
           // Add synthetic assistant message so message history stays
@@ -266,7 +267,12 @@ pub fn handle_think_down(
       let error_text = "[Error: think worker crashed: " <> reason <> "]"
       process.send(
         rt,
-        CognitiveReply(response: error_text, model: state.model, usage: None),
+        CognitiveReply(
+          response: error_text,
+          model: state.model,
+          usage: None,
+          tools_fired: [],
+        ),
       )
       let error_msg =
         llm_types.Message(role: llm_types.Assistant, content: [

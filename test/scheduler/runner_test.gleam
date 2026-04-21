@@ -39,6 +39,7 @@ fn make_task(name: String, interval_ms: Int) -> types.ScheduleTaskConfig {
       format: "markdown",
     ),
     only_if_changed: False,
+    required_tools: [],
   )
 }
 
@@ -96,6 +97,7 @@ fn auto_reply_loop(subj: process.Subject(agent_types.CognitiveMessage)) -> Nil {
           response: "mock result",
           model: "mock",
           usage: None,
+          tools_fired: [],
         ),
       )
     }
@@ -106,6 +108,7 @@ fn auto_reply_loop(subj: process.Subject(agent_types.CognitiveMessage)) -> Nil {
           response: "mock result",
           model: "mock",
           usage: None,
+          tools_fired: [],
         ),
       )
     }
@@ -233,7 +236,12 @@ pub fn unknown_job_complete_ignored_test() {
 
   process.send(
     sched,
-    JobComplete(name: "ghost-job", result: "boo", tokens_used: 0),
+    JobComplete(
+      name: "ghost-job",
+      result: "boo",
+      tokens_used: 0,
+      tools_fired: [],
+    ),
   )
   process.sleep(100)
 
@@ -378,6 +386,7 @@ fn make_recurring_job(name: String) -> ScheduledJob {
     fired_count: 0,
     recurrence_end_at: None,
     max_occurrences: None,
+    required_tools: [],
   )
 }
 
@@ -405,6 +414,7 @@ fn make_one_shot_reminder(name: String) -> ScheduledJob {
     fired_count: 0,
     recurrence_end_at: None,
     max_occurrences: None,
+    required_tools: [],
   )
 }
 
@@ -615,6 +625,7 @@ pub fn auto_purge_drops_old_terminal_one_shot_test() {
       fired_count: 1,
       recurrence_end_at: None,
       max_occurrences: None,
+      required_tools: [],
     )
   schedule_log.append(cp, stale_todo, Create)
   schedule_log.append(
@@ -645,6 +656,129 @@ pub fn auto_purge_drops_old_terminal_one_shot_test() {
   |> should.be_error()
   list.find(jobs, fn(j: ScheduledJob) { j.name == "fresh-cancelled" })
   |> should.be_ok()
+
+  process.send(sched, StopAll)
+  process.sleep(50)
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3b required_tools enforcement — scheduled jobs that declare
+// required tools are marked JobFailed when those tools did not fire in
+// the completing cycle. Turns narrated success into visible failure on
+// the scheduler tab.
+// ---------------------------------------------------------------------------
+
+pub fn complete_job_with_missing_required_tool_routes_to_failed_test() {
+  let cp = "/tmp/springdrift-test-sched-required-missing"
+  clean_schedule_dir(cp)
+  let cognitive = auto_reply_cognitive()
+  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0)
+
+  // Add a job that requires analyze_affect_performance.
+  let add_reply = process.new_subject()
+  let job =
+    ScheduledJob(..make_recurring_job("needs-analysis"), required_tools: [
+      "analyze_affect_performance",
+    ])
+  process.send(sched, AddJob(job:, reply_to: add_reply))
+  let assert Ok(Ok(_)) = process.receive(add_reply, 5000)
+
+  // Simulate a JobComplete where only adjacent tools fired — the
+  // required tool is missing. The runner must reroute to JobFailed
+  // rather than marking success.
+  process.send(
+    sched,
+    JobComplete(
+      name: "needs-analysis",
+      result: "I analysed the data...",
+      tokens_used: 0,
+      tools_fired: ["reflect", "list_affect_history"],
+    ),
+  )
+  process.sleep(200)
+
+  // Verify the job status reflects the failure, not success. The run
+  // count should remain at zero since JobFailed does not increment it.
+  let status_subj = process.new_subject()
+  process.send(sched, GetStatus(reply_to: status_subj))
+  let assert Ok(jobs) = process.receive(status_subj, 5000)
+  let assert Ok(job2) =
+    list.find(jobs, fn(j: ScheduledJob) { j.name == "needs-analysis" })
+  { job2.error_count >= 1 } |> should.be_true
+
+  process.send(sched, StopAll)
+  process.sleep(50)
+}
+
+pub fn complete_job_with_required_tools_fired_succeeds_test() {
+  let cp = "/tmp/springdrift-test-sched-required-ok"
+  clean_schedule_dir(cp)
+  let cognitive = auto_reply_cognitive()
+  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0)
+
+  let add_reply = process.new_subject()
+  let job =
+    ScheduledJob(..make_recurring_job("all-present"), required_tools: [
+      "analyze_affect_performance",
+    ])
+  process.send(sched, AddJob(job:, reply_to: add_reply))
+  let assert Ok(Ok(_)) = process.receive(add_reply, 5000)
+
+  // Required tool is in tools_fired — normal completion.
+  process.send(
+    sched,
+    JobComplete(
+      name: "all-present",
+      result: "analysis complete",
+      tokens_used: 0,
+      tools_fired: ["analyze_affect_performance", "memory_write"],
+    ),
+  )
+  process.sleep(200)
+
+  let status_subj = process.new_subject()
+  process.send(sched, GetStatus(reply_to: status_subj))
+  let assert Ok(jobs) = process.receive(status_subj, 5000)
+  let assert Ok(job2) =
+    list.find(jobs, fn(j: ScheduledJob) { j.name == "all-present" })
+  job2.run_count |> should.equal(1)
+  job2.error_count |> should.equal(0)
+
+  process.send(sched, StopAll)
+  process.sleep(50)
+}
+
+pub fn complete_job_with_empty_required_tools_skips_check_test() {
+  let cp = "/tmp/springdrift-test-sched-required-none"
+  clean_schedule_dir(cp)
+  let cognitive = auto_reply_cognitive()
+  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0)
+
+  // Default required_tools is []; the check is disabled.
+  let add_reply = process.new_subject()
+  let job = make_recurring_job("no-required")
+  process.send(sched, AddJob(job:, reply_to: add_reply))
+  let assert Ok(Ok(_)) = process.receive(add_reply, 5000)
+
+  // Complete with an empty tools_fired list — still OK because the job
+  // declared no required tools.
+  process.send(
+    sched,
+    JobComplete(
+      name: "no-required",
+      result: "done",
+      tokens_used: 0,
+      tools_fired: [],
+    ),
+  )
+  process.sleep(200)
+
+  let status_subj = process.new_subject()
+  process.send(sched, GetStatus(reply_to: status_subj))
+  let assert Ok(jobs) = process.receive(status_subj, 5000)
+  let assert Ok(job2) =
+    list.find(jobs, fn(j: ScheduledJob) { j.name == "no-required" })
+  job2.run_count |> should.equal(1)
 
   process.send(sched, StopAll)
   process.sleep(50)

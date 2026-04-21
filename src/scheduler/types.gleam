@@ -31,6 +31,13 @@ pub type ScheduleTaskConfig {
     start_at: Option(String),
     delivery: DeliveryConfig,
     only_if_changed: Bool,
+    /// Phase 3 fluency/grounding. Tools the scheduled cycle must invoke
+    /// for the job to count as successful. When a job prompt explicitly
+    /// names a tool (e.g. "invoke `analyze_affect_performance`"), the
+    /// runner checks the completing cycle's tool log and marks the job
+    /// failed if any required tool did not fire. Empty list disables
+    /// the check — the default for jobs that don't name specific tools.
+    required_tools: List(String),
   )
 }
 
@@ -113,6 +120,9 @@ pub type ScheduledJob {
     fired_count: Int,
     recurrence_end_at: Option(String),
     max_occurrences: Option(Int),
+    /// Phase 3 fluency/grounding. Tools the cycle must invoke for the
+    /// fire to count as success. Empty = check disabled.
+    required_tools: List(String),
   )
 }
 
@@ -150,8 +160,16 @@ pub type JobQuery {
 pub type SchedulerMessage {
   /// Timer fired for a specific job
   Tick(name: String)
-  /// Job completed with result text and token usage
-  JobComplete(name: String, result: String, tokens_used: Int)
+  /// Job completed with result text, token usage, and the list of tools
+  /// that fired during the cycle. Used by the runner to apply the
+  /// required_tools check: if any required tool is absent from
+  /// tools_fired, the job is marked failed instead of complete.
+  JobComplete(
+    name: String,
+    result: String,
+    tokens_used: Int,
+    tools_fired: List(String),
+  )
   /// Job failed
   JobFailed(name: String, reason: String)
   /// Stop all scheduled jobs

@@ -1009,6 +1009,10 @@ fn make_job(
     fired_count: 0,
     recurrence_end_at: None,
     max_occurrences:,
+    // Agent-created jobs don't declare required tools at construction
+    // time — the scheduling prompt is free-form. Operators can set
+    // required_tools via schedule.toml for jobs defined there.
+    required_tools: [],
   )
 }
 

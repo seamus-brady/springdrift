@@ -89,6 +89,7 @@ pub fn encode_job_has_required_fields_test() {
       fired_count: 5,
       recurrence_end_at: None,
       max_occurrences: None,
+      required_tools: [],
     )
   let json_str = json.to_string(types.encode_job(job))
   should.be_true(string.contains(json_str, "\"name\":\"test-job\""))
@@ -127,6 +128,7 @@ pub fn encode_job_truncates_last_result_test() {
       fired_count: 0,
       recurrence_end_at: None,
       max_occurrences: None,
+      required_tools: [],
     )
   let json_str = json.to_string(types.encode_job(job))
   // The JSON should NOT contain 300 x's — truncated to 200
