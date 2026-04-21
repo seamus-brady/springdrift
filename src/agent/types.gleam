@@ -526,7 +526,11 @@ pub type SensoryEvent {
 // ---------------------------------------------------------------------------
 
 pub type QueuedInput {
-  QueuedInput(source_id: String, text: String, reply_to: Subject(CognitiveReply))
+  QueuedInput(
+    source_id: String,
+    text: String,
+    reply_to: Subject(CognitiveReply),
+  )
   QueuedSchedulerInput(
     source_id: String,
     job_name: String,

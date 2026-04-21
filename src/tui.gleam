@@ -252,10 +252,19 @@ fn handle_delivery(state: TuiState, delivery: frontdoor_types.Delivery) -> Nil {
       question:,
       origin: _,
     ) -> {
-      // Treat a human question from the agent as a reply — render it
-      // and set status back to Idle so the operator can answer. The
-      // answer is still sent via the legacy UserAnswer path.
-      handle_cognitive_reply(state, question, state.model, None)
+      // Render the question as an assistant message and put the TUI
+      // into WaitingForInput so the operator's next keystrokes are
+      // funnelled back to cognitive via UserAnswer.
+      let asst =
+        Message(role: Assistant, content: [TextContent(text: question)])
+      continue_loop(
+        TuiState(
+          ..state,
+          messages: list.append(state.messages, [asst]),
+          status: WaitingForInput(question:),
+          spinner_label: "",
+        ),
+      )
     }
     frontdoor_types.DeliverClosed -> Nil
   }
@@ -299,8 +308,11 @@ fn handle_notification(
   notification: agent_types.Notification,
 ) -> Nil {
   case notification {
-    agent_types.QuestionForHuman(question:, ..) ->
-      continue_loop(TuiState(..state, status: WaitingForInput(question:)))
+    // QuestionForHuman is no longer emitted — questions route via
+    // Frontdoor's DeliverQuestion (see handle_delivery). Kept as a
+    // no-op so the exhaustive pattern compiles until the variant is
+    // dropped from the Notification enum.
+    agent_types.QuestionForHuman(..) -> Nil
     agent_types.SaveWarning(message:) ->
       continue_loop(
         TuiState(

@@ -14,10 +14,9 @@ import agent/registry
 import agent/team
 import agent/types.{
   type AgentOutcome, type CognitiveReply, type DelegationProgress, AgentFailure,
-  AgentQuestionSource, AgentSuccess, AgentTask, AgentWaiting, CognitiveQuestion,
-  DelegationInfo, Idle, ModelEscalation, OwnToolWaiting, PendingAgent,
-  PendingThink, QuestionForHuman, Thinking, ToolCalling, WaitingForAgents,
-  WaitingForUser,
+  AgentSuccess, AgentTask, AgentWaiting, DelegationInfo, Idle, ModelEscalation,
+  OwnToolWaiting, PendingAgent, PendingThink, Thinking, ToolCalling,
+  WaitingForAgents, WaitingForUser,
 }
 import agent/worker
 import cycle_log
@@ -180,116 +179,28 @@ fn handle_own_human_input(
 ) -> CognitiveState {
   let question = framework.parse_human_input_question(call.input_json)
 
-  case state.cycle_node_type {
-    // Autonomous cycle — no human is attached. Broadcasting a
-    // QuestionForHuman notification would hijack every connected browser
-    // (setting waitingForAnswer on their UIs), and the operator's next
-    // chat message would be funnelled into this cycle's reply subject.
-    // Instead, synthesise a tool result that the LLM can continue from.
-    dag_types.SchedulerCycle -> {
-      slog.info(
-        "cognitive",
-        "handle_own_human_input",
-        "request_human_input suppressed in autonomous cycle — synthesising 'no human' tool result",
-        state.cycle_id,
-      )
-      let canned =
-        "No human is attached to this autonomous cycle. Answer your own "
-        <> "question from current evidence, or return what you already have. "
-        <> "Your question was: "
-        <> question
-      continue_with_synthetic_tool_result(state, task_id, resp, call.id, canned)
-    }
-    _ -> {
-      // Interactive cycle — existing behaviour. Publish to Frontdoor
-      // for symmetry, broadcast the legacy notification so current
-      // WS / TUI adapters still render the question.
-      output.publish_human_question(
-        state,
-        question,
-        frontdoor_types.CognitiveLoopOrigin,
-      )
-      process.send(
-        state.notify,
-        QuestionForHuman(question:, source: CognitiveQuestion),
-      )
+  // Publish to Frontdoor. For UserSource destinations Frontdoor delivers
+  // the question to the originating sink only; for SchedulerSource
+  // destinations it drops the question and injects a canned answer back
+  // into cognitive's inbox so the paused react loop resumes.
+  output.publish_human_question(
+    state,
+    question,
+    frontdoor_types.CognitiveLoopOrigin,
+  )
 
-      let assistant_msg =
-        llm_types.Message(role: llm_types.Assistant, content: resp.content)
-      let messages = list.append(state.messages, [assistant_msg])
+  let assistant_msg =
+    llm_types.Message(role: llm_types.Assistant, content: resp.content)
+  let messages = list.append(state.messages, [assistant_msg])
 
-      let ctx = OwnToolWaiting(tool_use_id: call.id, reply_to:)
+  let ctx = OwnToolWaiting(tool_use_id: call.id, reply_to:)
 
-      CognitiveState(
-        ..state,
-        messages:,
-        status: WaitingForUser(question:, context: ctx),
-        pending: dict.delete(state.pending, task_id),
-      )
-    }
-  }
-}
-
-/// Resume the react loop with a synthetic tool result instead of waiting
-/// for a human to answer. Used when `request_human_input` is called
-/// during an autonomous cycle where no human is available. Adds the
-/// assistant's tool-use content, appends a matching tool-result user
-/// message, and spawns a continuation think worker that reuses the
-/// original cycle's reply_to so the terminal reply still lands.
-fn continue_with_synthetic_tool_result(
-  state: CognitiveState,
-  task_id: String,
-  resp: llm_types.LlmResponse,
-  tool_use_id: String,
-  content: String,
-) -> CognitiveState {
-  case dict.get(state.pending, task_id) {
-    Error(_) -> state
-    Ok(PendingThink(reply_to: rt, ..)) -> {
-      let assistant_msg =
-        llm_types.Message(role: llm_types.Assistant, content: resp.content)
-      let tool_result =
-        llm_types.ToolResultContent(tool_use_id:, content:, is_error: False)
-      let user_msg =
-        llm_types.Message(role: llm_types.User, content: [tool_result])
-      let messages = list.append(state.messages, [assistant_msg, user_msg])
-
-      let new_task_id = cycle_log.generate_uuid()
-      let req = cognitive_llm.build_request(state, messages)
-      case state.verbose {
-        True ->
-          cycle_log.log_llm_request(option.unwrap(state.cycle_id, ""), req)
-        False -> Nil
-      }
-      worker.spawn_think(
-        new_task_id,
-        req,
-        state.provider,
-        state.self,
-        state.config.retry_config,
-      )
-      CognitiveState(
-        ..state,
-        messages:,
-        status: Thinking(task_id: new_task_id),
-        pending: state.pending
-          |> dict.delete(task_id)
-          |> dict.insert(
-            new_task_id,
-            PendingThink(
-              task_id: new_task_id,
-              model: state.model,
-              fallback_from: None,
-              reply_to: rt,
-              output_gate_count: 0,
-              empty_retried: False,
-              node_type: state.cycle_node_type,
-            ),
-          ),
-      )
-    }
-    Ok(_) -> state
-  }
+  CognitiveState(
+    ..state,
+    messages:,
+    status: WaitingForUser(question:, context: ctx),
+    pending: dict.delete(state.pending, task_id),
+  )
 }
 
 fn handle_memory_tools(
@@ -1427,45 +1338,19 @@ pub fn handle_agent_question(
   agent: String,
   reply_to: Subject(String),
 ) -> CognitiveState {
-  case state.cycle_node_type {
-    // Autonomous cycle — no human is available. Reply to the waiting
-    // agent directly with a canned answer so its react loop resumes,
-    // and do NOT broadcast (that would hijack interactive UIs).
-    dag_types.SchedulerCycle -> {
-      slog.info(
-        "cognitive",
-        "handle_agent_question",
-        agent
-          <> " asked for human input inside an autonomous cycle — "
-          <> "replying synthetically",
-        state.cycle_id,
-      )
-      let canned =
-        "No human is attached to this autonomous cycle. Answer your own "
-        <> "question from current evidence, or return what you already have. "
-        <> "Your question was: "
-        <> question
-      process.send(reply_to, canned)
-      // State stays as-is — the agent's react loop continues in its
-      // own process; cognitive is still Thinking on the parent cycle.
-      state
-    }
-    _ -> {
-      output.publish_human_question(
-        state,
-        question,
-        frontdoor_types.AgentOrigin(agent_name: agent),
-      )
-      process.send(
-        state.notify,
-        QuestionForHuman(question:, source: AgentQuestionSource(agent:)),
-      )
-      CognitiveState(
-        ..state,
-        status: WaitingForUser(question:, context: AgentWaiting(reply_to:)),
-      )
-    }
-  }
+  // Publish to Frontdoor. UserSource destinations see DeliverQuestion;
+  // SchedulerSource destinations drop the question and Frontdoor
+  // synthesises an answer via InjectUserAnswer, which routes through
+  // handle_user_answer → forwards to the agent's reply_to here.
+  output.publish_human_question(
+    state,
+    question,
+    frontdoor_types.AgentOrigin(agent_name: agent),
+  )
+  CognitiveState(
+    ..state,
+    status: WaitingForUser(question:, context: AgentWaiting(reply_to:)),
+  )
 }
 
 pub fn handle_user_answer(
