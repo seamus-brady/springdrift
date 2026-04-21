@@ -953,9 +953,9 @@ fn run(cfg: AppConfig) -> Nil {
     [] -> Nil
     _ ->
       io.println(
-        "Scheduler: meta-learning Phase F enabled, registering "
+        "Scheduler: "
         <> int.to_string(list.length(meta_tasks))
-        <> " recurring jobs",
+        <> " meta-learning jobs registered",
       )
   }
   let meta_budget_pct = option.unwrap(cfg.meta_max_reflection_budget_pct, 25)
