@@ -121,10 +121,14 @@ Default port: **12001**. Set `SPRINGDRIFT_WEB_TOKEN` in the
 environment to require auth on every request (highly recommended for
 anything not on `localhost`).
 
-Two pages:
+Three pages:
 
 - `/chat` — the conversational UI. Two tabs: **Chat** and
-  **Activity** (live tool-use feed)
+  **Activity** (live tool-use feed). Designed for desktop.
+- `/m` — mobile-first chat. Strip-down of `/chat` for phone screens:
+  full-width messages, big tap targets, no sidebar, no admin tabs,
+  no activity feed. Same WebSocket protocol, same conversation
+  history. Use this from your phone instead of `/chat`.
 - `/admin` — 11 read-only tabs for inspecting agent state. Below
 
 Authenticate by appending `?token=YOUR_TOKEN` to the URL or sending
@@ -145,6 +149,15 @@ Authenticate by appending `?token=YOUR_TOKEN` to the URL or sending
 | **Affect** | Five-dimensional affect snapshots over time. | Investigating a behaviour change. |
 | **Skills** | Active and archived skills with metadata, decay candidates. | Weekly during skills review. |
 | **Memory** | Counts and recent entries from facts, CBR cases, artifacts. | Sanity-checking that memory is actually growing. |
+
+### Accessing the agent from your phone
+
+The dense admin UI is desktop-only — `/m` is the page for phone
+chat. Open `http://your-host:12001/m?token=...` from your phone
+(via Tailscale or SSH tunnel as below). The agent itself can answer
+"what's on my schedule today?" or "any failures since yesterday?",
+which is usually faster than scrolling through admin tabs on a
+phone screen anyway.
 
 ### Accessing the admin from your phone or laptop
 

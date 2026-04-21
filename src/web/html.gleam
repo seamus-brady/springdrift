@@ -885,6 +885,488 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
 </html>"
 }
 
+/// Stripped-down chat UI optimised for phone screens.
+///
+/// Deliberately minimal: no sidebar, no tab bar, no activity feed, no
+/// admin tabs, no markdown editor affordances. Just a scrollable
+/// message list, a thumb-friendly textarea, and a send button.
+/// Reuses the same /ws WebSocket protocol as `chat_page` so the
+/// server is unchanged. For a phone-from-the-pub use case the agent
+/// can answer "what's on my schedule" via chat — no need to render
+/// schedule UI.
+pub fn mobile_page(agent_name: String, agent_version: String) -> String {
+  let version_display = case agent_version {
+    "" -> ""
+    v -> " v" <> v
+  }
+  let title = escape(agent_name)
+  let version = escape(version_display)
+  let placeholder = "Message " <> escape(string.lowercase(agent_name)) <> "..."
+
+  "<!DOCTYPE html>
+<html lang=\"en\">
+<head>
+<meta charset=\"UTF-8\">
+<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0, viewport-fit=cover\">
+<meta name=\"theme-color\" content=\"#f0efe9\">
+<meta name=\"apple-mobile-web-app-capable\" content=\"yes\">
+<meta name=\"apple-mobile-web-app-status-bar-style\" content=\"default\">
+<meta name=\"apple-mobile-web-app-title\" content=\"" <> title <> "\">
+<title>" <> title <> "</title>
+<script src=\"https://cdn.jsdelivr.net/npm/marked/marked.min.js\"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #f7f7f8;
+    --surface: #ffffff;
+    --header-bg: #f0efe9;
+    --header-border: #e3e2dc;
+    --border: #e5e5e5;
+    --text: #2d2d2d;
+    --text-dim: #8e8e93;
+    --accent: #da7e37;
+    --user-bg: #ece4d9;
+    --assistant-bg: #ffffff;
+    --code-bg: #f4f3ee;
+    --radius: 16px;
+  }
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
+    -webkit-text-size-adjust: 100%;
+    overscroll-behavior-y: none;
+  }
+  body {
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    padding-top: env(safe-area-inset-top);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+  header {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: var(--header-bg);
+    border-bottom: 1px solid var(--header-border);
+    min-height: 52px;
+  }
+  header h1 {
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  header .version {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-left: 6px;
+  }
+  .status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    transition: background 0.2s;
+  }
+  .status-dot.connected { background: #34c759; }
+  .status-dot.disconnected { background: #ff3b30; }
+  #messages {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .msg {
+    max-width: 85%;
+    padding: 12px 16px;
+    border-radius: var(--radius);
+    word-wrap: break-word;
+    overflow-wrap: anywhere;
+  }
+  .msg.user {
+    align-self: flex-end;
+    background: var(--user-bg);
+    border-bottom-right-radius: 6px;
+  }
+  .msg.assistant {
+    align-self: flex-start;
+    background: var(--assistant-bg);
+    border: 1px solid var(--border);
+    border-bottom-left-radius: 6px;
+  }
+  .msg.system {
+    align-self: center;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 13px;
+    text-align: center;
+    max-width: 90%;
+    padding: 4px 12px;
+  }
+  .msg.system.scheduler-divider {
+    font-size: 12px;
+    letter-spacing: 0.02em;
+    text-transform: lowercase;
+    opacity: 0.7;
+    padding: 12px 0 4px;
+  }
+  .msg.question {
+    align-self: flex-start;
+    background: #fff8eb;
+    border: 1px solid #f5d8a0;
+    border-radius: var(--radius);
+  }
+  .msg p { margin: 0 0 0.6em 0; }
+  .msg p:last-child { margin: 0; }
+  .msg ul, .msg ol { margin: 0 0 0.6em 1.2em; }
+  .msg pre {
+    background: var(--code-bg);
+    padding: 10px 12px;
+    border-radius: 8px;
+    overflow-x: auto;
+    font-size: 14px;
+    margin: 0.6em 0;
+  }
+  .msg code {
+    background: var(--code-bg);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 0.9em;
+  }
+  .msg pre code { background: none; padding: 0; }
+  .msg a { color: var(--accent); }
+  .thinking {
+    align-self: flex-start;
+    color: var(--text-dim);
+    font-size: 14px;
+    font-style: italic;
+    padding: 4px 12px;
+  }
+  .thinking::after {
+    content: '\\2026';
+    display: inline-block;
+    animation: blink 1.4s infinite;
+  }
+  @keyframes blink {
+    0%, 60%, 100% { opacity: 1; }
+    30% { opacity: 0.3; }
+  }
+  #input-area {
+    flex-shrink: 0;
+    padding: 8px 12px;
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+  }
+  #chat-form {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+  }
+  #chat-input {
+    flex: 1;
+    border: 1px solid var(--border);
+    border-radius: 22px;
+    padding: 10px 16px;
+    font-size: 16px;
+    line-height: 1.4;
+    font-family: inherit;
+    background: var(--bg);
+    color: var(--text);
+    resize: none;
+    min-height: 44px;
+    max-height: 144px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  #chat-input:focus { border-color: var(--accent); }
+  #send-btn {
+    flex-shrink: 0;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: none;
+    background: var(--accent);
+    color: white;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 0.15s, transform 0.1s;
+  }
+  #send-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  #send-btn:active:not(:disabled) { transform: scale(0.92); }
+  #send-btn svg { width: 20px; height: 20px; }
+  .empty {
+    align-self: center;
+    text-align: center;
+    color: var(--text-dim);
+    padding: 32px 16px;
+    font-size: 14px;
+  }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1 style=\"display:inline\">" <> title <> "</h1>
+    <span class=\"version\">" <> version <> "</span>
+  </div>
+  <div class=\"status-dot disconnected\" id=\"status-dot\" aria-label=\"Connection status\"></div>
+</header>
+<div id=\"messages\">
+  <div class=\"empty\" id=\"empty-state\">Ask anything. Try \"what's on my schedule today?\"</div>
+</div>
+<div id=\"input-area\">
+  <form id=\"chat-form\">
+    <textarea id=\"chat-input\" rows=\"1\" placeholder=\"" <> placeholder <> "\" autocapitalize=\"sentences\" autocomplete=\"off\"></textarea>
+    <button type=\"submit\" id=\"send-btn\" aria-label=\"Send\" disabled>
+      <svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><line x1=\"22\" y1=\"2\" x2=\"11\" y2=\"13\"/><polygon points=\"22 2 15 22 11 13 2 9 22 2\"/></svg>
+    </button>
+  </form>
+</div>
+<script>
+(function() {
+  var msgs = document.getElementById('messages');
+  var emptyState = document.getElementById('empty-state');
+  var form = document.getElementById('chat-form');
+  var input = document.getElementById('chat-input');
+  var sendBtn = document.getElementById('send-btn');
+  var statusDot = document.getElementById('status-dot');
+  var ws = null;
+  var thinkingEl = null;
+  var waitingForAnswer = false;
+  var reconnectDelay = 1000;
+
+  // Auth: same as desktop — token via ?token=... in the URL flows through to /ws
+  function wsUrl() {
+    var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    var url = proto + '//' + location.host + '/ws';
+    var qs = location.search;
+    if (qs) url += qs;
+    return url;
+  }
+
+  function setStatus(state) {
+    statusDot.className = 'status-dot ' + state;
+  }
+
+  function autoGrow() {
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 144) + 'px';
+    sendBtn.disabled = input.value.trim().length === 0;
+  }
+
+  function scrollBottom() {
+    requestAnimationFrame(function() {
+      msgs.scrollTop = msgs.scrollHeight;
+    });
+  }
+
+  function clearEmpty() {
+    if (emptyState) {
+      emptyState.remove();
+      emptyState = null;
+    }
+  }
+
+  function renderUser(text) {
+    clearEmpty();
+    var el = document.createElement('div');
+    el.className = 'msg user';
+    el.textContent = text;
+    msgs.appendChild(el);
+    scrollBottom();
+  }
+
+  function renderAssistant(text, klass) {
+    clearEmpty();
+    var el = document.createElement('div');
+    el.className = 'msg ' + (klass || 'assistant');
+    try {
+      el.innerHTML = marked.parse(text || '');
+    } catch (e) {
+      el.textContent = text || '';
+    }
+    msgs.appendChild(el);
+    scrollBottom();
+  }
+
+  function renderSystem(text) {
+    clearEmpty();
+    var el = document.createElement('div');
+    el.className = 'msg system';
+    el.textContent = text;
+    msgs.appendChild(el);
+    scrollBottom();
+  }
+
+  // Compact divider for scheduler-triggered cycles. The cognitive loop
+  // injects the full <scheduler_context> XML as a user-role message;
+  // rendering it raw is unreadable on mobile. Show the job name as a
+  // thin divider so the operator can see autonomous work happened
+  // without drowning in markup.
+  function renderSchedulerDivider(text) {
+    clearEmpty();
+    var jobMatch = text.match(/<job_name>(.*?)<\\/job_name>/);
+    var titleMatch = text.match(/<title>(.*?)<\\/title>/);
+    var label = titleMatch && titleMatch[1] ? titleMatch[1]
+              : jobMatch && jobMatch[1] ? jobMatch[1]
+              : 'Scheduled task';
+    var el = document.createElement('div');
+    el.className = 'msg system scheduler-divider';
+    el.textContent = '\\u2014 ' + label + ' \\u2014';
+    msgs.appendChild(el);
+    scrollBottom();
+  }
+
+  function showThinking() {
+    if (thinkingEl) return;
+    thinkingEl = document.createElement('div');
+    thinkingEl.className = 'thinking';
+    thinkingEl.textContent = 'Thinking';
+    msgs.appendChild(thinkingEl);
+    scrollBottom();
+  }
+
+  function hideThinking() {
+    if (thinkingEl) {
+      thinkingEl.remove();
+      thinkingEl = null;
+    }
+  }
+
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    var text = input.value.trim();
+    if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+    if (waitingForAnswer) {
+      ws.send(JSON.stringify({ type: 'user_answer', text: text }));
+      waitingForAnswer = false;
+    } else {
+      ws.send(JSON.stringify({ type: 'user_message', text: text }));
+    }
+    renderUser(text);
+    input.value = '';
+    autoGrow();
+    showThinking();
+  });
+
+  // Enter sends, Shift+Enter inserts newline. On phones the on-screen
+  // keyboard usually provides its own Return; we treat both the same.
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      form.dispatchEvent(new Event('submit', { cancelable: true }));
+    }
+  });
+  input.addEventListener('input', autoGrow);
+
+  function connect() {
+    ws = new WebSocket(wsUrl());
+    ws.onopen = function() {
+      setStatus('connected');
+      reconnectDelay = 1000;
+    };
+    ws.onclose = function() {
+      setStatus('disconnected');
+      hideThinking();
+      setTimeout(connect, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+    };
+    ws.onerror = function() { setStatus('disconnected'); };
+    ws.onmessage = function(evt) {
+      var msg;
+      try { msg = JSON.parse(evt.data); } catch (e) { return; }
+      switch (msg.type) {
+        case 'session_history':
+          // Replay prior messages. Filtering matches the desktop /chat
+          // page so the mobile view doesn't surface internal control
+          // messages as empty user bubbles or walls of XML.
+          var entries = msg.messages || [];
+          if (entries.length > 0) clearEmpty();
+          entries.forEach(function(m) {
+            if (m.role === 'user') {
+              var t = m.text || '';
+              // Synthetic bootstrap prompt that triggers the session
+              // greeting — operator never typed it, don't render it.
+              if (t.indexOf('[Session started.') === 0) return;
+              // Scheduler-injected prompt — render as a compact divider
+              // instead of dumping the raw <scheduler_context> XML.
+              if (t.indexOf('<scheduler_context>') === 0) {
+                renderSchedulerDivider(t);
+                return;
+              }
+              // Skip empty/whitespace-only user messages so they don't
+              // produce blank bubbles after scheduler cycles.
+              if (!t.trim()) return;
+              renderUser(t);
+            } else if (m.role === 'assistant') {
+              if (m.text && m.text.trim()) renderAssistant(m.text);
+            }
+          });
+          break;
+        case 'thinking':
+          showThinking();
+          break;
+        case 'assistant_message':
+          hideThinking();
+          renderAssistant(msg.text);
+          break;
+        case 'question':
+          hideThinking();
+          renderAssistant(msg.text, 'question');
+          waitingForAnswer = true;
+          input.focus();
+          break;
+        case 'notification':
+          // Surface only the most useful kinds. Skip safety/queue noise on mobile.
+          if (msg.kind === 'tool_calling' && msg.name) {
+            // No-op: tool_calling is too chatty for mobile. We let the
+            // single 'thinking' indicator stand in.
+          } else if (msg.kind === 'save_warning') {
+            renderSystem(msg.message || 'Saved');
+          }
+          break;
+        // Everything else (log_data, scheduler_data, planner_data, etc.)
+        // is admin-tab-specific and irrelevant on the mobile page.
+        default:
+          break;
+      }
+    };
+  }
+
+  // Refocus when the page becomes visible again so the keyboard reopens
+  // when you switch back to the tab.
+  document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'visible' && ws && ws.readyState === WebSocket.OPEN) {
+      // Keep keyboard closed until the user taps; just refresh status.
+      setStatus('connected');
+    }
+  });
+
+  autoGrow();
+  connect();
+})();
+</script>
+</body>
+</html>"
+}
+
 pub fn admin_page(agent_name: String, agent_version: String) -> String {
   let version_display = case agent_version {
     "" -> ""
