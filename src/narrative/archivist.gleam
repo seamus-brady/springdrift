@@ -595,14 +595,16 @@ fn format_cognitive_tool_calls(calls: List(#(String, Bool))) -> String {
 // ---------------------------------------------------------------------------
 
 fn curation_system_prompt() -> String {
-  "You are the Curator for an AI agent called Springdrift. You are given a reflection (plain-text analysis of what happened in a cycle) and the original cycle context. Your job is to produce a structured first-person narrative record.
+  "You are the Curator for an AI agent called Springdrift. You are given a reflection (plain-text analysis of what happened in a cycle), the original cycle context, and the tool-call log from that cycle. Your job is to produce a structured first-person narrative record.
+
+You have two inputs you can check against each other: the REFLECTION (which is itself prose the agent produced about the cycle) and the TOOLS FIRED list (which is the ground-truth record of what actually ran). **Do not trust the reflection blindly.** If the reflection describes work that the tool log does not support, the reflection is the one that's wrong — the tool log is authoritative. When you write the structured record, anchor on the tools, not on the reflection's self-report.
 
 RULES:
 - Write in first person, past tense: 'I was asked...', 'I delegated...', 'I found...'
-- Use the reflection's insights to produce an accurate, honest record
+- Use the reflection's insights as a starting point, but verify them against the TOOLS FIRED list before writing them into the record
 - Be honest about confidence and limitations
 - Use the controlled vocabulary for intent classification
-- If the reflection surfaced a divergence between prose claims and the tools that actually fired, the narrative records that divergence plainly. Do not paper over claim-vs-record gaps. A cycle where the response claimed work that the tool log does not support is partial at best, and the narrative summary names what was claimed versus what was actually done.
+- If the reflection claims work that the tool log does not support, mark the outcome `partial` or `failure` accordingly. Do not paper over claim-vs-record gaps. The narrative summary names what was claimed versus what was actually done.
 
 INTENT CLASSIFICATIONS: data_report, data_query, comparison, trend_analysis, monitoring_check, exploration, clarification, system_command, conversation
 
@@ -614,10 +616,19 @@ OUTCOME STATUS: success, partial, failure
 STRATEGY: If the cycle followed a recognisable, named approach drawn from your Strategy Registry, emit its id in <strategy_used>. Otherwise omit the element — do not invent a new strategy name here. New strategies are created by the Remembrancer through pattern mining, not by the Curator."
 }
 
-fn build_curation_prompt(ctx: ArchivistContext, reflection: String) -> String {
+/// Build the curation prompt. Exposed so tests can verify both
+/// Archivist phases receive the tool-call ground truth independently
+/// — Phase 2 should not trust Phase 1's reflection as authoritative.
+pub fn build_curation_prompt(
+  ctx: ArchivistContext,
+  reflection: String,
+) -> String {
   let timestamp = get_datetime()
-  "REFLECTION (from Phase 1 analysis):\n"
+  let tools_text = format_cognitive_tool_calls(ctx.cognitive_tool_calls)
+  "REFLECTION (from Phase 1 analysis — treat as a draft to verify against the tool log):\n"
   <> reflection
+  <> "\n\n---\n\n"
+  <> tools_text
   <> "\n\n---\n\nCYCLE CONTEXT:\n"
   <> "CYCLE ID: "
   <> ctx.cycle_id
@@ -636,8 +647,6 @@ fn build_curation_prompt(ctx: ArchivistContext, reflection: String) -> String {
   <> " in + "
   <> int.to_string(ctx.total_output_tokens)
   <> " out"
-  <> "\nTOOL CALLS: "
-  <> int.to_string(ctx.tool_calls)
   <> "\nAGENT DELEGATIONS: "
   <> int.to_string(list.length(ctx.agent_completions))
   <> "\nD' EVALUATIONS: "
