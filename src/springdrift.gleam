@@ -1171,6 +1171,7 @@ fn run(cfg: AppConfig) -> Nil {
         agent_version,
         ws_max_bytes,
         scheduler_subj,
+        frontdoor_subj,
       )
     }
     _ ->
