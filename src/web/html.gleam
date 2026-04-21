@@ -106,7 +106,7 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
 </div>
 </div>
 <script>
-" <> sidebar_js() <> "
+" <> sidebar_js() <> shared_js_helpers() <> "
 (function() {
   // Chat history is server-authoritative — no localStorage
   var msgs = document.getElementById('messages');
@@ -828,12 +828,6 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
     msgs.scrollTop = msgs.scrollHeight;
   }
 
-  function escapeHtml(s) {
-    var d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
-  }
-
   function sendMessage() {
     var text = input.value.trim();
     if (!text || !ws || ws.readyState !== WebSocket.OPEN || isThinking) return;
@@ -1140,6 +1134,7 @@ pub fn mobile_page(agent_name: String, agent_version: String) -> String {
   </form>
 </div>
 <script>
+" <> shared_js_helpers() <> "
 (function() {
   var msgs = document.getElementById('messages');
   var emptyState = document.getElementById('empty-state');
@@ -1549,7 +1544,7 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
 </div>
 </div>
 <script>
-" <> sidebar_js() <> "
+" <> sidebar_js() <> shared_js_helpers() <> "
 (function() {
   var statusEl = document.getElementById('status');
   var statusDot = document.getElementById('status-dot');
@@ -1713,7 +1708,7 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
     if (d === 'MODIFY') return '\\u26A0\\uFE0F MODIFY';
     if (d === 'REJECT') return '\\u274C REJECT';
     if (d === 'ABORT') return '\\u26D4 ABORT';
-    return decision;
+    return escapeHtml(decision);
   }
 
   function renderDprimeGates(gates) {
@@ -1957,7 +1952,7 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
   function renderDprimeConfig(config) {
     var container = document.getElementById('dprime-config-container');
     if (!config || config.error) {
-      container.innerHTML = '<div style=\"opacity:.5;padding:20px\">D\\' config not available: ' + (config ? config.error : 'no data') + '</div>';
+      container.innerHTML = '<div style=\"opacity:.5;padding:20px\">D\\' config not available: ' + escapeHtml(config ? config.error : 'no data') + '</div>';
       return;
     }
     var html = '';
@@ -2114,7 +2109,7 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
     body.innerHTML = filtered.map(function(j) {
       var due = j.due_at ? j.due_at : (j.interval_ms > 0 ? (j.interval_ms/1000)+'s' : '-');
       var lr = j.last_result ? j.last_result.substring(0,80) : '-';
-      return '<tr><td>'+escapeHtml(j.name)+'</td><td>'+j.kind+'</td><td>'+j.status+'</td><td>'+(j['for']||'-')+'</td><td>'+due+'</td><td>'+j.run_count+'</td><td>'+j.error_count+'</td><td style=\"max-width:200px;overflow:hidden;text-overflow:ellipsis\">'+escapeHtml(lr)+'</td></tr>';
+      return '<tr><td>'+escapeHtml(j.name)+'</td><td>'+escapeHtml(j.kind)+'</td><td>'+escapeHtml(j.status)+'</td><td>'+escapeHtml(j['for']||'-')+'</td><td>'+escapeHtml(due)+'</td><td>'+escapeHtml(j.run_count)+'</td><td>'+escapeHtml(j.error_count)+'</td><td style=\"max-width:200px;overflow:hidden;text-overflow:ellipsis\">'+escapeHtml(lr)+'</td></tr>';
     }).join('');
   }
 
@@ -2141,7 +2136,7 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
       var badge = c.outcome === 'success' ? '\\u2705' : c.outcome === 'pending' ? '\\u23f3' : '\\u274c';
       var tokens = c.tokens_in + c.tokens_out;
       var dur = c.duration_ms > 0 ? (c.duration_ms/1000).toFixed(1)+'s' : '-';
-      return '<tr><td>'+c.cycle_id.substring(0,8)+'</td><td>'+c.timestamp+'</td><td>'+badge+' '+c.outcome+'</td><td>'+c.model+'</td><td>'+c.tool_call_count+'</td><td>'+tokens+'</td><td>'+dur+'</td></tr>';
+      return '<tr><td>'+escapeHtml(c.cycle_id.substring(0,8))+'</td><td>'+escapeHtml(c.timestamp)+'</td><td>'+badge+' '+escapeHtml(c.outcome)+'</td><td>'+escapeHtml(c.model)+'</td><td>'+escapeHtml(c.tool_call_count)+'</td><td>'+escapeHtml(tokens)+'</td><td>'+escapeHtml(dur)+'</td></tr>';
     }).join('');
   }
 
@@ -2392,12 +2387,6 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
         }
         break;
     }
-  }
-
-  function escapeHtml(s) {
-    var d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
   }
 
   connect();
@@ -3764,4 +3753,18 @@ fn escape(s: String) -> String {
   |> string.replace("<", "&lt;")
   |> string.replace(">", "&gt;")
   |> string.replace("\"", "&quot;")
+}
+
+// Client-side escape helper. Emitted once per page and used wherever
+// dynamic fields are interpolated into innerHTML strings. Uses the
+// textContent-to-innerHTML round-trip to delegate escaping to the DOM
+// parser, which keeps it identical to what the browser would do.
+fn shared_js_helpers() -> String {
+  "function escapeHtml(s) {
+    if (s === null || s === undefined) return '';
+    var d = document.createElement('div');
+    d.textContent = String(s);
+    return d.innerHTML;
+  }
+"
 }
