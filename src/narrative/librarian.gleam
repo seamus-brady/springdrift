@@ -47,11 +47,11 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/order
 import gleam/string
+import narrative/librarian/planner_index
 import narrative/log as narrative_log
 import narrative/types.{
   type NarrativeEntry, type ThreadIndex, type ThreadState, ThreadIndex,
 }
-import planner/log as planner_log
 import planner/types as planner_types
 import simplifile
 import slog
@@ -97,8 +97,6 @@ pub type DagTable
 
 pub type ArtifactTable
 
-pub type PlannerTable
-
 @external(erlang, "springdrift_ffi", "days_between")
 fn days_between(date_a: String, date_b: String) -> Int
 
@@ -132,9 +130,6 @@ fn new_dag_table(name: String, table_type: String) -> DagTable
 
 @external(erlang, "store_ffi", "new_unique_table")
 fn new_artifact_table(name: String, table_type: String) -> ArtifactTable
-
-@external(erlang, "store_ffi", "new_unique_table")
-fn new_planner_table(name: String, table_type: String) -> PlannerTable
 
 // Narrative-typed operations
 @external(erlang, "store_ffi", "insert")
@@ -295,56 +290,9 @@ fn artifact_lookup_bag(
   key: String,
 ) -> List(artifacts_types.ArtifactMeta)
 
-// Planner-typed operations
-@external(erlang, "store_ffi", "insert")
-fn planner_insert(
-  table: PlannerTable,
-  key: String,
-  value: planner_types.PlannerTask,
-) -> Nil
-
-@external(erlang, "store_ffi", "lookup")
-fn planner_lookup(
-  table: PlannerTable,
-  key: String,
-) -> Result(planner_types.PlannerTask, Nil)
-
-@external(erlang, "store_ffi", "all_values")
-fn planner_all_values(table: PlannerTable) -> List(planner_types.PlannerTask)
-
-// Reserved for future use (trim/housekeeping)
-// @external(erlang, "store_ffi", "delete_key")
-@external(erlang, "store_ffi", "delete_key")
-fn planner_delete_key(table: PlannerTable, key: String) -> Nil
-
-@external(erlang, "store_ffi", "delete_table")
-fn planner_delete_table(table: PlannerTable) -> Nil
-
-@external(erlang, "store_ffi", "table_size")
-fn planner_table_size(table: PlannerTable) -> Int
-
-// Endeavour-typed operations (reuse PlannerTable type)
-@external(erlang, "store_ffi", "insert")
-fn endeavour_insert(
-  table: PlannerTable,
-  key: String,
-  value: planner_types.Endeavour,
-) -> Nil
-
-@external(erlang, "store_ffi", "lookup")
-fn endeavour_lookup(
-  table: PlannerTable,
-  key: String,
-) -> Result(planner_types.Endeavour, Nil)
-
-@external(erlang, "store_ffi", "all_values")
-fn endeavour_all_values(table: PlannerTable) -> List(planner_types.Endeavour)
-
-@external(erlang, "store_ffi", "delete_key")
-fn endeavour_delete(table: PlannerTable, key: String) -> Nil
-
-@external(erlang, "store_ffi", "delete_table")
-fn endeavour_delete_table(table: PlannerTable) -> Nil
+// Planner-typed operations live in `narrative/librarian/planner_index` —
+// tasks and endeavours share one ETS-table shape but hold different value
+// types, and the sub-module keeps per-value-type FFI signatures encapsulated.
 
 // ---------------------------------------------------------------------------
 // Messages
@@ -606,8 +554,8 @@ type LibrarianState {
     artifacts_by_cycle: ArtifactTable,
     // Planner ETS tables
     planner_dir: String,
-    planner_tasks: PlannerTable,
-    planner_endeavours: PlannerTable,
+    planner_tasks: planner_index.Table,
+    planner_endeavours: planner_index.Table,
   )
 }
 
@@ -690,9 +638,9 @@ fn start_with_pid(
         new_artifact_table("artifacts_by_cycle", "bag")
 
       // Create Planner ETS tables
-      let planner_tasks_table = new_planner_table("planner_tasks", "set")
+      let planner_tasks_table = planner_index.new_table("planner_tasks", "set")
       let planner_endeavours_table =
-        new_planner_table("planner_endeavours", "set")
+        planner_index.new_table("planner_endeavours", "set")
 
       let state =
         LibrarianState(
@@ -743,12 +691,17 @@ fn start_with_pid(
       replay_artifacts_from_disk(state, max_files)
 
       // Replay planner from disk
-      replay_planner_from_disk(state, max_files)
+      planner_index.replay_from_disk(
+        planner_tasks_table,
+        planner_endeavours_table,
+        planner_dir,
+        max_files,
+      )
 
       let narrative_count = ets_table_size(entries_table)
       let cbr_count = cbr_table_size(cbr_cases_table)
       let facts_count = fact_table_size(facts_key_table)
-      let tasks_count = planner_table_size(planner_tasks_table)
+      let tasks_count = planner_index.table_size(planner_tasks_table)
       slog.info(
         "narrative/librarian",
         "start",
@@ -1592,8 +1545,8 @@ fn loop(state: LibrarianState) -> Nil {
           artifact_delete_table(state.artifacts)
           artifact_delete_table(state.artifacts_by_cycle)
           // Delete Planner tables
-          planner_delete_table(state.planner_tasks)
-          endeavour_delete_table(state.planner_endeavours)
+          planner_index.delete_table(state.planner_tasks)
+          planner_index.delete_table(state.planner_endeavours)
           slog.info(
             "narrative/librarian",
             "shutdown",
@@ -2110,17 +2063,17 @@ fn loop(state: LibrarianState) -> Nil {
 
         // --- Planner messages ---
         NotifyTaskOp(op:) -> {
-          apply_task_op(state, op)
+          planner_index.apply_task_op(state.planner_tasks, op)
           loop(state)
         }
 
         NotifyEndeavourOp(op:) -> {
-          apply_endeavour_op(state, op)
+          planner_index.apply_endeavour_op(state.planner_endeavours, op)
           loop(state)
         }
 
         QueryActiveTasks(reply_to:) -> {
-          let all = planner_all_values(state.planner_tasks)
+          let all = planner_index.task_all_values(state.planner_tasks)
           let active =
             list.filter(all, fn(t) {
               t.status == planner_types.Pending
@@ -2131,19 +2084,23 @@ fn loop(state: LibrarianState) -> Nil {
         }
 
         QueryTaskById(task_id:, reply_to:) -> {
-          let result = planner_lookup(state.planner_tasks, task_id)
+          let result = planner_index.task_lookup(state.planner_tasks, task_id)
           process.send(reply_to, result)
           loop(state)
         }
 
         QueryEndeavourById(endeavour_id:, reply_to:) -> {
-          let result = endeavour_lookup(state.planner_endeavours, endeavour_id)
+          let result =
+            planner_index.endeavour_lookup(
+              state.planner_endeavours,
+              endeavour_id,
+            )
           process.send(reply_to, result)
           loop(state)
         }
 
         QueryAllEndeavours(reply_to:) -> {
-          let all = endeavour_all_values(state.planner_endeavours)
+          let all = planner_index.endeavour_all_values(state.planner_endeavours)
           process.send(reply_to, all)
           loop(state)
         }
@@ -2949,410 +2906,6 @@ fn build_tool_summaries(
         dag_types.ToolSummary(name:, success:, error: None),
         ..acc
       ])
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Planner — apply ops, replay, queries
-// ---------------------------------------------------------------------------
-
-fn apply_task_op(state: LibrarianState, op: planner_types.TaskOp) -> Nil {
-  case op {
-    planner_types.CreateTask(task:) ->
-      planner_insert(state.planner_tasks, task.task_id, task)
-
-    planner_types.UpdateTaskStatus(task_id:, status:, at:) ->
-      case planner_lookup(state.planner_tasks, task_id) {
-        Ok(t) ->
-          planner_insert(
-            state.planner_tasks,
-            task_id,
-            planner_types.PlannerTask(..t, status:, updated_at: at),
-          )
-        Error(_) -> Nil
-      }
-
-    planner_types.CompleteStep(task_id:, step_index:, at:) ->
-      case planner_lookup(state.planner_tasks, task_id) {
-        Ok(t) -> {
-          let steps =
-            list.map(t.plan_steps, fn(s) {
-              case s.index == step_index {
-                True ->
-                  planner_types.PlanStep(
-                    ..s,
-                    status: planner_types.Complete,
-                    completed_at: Some(at),
-                  )
-                False -> s
-              }
-            })
-          let all_complete =
-            list.all(steps, fn(s) { s.status == planner_types.Complete })
-          let new_status = case all_complete {
-            True -> planner_types.Complete
-            False -> t.status
-          }
-          planner_insert(
-            state.planner_tasks,
-            task_id,
-            planner_types.PlannerTask(
-              ..t,
-              plan_steps: steps,
-              status: new_status,
-              updated_at: at,
-            ),
-          )
-        }
-        Error(_) -> Nil
-      }
-
-    planner_types.FlagRisk(task_id:, text:, at:) ->
-      case planner_lookup(state.planner_tasks, task_id) {
-        Ok(t) ->
-          planner_insert(
-            state.planner_tasks,
-            task_id,
-            planner_types.PlannerTask(
-              ..t,
-              materialised_risks: list.append(t.materialised_risks, [text]),
-              updated_at: at,
-            ),
-          )
-        Error(_) -> Nil
-      }
-
-    planner_types.AddCycleId(task_id:, cycle_id:) ->
-      case planner_lookup(state.planner_tasks, task_id) {
-        Ok(t) ->
-          case list.contains(t.cycle_ids, cycle_id) {
-            True -> Nil
-            False ->
-              planner_insert(
-                state.planner_tasks,
-                task_id,
-                planner_types.PlannerTask(
-                  ..t,
-                  cycle_ids: list.append(t.cycle_ids, [cycle_id]),
-                ),
-              )
-          }
-        Error(_) -> Nil
-      }
-
-    planner_types.UpdateForecastScore(task_id:, score:) ->
-      case planner_lookup(state.planner_tasks, task_id) {
-        Ok(t) ->
-          planner_insert(
-            state.planner_tasks,
-            task_id,
-            planner_types.PlannerTask(..t, forecast_score: Some(score)),
-          )
-        Error(_) -> Nil
-      }
-
-    // Delete — remove from ETS entirely
-    planner_types.DeleteTask(task_id:) ->
-      planner_delete_key(state.planner_tasks, task_id)
-
-    // Direct field update — apply to ETS record
-    planner_types.UpdateForecastBreakdown(task_id:, score:, breakdown:) ->
-      case planner_lookup(state.planner_tasks, task_id) {
-        Ok(t) ->
-          planner_insert(
-            state.planner_tasks,
-            task_id,
-            planner_types.PlannerTask(
-              ..t,
-              forecast_score: Some(score),
-              forecast_breakdown: Some(breakdown),
-            ),
-          )
-        Error(_) -> Nil
-      }
-
-    planner_types.AddPreMortem(task_id:, pre_mortem:) ->
-      case planner_lookup(state.planner_tasks, task_id) {
-        Ok(t) ->
-          planner_insert(
-            state.planner_tasks,
-            task_id,
-            planner_types.PlannerTask(..t, pre_mortem: option.Some(pre_mortem)),
-          )
-        Error(_) -> Nil
-      }
-
-    planner_types.AddPostMortem(task_id:, post_mortem:) ->
-      case planner_lookup(state.planner_tasks, task_id) {
-        Ok(t) ->
-          planner_insert(
-            state.planner_tasks,
-            task_id,
-            planner_types.PlannerTask(
-              ..t,
-              post_mortem: option.Some(post_mortem),
-            ),
-          )
-        Error(_) -> Nil
-      }
-
-    // Remaining task ops — apply via resolve pattern
-    other_op -> {
-      let tid = case other_op {
-        planner_types.UpdateTaskFields(task_id: id, ..) -> id
-        planner_types.AddTaskStep(task_id: id, ..) -> id
-        planner_types.RemoveTaskStep(task_id: id, ..) -> id
-        // Already handled above — unreachable
-        _ -> ""
-      }
-      case tid {
-        "" -> Nil
-        _ ->
-          case planner_lookup(state.planner_tasks, tid) {
-            Ok(t) -> {
-              let resolved =
-                planner_log.resolve_tasks([
-                  planner_types.CreateTask(task: t),
-                  other_op,
-                ])
-              case resolved {
-                [updated, ..] ->
-                  planner_insert(state.planner_tasks, tid, updated)
-                _ -> Nil
-              }
-            }
-            Error(_) -> Nil
-          }
-      }
-    }
-  }
-}
-
-fn apply_endeavour_op(
-  state: LibrarianState,
-  op: planner_types.EndeavourOp,
-) -> Nil {
-  case op {
-    planner_types.CreateEndeavour(endeavour:) ->
-      endeavour_insert(
-        state.planner_endeavours,
-        endeavour.endeavour_id,
-        endeavour,
-      )
-
-    planner_types.AddTaskToEndeavour(endeavour_id:, task_id:) ->
-      case endeavour_lookup(state.planner_endeavours, endeavour_id) {
-        Ok(e) ->
-          case list.contains(e.task_ids, task_id) {
-            True -> Nil
-            False ->
-              endeavour_insert(
-                state.planner_endeavours,
-                endeavour_id,
-                planner_types.Endeavour(
-                  ..e,
-                  task_ids: list.append(e.task_ids, [task_id]),
-                ),
-              )
-          }
-        Error(_) -> Nil
-      }
-
-    planner_types.UpdateEndeavourStatus(endeavour_id:, status:) ->
-      case endeavour_lookup(state.planner_endeavours, endeavour_id) {
-        Ok(e) ->
-          endeavour_insert(
-            state.planner_endeavours,
-            endeavour_id,
-            planner_types.Endeavour(..e, status:),
-          )
-        Error(_) -> Nil
-      }
-
-    // Delete — remove from ETS entirely
-    planner_types.DeleteEndeavour(endeavour_id:) ->
-      endeavour_delete(state.planner_endeavours, endeavour_id)
-
-    // Direct field updates — apply to ETS record without re-resolve
-    planner_types.UpdateEndeavourForecastBreakdown(
-      endeavour_id:,
-      score:,
-      breakdown:,
-    ) ->
-      case endeavour_lookup(state.planner_endeavours, endeavour_id) {
-        Ok(e) ->
-          endeavour_insert(
-            state.planner_endeavours,
-            endeavour_id,
-            planner_types.Endeavour(
-              ..e,
-              forecast_score: option.Some(score),
-              forecast_breakdown: option.Some(breakdown),
-            ),
-          )
-        Error(_) -> Nil
-      }
-
-    planner_types.UpdateForecasterConfig(
-      endeavour_id:,
-      feature_overrides:,
-      threshold_override:,
-    ) ->
-      case endeavour_lookup(state.planner_endeavours, endeavour_id) {
-        Ok(e) ->
-          endeavour_insert(
-            state.planner_endeavours,
-            endeavour_id,
-            planner_types.Endeavour(
-              ..e,
-              feature_overrides:,
-              threshold_override:,
-            ),
-          )
-        Error(_) -> Nil
-      }
-
-    planner_types.UpdateEndeavourFields(
-      endeavour_id:,
-      goal:,
-      success_criteria:,
-      deadline:,
-      update_cadence:,
-      approval_config:,
-    ) ->
-      case endeavour_lookup(state.planner_endeavours, endeavour_id) {
-        Ok(e) -> {
-          let updated =
-            planner_types.Endeavour(
-              ..e,
-              goal: option.unwrap(goal, e.goal),
-              success_criteria: option.unwrap(
-                success_criteria,
-                e.success_criteria,
-              ),
-              deadline: case deadline {
-                option.Some(d) -> option.Some(d)
-                option.None -> e.deadline
-              },
-              update_cadence: case update_cadence {
-                option.Some(c) -> option.Some(c)
-                option.None -> e.update_cadence
-              },
-              approval_config: option.unwrap(approval_config, e.approval_config),
-            )
-          endeavour_insert(state.planner_endeavours, endeavour_id, updated)
-        }
-        Error(_) -> Nil
-      }
-
-    planner_types.CancelSession(endeavour_id:, session_id:, reason:, ..) ->
-      case endeavour_lookup(state.planner_endeavours, endeavour_id) {
-        Ok(e) -> {
-          let updated_sessions =
-            list.map(e.work_sessions, fn(s) {
-              case s.session_id == session_id {
-                True ->
-                  planner_types.WorkSession(
-                    ..s,
-                    status: planner_types.SessionSkipped(reason:),
-                  )
-                False -> s
-              }
-            })
-          endeavour_insert(
-            state.planner_endeavours,
-            endeavour_id,
-            planner_types.Endeavour(..e, work_sessions: updated_sessions),
-          )
-        }
-        Error(_) -> Nil
-      }
-
-    planner_types.AddEndeavourPostMortem(endeavour_id:, post_mortem:) ->
-      case endeavour_lookup(state.planner_endeavours, endeavour_id) {
-        Ok(e) ->
-          endeavour_insert(
-            state.planner_endeavours,
-            endeavour_id,
-            planner_types.Endeavour(..e, post_mortem: option.Some(post_mortem)),
-          )
-        Error(_) -> Nil
-      }
-
-    // Remaining ops — apply via resolve pattern (re-create + apply)
-    other_op -> {
-      let eid = case other_op {
-        planner_types.UpdatePhase(endeavour_id: id, ..) -> id
-        planner_types.AddPhase(endeavour_id: id, ..) -> id
-        planner_types.AddBlocker(endeavour_id: id, ..) -> id
-        planner_types.ResolveBlocker(endeavour_id: id, ..) -> id
-        planner_types.RecordSession(endeavour_id: id, ..) -> id
-        planner_types.ScheduleSession(endeavour_id: id, ..) -> id
-        planner_types.SendUpdate(endeavour_id: id, ..) -> id
-        planner_types.Replan(endeavour_id: id, ..) -> id
-        planner_types.RecordMetrics(endeavour_id: id, ..) -> id
-        // Already handled above — unreachable but required for exhaustiveness
-        _ -> ""
-      }
-      case eid {
-        "" -> Nil
-        _ ->
-          case endeavour_lookup(state.planner_endeavours, eid) {
-            Ok(e) -> {
-              let resolved =
-                planner_log.resolve_endeavours([
-                  planner_types.CreateEndeavour(endeavour: e),
-                  other_op,
-                ])
-              case resolved {
-                [updated, ..] ->
-                  endeavour_insert(state.planner_endeavours, eid, updated)
-                _ -> Nil
-              }
-            }
-            Error(_) -> Nil
-          }
-      }
-    }
-  }
-}
-
-fn replay_planner_from_disk(state: LibrarianState, max_files: Int) -> Nil {
-  // Load and resolve tasks
-  case simplifile.read_directory(state.planner_dir) {
-    Error(_) -> Nil
-    Ok(files) -> {
-      let task_files =
-        files
-        |> list.filter(fn(f) { string.ends_with(f, "-tasks.jsonl") })
-        |> list.sort(string.compare)
-      let limited_tasks = limit_files(task_files, max_files)
-      let task_ops =
-        list.flat_map(limited_tasks, fn(f) {
-          let date = string.drop_end(f, 12)
-          planner_log.load_task_ops_date(state.planner_dir, date)
-        })
-      let tasks = planner_log.resolve_tasks(task_ops)
-      list.each(tasks, fn(t) {
-        planner_insert(state.planner_tasks, t.task_id, t)
-      })
-
-      // Load and resolve endeavours
-      let endeavour_files =
-        files
-        |> list.filter(fn(f) { string.ends_with(f, "-endeavours.jsonl") })
-        |> list.sort(string.compare)
-      let limited_endeavours = limit_files(endeavour_files, max_files)
-      let endeavour_ops =
-        list.flat_map(limited_endeavours, fn(f) {
-          let date = string.drop_end(f, 17)
-          planner_log.load_endeavour_ops_date(state.planner_dir, date)
-        })
-      let endeavours = planner_log.resolve_endeavours(endeavour_ops)
-      list.each(endeavours, fn(e) {
-        endeavour_insert(state.planner_endeavours, e.endeavour_id, e)
-      })
     }
   }
 }
