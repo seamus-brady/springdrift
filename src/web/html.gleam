@@ -1297,8 +1297,14 @@ pub fn mobile_page(agent_name: String, agent_version: String) -> String {
           // Replay prior messages. Filtering matches the desktop /chat
           // page so the mobile view doesn't surface internal control
           // messages as empty user bubbles or walls of XML.
+          //
+          // Wipe the messages container first — the server resends the
+          // full history on every WebSocket connect, so a reconnect
+          // (tab wake, network blip, backoff retry) would otherwise
+          // append a duplicate copy of every prior message.
+          msgs.innerHTML = '';
+          emptyState = null;
           var entries = msg.messages || [];
-          if (entries.length > 0) clearEmpty();
           entries.forEach(function(m) {
             if (m.role === 'user') {
               var t = m.text || '';
