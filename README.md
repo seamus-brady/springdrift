@@ -42,7 +42,7 @@ Built in [Gleam](https://gleam.run) on the Erlang/OTP runtime.
 
 ## Status
 
-Beta. In active development. Running in daily use. ~62,000 lines of Gleam across 136 source files, 1,649 tests passing. Core systems (cognitive loop, multi-agent delegation, D' safety gates, normative calculus, CBR memory, narrative threading, sensorium, scheduler, comms, meta-learning, web GUI) are implemented and relatively stable. There are probably bugs though.
+Beta. In active development. Running in daily use. Tens of thousands of lines of Gleam across ~150 source files, with a comprehensive green test suite. Core systems (cognitive loop, multi-agent delegation, D' safety gates, normative calculus, CBR memory, narrative threading, sensorium, scheduler, comms, meta-learning, web GUI) are implemented and relatively stable. There are probably bugs though.
 
 See [docs/roadmap/](docs/roadmap/) for planned work including federation, learner ingestion, and metacognition reporting.
 
@@ -178,7 +178,7 @@ DuckDuckGo web search requires no API key and is always available.
 
 ```sh
 gleam build           # Compile (must be warning-free)
-gleam test            # Run the test suite (1490 tests)
+gleam test            # Run the test suite
 gleam format          # Format all source files
 gleam run             # Run the application
 ```
