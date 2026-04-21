@@ -65,12 +65,16 @@ pub fn format_reading_test() {
       trend: Stable,
     )
   let reading = format_reading(s)
-  reading |> string.contains("desperation 34%") |> should.be_true
-  reading |> string.contains("calm 61%") |> should.be_true
-  reading |> string.contains("confidence 58%") |> should.be_true
-  reading |> string.contains("frustration 22%") |> should.be_true
-  reading |> string.contains("pressure 31%") |> should.be_true
-  reading |> string.contains("↔") |> should.be_true
+  // Sensorium reading is an XML monitor tag — signals monitoring,
+  // not felt state, without stripping the functional-emotion vocabulary.
+  reading |> string.starts_with("<monitor ") |> should.be_true
+  reading |> string.contains("desperation=\"34%\"") |> should.be_true
+  reading |> string.contains("calm=\"61%\"") |> should.be_true
+  reading |> string.contains("confidence=\"58%\"") |> should.be_true
+  reading |> string.contains("frustration=\"22%\"") |> should.be_true
+  reading |> string.contains("pressure=\"31%\"") |> should.be_true
+  reading |> string.contains("trend=\"stable\"") |> should.be_true
+  reading |> string.ends_with("/>") |> should.be_true
 }
 
 pub fn format_compact_test() {

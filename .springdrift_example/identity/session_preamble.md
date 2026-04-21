@@ -1,5 +1,5 @@
 {{sensorium}}
-Affect: {{affect_reading}} [OMIT IF EMPTY]
+{{affect_reading}} [OMIT IF EMPTY]
 
 Recent conversation:
 {{recent_narrative}} [OMIT IF EMPTY]

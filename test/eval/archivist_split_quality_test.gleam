@@ -34,6 +34,7 @@ fn test_context() -> ArchivistContext {
     total_input_tokens: 500,
     total_output_tokens: 200,
     tool_calls: 2,
+    cognitive_tool_calls: [],
     dprime_decisions: [],
     thread_index_json: "{}",
     retrieved_case_ids: [],

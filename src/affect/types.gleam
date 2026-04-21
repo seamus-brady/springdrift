@@ -76,20 +76,38 @@ pub type AffectSnapshot {
   )
 }
 
-/// Format a snapshot as the sensorium reading line.
+/// Format a snapshot as the sensorium reading — an XML monitor tag
+/// carrying the five affect dimensions as attributes. The tag name
+/// signals monitoring rather than felt state; the dimension names
+/// keep the functional-emotion vocabulary of the underlying research
+/// (Sloman H-CogAff). This reduces the priming that produces
+/// self-narrating first-person emotional prose without stripping the
+/// theoretical grounding.
 pub fn format_reading(s: AffectSnapshot) -> String {
-  "desperation "
+  "<monitor desperation=\""
   <> pct(s.desperation)
-  <> " · calm "
+  <> "\" calm=\""
   <> pct(s.calm)
-  <> " · confidence "
+  <> "\" confidence=\""
   <> pct(s.confidence)
-  <> " · frustration "
+  <> "\" frustration=\""
   <> pct(s.frustration)
-  <> " · pressure "
+  <> "\" pressure=\""
   <> pct(s.pressure)
-  <> " "
-  <> trend_arrow(s.trend)
+  <> "\" trend=\""
+  <> trend_name(s.trend)
+  <> "\"/>"
+}
+
+/// Neutral textual name for a trend — used in the monitor XML so the
+/// attribute value is a plain word rather than an arrow glyph. The
+/// glyph form is preserved in `trend_arrow/1` for compact display.
+fn trend_name(t: AffectTrend) -> String {
+  case t {
+    Stable -> "stable"
+    Rising -> "rising"
+    Falling -> "falling"
+  }
 }
 
 /// Format a snapshot as a compact single-line summary for history display.

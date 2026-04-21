@@ -48,6 +48,9 @@ pub fn maybe_spawn_archivist(
       total_output_tokens: output_tokens,
       tool_calls: list.flat_map(state.agent_completions, fn(c) { c.tools_used })
         |> list.length,
+      cognitive_tool_calls: list.map(state.cycle_tool_calls, fn(t) {
+        #(t.name, t.success)
+      }),
       dprime_decisions: list.map(
         list.reverse(state.dprime_decisions),
         fn(r: dag_types.DprimeDecisionRecord) {

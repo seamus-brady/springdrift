@@ -30,6 +30,7 @@ fn make_ctx() -> ArchivistContext {
     total_input_tokens: 100,
     total_output_tokens: 50,
     tool_calls: 0,
+    cognitive_tool_calls: [],
     dprime_decisions: [],
     thread_index_json: "{}",
     retrieved_case_ids: [],
@@ -419,4 +420,74 @@ pub fn generate_two_phase_success_test() {
   let assert Some(entry) = result
   entry.summary |> should.equal("Two-phase entry: user was greeted.")
   entry.outcome.status |> should.equal(Success)
+}
+
+// ---------------------------------------------------------------------------
+// Reflection prompt grounding — the prompt must surface actual tool calls so
+// the Reflector can compare prose claims against what fired. Pre-fix, the
+// prompt carried only a TOOL CALLS count; the agent could "reflect" on a
+// fabricated analysis without ever seeing that the analysis tool wasn't
+// among the calls that actually ran.
+// ---------------------------------------------------------------------------
+
+pub fn reflection_prompt_shows_empty_tool_list_when_no_calls_test() {
+  let ctx = make_ctx()
+  let prompt = archivist.build_reflection_prompt(ctx)
+  prompt |> string.contains("TOOLS FIRED") |> should.be_true
+  prompt |> string.contains("(none") |> should.be_true
+}
+
+pub fn reflection_prompt_lists_tool_names_and_outcomes_test() {
+  let ctx =
+    ArchivistContext(..make_ctx(), cognitive_tool_calls: [
+      #("reflect", True),
+      #("list_affect_history", True),
+      #("analyze_affect_performance", False),
+    ])
+  let prompt = archivist.build_reflection_prompt(ctx)
+  prompt |> string.contains("reflect (ok)") |> should.be_true
+  prompt |> string.contains("list_affect_history (ok)") |> should.be_true
+  prompt
+  |> string.contains("analyze_affect_performance (FAILED)")
+  |> should.be_true
+}
+
+pub fn reflection_prompt_asks_for_claim_vs_log_reconciliation_test() {
+  let ctx = make_ctx()
+  let prompt = archivist.build_reflection_prompt(ctx)
+  // The grounding question must be present and phrased around divergence
+  // between prose claims and the tool log.
+  prompt |> string.contains("prose claims") |> should.be_true
+  prompt |> string.contains("tool log") |> should.be_true
+  prompt |> string.contains("divergence") |> should.be_true
+}
+
+// ---------------------------------------------------------------------------
+// Curation prompt grounding — Phase 2 must receive the tool-call list as an
+// independent anchor, not trust the Phase 1 reflection as authoritative.
+// Without this, a fabricated reflection is faithfully structured into a
+// permanent NarrativeEntry and CbrCase.
+// ---------------------------------------------------------------------------
+
+pub fn curation_prompt_includes_tool_log_independently_test() {
+  let ctx =
+    ArchivistContext(..make_ctx(), cognitive_tool_calls: [
+      #("reflect", True),
+      #("list_affect_history", True),
+    ])
+  let prompt = archivist.build_curation_prompt(ctx, "reflection text here")
+  // The Curator must see the tool list just like the Reflector did.
+  prompt |> string.contains("TOOLS FIRED") |> should.be_true
+  prompt |> string.contains("reflect (ok)") |> should.be_true
+  prompt |> string.contains("list_affect_history (ok)") |> should.be_true
+}
+
+pub fn curation_prompt_treats_reflection_as_draft_test() {
+  let ctx = make_ctx()
+  let prompt = archivist.build_curation_prompt(ctx, "whatever")
+  // The framing must signal that the reflection is to be verified,
+  // not trusted. Pre-fix, the Curator received the reflection as a
+  // summary to structure; post-fix it's a draft to check against the log.
+  prompt |> string.contains("draft") |> should.be_true
+  prompt |> string.contains("tool log") |> should.be_true
 }
