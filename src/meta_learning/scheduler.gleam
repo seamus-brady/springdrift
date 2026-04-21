@@ -234,6 +234,9 @@ fn fabrication_audit_task(
     start_at: None,
     delivery: delivery,
     only_if_changed: False,
+    // The audit itself is a tool call — require it to have fired so
+    // the integrity signal doesn't get narrated into existence.
+    required_tools: ["audit_fabrication"],
   )
 }
 
@@ -261,6 +264,7 @@ fn voice_drift_task(
     start_at: None,
     delivery: delivery,
     only_if_changed: False,
+    required_tools: ["audit_voice_drift"],
   )
 }
 
