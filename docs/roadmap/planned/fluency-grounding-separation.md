@@ -79,7 +79,19 @@ The current voice is self-descriptive and identity-narrating ("I am thoughtful, 
 
 Same affect vocabulary. Different reflective posture. Still first-person, still the agent's voice, still narrative — but reporting rather than reassuring.
 
-Action: draft a revised `persona.md` that retunes the reflective voice. Keep Curragh as Curragh; change how Curragh talks to itself in narrative and reflection.
+#### Anti-meta-integrity clause
+
+Once Phase 2 lands, the agent will see integrity signals about itself (fabrication risk, voice drift). This creates a new drift vector the persona must anticipate: **narrating integrity as an identity trait rather than monitoring it as a signal**. The April 20 transcript already shows this pattern around the existing catch mechanisms — "That's the cycle working — error detection + correction + learning" and "the accountability structures are functional" are exactly the self-congratulatory framing Phase 1c wants to sweep, but about the integrity system itself.
+
+The persona revision needs to forbid this explicitly, not just by extension of the "don't narrate affect" clause. Concretely:
+
+- No "my accountability structures are functional" — report the signal values plainly, don't praise the mechanism that reports them
+- No "I caught my own hallucination" as reassurance — if a divergence is detected, note it and move on, don't narrate the catching as a virtue
+- Integrity signals are data, not achievements. The monitoring is not the agent's character; it's the substrate the agent operates within
+
+Without this clause, Phase 2's integrity block risks producing more drift, not less — the agent learns a new vocabulary to perform coherence in.
+
+Action: draft a revised `persona.md` that retunes the reflective voice for *both* affect and integrity narration. Keep Curragh as Curragh; change how Curragh talks to itself in narrative and reflection.
 
 ### 1b. Retune the Archivist's reflection prompt
 
@@ -113,9 +125,13 @@ Cadence: daily (matches the goal-review job).
 
 Recurring meta-learning job. Regex-counts self-congratulatory / identity-narration phrases in narrative entries over the window ("composure", "I appreciate", "stable place", "accountability structures", "I feel", first-person emotional prose patterns). Produces a density metric.
 
-Output: a persistent fact under `integrity_voice_drift_7d`.
+Output: a persistent fact under `integrity_voice_drift_7d` carrying both the current density and a 7d delta (the change from the prior week).
 
 Cadence: daily.
+
+**Use the delta, not the absolute count.** The metric is deliberately a trend, not a threshold. A threshold invites the regex to become a target — once the agent learns that "above N is bad," subtle overfitting appears, producing neutral prose only where the regex catches. The delta instead asks "is the density trending down relative to last week?", which is both harder to game and more honest about what we actually care about (improvement over time, not perfection).
+
+Phrases like "I notice my pressure signal" and "I feel pressure" read very differently to a human reader but register identically to a simple substring count. That's a limitation of the measurement, not a reason to complicate the regex — complicating the pattern just creates different ways to game it. Accept the noise and measure the direction.
 
 ### 2c. Sensorium integration
 
@@ -133,8 +149,10 @@ The agent sees these signals on every cycle. No new UI. No external cron. No ope
 
 Seed two learning goals on first integration:
 
-- "Keep fabrication_risk signal below N" (acceptance criterion: 7-day suspect-fact rate under threshold)
-- "Keep voice_drift signal below N" (acceptance criterion: self-congratulatory phrase density under threshold)
+- "Keep fabrication_risk signal trending down" (acceptance criterion: 7-day delta in suspect-fact count is zero or negative over a 4-week window)
+- "Keep voice_drift signal trending down" (acceptance criterion: 7-day delta in self-congratulatory phrase density is zero or negative over a 4-week window)
+
+Trend-based, not threshold-based, for the reasons laid out in 2b. The goals ask the agent to improve over time rather than stay under a line — which matches the actual concern (drift, not absolute level) and resists regex overfitting.
 
 These give the agent somewhere to direct action when the signals go bad. Without them, the signals are sensorium noise the model can narrate around. With them, the existing learning-goal mechanics (status tracking, evidence accumulation) close the loop.
 
@@ -191,11 +209,10 @@ Optionally: keep the admin UI's affect tab labelled "Affect" (operator vocabular
 
 Ordered by feedback speed, not by size. Persona work is reversible and fast to iterate; structural guards are schema changes deserving more thought. By the time Phase 3 lands, the voice will already be healthier and the blast radius of the structural guards will be smaller.
 
-1. **Phase 1** (a, b, c together) — one PR, identity files and the Archivist prompt string. Ship first.
-2. **Phase 4** — trivial, can go with Phase 1 or separately. Likely bundle it.
-3. **Phase 2** (a, b, c, d) — one PR or staged. The infrastructure (meta-learning scheduler, sensorium assembly, learning goals, fact persistence) all exists; this is wiring two new jobs and a sensorium block.
-4. **Phase 3a** (synthesis provenance) — deserves a design pass. Probably a dedicated spec document.
-5. **Phase 3b** (scheduler `required_tools`) — smallest, can land whenever convenient.
+1. **Phase 1 + Phase 4 together** — one PR, identity files, the Archivist prompt string, and the `<affect>` → `<monitor>` sensorium tag rename. **Bundled deliberately**: both touch the model-facing prompt surface, so ship them together for a clean before/after measurement window against the voice-drift baseline. Ships first.
+2. **Phase 2** (a, b, c, d) — one PR or staged. The infrastructure (meta-learning scheduler, sensorium assembly, learning goals, fact persistence) all exists; this is wiring two new jobs and a sensorium block.
+3. **Phase 3a** (synthesis provenance) — deserves a design pass. Appendix B here resolves the key load-bearing question (evidence-grade vs commentary-grade tool classification); further design work concerns the write-path mechanics. Probably a dedicated sub-spec.
+4. **Phase 3b** (scheduler `required_tools`) — smallest, can land whenever convenient.
 
 Landing 1–3 in sequence gives the persona revision time to settle, then adds the meta-cognition monitoring on top of a voice that is already drifting less, then tightens the persistence layer.
 
@@ -217,11 +234,11 @@ Secondary signals (watch on the admin Scheduler tab):
 
 ## Open Questions
 
-Worth settling before or during implementation, not blockers:
+Most were flagged during initial drafting and have since been resolved in the body of the spec. Remaining:
 
-1. **How strict is "tool-call evidence" for synthesis writes in Phase 3a?** Does calling `reflect` count as evidence for any claim the reflection made? Or must the claim itself be traceable to a specific tool's output? The spec leans strict — reflect is too generic to anchor arbitrary claims — but edge cases exist.
+1. ~~**How strict is "tool-call evidence" for synthesis writes in Phase 3a?**~~ Resolved. See [Appendix B — Evidence-grade vs commentary-grade tools](#appendix-b--evidence-grade-vs-commentary-grade-tools). Must be settled in Phase 1 timeframe even though it only lands in Phase 3a, because the classification is load-bearing for the whole guard.
 
-2. **Can the agent clear its own integrity violations?** When `integrity_suspect_facts_7d` lists suspect fact IDs, the agent could in principle call `memory_clear_key` on each. Should it? Or should the operator gate this via approval? Leaning toward: agent proposes clearances via a learning-goal evidence event, operator reviews in the weekly admin pass.
+2. ~~**Can the agent clear its own integrity violations?**~~ Resolved: **agent proposes, operator approves**. The agent emits a clearance proposal as evidence on the integrity learning goal; the operator reviews during the weekly admin pass and either approves (which triggers `memory_clear_key`) or rejects (which keeps the suspect fact and becomes a calibration signal). Letting the agent clear its own flagged facts creates a cleanup loop that could erase evidence of systematic problems. The operator gate also serves as a calibration checkpoint — a high rate of rejected clearances tells us the audit is firing false positives and its patterns need tightening.
 
 3. **Does the voice-drift regex need to be configurable?** Probably yes — the operator's judgment of what counts as self-congratulatory drift will evolve. Ship it as config, not hardcoded.
 
@@ -234,6 +251,51 @@ Worth settling before or during implementation, not blockers:
 - [`provenance-aware-output-gate.md`](provenance-aware-output-gate.md) — related but distinct. That spec upgrades the output gate's unsourced-claim detection from heuristic to provenance-based. Phase 3a here is the persistence-layer counterpart: not about what the gate rejects, but about what the fact store canonicalises.
 - [`remembrancer-followups.md`](remembrancer-followups.md) — may overlap with Phase 2's meta-learning jobs. Integrity monitoring is arguably a Remembrancer responsibility (deep-memory pattern detection) rather than a standalone scheduler job.
 - [`metacognition-reporting.md`](metacognition-reporting.md) — Phase 2's integrity signals are natural inputs to metacognition reporting when that lands.
+
+---
+
+## Appendix B — Evidence-grade vs commentary-grade tools
+
+Phase 3a's synthesis-provenance strictness only works if "what counts as evidence" is resolved before implementation. Leaving the question open would make the guard toothless — if `reflect` counts as evidence for anything the reflection prose claims, then any prose can be laundered through a reflect call and the guard accepts everything.
+
+This classification must be settled in Phase 1 timeframe even though it only lands in Phase 3a. Resolving it later means shipping a guard that degrades into theatre.
+
+### Classification
+
+Every tool the cognitive loop or specialist agents can call is either **evidence-grade** or **commentary-grade**. Commentary-grade tools do not anchor synthesis claims; only evidence-grade tools do.
+
+**Evidence-grade tools** produce structured, attributable output tied to a specific query or action. A synthesis fact can cite them in its provenance chain:
+
+- Web research: `kagi_search`, `brave_web_search`, `jina_reader`, `fetch_url`, `web_search`, and their variants. Each returns retrievable content tied to a URL and query.
+- Memory retrieval: `memory_read`, `recall_recent`, `recall_search`, `recall_cases`, `recall_threads`, `deep_search` (Remembrancer). Each returns content already in the store.
+- Analysis: `analyze_affect_performance`, `mine_patterns`, `detect_patterns`, `get_forecast_breakdown`, `query_tool_activity`. Each produces structured output the agent can cite verbatim.
+- Sandbox execution: `run_code`, `sandbox_exec`. Produce stdout/stderr the agent can attribute.
+- Artifacts: `retrieve_result`, `workspace_ls`, `read_file`. Return stored content.
+- Comms inputs: `check_inbox`, `read_message`. Return external content verbatim.
+
+**Commentary-grade tools** produce prose or state changes without external grounding. They cannot anchor synthesis claims:
+
+- Reflection and introspection: `reflect`, `introspect`, `review_recent`. These synthesise from context the agent already has; they don't add new evidence.
+- Memory writes: `memory_write`, `memory_clear_key`, `memory_trace_fact`. Writing is not evidence for writing's own content.
+- Narrative queries without return content: internal housekeeping calls that return status rather than data.
+- Agent delegations: `agent_researcher`, `agent_coder`, etc. — the delegation itself isn't evidence; the tools the delegated agent called are. Provenance chains must walk through sub-agent tool logs to find evidence-grade anchors.
+
+### Implementation implication
+
+When a synthesis write arrives at the fact store with `derivation=Synthesis`, the persistence layer checks the cited `source_cycle_id`'s tool log. At least one evidence-grade tool must appear in that cycle's calls. If only commentary-grade tools are present, the fact is still written but downgraded to `derivation=Unknown` with confidence capped at 0.5 (configurable).
+
+This preserves the agent's ability to capture reflective observations as facts — they just aren't canonical sourced evidence, and future cycles that retrieve them will see `Unknown` provenance rather than `Synthesis`.
+
+### Edge cases
+
+- **An agent delegation that invokes evidence-grade tools.** Provenance chains walk through — if the Researcher calls `kagi_search`, and Curragh's synthesis cites the Researcher delegation, the chain reaches an evidence-grade anchor.
+- **A reflection that cites a memory_read.** The `memory_read` is evidence-grade (returns stored content), so the synthesis is allowed even if `reflect` is the only other tool called.
+- **A `recall_cases` that returns empty.** Still evidence-grade — it established the absence of prior cases, which is a grounded claim. Synthesis citing "no prior cases match" is allowed.
+- **`review_recent` on a claim about recent cycles.** Commentary-grade under this classification, but the underlying data lives in the cycle log and narrative — if the synthesis cites specific cycle IDs the review produced, those IDs are the evidence anchors, not the review call itself.
+
+### Configuration
+
+The classification ships as a config field (list of tool names in each bucket), defaulting to the lists above. Operators can adjust as new tools land. New tools added without classification default to commentary-grade (safe default — they can't anchor synthesis until explicitly allowed).
 
 ---
 
