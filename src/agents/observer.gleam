@@ -6,6 +6,7 @@
 // (at your option) any later version.
 
 import agent/types.{type AgentSpec, AgentSpec, Transient}
+import facts/provenance_check
 import gleam/erlang/process.{type Subject}
 import gleam/list
 import gleam/option.{type Option, Some}
@@ -112,6 +113,11 @@ fn observer_executor(
             cycle_id: "observer",
             agent_id: "observer",
             fact_decay_half_life_days:,
+            // Observer uses facts context for read-only trace operations.
+            // It doesn't write synthesis facts itself; the classification
+            // only matters if it did, so defaults are fine.
+            cycle_tool_names: [],
+            evidence_config: provenance_check.default_config(),
           ))
         memory.execute(
           call,

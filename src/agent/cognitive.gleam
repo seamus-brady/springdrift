@@ -158,6 +158,7 @@ pub fn start(
           team_guards: cfg.team_guards,
           agentlair_config: cfg.agentlair_config,
           strategy_registry_enabled: cfg.strategy_registry_enabled,
+          evidence_config: cfg.evidence_config,
         ),
         redact_secrets: cfg.redact_secrets,
         pending_sensory_events: [],

@@ -5,6 +5,7 @@
 // by the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 
+import facts/provenance_check
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
@@ -369,6 +370,8 @@ pub fn memory_write_and_read_roundtrip_test() {
       cycle_id: "cycle-001",
       agent_id: "test-agent",
       fact_decay_half_life_days: 30,
+      cycle_tool_names: [],
+      evidence_config: provenance_check.default_config(),
     ))
 
   // Write a fact
@@ -423,6 +426,8 @@ pub fn memory_write_clear_read_test() {
       cycle_id: "cycle-001",
       agent_id: "test-agent",
       fact_decay_half_life_days: 30,
+      cycle_tool_names: [],
+      evidence_config: provenance_check.default_config(),
     ))
 
   // Write
@@ -478,6 +483,8 @@ pub fn memory_trace_shows_history_test() {
       cycle_id: "cycle-001",
       agent_id: "test-agent",
       fact_decay_half_life_days: 30,
+      cycle_tool_names: [],
+      evidence_config: provenance_check.default_config(),
     ))
 
   // Write two versions
@@ -534,6 +541,8 @@ pub fn memory_query_finds_facts_test() {
       cycle_id: "cycle-001",
       agent_id: "test-agent",
       fact_decay_half_life_days: 30,
+      cycle_tool_names: [],
+      evidence_config: provenance_check.default_config(),
     ))
 
   // Write facts

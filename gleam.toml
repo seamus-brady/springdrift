@@ -1,7 +1,7 @@
 name = "springdrift"
 version = "0.9.5"
 description = "A knowledge worker agent framework for the BEAM. Persistent memory, scheduled research, configurable safety."
-licences = ["MIT"]
+licences = ["AGPL-3.0-or-later"]
 repository = { type = "github", user = "seamus-brady", repo = "springdrift" }
 gleam = ">= 1.11.0"
 

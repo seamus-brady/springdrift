@@ -17,6 +17,7 @@ import agentlair/types as agentlair_types
 import dag/types as dag_types
 import dprime/deterministic.{type DeterministicConfig}
 import dprime/types as dprime_types
+import facts/provenance_check
 import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Subject}
 import gleam/list
@@ -95,6 +96,12 @@ pub type RuntimeConfig {
     agentlair_config: Option(agentlair_types.AgentLairConfig),
     /// Phase A — when False, Archivist drops strategy_used emissions.
     strategy_registry_enabled: Bool,
+    /// Phase 3a synthesis-provenance classification. Synthesis-
+    /// derivation facts written in a cycle whose tool-call list
+    /// contains no evidence-grade tool are downgraded to Unknown
+    /// with capped confidence. Operator-configurable; defaults
+    /// from `facts/provenance_check.default_config/0`.
+    evidence_config: provenance_check.EvidenceConfig,
   )
 }
 

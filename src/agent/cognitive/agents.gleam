@@ -221,6 +221,8 @@ fn handle_memory_tools(
             cycle_id: cid,
             agent_id: "cognitive",
             fact_decay_half_life_days: state.config.fact_decay_half_life_days,
+            cycle_tool_names: list.map(state.cycle_tool_calls, fn(t) { t.name }),
+            evidence_config: state.config.evidence_config,
           ))
         None -> None
       }
