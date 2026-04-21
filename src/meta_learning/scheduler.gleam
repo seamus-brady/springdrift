@@ -41,6 +41,12 @@ const default_affect_correlation_hours = 168
 
 const default_strategy_review_hours = 336
 
+/// Phase 2 fluency/grounding. Daily fabrication audit.
+const default_fabrication_audit_hours = 24
+
+/// Phase 2 fluency/grounding. Daily voice-drift check.
+const default_voice_drift_hours = 24
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -63,6 +69,8 @@ pub fn build_tasks(cfg: AppConfig) -> List(ScheduleTaskConfig) {
         skill_decay_task(cfg, delivery),
         affect_correlation_task(cfg, delivery),
         strategy_review_task(cfg, delivery),
+        fabrication_audit_task(cfg, delivery),
+        voice_drift_task(cfg, delivery),
       ]
     }
   }
@@ -181,6 +189,60 @@ fn strategy_review_task(
       <> "success rates still justify keeping them. Strategies with sustained "
       <> "low success rates may warrant archival; recurring unnamed approaches "
       <> "may warrant a new strategy entry.",
+    interval_ms: hours_to_ms(hours),
+    start_at: None,
+    delivery: delivery,
+    only_if_changed: False,
+  )
+}
+
+fn fabrication_audit_task(
+  cfg: AppConfig,
+  delivery: DeliveryConfig,
+) -> ScheduleTaskConfig {
+  let hours =
+    option.unwrap(
+      cfg.meta_fabrication_audit_interval_hours,
+      default_fabrication_audit_hours,
+    )
+  ScheduleTaskConfig(
+    name: "meta_learning_fabrication_audit",
+    query: "Run the daily fabrication audit. Delegate to the Remembrancer "
+      <> "agent: invoke `audit_fabrication` with the default 7-day window. "
+      <> "This cross-references synthesis-derivation facts against the "
+      <> "cycle-log tool-call record. Flagged facts are written to "
+      <> "integrity_suspect_facts_7d and surface in the sensorium "
+      <> "<integrity> block. If the count increased relative to prior "
+      <> "windows, review the flagged fact ids and consider proposing "
+      <> "clearances as evidence on the integrity learning goal. Do not "
+      <> "clear facts yourself — the operator approves clearances.",
+    interval_ms: hours_to_ms(hours),
+    start_at: None,
+    delivery: delivery,
+    only_if_changed: False,
+  )
+}
+
+fn voice_drift_task(
+  cfg: AppConfig,
+  delivery: DeliveryConfig,
+) -> ScheduleTaskConfig {
+  let hours =
+    option.unwrap(
+      cfg.meta_voice_drift_interval_hours,
+      default_voice_drift_hours,
+    )
+  ScheduleTaskConfig(
+    name: "meta_learning_voice_drift",
+    query: "Run the daily voice-drift check. Delegate to the Remembrancer "
+      <> "agent: invoke `audit_voice_drift`. The check counts self-"
+      <> "congratulatory and identity-narration phrases in your narrative "
+      <> "entries over the last 7 days and compares against the prior 7 "
+      <> "days. A negative delta is good — drift is decreasing. Result is "
+      <> "written to integrity_voice_drift_7d and surfaces in the "
+      <> "sensorium <integrity> block. Do not interpret the metric as a "
+      <> "performance target to narrate about; the metric is a signal to "
+      <> "monitor, not an achievement to celebrate.",
     interval_ms: hours_to_ms(hours),
     start_at: None,
     delivery: delivery,

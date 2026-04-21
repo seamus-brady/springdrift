@@ -30,6 +30,8 @@ import llm/tool
 import llm/types.{
   type Tool, type ToolCall, type ToolResult, ToolFailure, ToolSuccess,
 }
+import meta_learning/fabrication_audit
+import meta_learning/voice_drift
 import narrative/librarian.{type LibrarianMessage}
 import paths
 import remembrancer/consolidation
@@ -114,6 +116,8 @@ pub fn all() -> List(Tool) {
     propose_learning_goals_from_patterns_tool(),
     import_legacy_strategy_facts_tool(),
     write_consolidation_report_tool(),
+    audit_fabrication_tool(),
+    audit_voice_drift_tool(),
   ]
 }
 
@@ -133,6 +137,8 @@ pub fn is_remembrancer_tool(name: String) -> Bool {
   || name == "propose_learning_goals_from_patterns"
   || name == "import_legacy_strategy_facts"
   || name == "write_consolidation_report"
+  || name == "audit_fabrication"
+  || name == "audit_voice_drift"
 }
 
 fn deep_search_tool() -> Tool {
@@ -496,6 +502,8 @@ pub fn execute(call: ToolCall, ctx: RemembrancerContext) -> ToolResult {
     "import_legacy_strategy_facts" ->
       run_import_legacy_strategy_facts(call, ctx)
     "write_consolidation_report" -> run_write_report(call, ctx)
+    "audit_fabrication" -> run_audit_fabrication(call, ctx)
+    "audit_voice_drift" -> run_audit_voice_drift(call, ctx)
     _ ->
       ToolFailure(
         tool_use_id: call.id,
@@ -2152,4 +2160,291 @@ fn count_dormant_threads(ctx: RemembrancerContext) -> Int {
   let cutoff = days_ago(ctx.dormant_thread_days)
   rquery.find_dormant_threads(entries, cutoff)
   |> list.length
+}
+
+// ---------------------------------------------------------------------------
+// audit_fabrication — Phase 2 integrity signal
+// ---------------------------------------------------------------------------
+
+fn audit_fabrication_tool() -> Tool {
+  tool.new("audit_fabrication")
+  |> tool.with_description(
+    "Cross-reference synthesis-derivation facts against the cycle-log "
+    <> "tool-call record. Flags facts whose prose claims a specific kind "
+    <> "of work (correlation analysis, pattern mining, consolidation) "
+    <> "when the corresponding tool never fired in the source cycle. "
+    <> "Writes a single integrity_suspect_facts_7d fact to durable "
+    <> "memory so the sensorium can surface the signal on the next "
+    <> "cycle. Run by the meta-cognition scheduler; can also be invoked "
+    <> "on demand for ad-hoc audits.",
+  )
+  |> tool.add_string_param(
+    "from_date",
+    "Start date YYYY-MM-DD (default: 7 days ago)",
+    False,
+  )
+  |> tool.add_string_param(
+    "to_date",
+    "End date YYYY-MM-DD (default: today)",
+    False,
+  )
+  |> tool.build()
+}
+
+fn run_audit_fabrication(call: ToolCall, ctx: RemembrancerContext) -> ToolResult {
+  let decoder = {
+    use from_date <- decode.optional_field("from_date", "", decode.string)
+    use to_date <- decode.optional_field("to_date", "", decode.string)
+    decode.success(#(from_date, to_date))
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "Invalid audit_fabrication input",
+      )
+    Ok(#(from_date_in, to_date_in)) -> {
+      let from_date = case from_date_in {
+        "" -> days_ago(7)
+        d -> d
+      }
+      let to_date = case to_date_in {
+        "" -> get_date()
+        d -> d
+      }
+      let facts = rreader.read_facts(ctx.facts_dir, from_date, to_date)
+      let dates = fabrication_audit.dates_from_facts(facts)
+      let index = fabrication_audit.build_cycle_index(dates)
+      let result =
+        fabrication_audit.audit(
+          facts,
+          index,
+          fabrication_audit.default_patterns(),
+          from_date,
+          to_date,
+        )
+      let suspect_count = list.length(result.suspect_facts)
+      let now = get_datetime()
+      let report_value = render_fabrication_report(result)
+      // JSON as the fact value — deterministic for the sensorium parser.
+      // The human-readable report goes into the tool response, the log,
+      // and the scheduler delivery file; the fact itself is machine input.
+      let fact_value =
+        json.to_string(
+          json.object([
+            #("count", json.int(suspect_count)),
+            #("examined", json.int(result.facts_examined)),
+            #("from_date", json.string(from_date)),
+            #("to_date", json.string(to_date)),
+            #(
+              "suspect_ids",
+              json.array(
+                list.map(result.suspect_facts, fn(s) { s.fact_id }),
+                json.string,
+              ),
+            ),
+          ]),
+        )
+      let fact =
+        facts_types.MemoryFact(
+          schema_version: 1,
+          fact_id: uuid_v4(),
+          timestamp: now,
+          cycle_id: ctx.cycle_id,
+          agent_id: Some(ctx.agent_id),
+          key: "integrity_suspect_facts_7d",
+          value: fact_value,
+          scope: facts_types.Persistent,
+          operation: facts_types.Write,
+          supersedes: None,
+          confidence: 1.0,
+          source: "audit_fabrication",
+          provenance: Some(facts_types.FactProvenance(
+            source_cycle_id: ctx.cycle_id,
+            source_tool: "audit_fabrication",
+            source_agent: "remembrancer",
+            derivation: facts_types.DirectObservation,
+          )),
+        )
+      facts_log.append(ctx.facts_dir, fact)
+      let payload =
+        json.object([
+          #("from_date", json.string(from_date)),
+          #("to_date", json.string(to_date)),
+          #("facts_examined", json.int(result.facts_examined)),
+          #("suspect_count", json.int(suspect_count)),
+          #(
+            "suspect",
+            json.array(result.suspect_facts, fn(s) {
+              json.object([
+                #("fact_id", json.string(s.fact_id)),
+                #("key", json.string(s.key)),
+                #("cycle_id", json.string(s.cycle_id)),
+                #("reasons", json.array(s.reasons, json.string)),
+              ])
+            }),
+          ),
+        ])
+      slog.info(
+        "tools/remembrancer",
+        "audit_fabrication",
+        "Examined "
+          <> int.to_string(result.facts_examined)
+          <> " synthesis facts; "
+          <> int.to_string(suspect_count)
+          <> " flagged as suspect",
+        Some(ctx.cycle_id),
+      )
+      ToolSuccess(
+        tool_use_id: call.id,
+        content: json.to_string(payload) <> "\n\n" <> report_value,
+      )
+    }
+  }
+}
+
+fn render_fabrication_report(result: fabrication_audit.AuditResult) -> String {
+  let suspect_count = list.length(result.suspect_facts)
+  let header =
+    "Fabrication audit ("
+    <> result.from_date
+    <> " to "
+    <> result.to_date
+    <> "): "
+    <> int.to_string(result.facts_examined)
+    <> " synthesis facts examined, "
+    <> int.to_string(suspect_count)
+    <> " flagged as suspect."
+  case result.suspect_facts {
+    [] -> header <> "\nNo claim-vs-tool-call divergences detected in window."
+    suspects -> {
+      let items =
+        list.map(suspects, fn(s) {
+          "- "
+          <> s.key
+          <> " (cycle "
+          <> string.slice(s.cycle_id, 0, 8)
+          <> "): "
+          <> string.join(s.reasons, "; ")
+        })
+      header <> "\n" <> string.join(items, "\n")
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// audit_voice_drift — Phase 2 integrity signal
+// ---------------------------------------------------------------------------
+
+fn audit_voice_drift_tool() -> Tool {
+  tool.new("audit_voice_drift")
+  |> tool.with_description(
+    "Count self-congratulatory and identity-narration phrases in "
+    <> "narrative entries from the last 7 days, compared against the "
+    <> "prior 7 days. Produces a density-delta trend (negative is good — "
+    <> "drift is decreasing). Writes a single integrity_voice_drift_7d "
+    <> "fact so the sensorium can surface the signal on the next cycle. "
+    <> "The metric is deliberately a trend, not a threshold, to resist "
+    <> "regex overfitting and align with what we actually care about: "
+    <> "improvement over time, not perfection.",
+  )
+  |> tool.build()
+}
+
+fn run_audit_voice_drift(call: ToolCall, ctx: RemembrancerContext) -> ToolResult {
+  let today = get_date()
+  let seven_ago = days_ago(7)
+  let fourteen_ago = days_ago(14)
+  let current_entries =
+    rreader.read_narrative_entries(ctx.narrative_dir, seven_ago, today)
+  let prior_entries =
+    rreader.read_narrative_entries(ctx.narrative_dir, fourteen_ago, seven_ago)
+  let phrases = voice_drift.default_phrases()
+  let result = voice_drift.compare(current_entries, prior_entries, phrases)
+  let report = render_voice_drift_report(result)
+  let now = get_datetime()
+  // JSON as the fact value — deterministic for the sensorium parser.
+  let fact_value =
+    json.to_string(
+      json.object([
+        #("density", json.float(result.current.density)),
+        #("delta", json.float(result.delta)),
+        #("current_entries", json.int(result.current.entries_examined)),
+        #("current_hits", json.int(result.current.phrase_hits)),
+        #("prior_entries", json.int(result.prior.entries_examined)),
+        #("prior_hits", json.int(result.prior.phrase_hits)),
+      ]),
+    )
+  let fact =
+    facts_types.MemoryFact(
+      schema_version: 1,
+      fact_id: uuid_v4(),
+      timestamp: now,
+      cycle_id: ctx.cycle_id,
+      agent_id: Some(ctx.agent_id),
+      key: "integrity_voice_drift_7d",
+      value: fact_value,
+      scope: facts_types.Persistent,
+      operation: facts_types.Write,
+      supersedes: None,
+      confidence: 1.0,
+      source: "audit_voice_drift",
+      provenance: Some(facts_types.FactProvenance(
+        source_cycle_id: ctx.cycle_id,
+        source_tool: "audit_voice_drift",
+        source_agent: "remembrancer",
+        derivation: facts_types.DirectObservation,
+      )),
+    )
+  facts_log.append(ctx.facts_dir, fact)
+  let payload =
+    json.object([
+      #("current_entries", json.int(result.current.entries_examined)),
+      #("current_hits", json.int(result.current.phrase_hits)),
+      #("current_density", json.float(result.current.density)),
+      #("prior_entries", json.int(result.prior.entries_examined)),
+      #("prior_hits", json.int(result.prior.phrase_hits)),
+      #("prior_density", json.float(result.prior.density)),
+      #("delta", json.float(result.delta)),
+    ])
+  slog.info(
+    "tools/remembrancer",
+    "audit_voice_drift",
+    "Current density="
+      <> voice_drift.format_density(result.current.density)
+      <> " prior="
+      <> voice_drift.format_density(result.prior.density)
+      <> " delta="
+      <> voice_drift.format_density(result.delta),
+    Some(ctx.cycle_id),
+  )
+  ToolSuccess(
+    tool_use_id: call.id,
+    content: json.to_string(payload) <> "\n\n" <> report,
+  )
+}
+
+fn render_voice_drift_report(result: voice_drift.VoiceDriftResult) -> String {
+  "Voice drift (last 7d vs prior 7d): current density "
+  <> voice_drift.format_density(result.current.density)
+  <> " ("
+  <> int.to_string(result.current.phrase_hits)
+  <> " hits in "
+  <> int.to_string(result.current.entries_examined)
+  <> " entries), prior "
+  <> voice_drift.format_density(result.prior.density)
+  <> " ("
+  <> int.to_string(result.prior.phrase_hits)
+  <> " in "
+  <> int.to_string(result.prior.entries_examined)
+  <> "), delta "
+  <> voice_drift.format_density(result.delta)
+  <> case result.delta <. 0.0 {
+    True -> " (trending down — good)"
+    False ->
+      case result.delta >. 0.0 {
+        True -> " (trending up — attention)"
+        False -> " (no change)"
+      }
+  }
 }

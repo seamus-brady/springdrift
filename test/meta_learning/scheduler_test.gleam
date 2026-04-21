@@ -32,7 +32,7 @@ fn enabled_cfg() -> config.AppConfig {
 pub fn enabled_when_unset_test() {
   // Default config (no meta_scheduler_enabled set) emits the full task list.
   let tasks = meta_scheduler.build_tasks(base_cfg())
-  list.length(tasks) |> should.equal(5)
+  list.length(tasks) |> should.equal(7)
 }
 
 pub fn disabled_when_explicitly_false_test() {
@@ -41,12 +41,12 @@ pub fn disabled_when_explicitly_false_test() {
 }
 
 // ---------------------------------------------------------------------------
-// Enabled — five recurring tasks
+// Enabled — seven recurring tasks (five original + two integrity audits)
 // ---------------------------------------------------------------------------
 
-pub fn enabled_emits_five_tasks_test() {
+pub fn enabled_emits_seven_tasks_test() {
   let tasks = meta_scheduler.build_tasks(enabled_cfg())
-  list.length(tasks) |> should.equal(5)
+  list.length(tasks) |> should.equal(7)
 }
 
 pub fn task_names_unique_and_namespaced_test() {
