@@ -8,8 +8,6 @@
 import agent/cognitive
 import agent/cognitive/escalation as agent_cognitive_escalation
 import agent/cognitive_config.{CognitiveConfig}
-import frontdoor
-import frontdoor/types as frontdoor_types
 import agent/registry
 import agent/supervisor
 import agent/team as agent_team
@@ -36,6 +34,8 @@ import dprime/config as dprime_config_mod
 import embedding
 import facts/log as facts_log
 import facts/provenance_check
+import frontdoor
+import frontdoor/types as frontdoor_types
 import gleam/erlang/process
 import gleam/http/request as http_request
 import gleam/httpc

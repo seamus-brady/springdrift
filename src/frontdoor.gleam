@@ -66,11 +66,21 @@ fn initial_state() -> State {
 // ---------------------------------------------------------------------------
 
 /// Start the Frontdoor actor. Returns a subject suitable for publishing
-/// outputs and for subscribing destinations.
+/// outputs and for subscribing destinations. The subject is created
+/// inside the spawned process so it can actually receive on it; the
+/// setup channel is the standard Gleam-OTP pattern for handing the
+/// child-owned subject back to the parent.
 pub fn start() -> Subject(FrontdoorMessage) {
-  let subj: Subject(FrontdoorMessage) = process.new_subject()
-  process.spawn_unlinked(fn() { loop(subj, initial_state()) })
-  subj
+  let setup: Subject(Subject(FrontdoorMessage)) = process.new_subject()
+  process.spawn_unlinked(fn() {
+    let subj: Subject(FrontdoorMessage) = process.new_subject()
+    process.send(setup, subj)
+    loop(subj, initial_state())
+  })
+  case process.receive(setup, 5000) {
+    Ok(subj) -> subj
+    Error(_) -> panic as "Frontdoor failed to start within 5s"
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -181,11 +191,7 @@ fn route_output(output: CognitiveOutput, state: State) -> Nil {
   }
 }
 
-fn deliver(
-  state: State,
-  dest: Destination,
-  output: CognitiveOutput,
-) -> Nil {
+fn deliver(state: State, dest: Destination, output: CognitiveOutput) -> Nil {
   case output {
     CognitiveReplyOutput(cycle_id:, response:, model:, usage:, tools_fired:) -> {
       process.send(
