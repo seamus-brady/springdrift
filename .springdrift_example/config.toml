@@ -355,6 +355,14 @@ summary_schedule = "weekly"
 # affect_correlation_interval_hours = 168       # Default: 168 (weekly)
 # strategy_review_interval_hours = 336          # Default: 336 (fortnightly)
 
+# Fluency/grounding Phase 2 — integrity signals as meta-cognition.
+# fabrication_audit cross-references synthesis facts against the cycle-log
+# tool record; voice_drift counts self-congratulatory phrases in narrative
+# entries. Both write an integrity fact the sensorium surfaces on the next
+# cycle, and both seed a learning goal on first integration.
+# fabrication_audit_interval_hours = 24          # Default: 24 (daily)
+# voice_drift_interval_hours = 24                # Default: 24 (daily)
+
 # Budget caps
 # max_reflection_budget_pct = 25     # Max % of recent cycles that may be
                                      # meta-learning fires. 0 disables. Default: 25.

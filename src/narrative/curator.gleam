@@ -24,9 +24,11 @@ import affect/correlation as affect_correlation
 import agent/types as agent_types
 import facts/log as facts_log
 import facts/types as facts_types
+import gleam/dynamic/decode
 import gleam/erlang/process.{type Subject}
 import gleam/float
 import gleam/int
+import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
@@ -1137,6 +1139,7 @@ fn build_sensorium(
   let strategies_section = render_sensorium_strategies()
   let goals_section = render_sensorium_learning_goals()
   let affect_warnings_section = render_sensorium_affect_warnings(state)
+  let integrity_section = render_sensorium_integrity(state)
   let skill_procedures_section = render_sensorium_skill_procedures(state.skills)
   let meta_recommendations_section =
     render_sensorium_meta_recommendations(perf, novelty)
@@ -1145,8 +1148,8 @@ fn build_sensorium(
     [
       clock, situation, schedule, vitals, sandbox_section, delegations, events,
       tasks_section, strategies_section, goals_section, affect_warnings_section,
-      skill_procedures_section, meta_recommendations_section, knowledge_section,
-      memory_section,
+      integrity_section, skill_procedures_section, meta_recommendations_section,
+      knowledge_section, memory_section,
     ]
     |> list.filter(fn(s) { s != "" })
     |> string.join("\n")
@@ -1770,6 +1773,91 @@ fn render_affect_warning_row(w: #(String, Float, Int)) -> String {
   <> "\" sample_size=\""
   <> int.to_string(n)
   <> "\"/>"
+}
+
+/// Render the <integrity> element — surfaces the fabrication-audit and
+/// voice-drift signals so the agent sees its own integrity metrics
+/// on every cycle. Phase 2 of the fluency/grounding separation.
+///
+/// Reads two facts written by the meta-learning scheduler's
+/// integrity-audit jobs:
+///   - integrity_suspect_facts_7d: { count, examined, suspect_ids, ... }
+///   - integrity_voice_drift_7d:   { density, delta, ... }
+///
+/// Omitted when both facts are absent (new installs, or jobs haven't
+/// fired yet) so the sensorium stays quiet until there's a signal.
+/// Rendered attributes are deliberately minimal — counts and a delta,
+/// not interpretive adjectives — to discourage the agent narrating the
+/// signal as an identity trait. The persona's anti-meta-integrity
+/// clause compounds with this framing: data, not achievements.
+fn render_sensorium_integrity(state: CuratorState) -> String {
+  let facts = facts_log.resolve_current(state.facts_dir, None)
+  let fab = find_fact(facts, "integrity_suspect_facts_7d")
+  let drift = find_fact(facts, "integrity_voice_drift_7d")
+  case fab, drift {
+    None, None -> ""
+    _, _ -> {
+      let fab_attrs = case fab {
+        Some(f) -> render_fabrication_attrs(f.value)
+        None -> ""
+      }
+      let drift_attrs = case drift {
+        Some(f) -> render_drift_attrs(f.value)
+        None -> ""
+      }
+      "  <integrity" <> fab_attrs <> drift_attrs <> "/>"
+    }
+  }
+}
+
+fn find_fact(
+  facts: List(facts_types.MemoryFact),
+  key: String,
+) -> Option(facts_types.MemoryFact) {
+  case
+    list.find(facts, fn(f) { f.key == key && f.operation == facts_types.Write })
+  {
+    Ok(f) -> Some(f)
+    Error(_) -> None
+  }
+}
+
+fn render_fabrication_attrs(value: String) -> String {
+  let count_decoder = {
+    use count <- decode.field("count", decode.int)
+    use examined <- decode.field("examined", decode.int)
+    decode.success(#(count, examined))
+  }
+  case json.parse(value, count_decoder) {
+    Ok(#(count, examined)) ->
+      " suspect_facts_7d=\""
+      <> int.to_string(count)
+      <> "\" facts_examined_7d=\""
+      <> int.to_string(examined)
+      <> "\""
+    Error(_) -> ""
+  }
+}
+
+fn render_drift_attrs(value: String) -> String {
+  let drift_decoder = {
+    use density <- decode.field("density", decode.float)
+    use delta <- decode.field("delta", decode.float)
+    decode.success(#(density, delta))
+  }
+  case json.parse(value, drift_decoder) {
+    Ok(#(density, delta)) ->
+      " voice_drift_density=\""
+      <> float_2dp(density)
+      <> "\" voice_drift_delta=\""
+      <> float_2dp(delta)
+      <> "\""
+    Error(_) -> ""
+  }
+}
+
+fn float_2dp(f: Float) -> String {
+  float.to_string(int.to_float(float.round(f *. 100.0)) /. 100.0)
 }
 
 /// Render the <strategies> element — top active strategies from the
