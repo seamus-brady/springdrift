@@ -1138,7 +1138,8 @@ fn run(cfg: AppConfig) -> Nil {
               ),
               from_address: poller_from,
             )
-          let _poller = comms_poller.start(poll_config, cognitive_subj)
+          let _poller =
+            comms_poller.start(poll_config, cognitive_subj, frontdoor_subj)
           io.println(
             "Comms    : inbox poller started ("
             <> int.to_string(poll_config.poll_interval_ms / 1000)
