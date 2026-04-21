@@ -41,10 +41,11 @@ architecture; planned features include the design proposal and open questions.
 | [Communications agent](implemented/comms-agent.md) | Comms |
 | [Bug fixes (March 2026)](implemented/Bug%20fixes%2027-03-26.md) | Fixes |
 
-## Planned (24)
+## Planned (25)
 
 | Feature | Category |
 |---|---|
+| [Fluency / Grounding separation](planned/fluency-grounding-separation.md) | Safety |
 | [Federated instances](planned/federated-instances.md) | Core |
 | [Learner ingestion](planned/learner-ingestion.md) | Memory |
 | [Metacognition reporting](planned/metacognition-reporting.md) | Observability |
