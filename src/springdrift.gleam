@@ -983,6 +983,7 @@ fn run(cfg: AppConfig) -> Nil {
       max_cycles_per_hour,
       token_budget_per_hour,
       meta_budget_pct,
+      frontdoor_subj,
     )
   let scheduler_subj = case runner_result {
     Ok(runner_subj) -> {
@@ -1185,6 +1186,7 @@ fn run(cfg: AppConfig) -> Nil {
         narrative_dir,
         lib,
         tui_input_limit,
+        frontdoor_subj,
       )
   }
 

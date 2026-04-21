@@ -12,6 +12,7 @@
 // (at your option) any later version.
 
 import agent/types as agent_types
+import frontdoor/types as frontdoor_types
 import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Subject}
 import gleam/json
@@ -45,6 +46,7 @@ pub fn start(
   max_cycles_per_hour: Int,
   token_budget_per_hour: Int,
   meta_max_reflection_budget_pct: Int,
+  frontdoor: Subject(frontdoor_types.FrontdoorMessage),
 ) -> Result(Subject(SchedulerMessage), Nil) {
   let setup = process.new_subject()
   process.spawn_unlinked(fn() {
@@ -198,6 +200,7 @@ pub fn start(
       max_cycles_per_hour,
       token_budget_per_hour,
       meta_max_reflection_budget_pct,
+      frontdoor,
       [],
       [],
       [],
@@ -227,6 +230,7 @@ fn scheduler_loop(
   max_cycles_per_hour: Int,
   token_budget_per_hour: Int,
   meta_max_reflection_budget_pct: Int,
+  frontdoor: Subject(frontdoor_types.FrontdoorMessage),
   cycle_timestamps: List(Int),
   meta_cycle_timestamps: List(Int),
   token_usage: List(#(Int, Int)),
@@ -246,6 +250,7 @@ fn scheduler_loop(
       max_cycles_per_hour,
       token_budget_per_hour,
       meta_max_reflection_budget_pct,
+      frontdoor,
       cycle_timestamps,
       meta_cycle_timestamps,
       token_usage,
@@ -261,6 +266,7 @@ fn scheduler_loop(
       max_cycles_per_hour,
       token_budget_per_hour,
       meta_max_reflection_budget_pct,
+      frontdoor,
       cts,
       mts,
       tu,
@@ -365,7 +371,7 @@ fn scheduler_loop(
                   let updated_jobs = dict.insert(jobs, name, updated_job)
 
                   // Spawn async query to cognitive loop
-                  spawn_job(self, cognitive, job)
+                  spawn_job(self, cognitive, frontdoor, job)
 
                   // Schedule stuck-job timeout check
                   process.send_after(
@@ -875,19 +881,32 @@ fn ms_until_datetime(iso: String) -> Int
 fn spawn_job(
   scheduler: Subject(SchedulerMessage),
   cognitive: Subject(agent_types.CognitiveMessage),
+  frontdoor: Subject(frontdoor_types.FrontdoorMessage),
   job: ScheduledJob,
 ) -> Nil {
   let name = job.name
   process.spawn_unlinked(fn() {
-    let reply_subj: Subject(agent_types.CognitiveReply) = process.new_subject()
+    // Per-job source_id with a uuid suffix so concurrent invocations
+    // of the same job name don't collide on the routing table.
+    let source_id = "scheduler:" <> name <> ":" <> generate_uuid()
+    let delivery_subj: Subject(frontdoor_types.Delivery) = process.new_subject()
+
+    process.send(
+      frontdoor,
+      frontdoor_types.Subscribe(
+        source_id:,
+        kind: frontdoor_types.SchedulerSource,
+        sink: delivery_subj,
+      ),
+    )
+
+    // Legacy reply_to kept for now — cognitive still writes to it on
+    // terminal reply. Discarded when reply_to leaves UserInput.
+    let throwaway = process.new_subject()
     process.send(
       cognitive,
       agent_types.SchedulerInput(
-        // Per-job source_id — Frontdoor uses this to route any human
-        // questions raised during the cycle back to nowhere (autonomous
-        // source, nobody listening) rather than broadcasting to every
-        // connected browser.
-        source_id: "scheduler:" <> name,
+        source_id:,
         job_name: name,
         query: job.query,
         kind: job.kind,
@@ -895,31 +914,60 @@ fn spawn_job(
         title: job.title,
         body: job.body,
         tags: job.tags,
-        reply_to: reply_subj,
+        reply_to: throwaway,
       ),
     )
-    case process.receive(reply_subj, 300_000) {
-      Ok(reply) -> {
-        let tokens = case reply.usage {
-          Some(usage) -> usage.input_tokens + usage.output_tokens
+
+    case process.receive(delivery_subj, 300_000) {
+      Ok(frontdoor_types.DeliverReply(
+        cycle_id: _,
+        response:,
+        model: _,
+        usage:,
+        tools_fired:,
+      )) -> {
+        let tokens = case usage {
+          Some(u) -> u.input_tokens + u.output_tokens
           None -> 0
         }
         process.send(
           scheduler,
           JobComplete(
             name:,
-            result: reply.response,
+            result: response,
             tokens_used: tokens,
-            tools_fired: reply.tools_fired,
+            tools_fired:,
           ),
         )
       }
+      Ok(frontdoor_types.DeliverQuestion(..)) -> {
+        // SchedulerSource questions are dropped by Frontdoor — this
+        // shouldn't arrive. Treat as a failure defensively.
+        process.send(
+          scheduler,
+          JobFailed(
+            name:,
+            reason: "Unexpected question delivered to scheduler source",
+          ),
+        )
+      }
+      Ok(frontdoor_types.DeliverClosed) ->
+        process.send(
+          scheduler,
+          JobFailed(name:, reason: "Frontdoor subscription closed"),
+        )
       Error(_) ->
         process.send(scheduler, JobFailed(name:, reason: "Timeout (5 minutes)"))
     }
+
+    // Clean up the per-job subscription so the routing table doesn't grow.
+    process.send(frontdoor, frontdoor_types.Unsubscribe(source_id))
   })
   Nil
 }
+
+@external(erlang, "springdrift_ffi", "generate_uuid")
+fn generate_uuid() -> String
 
 fn schedule_tick(
   self: Subject(SchedulerMessage),

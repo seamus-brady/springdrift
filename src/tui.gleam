@@ -10,6 +10,7 @@ import etch/command
 import etch/stdout
 import etch/style
 import etch/terminal
+import frontdoor/types as frontdoor_types
 import gleam/erlang/process.{type Selector, type Subject}
 import gleam/float
 import gleam/int
@@ -43,14 +44,14 @@ type AgentStatus {
 
 type TuiMessage {
   StdinByte(byte: String)
-  CognitiveReplyReceived(response: String, model: String, usage: Option(Usage))
+  DeliveryReceived(delivery: frontdoor_types.Delivery)
   NotificationReceived(notification: agent_types.Notification)
 }
 
 type TuiState {
   TuiState(
     cognitive: Subject(agent_types.CognitiveMessage),
-    cognitive_reply: Subject(agent_types.CognitiveReply),
+    delivery_subj: Subject(frontdoor_types.Delivery),
     stdin_subj: Subject(TuiMessage),
     selector: Selector(TuiMessage),
     provider_name: String,
@@ -75,6 +76,7 @@ type TuiState {
     narrative_scroll: Int,
     librarian: Option(Subject(LibrarianMessage)),
     input_limit: Int,
+    source_id: String,
   )
 }
 
@@ -108,6 +110,7 @@ pub fn start(
   narrative_dir: String,
   lib: Option(Subject(LibrarianMessage)),
   input_limit: Int,
+  frontdoor: Subject(frontdoor_types.FrontdoorMessage),
 ) -> Nil {
   let size = terminal.window_size()
   let #(w, h) = result.unwrap(size, #(80, 24))
@@ -118,18 +121,22 @@ pub fn start(
     command.Clear(terminal.All),
   ])
   let stdin_subj = process.new_subject()
-  let cognitive_reply: Subject(agent_types.CognitiveReply) =
-    process.new_subject()
+  let delivery_subj: Subject(frontdoor_types.Delivery) = process.new_subject()
+  // Subscribe with a stable source_id; cognitive will ClaimCycle for
+  // every TUI-originated cycle and replies route here.
+  let source_id = "tui"
+  process.send(
+    frontdoor,
+    frontdoor_types.Subscribe(
+      source_id:,
+      kind: frontdoor_types.UserSource,
+      sink: delivery_subj,
+    ),
+  )
   let selector =
     process.new_selector()
     |> process.select(stdin_subj)
-    |> process.select_map(cognitive_reply, fn(cr: agent_types.CognitiveReply) {
-      CognitiveReplyReceived(
-        response: cr.response,
-        model: cr.model,
-        usage: cr.usage,
-      )
-    })
+    |> process.select_map(delivery_subj, fn(d) { DeliveryReceived(delivery: d) })
     |> process.select_map(notify, fn(n: agent_types.Notification) {
       NotificationReceived(notification: n)
     })
@@ -137,7 +144,7 @@ pub fn start(
   let state =
     TuiState(
       cognitive:,
-      cognitive_reply:,
+      delivery_subj:,
       stdin_subj:,
       selector:,
       provider_name:,
@@ -162,14 +169,18 @@ pub fn start(
       narrative_scroll: 0,
       librarian: lib,
       input_limit:,
+      source_id:,
     )
-  // Send a startup greeting so the agent says hello
+  // Send a startup greeting so the agent says hello. reply_to is a
+  // throwaway — replies route via Frontdoor delivery sink keyed on
+  // source_id.
+  let throwaway = process.new_subject()
   process.send(
     cognitive,
     agent_types.UserInput(
-      source_id: "tui",
+      source_id:,
       text: "[Session started. Greet the operator briefly — one or two sentences. Mention anything notable from your sensorium.]",
-      reply_to: cognitive_reply,
+      reply_to: throwaway,
     ),
   )
   let state = TuiState(..state, status: WaitingForLlm)
@@ -220,10 +231,33 @@ fn event_loop(state: TuiState) -> Nil {
 fn dispatch(state: TuiState, msg: TuiMessage) -> Nil {
   case msg {
     StdinByte(byte:) -> handle_stdin_byte(state, byte)
-    CognitiveReplyReceived(response:, model:, usage:) ->
-      handle_cognitive_reply(state, response, model, usage)
+    DeliveryReceived(delivery:) -> handle_delivery(state, delivery)
     NotificationReceived(notification:) ->
       handle_notification(state, notification)
+  }
+}
+
+fn handle_delivery(state: TuiState, delivery: frontdoor_types.Delivery) -> Nil {
+  case delivery {
+    frontdoor_types.DeliverReply(
+      cycle_id: _,
+      response:,
+      model:,
+      usage:,
+      tools_fired: _,
+    ) -> handle_cognitive_reply(state, response, model, usage)
+    frontdoor_types.DeliverQuestion(
+      cycle_id: _,
+      question_id: _,
+      question:,
+      origin: _,
+    ) -> {
+      // Treat a human question from the agent as a reply — render it
+      // and set status back to Idle so the operator can answer. The
+      // answer is still sent via the legacy UserAnswer path.
+      handle_cognitive_reply(state, question, state.model, None)
+    }
+    frontdoor_types.DeliverClosed -> Nil
   }
 }
 
@@ -566,12 +600,13 @@ fn handle_chat_enter(state: TuiState) -> Nil {
                   scroll_offset: 0,
                 )
               render(s1)
+              let throwaway = process.new_subject()
               process.send(
                 state.cognitive,
                 agent_types.UserInput(
-                  source_id: "tui",
+                  source_id: state.source_id,
                   text: input_text,
-                  reply_to: state.cognitive_reply,
+                  reply_to: throwaway,
                 ),
               )
               event_loop(s1)
