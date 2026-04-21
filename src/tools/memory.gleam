@@ -22,6 +22,7 @@ import cycle_log
 import dag/types as dag_types
 import dprime/decay
 import facts/log as facts_log
+import facts/provenance_check
 import facts/types as facts_types
 import gleam/dynamic/decode
 import gleam/erlang/process.{type Subject}
@@ -479,6 +480,16 @@ pub type FactsContext {
     cycle_id: String,
     agent_id: String,
     fact_decay_half_life_days: Int,
+    /// Tools the cognitive loop has fired during the current cycle,
+    /// passed through so the Phase 3a provenance check can decide
+    /// whether a synthesis-derivation write has evidence support.
+    /// Snapshot at the time the memory tool is dispatched — does not
+    /// include the memory tool itself.
+    cycle_tool_names: List(String),
+    /// Evidence-grade tool classification used by the Phase 3a check.
+    /// Operators can override via config; defaults in
+    /// `facts/provenance_check.default_config/0`.
+    evidence_config: provenance_check.EvidenceConfig,
   )
 }
 
@@ -1045,6 +1056,10 @@ fn run_memory_write(
                     source_agent: "cognitive",
                     derivation: facts_types.Synthesis,
                   )),
+                )
+                |> provenance_check.apply_check(
+                  ctx.cycle_tool_names,
+                  ctx.evidence_config,
                 )
 
               // Write to JSONL

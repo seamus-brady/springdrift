@@ -12,6 +12,7 @@ import agent/types.{type Notification}
 import agentlair/types as agentlair_types
 import dprime/deterministic.{type DeterministicConfig}
 import dprime/types as dprime_types
+import facts/provenance_check
 import gleam/erlang/process.{type Subject}
 import gleam/option.{type Option, None}
 import gleam/string
@@ -86,6 +87,10 @@ pub type CognitiveConfig {
     /// strategy_used emissions and skips StrategyUsed/StrategyOutcome
     /// event logging. Default True.
     strategy_registry_enabled: Bool,
+    /// Phase 3a synthesis-provenance classification. Threaded through
+    /// so memory_write can downgrade unsupported synthesis facts at
+    /// write time. Default: provenance_check.default_config().
+    evidence_config: provenance_check.EvidenceConfig,
   )
 }
 
@@ -152,5 +157,6 @@ pub fn default_test_config(
     team_guards: team.default_guards(),
     agentlair_config: None,
     strategy_registry_enabled: True,
+    evidence_config: provenance_check.default_config(),
   )
 }

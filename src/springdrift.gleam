@@ -33,6 +33,7 @@ import dot_env
 import dprime/config as dprime_config_mod
 import embedding
 import facts/log as facts_log
+import facts/provenance_check
 import gleam/erlang/process
 import gleam/http/request as http_request
 import gleam/httpc
@@ -883,6 +884,7 @@ fn run(cfg: AppConfig) -> Nil {
         cfg.strategy_registry_enabled,
         True,
       ),
+      evidence_config: provenance_check.default_config(),
     ))
   {
     Ok(subj) -> subj
