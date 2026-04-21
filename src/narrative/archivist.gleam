@@ -70,6 +70,10 @@ pub type ArchivistContext {
     total_input_tokens: Int,
     total_output_tokens: Int,
     tool_calls: Int,
+    /// Names and success of the cognitive loop's own tool calls for
+    /// this cycle. Lets the reflection prompt compare prose claims
+    /// against what actually fired, instead of reflecting on a count.
+    cognitive_tool_calls: List(#(String, Bool)),
     dprime_decisions: List(String),
     thread_index_json: String,
     retrieved_case_ids: List(String),
@@ -525,10 +529,15 @@ pub fn spawn(
 fn reflection_system_prompt() -> String {
   "You are the Reflector for an AI agent called Springdrift. Your job is to honestly assess what just happened in a conversation cycle. Write in plain text — no XML, no JSON, no special formatting.
 
-Be candid and specific. Focus on what actually happened, not what should have happened."
+Be candid and specific. Focus on what actually happened, not what should have happened.
+
+Your single most important discipline: distinguish what the agent *claimed* (in its FINAL RESPONSE prose) from what the agent actually *did* (the TOOLS FIRED list). If the response prose describes running an analysis, calling a tool, or producing a finding, check whether the corresponding tool actually appears in the tool log. When the prose and the log diverge, note the divergence plainly. Adjacent tools that let the agent speculate do not count as having done the requested work. The tool log is ground truth; the response is a claim about ground truth."
 }
 
-fn build_reflection_prompt(ctx: ArchivistContext) -> String {
+/// Build the reflection prompt. Exposed so tests can verify the
+/// prompt text includes the tool-call ground-truth section without
+/// having to instrument the provider.
+pub fn build_reflection_prompt(ctx: ArchivistContext) -> String {
   let agents_text = format_agent_completions(ctx.agent_completions)
 
   let dprime_text = case ctx.dprime_decisions {
@@ -536,25 +545,49 @@ fn build_reflection_prompt(ctx: ArchivistContext) -> String {
     decisions -> "D' DECISIONS:\n" <> string.join(decisions, "\n")
   }
 
-  "Reflect on this completed cycle and identify:
-1. What task was attempted?
-2. What approach was taken?
-3. What tools were used and what did they return?
-4. What worked well?
-5. What failed or was unexpected?
-6. What should be remembered for future similar tasks?
-7. Were there any D' safety gate decisions worth noting?
+  let tools_text = format_cognitive_tool_calls(ctx.cognitive_tool_calls)
+
+  "Reflect on this completed cycle. Work through these questions in order:
+
+1. What task was attempted? What did the user or scheduler ask for?
+2. What does the TOOLS FIRED list show actually happened? Which tools were called, and which succeeded?
+3. What does the FINAL RESPONSE prose claim was done?
+4. Do the prose claims and the tool log agree? If the response says 'I analysed X' or 'I searched Y' or 'I found Z', does the corresponding tool appear in the TOOLS FIRED list? Note any divergence plainly — this is the most important part of the reflection.
+5. What worked well?
+6. What failed or was unexpected?
+7. What should be remembered for future similar tasks?
+8. Were there any D' safety gate decisions worth noting?
 
 CYCLE CONTEXT:
 CYCLE ID: " <> ctx.cycle_id <> "\nMODEL: " <> ctx.model_used <> "\nCLASSIFICATION: " <> ctx.classification <> "\n\nUSER INPUT:\n" <> ctx.user_input <> "\n\nFINAL RESPONSE:\n" <> string.slice(
     ctx.final_response,
     0,
     2000,
-  ) <> "\n\n" <> agents_text <> "\n\n" <> dprime_text <> "\n\nTOTAL TOKENS: " <> int.to_string(
+  ) <> "\n\n" <> tools_text <> "\n\n" <> agents_text <> "\n\n" <> dprime_text <> "\n\nTOTAL TOKENS: " <> int.to_string(
     ctx.total_input_tokens,
-  ) <> " in + " <> int.to_string(ctx.total_output_tokens) <> " out" <> "\nTOOL CALLS: " <> int.to_string(
-    ctx.tool_calls,
-  )
+  ) <> " in + " <> int.to_string(ctx.total_output_tokens) <> " out"
+}
+
+/// Render the cognitive loop's own tool calls as a list the reflector
+/// can reconcile against prose claims. Includes success/failure so the
+/// reflection can distinguish "tried and failed" from "never called."
+fn format_cognitive_tool_calls(calls: List(#(String, Bool))) -> String {
+  case calls {
+    [] -> "TOOLS FIRED: (none — this cycle made no cognitive-loop tool calls)"
+    _ ->
+      "TOOLS FIRED:\n"
+      <> string.join(
+        list.map(calls, fn(pair) {
+          let #(name, success) = pair
+          let outcome = case success {
+            True -> "ok"
+            False -> "FAILED"
+          }
+          "  - " <> name <> " (" <> outcome <> ")"
+        }),
+        "\n",
+      )
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -569,10 +602,14 @@ RULES:
 - Use the reflection's insights to produce an accurate, honest record
 - Be honest about confidence and limitations
 - Use the controlled vocabulary for intent classification
+- If the reflection surfaced a divergence between prose claims and the tools that actually fired, the narrative records that divergence plainly. Do not paper over claim-vs-record gaps. A cycle where the response claimed work that the tool log does not support is partial at best, and the narrative summary names what was claimed versus what was actually done.
 
 INTENT CLASSIFICATIONS: data_report, data_query, comparison, trend_analysis, monitoring_check, exploration, clarification, system_command, conversation
 
 OUTCOME STATUS: success, partial, failure
+  - success: the task was attempted and the tool log supports the claimed work
+  - partial: some work was done, but claims exceed what the tools show, or expected tools did not fire
+  - failure: the task was not accomplished, or the response fabricated work that did not happen
 
 STRATEGY: If the cycle followed a recognisable, named approach drawn from your Strategy Registry, emit its id in <strategy_used>. Otherwise omit the element — do not invent a new strategy name here. New strategies are created by the Remembrancer through pattern mining, not by the Curator."
 }
