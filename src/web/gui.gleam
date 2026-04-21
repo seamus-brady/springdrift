@@ -14,6 +14,11 @@ import comms/log as comms_log
 import comms/types as comms_types
 import cycle_log
 import dag/types as dag_types
+import frontdoor/types.{
+  type Delivery, type FrontdoorMessage, AgentOrigin, CognitiveLoopOrigin,
+  DeliverClosed, DeliverQuestion, DeliverReply, Subscribe, Unsubscribe,
+  UserSource,
+} as _frontdoor_types
 import gleam/bytes_tree
 import gleam/erlang/process.{type Selector, type Subject}
 import gleam/http/request.{type Request}
@@ -48,7 +53,8 @@ import web/protocol
 // ---------------------------------------------------------------------------
 
 type WsMsg {
-  GotReply(agent_types.CognitiveReply)
+  /// Reply / question from Frontdoor delivery sink.
+  GotDelivery(Delivery)
   GotNotification(agent_types.Notification)
   SendHistory(String)
 }
@@ -60,11 +66,12 @@ type WsMsg {
 type RelayMsg {
   Register(Subject(agent_types.Notification))
   Unregister(Subject(agent_types.Notification))
-  /// Request a one-shot startup greeting addressed to the given reply subject.
-  /// The relay tracks whether a greeting has already fired this session and
-  /// drops duplicates — protects against the bug where every WS reconnect
-  /// (or a second browser tab) used to trigger another "Good morning".
-  GreetOnce(reply_to: Subject(agent_types.CognitiveReply))
+  /// Request a one-shot startup greeting routed through Frontdoor for
+  /// the given source_id. The relay tracks whether a greeting has
+  /// already fired this session and drops duplicates — protects
+  /// against every WS reconnect (or a second browser tab) triggering
+  /// another "Good morning".
+  GreetOnce(source_id: String)
 }
 
 type ForwardMsg {
@@ -79,7 +86,8 @@ type ForwardMsg {
 type WsState {
   WsState(
     cognitive: Subject(agent_types.CognitiveMessage),
-    reply_subject: Subject(agent_types.CognitiveReply),
+    frontdoor: Subject(FrontdoorMessage),
+    delivery_subject: Subject(Delivery),
     notify_subject: Subject(agent_types.Notification),
     relay: Subject(RelayMsg),
     narrative_dir: String,
@@ -87,8 +95,9 @@ type WsState {
     scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
     ws_max_bytes: Int,
     /// Frontdoor source token for this connection. Passed on every
-    /// outbound `UserInput` so cognitive can register the cycle with
-    /// Frontdoor and the reply routes back to *this* browser.
+    /// outbound `UserInput` so cognitive claims the cycle with
+    /// Frontdoor and the reply routes back to this browser's
+    /// delivery sink.
     source_id: String,
   )
 }
@@ -132,6 +141,7 @@ pub fn start(
   agent_version: String,
   ws_max_bytes: Int,
   scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
+  frontdoor: Subject(FrontdoorMessage),
 ) -> Nil {
   let auth_token = get_auth_token()
   let relay: Subject(RelayMsg) = process.new_subject()
@@ -155,6 +165,7 @@ pub fn start(
         agent_version,
         ws_max_bytes,
         scheduler,
+        frontdoor,
       )
     }
     |> mist.new
@@ -182,6 +193,7 @@ fn handle_request(
   agent_version: String,
   ws_max_bytes: Int,
   scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
+  frontdoor: Subject(FrontdoorMessage),
 ) -> Response(ResponseData) {
   case auth.check_auth(req, auth_token) {
     False ->
@@ -242,10 +254,12 @@ fn handle_request(
                 lib,
                 ws_max_bytes,
                 scheduler,
+                frontdoor,
               )
             },
             on_close: fn(state) {
               process.send(state.relay, Unregister(state.notify_subject))
+              process.send(state.frontdoor, Unsubscribe(state.source_id))
             },
             handler: ws_handler,
           )
@@ -270,41 +284,48 @@ fn ws_on_init(
   lib: Option(Subject(LibrarianMessage)),
   ws_max_bytes: Int,
   scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
+  frontdoor: Subject(FrontdoorMessage),
 ) -> #(WsState, option.Option(Selector(WsMsg))) {
-  // Create per-connection subjects (owned by this WebSocket handler process)
-  let reply_subject: Subject(agent_types.CognitiveReply) = process.new_subject()
+  // Per-connection subjects owned by this WebSocket handler process.
+  let delivery_subject: Subject(Delivery) = process.new_subject()
   let notify_subject: Subject(agent_types.Notification) = process.new_subject()
-
-  // Register with the relay so the main process forwards notifications here
-  process.send(relay, Register(notify_subject))
-
-  // Channel for sending session history on connect
   let history_subject: Subject(String) = process.new_subject()
 
-  // Build selector that bridges cognitive replies + notifications + history into WsMsg
+  let source_id = "ws:" <> generate_uuid()
+
+  // Subscribe this connection with Frontdoor. Every reply / question for
+  // a cycle claimed by this source_id will arrive on `delivery_subject`.
+  process.send(
+    frontdoor,
+    Subscribe(source_id:, kind: UserSource, sink: delivery_subject),
+  )
+
+  // Register for broadcast notifications (tool-calling, status, affect, etc.).
+  process.send(relay, Register(notify_subject))
+
   let selector: Selector(WsMsg) =
     process.new_selector()
-    |> process.select_map(reply_subject, fn(cr) { GotReply(cr) })
+    |> process.select_map(delivery_subject, fn(d) { GotDelivery(d) })
     |> process.select_map(notify_subject, fn(n) { GotNotification(n) })
     |> process.select_map(history_subject, fn(h) { SendHistory(h) })
 
   let state =
     WsState(
       cognitive:,
-      reply_subject:,
+      frontdoor:,
+      delivery_subject:,
       notify_subject:,
       relay:,
       narrative_dir:,
       librarian: lib,
       scheduler:,
       ws_max_bytes:,
-      source_id: "ws:" <> generate_uuid(),
+      source_id:,
     )
 
-  // Ask the relay to fire a startup greeting addressed to this connection's
-  // reply subject. The relay enforces once-per-session semantics so reconnects
-  // and additional browser tabs don't trigger duplicate hellos.
-  process.send(relay, GreetOnce(reply_subject))
+  // Ask the relay to fire a startup greeting addressed to this connection
+  // via Frontdoor. The relay enforces once-per-session semantics.
+  process.send(relay, GreetOnce(source_id))
 
   // Query live messages from the cognitive loop (not the static boot snapshot)
   process.spawn_unlinked(fn() {
@@ -357,13 +378,17 @@ fn ws_handler(
                   conn,
                   protocol.encode_server_message(protocol.Thinking),
                 )
-              // Dispatch to cognitive loop
+              // Dispatch to cognitive loop. reply_to is now a
+              // throwaway — the real reply path is Frontdoor Delivery
+              // keyed on source_id. reply_to will be removed from
+              // UserInput entirely in a later commit in this branch.
+              let throwaway = process.new_subject()
               process.send(
                 state.cognitive,
                 agent_types.UserInput(
                   source_id: state.source_id,
                   text:,
-                  reply_to: state.reply_subject,
+                  reply_to: throwaway,
                 ),
               )
               mist.continue(state)
@@ -777,16 +802,28 @@ fn ws_handler(
       }
     }
 
-    // Cognitive reply arrived via selector
-    mist.Custom(GotReply(reply)) -> {
-      let msg =
-        protocol.AssistantMessage(
-          text: reply.response,
-          model: reply.model,
-          usage: reply.usage,
-        )
-      let _ = mist.send_text_frame(conn, protocol.encode_server_message(msg))
-      mist.continue(state)
+    // Delivery from Frontdoor — reply or question for a cycle claimed
+    // by this connection's source_id.
+    mist.Custom(GotDelivery(delivery)) -> {
+      case delivery {
+        DeliverReply(cycle_id: _, response:, model:, usage:, tools_fired: _) -> {
+          let msg = protocol.AssistantMessage(text: response, model:, usage:)
+          let _ =
+            mist.send_text_frame(conn, protocol.encode_server_message(msg))
+          mist.continue(state)
+        }
+        DeliverQuestion(cycle_id: _, question_id: _, question:, origin:) -> {
+          let source_str = case origin {
+            CognitiveLoopOrigin -> protocol.cognitive_source()
+            AgentOrigin(agent_name:) -> protocol.agent_source(agent_name)
+          }
+          let msg = protocol.Question(text: question, source: source_str)
+          let _ =
+            mist.send_text_frame(conn, protocol.encode_server_message(msg))
+          mist.continue(state)
+        }
+        DeliverClosed -> mist.stop()
+      }
     }
 
     // Notification arrived via selector
@@ -855,7 +892,7 @@ fn forward_loop(
         greeted,
       )
     }
-    FwdRelay(GreetOnce(reply_to:)) -> {
+    FwdRelay(GreetOnce(source_id:)) -> {
       case greeted {
         True -> forward_loop(cognitive, notify, relay, connections, True)
         False -> {
@@ -872,15 +909,22 @@ fn forward_loop(
             let inner_selector =
               process.new_selector() |> process.select(msg_subject)
             case process.selector_receive(inner_selector, 2000) {
-              Ok([]) | Error(_) ->
+              Ok([]) | Error(_) -> {
+                // Dispatch the greeting UserInput via Frontdoor's
+                // source_id. The reply flows back through the
+                // delivery sink registered at connect time.
+                // reply_to is a throwaway — cognitive still accepts
+                // it on the legacy path during the migration.
+                let throwaway = process.new_subject()
                 process.send(
                   cognitive,
                   agent_types.UserInput(
-                    source_id: "",
+                    source_id:,
                     text: "[Session started. Greet the operator briefly — one or two sentences. Mention anything notable from your sensorium.]",
-                    reply_to:,
+                    reply_to: throwaway,
                   ),
                 )
+              }
               Ok(_) -> Nil
             }
           })

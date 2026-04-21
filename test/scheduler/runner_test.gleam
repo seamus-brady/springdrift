@@ -6,6 +6,8 @@
 // (at your option) any later version.
 
 import agent/types as agent_types
+import frontdoor
+import frontdoor/types as frontdoor_types
 import gleam/erlang/process
 import gleam/list
 import gleam/option.{None, Some}
@@ -43,15 +45,18 @@ fn make_task(name: String, interval_ms: Int) -> types.ScheduleTaskConfig {
   )
 }
 
-/// A cognitive subject that auto-replies to UserInput messages.
-/// The subject is created inside the spawned process to satisfy ownership rules.
-fn auto_reply_cognitive() -> process.Subject(agent_types.CognitiveMessage) {
+/// A cognitive subject that auto-replies to UserInput and SchedulerInput
+/// by ClaimCycle'ing + Publishing to Frontdoor, matching how the real
+/// cognitive loop routes replies post-migration.
+fn auto_reply_cognitive(
+  fd: process.Subject(frontdoor_types.FrontdoorMessage),
+) -> process.Subject(agent_types.CognitiveMessage) {
   let setup = process.new_subject()
   process.spawn_unlinked(fn() {
     let subj: process.Subject(agent_types.CognitiveMessage) =
       process.new_subject()
     process.send(setup, subj)
-    auto_reply_loop(subj)
+    auto_reply_loop(subj, fd)
   })
   let assert Ok(subj) = process.receive(setup, 5000)
   subj
@@ -84,37 +89,47 @@ fn poll_until(
   }
 }
 
-fn auto_reply_loop(subj: process.Subject(agent_types.CognitiveMessage)) -> Nil {
+fn auto_reply_loop(
+  subj: process.Subject(agent_types.CognitiveMessage),
+  fd: process.Subject(frontdoor_types.FrontdoorMessage),
+) -> Nil {
   let selector =
     process.new_selector()
     |> process.select(subj)
   let msg = process.selector_receive_forever(selector)
   case msg {
-    agent_types.UserInput(text: _, reply_to:, ..) -> {
-      process.send(
-        reply_to,
-        agent_types.CognitiveReply(
-          response: "mock result",
-          model: "mock",
-          usage: None,
-          tools_fired: [],
-        ),
-      )
+    agent_types.UserInput(source_id:, text: _, reply_to: _) -> {
+      mock_publish(fd, source_id, "mock result")
     }
-    agent_types.SchedulerInput(reply_to:, ..) -> {
-      process.send(
-        reply_to,
-        agent_types.CognitiveReply(
-          response: "mock result",
-          model: "mock",
-          usage: None,
-          tools_fired: [],
-        ),
-      )
+    agent_types.SchedulerInput(source_id:, ..) -> {
+      mock_publish(fd, source_id, "mock result")
     }
     _ -> Nil
   }
-  auto_reply_loop(subj)
+  auto_reply_loop(subj, fd)
+}
+
+fn mock_publish(
+  fd: process.Subject(frontdoor_types.FrontdoorMessage),
+  source_id: String,
+  response: String,
+) -> Nil {
+  // Generate a stand-in cycle_id, claim it, then publish — mirrors
+  // how the real cognitive loop interacts with Frontdoor.
+  let cycle_id = "mock-cycle-" <> source_id
+  process.send(fd, frontdoor_types.ClaimCycle(cycle_id:, source_id:))
+  process.send(
+    fd,
+    frontdoor_types.Publish(
+      output: frontdoor_types.CognitiveReplyOutput(
+        cycle_id:,
+        response:,
+        model: "mock",
+        usage: None,
+        tools_fired: [],
+      ),
+    ),
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -122,7 +137,8 @@ fn auto_reply_loop(subj: process.Subject(agent_types.CognitiveMessage)) -> Nil {
 // ---------------------------------------------------------------------------
 
 pub fn start_returns_subject_test() {
-  let cognitive = auto_reply_cognitive()
+  let fd = frontdoor.start()
+  let cognitive = auto_reply_cognitive(fd)
   let tasks = [make_task("job-a", 600_000)]
   let assert Ok(sched) =
     runner.start(
@@ -133,6 +149,7 @@ pub fn start_returns_subject_test() {
       20,
       500_000,
       0,
+      fd,
     )
 
   let status_subj = process.new_subject()
@@ -142,7 +159,8 @@ pub fn start_returns_subject_test() {
 }
 
 pub fn start_with_multiple_tasks_test() {
-  let cognitive = auto_reply_cognitive()
+  let fd = frontdoor.start()
+  let cognitive = auto_reply_cognitive(fd)
   let tasks = [make_task("alpha", 600_000), make_task("beta", 600_000)]
   let assert Ok(sched) =
     runner.start(
@@ -153,6 +171,7 @@ pub fn start_with_multiple_tasks_test() {
       20,
       500_000,
       0,
+      fd,
     )
 
   let status_subj = process.new_subject()
@@ -166,7 +185,8 @@ pub fn start_with_multiple_tasks_test() {
 // ---------------------------------------------------------------------------
 
 pub fn stop_all_terminates_test() {
-  let cognitive = auto_reply_cognitive()
+  let fd = frontdoor.start()
+  let cognitive = auto_reply_cognitive(fd)
   let tasks = [make_task("stopping", 600_000)]
   let assert Ok(sched) =
     runner.start(
@@ -177,6 +197,7 @@ pub fn stop_all_terminates_test() {
       20,
       500_000,
       0,
+      fd,
     )
 
   process.send(sched, StopAll)
@@ -190,11 +211,12 @@ pub fn stop_all_terminates_test() {
 pub fn auto_execution_completes_job_test() {
   let cp = "/tmp/springdrift-test-sched-auto"
   clean_schedule_dir(cp)
-  let cognitive = auto_reply_cognitive()
+  let fd = frontdoor.start()
+  let cognitive = auto_reply_cognitive(fd)
   // initial_delay returns 0, so tick fires at 1ms
   let tasks = [make_task("auto-run", 600_000)]
   let assert Ok(sched) =
-    runner.start(tasks, cognitive, cp, 600_000, 20, 500_000, 0)
+    runner.start(tasks, cognitive, cp, 600_000, 20, 500_000, 0, fd)
 
   // Poll until the job has run at least once. Recurring tasks return to Pending
   // after each completion, so we check run_count rather than status.
@@ -221,7 +243,8 @@ pub fn auto_execution_completes_job_test() {
 // ---------------------------------------------------------------------------
 
 pub fn unknown_job_complete_ignored_test() {
-  let cognitive = auto_reply_cognitive()
+  let fd = frontdoor.start()
+  let cognitive = auto_reply_cognitive(fd)
   let tasks = [make_task("real-job", 600_000)]
   let assert Ok(sched) =
     runner.start(
@@ -232,6 +255,7 @@ pub fn unknown_job_complete_ignored_test() {
       20,
       500_000,
       0,
+      fd,
     )
 
   process.send(
@@ -252,7 +276,8 @@ pub fn unknown_job_complete_ignored_test() {
 }
 
 pub fn unknown_job_failed_ignored_test() {
-  let cognitive = auto_reply_cognitive()
+  let fd = frontdoor.start()
+  let cognitive = auto_reply_cognitive(fd)
   let tasks = [make_task("real-job2", 600_000)]
   let assert Ok(sched) =
     runner.start(
@@ -263,6 +288,7 @@ pub fn unknown_job_failed_ignored_test() {
       20,
       500_000,
       0,
+      fd,
     )
 
   process.send(sched, JobFailed(name: "ghost-job", reason: "phantom"))
@@ -279,7 +305,8 @@ pub fn unknown_job_failed_ignored_test() {
 // ---------------------------------------------------------------------------
 
 pub fn start_with_no_tasks_test() {
-  let cognitive = auto_reply_cognitive()
+  let fd = frontdoor.start()
+  let cognitive = auto_reply_cognitive(fd)
   let assert Ok(sched) =
     runner.start(
       [],
@@ -289,6 +316,7 @@ pub fn start_with_no_tasks_test() {
       20,
       500_000,
       0,
+      fd,
     )
 
   let status_subj = process.new_subject()
@@ -304,10 +332,11 @@ pub fn start_with_no_tasks_test() {
 pub fn job_transitions_through_running_test() {
   let cp = "/tmp/springdrift-test-sched-trans"
   clean_schedule_dir(cp)
-  let cognitive = auto_reply_cognitive()
+  let fd = frontdoor.start()
+  let cognitive = auto_reply_cognitive(fd)
   let tasks = [make_task("transitions", 600_000)]
   let assert Ok(sched) =
-    runner.start(tasks, cognitive, cp, 600_000, 20, 500_000, 0)
+    runner.start(tasks, cognitive, cp, 600_000, 20, 500_000, 0, fd)
 
   // Poll until the job has left Pending (Running, Completed, or back to Pending
   // with run_count > 0 for recurring tasks).
@@ -337,10 +366,11 @@ pub fn job_transitions_through_running_test() {
 pub fn multiple_tasks_all_complete_test() {
   let cp = "/tmp/springdrift-test-sched-multi"
   clean_schedule_dir(cp)
-  let cognitive = auto_reply_cognitive()
+  let fd = frontdoor.start()
+  let cognitive = auto_reply_cognitive(fd)
   let tasks = [make_task("task-1", 600_000), make_task("task-2", 600_000)]
   let assert Ok(sched) =
-    runner.start(tasks, cognitive, cp, 600_000, 20, 500_000, 0)
+    runner.start(tasks, cognitive, cp, 600_000, 20, 500_000, 0, fd)
 
   // Poll until both jobs have run at least once (recurring tasks return to
   // Pending after completion, so check run_count).
@@ -421,8 +451,9 @@ fn make_one_shot_reminder(name: String) -> ScheduledJob {
 pub fn complete_job_refuses_recurring_test() {
   let cp = "/tmp/springdrift-test-sched-refuse"
   clean_schedule_dir(cp)
-  let cognitive = auto_reply_cognitive()
-  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0)
+  let fd = frontdoor.start()
+  let cognitive = auto_reply_cognitive(fd)
+  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0, fd)
 
   // Add a recurring task with no fire budget exhaustion.
   let add_reply = process.new_subject()
@@ -459,8 +490,9 @@ pub fn complete_job_refuses_recurring_test() {
 pub fn complete_job_succeeds_for_one_shot_reminder_test() {
   let cp = "/tmp/springdrift-test-sched-oneshot"
   clean_schedule_dir(cp)
-  let cognitive = auto_reply_cognitive()
-  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0)
+  let fd = frontdoor.start()
+  let cognitive = auto_reply_cognitive(fd)
+  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0, fd)
 
   let add_reply = process.new_subject()
   process.send(
@@ -488,8 +520,9 @@ pub fn complete_job_succeeds_for_one_shot_reminder_test() {
 pub fn complete_job_succeeds_for_recurring_with_max_reached_test() {
   let cp = "/tmp/springdrift-test-sched-maxout"
   clean_schedule_dir(cp)
-  let cognitive = auto_reply_cognitive()
-  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0)
+  let fd = frontdoor.start()
+  let cognitive = auto_reply_cognitive(fd)
+  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0, fd)
 
   // Recurring job that has already exhausted its max_occurrences.
   let job =
@@ -525,8 +558,9 @@ pub fn recovery_rearms_completed_recurring_job_test() {
   schedule_log.append(cp, job, Create)
   schedule_log.append(cp, ScheduledJob(..job, status: Completed), Complete)
 
-  let cognitive = auto_reply_cognitive()
-  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0)
+  let fd = frontdoor.start()
+  let cognitive = auto_reply_cognitive(fd)
+  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0, fd)
 
   let status_subj = process.new_subject()
   process.send(sched, GetStatus(reply_to: status_subj))
@@ -553,8 +587,9 @@ pub fn recovery_leaves_exhausted_recurring_completed_test() {
   schedule_log.append(cp, job, Create)
   schedule_log.append(cp, ScheduledJob(..job, status: Completed), Complete)
 
-  let cognitive = auto_reply_cognitive()
-  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0)
+  let fd = frontdoor.start()
+  let cognitive = auto_reply_cognitive(fd)
+  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0, fd)
 
   let status_subj = process.new_subject()
   process.send(sched, GetStatus(reply_to: status_subj))
@@ -584,8 +619,9 @@ pub fn auto_purge_keeps_recurring_jobs_test() {
     )
   schedule_log.append(cp, recurring, Create)
 
-  let cognitive = auto_reply_cognitive()
-  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0)
+  let fd = frontdoor.start()
+  let cognitive = auto_reply_cognitive(fd)
+  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0, fd)
   let status_subj = process.new_subject()
   process.send(sched, GetStatus(reply_to: status_subj))
   let assert Ok(jobs) = process.receive(status_subj, 5000)
@@ -646,8 +682,9 @@ pub fn auto_purge_drops_old_terminal_one_shot_test() {
     )
   schedule_log.append(cp, fresh_cancelled, Create)
 
-  let cognitive = auto_reply_cognitive()
-  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0)
+  let fd = frontdoor.start()
+  let cognitive = auto_reply_cognitive(fd)
+  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0, fd)
 
   let status_subj = process.new_subject()
   process.send(sched, GetStatus(reply_to: status_subj))
@@ -671,8 +708,9 @@ pub fn auto_purge_drops_old_terminal_one_shot_test() {
 pub fn complete_job_with_missing_required_tool_routes_to_failed_test() {
   let cp = "/tmp/springdrift-test-sched-required-missing"
   clean_schedule_dir(cp)
-  let cognitive = auto_reply_cognitive()
-  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0)
+  let fd = frontdoor.start()
+  let cognitive = auto_reply_cognitive(fd)
+  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0, fd)
 
   // Add a job that requires analyze_affect_performance.
   let add_reply = process.new_subject()
@@ -713,8 +751,9 @@ pub fn complete_job_with_missing_required_tool_routes_to_failed_test() {
 pub fn complete_job_with_required_tools_fired_succeeds_test() {
   let cp = "/tmp/springdrift-test-sched-required-ok"
   clean_schedule_dir(cp)
-  let cognitive = auto_reply_cognitive()
-  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0)
+  let fd = frontdoor.start()
+  let cognitive = auto_reply_cognitive(fd)
+  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0, fd)
 
   let add_reply = process.new_subject()
   let job =
@@ -751,8 +790,9 @@ pub fn complete_job_with_required_tools_fired_succeeds_test() {
 pub fn complete_job_with_empty_required_tools_skips_check_test() {
   let cp = "/tmp/springdrift-test-sched-required-none"
   clean_schedule_dir(cp)
-  let cognitive = auto_reply_cognitive()
-  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0)
+  let fd = frontdoor.start()
+  let cognitive = auto_reply_cognitive(fd)
+  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0, fd)
 
   // Default required_tools is []; the check is disabled.
   let add_reply = process.new_subject()

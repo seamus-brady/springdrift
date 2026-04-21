@@ -983,6 +983,7 @@ fn run(cfg: AppConfig) -> Nil {
       max_cycles_per_hour,
       token_budget_per_hour,
       meta_budget_pct,
+      frontdoor_subj,
     )
   let scheduler_subj = case runner_result {
     Ok(runner_subj) -> {
@@ -1137,7 +1138,8 @@ fn run(cfg: AppConfig) -> Nil {
               ),
               from_address: poller_from,
             )
-          let _poller = comms_poller.start(poll_config, cognitive_subj)
+          let _poller =
+            comms_poller.start(poll_config, cognitive_subj, frontdoor_subj)
           io.println(
             "Comms    : inbox poller started ("
             <> int.to_string(poll_config.poll_interval_ms / 1000)
@@ -1171,6 +1173,7 @@ fn run(cfg: AppConfig) -> Nil {
         agent_version,
         ws_max_bytes,
         scheduler_subj,
+        frontdoor_subj,
       )
     }
     _ ->
@@ -1184,6 +1187,7 @@ fn run(cfg: AppConfig) -> Nil {
         narrative_dir,
         lib,
         tui_input_limit,
+        frontdoor_subj,
       )
   }
 

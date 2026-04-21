@@ -16,6 +16,7 @@ import agent/types as agent_types
 import comms/email
 import comms/log as comms_log
 import comms/types as comms_types
+import frontdoor/types as frontdoor_types
 import gleam/erlang/process.{type Subject}
 import gleam/int
 import gleam/list
@@ -52,6 +53,7 @@ type PollerState {
   PollerState(
     config: PollerConfig,
     cognitive: Subject(agent_types.CognitiveMessage),
+    frontdoor: Subject(frontdoor_types.FrontdoorMessage),
     self: Subject(PollerMessage),
     seen_ids: Set(String),
     last_poll_timestamp: Option(String),
@@ -67,6 +69,7 @@ type PollerState {
 pub fn start(
   config: PollerConfig,
   cognitive: Subject(agent_types.CognitiveMessage),
+  frontdoor: Subject(frontdoor_types.FrontdoorMessage),
 ) -> Subject(PollerMessage) {
   let setup = process.new_subject()
   process.spawn_unlinked(fn() {
@@ -91,6 +94,7 @@ pub fn start(
       PollerState(
         config:,
         cognitive:,
+        frontdoor:,
         self:,
         seen_ids: seed_ids,
         last_poll_timestamp: None,
@@ -248,12 +252,20 @@ fn handle_tick(state: PollerState) -> PollerState {
         )
 
         // Route to cognitive loop as SchedulerInput (not UserInput)
-        // so the agent knows this is an inbound email, not operator typing
-        let reply_to = process.new_subject()
+        // so the agent knows this is an inbound email, not operator
+        // typing. Subscribe per-message as a SchedulerSource so
+        // Frontdoor's source-kind routing drops any human questions
+        // raised during the cycle (inbound email cycles are
+        // autonomous — nobody is waiting for an answer). A
+        // lightweight drainer consumes the eventual reply and
+        // unsubscribes on timeout to keep the routing table bounded.
+        let source_id = "comms:" <> m.message_id
+        subscribe_and_drain(state.frontdoor, source_id)
+        let throwaway = process.new_subject()
         process.send(
           state.cognitive,
           agent_types.SchedulerInput(
-            source_id: "comms:" <> m.message_id,
+            source_id:,
             job_name: "email-inbound-" <> m.message_id,
             query: body,
             kind: scheduler_types.Reminder,
@@ -266,7 +278,7 @@ fn handle_tick(state: PollerState) -> PollerState {
               <> "\n\n"
               <> body,
             tags: ["email", "inbound"],
-            reply_to:,
+            reply_to: throwaway,
           ),
         )
         // Don't block waiting for reply — fire and forget
@@ -305,4 +317,29 @@ fn pow2(n: Int) -> Int {
     4 -> 16
     _ -> 32
   }
+}
+
+/// Subscribe to Frontdoor as a SchedulerSource so questions raised
+/// during this inbound-email cycle are dropped server-side. Drainer
+/// process awaits the eventual DeliverReply and unsubscribes on
+/// arrival or after a 10-minute safety timeout.
+fn subscribe_and_drain(
+  frontdoor: Subject(frontdoor_types.FrontdoorMessage),
+  source_id: String,
+) -> Nil {
+  process.spawn_unlinked(fn() {
+    let sink: Subject(frontdoor_types.Delivery) = process.new_subject()
+    process.send(
+      frontdoor,
+      frontdoor_types.Subscribe(
+        source_id:,
+        kind: frontdoor_types.SchedulerSource,
+        sink:,
+      ),
+    )
+    // 10 min (slightly longer than the scheduler-side timeout)
+    let _ = process.receive(sink, 600_000)
+    process.send(frontdoor, frontdoor_types.Unsubscribe(source_id))
+  })
+  Nil
 }

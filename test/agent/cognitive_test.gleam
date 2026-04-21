@@ -8,12 +8,14 @@
 import agent/cognitive
 import agent/cognitive_config
 import agent/types.{
-  type CognitiveReply, type Notification, QuestionForHuman, SchedulerJobStarted,
-  SetModel, UserAnswer, UserInput,
+  type CognitiveReply, type Notification, SchedulerJobStarted, SetModel,
+  UserAnswer, UserInput,
 }
+import frontdoor
+import frontdoor/types.{DeliverQuestion, Subscribe, UserSource} as frontdoor_types
 import gleam/erlang/process
 import gleam/list
-import gleam/option.{None}
+import gleam/option.{None, Some}
 import gleam/string
 import gleeunit/should
 import llm/adapters/mock
@@ -29,6 +31,21 @@ fn start_cognitive(provider) {
   let cfg = cognitive_config.default_test_config(provider, notify_subj)
   let assert Ok(subj) = cognitive.start(cfg)
   #(subj, notify_subj)
+}
+
+/// Start cognitive with a Frontdoor wired and a UserSource subscriber
+/// for `source_id`. Returns the cognitive subject, notify subject,
+/// frontdoor subject, and the delivery sink. Tests that need to
+/// observe questions or replies route via the sink.
+fn start_cognitive_with_frontdoor(provider, source_id: String) {
+  let notify_subj: process.Subject(Notification) = process.new_subject()
+  let base = cognitive_config.default_test_config(provider, notify_subj)
+  let fd = frontdoor.start()
+  let cfg = cognitive_config.CognitiveConfig(..base, frontdoor: Some(fd))
+  let assert Ok(subj) = cognitive.start(cfg)
+  let sink: process.Subject(frontdoor_types.Delivery) = process.new_subject()
+  process.send(fd, Subscribe(source_id:, kind: UserSource, sink:))
+  #(subj, notify_subj, fd, sink)
 }
 
 fn send_and_receive(cognitive_subj, text: String) -> CognitiveReply {
@@ -116,22 +133,24 @@ pub fn request_human_input_tool_test() {
       }
     })
 
-  let #(cognitive, notify) = start_cognitive(provider)
+  let #(cognitive, _notify, _fd, sink) =
+    start_cognitive_with_frontdoor(provider, "test:src")
 
-  // Send initial message
+  // Send initial message — source_id claims the cycle on Frontdoor so
+  // the question routes back to our sink.
   let reply_subj = process.new_subject()
   process.send(
     cognitive,
-    UserInput(source_id: "", text: "Hello", reply_to: reply_subj),
+    UserInput(source_id: "test:src", text: "Hello", reply_to: reply_subj),
   )
 
-  // Should receive a QuestionForHuman notification (decoupled, no Subject)
-  let assert Ok(notification) = process.receive(notify, 5000)
-  case notification {
-    QuestionForHuman(question:, source:) -> {
+  // Should receive a DeliverQuestion on the Frontdoor sink.
+  let assert Ok(delivery) = process.receive(sink, 5000)
+  case delivery {
+    DeliverQuestion(question:, origin:, ..) -> {
       question |> should.equal("What is your name?")
-      case source {
-        types.CognitiveQuestion -> Nil
+      case origin {
+        frontdoor_types.CognitiveLoopOrigin -> Nil
         _ -> should.fail()
       }
     }
@@ -188,9 +207,12 @@ pub fn error_reply_has_no_usage_test() {
 }
 
 pub fn agent_question_decoupled_test() {
-  // Verify that AgentQuestion results in a pure-data notification
+  // Verify that AgentQuestion parks cognitive in WaitingForUser and
+  // that UserAnswer forwards the reply to the agent's reply subject.
+  // (Question routing to external destinations is exercised directly
+  // in test/frontdoor_test.gleam.)
   let provider = mock.provider_with_text("ok")
-  let #(cognitive, notify) = start_cognitive(provider)
+  let #(cognitive, _notify) = start_cognitive(provider)
 
   // Simulate an agent asking a question
   let agent_reply_subj = process.new_subject()
@@ -202,19 +224,6 @@ pub fn agent_question_decoupled_test() {
       reply_to: agent_reply_subj,
     ),
   )
-
-  // Should receive a QuestionForHuman with AgentQuestionSource
-  let assert Ok(notification) = process.receive(notify, 5000)
-  case notification {
-    QuestionForHuman(question:, source:) -> {
-      question |> should.equal("Confirm deployment?")
-      case source {
-        types.AgentQuestionSource(agent:) -> agent |> should.equal("coder")
-        _ -> should.fail()
-      }
-    }
-    _ -> should.fail()
-  }
 
   // Send the answer via UserAnswer
   process.send(cognitive, UserAnswer(answer: "yes"))

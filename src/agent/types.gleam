@@ -294,10 +294,15 @@ pub type SupervisorMessage {
 // ---------------------------------------------------------------------------
 
 pub type CognitiveMessage {
-  /// `source_id` is the Frontdoor destination token. Senders that don't
-  /// use Frontdoor yet pass "" — cognitive then skips the ClaimCycle
-  /// and Frontdoor publishes become dead drops. Once every caller
-  /// threads a real source_id, Phase 5 removes `reply_to`.
+  /// Inbound user message. `source_id` is the Frontdoor destination
+  /// token — cognitive ClaimCycle's it, and every reply and question
+  /// for the resulting cycle routes through Frontdoor to whichever
+  /// sink is registered. Callers with no Frontdoor interest pass "".
+  /// `reply_to` is vestigial — adapters pass a throwaway subject. It
+  /// exists because cognitive's internal `PendingThink` chain still
+  /// threads a `Subject(CognitiveReply)` through gate callbacks; the
+  /// cycle-terminal `output.send_reply` helper is the only actual
+  /// caller and it publishes to Frontdoor regardless.
   UserInput(source_id: String, text: String, reply_to: Subject(CognitiveReply))
   UserAnswer(answer: String)
   /// Sent by Frontdoor when an autonomous cycle raised a human question
@@ -349,6 +354,7 @@ pub type CognitiveMessage {
     title: String,
     body: String,
     tags: List(String),
+    /// Vestigial — see UserInput.reply_to.
     reply_to: Subject(CognitiveReply),
   )
   OutputGateComplete(
