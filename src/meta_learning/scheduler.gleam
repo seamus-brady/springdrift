@@ -91,6 +91,8 @@ fn consolidation_task(
     start_at: None,
     delivery: delivery,
     only_if_changed: False,
+    // Both named tools must fire for the job to count as complete.
+    required_tools: ["consolidate_memory", "write_consolidation_report"],
   )
 }
 
@@ -115,6 +117,7 @@ fn goal_review_task(
     start_at: None,
     delivery: delivery,
     only_if_changed: False,
+    required_tools: ["list_learning_goals"],
   )
 }
 
@@ -139,6 +142,9 @@ fn skill_decay_task(
     start_at: None,
     delivery: delivery,
     only_if_changed: False,
+    // Skill decay is a judgment pass, not a tool invocation — no
+    // specific tool is strictly required.
+    required_tools: [],
   )
 }
 
@@ -162,6 +168,11 @@ fn affect_correlation_task(
     start_at: None,
     delivery: delivery,
     only_if_changed: False,
+    // The April 20 fabrication incident: agent claimed to run this
+    // analysis without calling the tool. The job now fails if the
+    // required tool doesn't fire, turning what was narrated success
+    // into visible failure on the scheduler tab.
+    required_tools: ["analyze_affect_performance"],
   )
 }
 
@@ -185,6 +196,9 @@ fn strategy_review_task(
     start_at: None,
     delivery: delivery,
     only_if_changed: False,
+    // Review is a judgment pass against the sensorium — no single
+    // tool must fire.
+    required_tools: [],
   )
 }
 

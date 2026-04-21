@@ -1005,7 +1005,12 @@ pub fn handle_input_safety_gate_complete(
       let agent_text = build_rejection_notice("input", result, "user query")
       process.send(
         reply_to,
-        CognitiveReply(response: user_text, model:, usage: None),
+        CognitiveReply(
+          response: user_text,
+          model:,
+          usage: None,
+          tools_fired: [],
+        ),
       )
       let state = cognitive_state.apply_meta_observation(state, 0)
       let state = with_assistant_error(state, agent_text)
@@ -1237,6 +1242,7 @@ pub fn check_deterministic_only(
           response: reply_text,
           model: state.model,
           usage: Some(usage),
+          tools_fired: list.map(state.cycle_tool_calls, fn(t) { t.name }),
         ),
       )
       // Spawn Archivist (fire-and-forget narrative + CBR generation)
@@ -1411,7 +1417,12 @@ pub fn handle_output_gate_complete(
       finalise_dag_node(state, tokens_in, tokens_out, state.model)
       process.send(
         reply_to,
-        CognitiveReply(response: report_text, model: state.model, usage:),
+        CognitiveReply(
+          response: report_text,
+          model: state.model,
+          usage:,
+          tools_fired: list.map(state.cycle_tool_calls, fn(t) { t.name }),
+        ),
       )
       // Spawn Archivist (fire-and-forget narrative + CBR generation)
       cognitive_memory.maybe_spawn_archivist(
@@ -1456,7 +1467,12 @@ pub fn handle_output_gate_complete(
           finalise_dag_node(state, tokens_in, tokens_out, state.model)
           process.send(
             reply_to,
-            CognitiveReply(response: full_text, model: state.model, usage:),
+            CognitiveReply(
+              response: full_text,
+              model: state.model,
+              usage:,
+              tools_fired: list.map(state.cycle_tool_calls, fn(t) { t.name }),
+            ),
           )
           cognitive_memory.maybe_spawn_archivist(
             state,
@@ -1545,7 +1561,12 @@ pub fn handle_output_gate_complete(
       finalise_dag_node(state, tokens_in, tokens_out, state.model)
       process.send(
         reply_to,
-        CognitiveReply(response: user_text, model: state.model, usage:),
+        CognitiveReply(
+          response: user_text,
+          model: state.model,
+          usage:,
+          tools_fired: list.map(state.cycle_tool_calls, fn(t) { t.name }),
+        ),
       )
       let state =
         cognitive_state.apply_meta_observation(state, tokens_in + tokens_out)
@@ -1592,6 +1613,7 @@ pub fn handle_gate_timeout(
               response: report_text,
               model: state.model,
               usage: None,
+              tools_fired: list.map(state.cycle_tool_calls, fn(t) { t.name }),
             ),
           )
           let new_state =

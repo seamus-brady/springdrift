@@ -660,6 +660,7 @@ fn handle_user_input(
                 <> " pending), please wait.]",
               model: state.model,
               usage: None,
+              tools_fired: [],
             ),
           )
           state
@@ -843,6 +844,7 @@ fn handle_scheduler_input(
                 <> "' rejected]",
               model: state.model,
               usage: None,
+              tools_fired: [],
             ),
           )
           state
@@ -1143,6 +1145,9 @@ fn handle_think_complete(
                       response: reply_text,
                       model: reply_model,
                       usage: Some(resp.usage),
+                      tools_fired: list.map(state.cycle_tool_calls, fn(t) {
+                        t.name
+                      }),
                     ),
                   )
                   // Spawn Archivist (fire-and-forget)

@@ -42,6 +42,7 @@ fn test_job(name: String) -> ScheduledJob {
     fired_count: 0,
     recurrence_end_at: None,
     max_occurrences: None,
+    required_tools: [],
   )
 }
 

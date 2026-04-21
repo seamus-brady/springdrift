@@ -363,7 +363,17 @@ pub type CognitiveMessage {
 }
 
 pub type CognitiveReply {
-  CognitiveReply(response: String, model: String, usage: Option(Usage))
+  CognitiveReply(
+    response: String,
+    model: String,
+    usage: Option(Usage),
+    /// Names of tools the cognitive loop fired during the cycle that
+    /// produced this reply. Used by the scheduler runner to enforce
+    /// the Phase 3b required_tools check — a job that didn't actually
+    /// call its declared required tools is marked JobFailed instead
+    /// of JobComplete. Ordering preserved.
+    tools_fired: List(String),
+  )
 }
 
 // ---------------------------------------------------------------------------

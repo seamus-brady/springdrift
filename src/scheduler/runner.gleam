@@ -103,6 +103,7 @@ pub fn start(
                 interval_ms: task.interval_ms,
                 delivery: task.delivery,
                 only_if_changed: task.only_if_changed,
+                required_tools: task.required_tools,
               ),
             )
           Error(_) ->
@@ -132,6 +133,7 @@ pub fn start(
                 fired_count: 0,
                 recurrence_end_at: None,
                 max_occurrences: None,
+                required_tools: task.required_tools,
               ),
             )
         }
@@ -448,107 +450,133 @@ fn scheduler_loop(
       }
     }
 
-    JobComplete(name:, result:, tokens_used:) -> {
+    JobComplete(name:, result:, tokens_used:, tools_fired:) -> {
       case dict.get(jobs, name) {
         Error(_) -> loop(jobs)
         Ok(job) -> {
-          let now = monotonic_now_ms()
+          // Phase 3b required_tools check. If the job declares
+          // required tools, every one must appear in the cycle's
+          // tools_fired list. Missing tools → reroute to JobFailed
+          // so the scheduler tab reflects reality rather than
+          // letting narrated success pass as real success.
+          let missing_required =
+            list.filter(job.required_tools, fn(t) {
+              !list.contains(tools_fired, t)
+            })
+          case missing_required {
+            [_, ..] -> {
+              let reason =
+                "required tool(s) did not fire: "
+                <> string.join(missing_required, ", ")
+              slog.warn(
+                "scheduler",
+                "loop",
+                "Job '" <> name <> "' completed but rejecting — " <> reason,
+                None,
+              )
+              process.send(self, types.JobFailed(name: name, reason: reason))
+              loop(jobs)
+            }
+            [] -> {
+              let now = monotonic_now_ms()
 
-          // Check only_if_changed
-          let should_deliver = case job.only_if_changed {
-            True ->
-              case job.last_result {
-                Some(prev) -> prev != result
-                None -> True
+              // Check only_if_changed
+              let should_deliver = case job.only_if_changed {
+                True ->
+                  case job.last_result {
+                    Some(prev) -> prev != result
+                    None -> True
+                  }
+                False -> True
               }
-            False -> True
-          }
 
-          case should_deliver {
-            True -> {
-              let content = case job.delivery {
-                WebhookDelivery(..) ->
-                  build_webhook_payload(name, result, get_datetime())
-                _ -> result
-              }
-              case delivery.deliver(content, name, job.delivery) {
-                Ok(path) ->
+              case should_deliver {
+                True -> {
+                  let content = case job.delivery {
+                    WebhookDelivery(..) ->
+                      build_webhook_payload(name, result, get_datetime())
+                    _ -> result
+                  }
+                  case delivery.deliver(content, name, job.delivery) {
+                    Ok(path) ->
+                      slog.info(
+                        "scheduler",
+                        "loop",
+                        "Job '" <> name <> "' delivered to " <> path,
+                        None,
+                      )
+                    Error(err) ->
+                      slog.warn(
+                        "scheduler",
+                        "loop",
+                        "Job '" <> name <> "' delivery failed: " <> err,
+                        None,
+                      )
+                  }
+                }
+                False ->
                   slog.info(
                     "scheduler",
                     "loop",
-                    "Job '" <> name <> "' delivered to " <> path,
-                    None,
-                  )
-                Error(err) ->
-                  slog.warn(
-                    "scheduler",
-                    "loop",
-                    "Job '" <> name <> "' delivery failed: " <> err,
+                    "Job '" <> name <> "' skipped (unchanged)",
                     None,
                   )
               }
-            }
-            False ->
-              slog.info(
-                "scheduler",
-                "loop",
-                "Job '" <> name <> "' skipped (unchanged)",
-                None,
+
+              let new_fired = job.fired_count + 1
+              let should_recur =
+                job.interval_ms > 0
+                && {
+                  case job.max_occurrences {
+                    Some(max) -> new_fired < max
+                    None -> True
+                  }
+                }
+                && {
+                  case job.recurrence_end_at {
+                    Some(end_at) -> ms_until_datetime(end_at) > 0
+                    None -> True
+                  }
+                }
+
+              let updated_job =
+                ScheduledJob(
+                  ..job,
+                  status: case should_recur {
+                    True -> Pending
+                    False -> Completed
+                  },
+                  last_run_ms: Some(now),
+                  last_result: Some(result),
+                  run_count: job.run_count + 1,
+                  fired_count: new_fired,
+                )
+              let updated_jobs = dict.insert(jobs, name, updated_job)
+
+              // Only schedule next tick if recurring
+              case should_recur {
+                True -> schedule_tick(self, name, job.interval_ms)
+                False -> Nil
+              }
+
+              schedule_log.append(schedule_dir, updated_job, types.Complete)
+
+              // Track token usage for rate limiting
+              let hour_ago = now - 3_600_000
+              let recent_tokens =
+                list.filter(token_usage, fn(tu) { tu.0 > hour_ago })
+              let new_tokens = case tokens_used > 0 {
+                True -> [#(now, tokens_used), ..recent_tokens]
+                False -> recent_tokens
+              }
+              loop_with_tracking(
+                updated_jobs,
+                cycle_timestamps,
+                meta_cycle_timestamps,
+                new_tokens,
               )
-          }
-
-          let new_fired = job.fired_count + 1
-          let should_recur =
-            job.interval_ms > 0
-            && {
-              case job.max_occurrences {
-                Some(max) -> new_fired < max
-                None -> True
-              }
             }
-            && {
-              case job.recurrence_end_at {
-                Some(end_at) -> ms_until_datetime(end_at) > 0
-                None -> True
-              }
-            }
-
-          let updated_job =
-            ScheduledJob(
-              ..job,
-              status: case should_recur {
-                True -> Pending
-                False -> Completed
-              },
-              last_run_ms: Some(now),
-              last_result: Some(result),
-              run_count: job.run_count + 1,
-              fired_count: new_fired,
-            )
-          let updated_jobs = dict.insert(jobs, name, updated_job)
-
-          // Only schedule next tick if recurring
-          case should_recur {
-            True -> schedule_tick(self, name, job.interval_ms)
-            False -> Nil
           }
-
-          schedule_log.append(schedule_dir, updated_job, types.Complete)
-
-          // Track token usage for rate limiting
-          let hour_ago = now - 3_600_000
-          let recent_tokens =
-            list.filter(token_usage, fn(tu) { tu.0 > hour_ago })
-          let new_tokens = case tokens_used > 0 {
-            True -> [#(now, tokens_used), ..recent_tokens]
-            False -> recent_tokens
-          }
-          loop_with_tracking(
-            updated_jobs,
-            cycle_timestamps,
-            meta_cycle_timestamps,
-            new_tokens,
-          )
         }
       }
     }
@@ -873,7 +901,12 @@ fn spawn_job(
         }
         process.send(
           scheduler,
-          JobComplete(name:, result: reply.response, tokens_used: tokens),
+          JobComplete(
+            name:,
+            result: reply.response,
+            tokens_used: tokens,
+            tools_fired: reply.tools_fired,
+          ),
         )
       }
       Error(_) ->

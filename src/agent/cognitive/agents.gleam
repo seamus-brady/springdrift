@@ -563,6 +563,9 @@ fn dispatch_agent_calls(
           response: reply_text,
           model: state.model,
           usage: Some(resp.usage),
+          // Phase 3b: the scheduler runner reads this to enforce
+          // required_tools on scheduled cycles.
+          tools_fired: list.map(state.cycle_tool_calls, fn(t) { t.name }),
         ),
       )
       CognitiveState(
@@ -801,6 +804,7 @@ fn do_dispatch_agents(
           response: error_text,
           model: state.model,
           usage: Some(resp.usage),
+          tools_fired: list.map(state.cycle_tool_calls, fn(t) { t.name }),
         ),
       )
       // Add single assistant message with the original response content + error
