@@ -13,6 +13,7 @@ import agentlair/types as agentlair_types
 import dprime/deterministic.{type DeterministicConfig}
 import dprime/types as dprime_types
 import facts/provenance_check
+import frontdoor/types as frontdoor_types
 import gleam/erlang/process.{type Subject}
 import gleam/option.{type Option, None}
 import gleam/string
@@ -91,6 +92,13 @@ pub type CognitiveConfig {
     /// so memory_write can downgrade unsupported synthesis facts at
     /// write time. Default: provenance_check.default_config().
     evidence_config: provenance_check.EvidenceConfig,
+    /// Frontdoor output channel. Cognitive publishes CognitiveOutput
+    /// values to this subject so the delivery layer can route them to
+    /// the correct destination. Optional while the Frontdoor migration
+    /// is in progress — when None, publishing is a no-op and the
+    /// legacy reply_to path is authoritative. Expected non-None once
+    /// Phase 5 lands.
+    frontdoor: Option(Subject(frontdoor_types.FrontdoorMessage)),
   )
 }
 
@@ -158,5 +166,6 @@ pub fn default_test_config(
     agentlair_config: None,
     strategy_registry_enabled: True,
     evidence_config: provenance_check.default_config(),
+    frontdoor: None,
   )
 }

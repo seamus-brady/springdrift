@@ -885,6 +885,7 @@ fn run(cfg: AppConfig) -> Nil {
         True,
       ),
       evidence_config: provenance_check.default_config(),
+      frontdoor: option.None,
     ))
   {
     Ok(subj) -> subj

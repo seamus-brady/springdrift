@@ -18,6 +18,7 @@ import dag/types as dag_types
 import dprime/deterministic.{type DeterministicConfig}
 import dprime/types as dprime_types
 import facts/provenance_check
+import frontdoor/types as frontdoor_types
 import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Subject}
 import gleam/list
@@ -102,6 +103,10 @@ pub type RuntimeConfig {
     /// with capped confidence. Operator-configurable; defaults
     /// from `facts/provenance_check.default_config/0`.
     evidence_config: provenance_check.EvidenceConfig,
+    /// Frontdoor output channel. Replies and human-questions are
+    /// published here in parallel with the existing reply_to path
+    /// during the migration. When None the publish is a no-op.
+    frontdoor: Option(Subject(frontdoor_types.FrontdoorMessage)),
   )
 }
 

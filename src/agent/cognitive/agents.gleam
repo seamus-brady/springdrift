@@ -7,6 +7,7 @@
 
 import agent/cognitive/escalation
 import agent/cognitive/llm as cognitive_llm
+import agent/cognitive/output
 import agent/cognitive_state.{type CognitiveState, CognitiveState}
 import agent/framework
 import agent/registry
@@ -14,9 +15,9 @@ import agent/team
 import agent/types.{
   type AgentOutcome, type CognitiveReply, type DelegationProgress, AgentFailure,
   AgentQuestionSource, AgentSuccess, AgentTask, AgentWaiting, CognitiveQuestion,
-  CognitiveReply, DelegationInfo, Idle, ModelEscalation, OwnToolWaiting,
-  PendingAgent, PendingThink, QuestionForHuman, Thinking, ToolCalling,
-  WaitingForAgents, WaitingForUser,
+  DelegationInfo, Idle, ModelEscalation, OwnToolWaiting, PendingAgent,
+  PendingThink, QuestionForHuman, Thinking, ToolCalling, WaitingForAgents,
+  WaitingForUser,
 }
 import agent/worker
 import cycle_log
@@ -559,16 +560,15 @@ fn dispatch_agent_calls(
       let assistant_msg =
         llm_types.Message(role: llm_types.Assistant, content: resp.content)
       let messages = list.append(state.messages, [assistant_msg])
-      process.send(
+      output.send_reply(
+        state,
         reply_to,
-        CognitiveReply(
-          response: reply_text,
-          model: state.model,
-          usage: Some(resp.usage),
-          // Phase 3b: the scheduler runner reads this to enforce
-          // required_tools on scheduled cycles.
-          tools_fired: list.map(state.cycle_tool_calls, fn(t) { t.name }),
-        ),
+        reply_text,
+        state.model,
+        Some(resp.usage),
+        // Phase 3b: the scheduler runner reads this to enforce
+        // required_tools on scheduled cycles.
+        list.map(state.cycle_tool_calls, fn(t) { t.name }),
       )
       CognitiveState(
         ..state,
@@ -800,14 +800,13 @@ fn do_dispatch_agents(
   case new_pending_agents {
     [] -> {
       let error_text = "[Error: no matching agents available]"
-      process.send(
+      output.send_reply(
+        state,
         reply_to,
-        CognitiveReply(
-          response: error_text,
-          model: state.model,
-          usage: Some(resp.usage),
-          tools_fired: list.map(state.cycle_tool_calls, fn(t) { t.name }),
-        ),
+        error_text,
+        state.model,
+        Some(resp.usage),
+        list.map(state.cycle_tool_calls, fn(t) { t.name }),
       )
       // Add single assistant message with the original response content + error
       // so message history stays well-formed (alternating user/assistant).

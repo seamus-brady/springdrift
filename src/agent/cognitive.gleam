@@ -8,6 +8,7 @@
 import agent/cognitive/agents as cognitive_agents
 import agent/cognitive/llm as cognitive_llm
 import agent/cognitive/memory as cognitive_memory
+import agent/cognitive/output
 import agent/cognitive/safety as cognitive_safety
 import agent/cognitive_config
 import agent/cognitive_state.{
@@ -18,10 +19,9 @@ import agent/registry as agent_registry
 import agent/team
 import agent/types.{
   type CognitiveMessage, type CognitiveReply, AgentComplete, AgentEvent,
-  Classifying, CognitiveReply, Idle, InputQueueFull, InputQueued, PendingThink,
-  QueuedInput, QueuedSchedulerInput, QueuedSensoryInput, SchedulerJobStarted,
-  SetModel, ThinkComplete, ThinkError, ThinkWorkerDown, Thinking, UserAnswer,
-  UserInput,
+  Classifying, Idle, InputQueueFull, InputQueued, PendingThink, QueuedInput,
+  QueuedSchedulerInput, QueuedSensoryInput, SchedulerJobStarted, SetModel,
+  ThinkComplete, ThinkError, ThinkWorkerDown, Thinking, UserAnswer, UserInput,
 }
 import agent/worker
 import agentlair/emitter as agentlair_emitter
@@ -159,6 +159,7 @@ pub fn start(
           agentlair_config: cfg.agentlair_config,
           strategy_registry_enabled: cfg.strategy_registry_enabled,
           evidence_config: cfg.evidence_config,
+          frontdoor: cfg.frontdoor,
         ),
         redact_secrets: cfg.redact_secrets,
         pending_sensory_events: [],
@@ -653,16 +654,15 @@ fn handle_user_input(
             state.notify,
             InputQueueFull(queue_cap: state.input_queue_cap),
           )
-          process.send(
+          output.send_reply(
+            state,
             reply_to,
-            CognitiveReply(
-              response: "[System: input queue full ("
-                <> int.to_string(state.input_queue_cap)
-                <> " pending), please wait.]",
-              model: state.model,
-              usage: None,
-              tools_fired: [],
-            ),
+            "[System: input queue full ("
+              <> int.to_string(state.input_queue_cap)
+              <> " pending), please wait.]",
+            state.model,
+            None,
+            [],
           )
           state
         }
@@ -837,16 +837,15 @@ fn handle_scheduler_input(
             state.notify,
             InputQueueFull(queue_cap: state.input_queue_cap),
           )
-          process.send(
+          output.send_reply(
+            state,
             reply_to,
-            CognitiveReply(
-              response: "[System: input queue full, scheduler job '"
-                <> job_name
-                <> "' rejected]",
-              model: state.model,
-              usage: None,
-              tools_fired: [],
-            ),
+            "[System: input queue full, scheduler job '"
+              <> job_name
+              <> "' rejected]",
+            state.model,
+            None,
+            [],
           )
           state
         }
@@ -1140,16 +1139,13 @@ fn handle_think_complete(
                       )
                     None -> Nil
                   }
-                  process.send(
+                  output.send_reply(
+                    state,
                     rt,
-                    CognitiveReply(
-                      response: reply_text,
-                      model: reply_model,
-                      usage: Some(resp.usage),
-                      tools_fired: list.map(state.cycle_tool_calls, fn(t) {
-                        t.name
-                      }),
-                    ),
+                    reply_text,
+                    reply_model,
+                    Some(resp.usage),
+                    list.map(state.cycle_tool_calls, fn(t) { t.name }),
                   )
                   // Spawn Archivist (fire-and-forget)
                   cognitive_memory.maybe_spawn_archivist(

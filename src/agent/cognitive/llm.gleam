@@ -5,10 +5,11 @@
 // by the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 
+import agent/cognitive/output
 import agent/cognitive_state.{type CognitiveState, CognitiveState}
 import agent/registry
 import agent/types.{
-  type CognitiveReply, CognitiveReply, PendingThink, SensoryEvent, Thinking,
+  type CognitiveReply, PendingThink, SensoryEvent, Thinking,
 }
 import agent/worker
 import context
@@ -223,15 +224,7 @@ pub fn handle_think_error(
         }
         False -> {
           let error_text = "[Error: " <> error <> "]"
-          process.send(
-            rt,
-            CognitiveReply(
-              response: error_text,
-              model: state.model,
-              usage: None,
-              tools_fired: [],
-            ),
-          )
+          output.send_reply(state, rt, error_text, state.model, None, [])
           // Add synthetic assistant message so message history stays
           // well-formed (alternating user/assistant). Without this, the
           // next user input would create two consecutive user messages
@@ -265,15 +258,7 @@ pub fn handle_think_down(
     Error(_) -> state
     Ok(PendingThink(reply_to: rt, ..)) -> {
       let error_text = "[Error: think worker crashed: " <> reason <> "]"
-      process.send(
-        rt,
-        CognitiveReply(
-          response: error_text,
-          model: state.model,
-          usage: None,
-          tools_fired: [],
-        ),
-      )
+      output.send_reply(state, rt, error_text, state.model, None, [])
       let error_msg =
         llm_types.Message(role: llm_types.Assistant, content: [
           llm_types.TextContent(text: error_text),
