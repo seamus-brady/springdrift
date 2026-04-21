@@ -7,6 +7,7 @@
 
 import agent/cognitive/escalation
 import agent/cognitive/llm as cognitive_llm
+import agent/cognitive/output
 import agent/cognitive_state.{type CognitiveState, CognitiveState}
 import agent/framework
 import agent/registry
@@ -14,15 +15,16 @@ import agent/team
 import agent/types.{
   type AgentOutcome, type CognitiveReply, type DelegationProgress, AgentFailure,
   AgentQuestionSource, AgentSuccess, AgentTask, AgentWaiting, CognitiveQuestion,
-  CognitiveReply, DelegationInfo, Idle, ModelEscalation, OwnToolWaiting,
-  PendingAgent, PendingThink, QuestionForHuman, Thinking, ToolCalling,
-  WaitingForAgents, WaitingForUser,
+  DelegationInfo, Idle, ModelEscalation, OwnToolWaiting, PendingAgent,
+  PendingThink, QuestionForHuman, Thinking, ToolCalling, WaitingForAgents,
+  WaitingForUser,
 }
 import agent/worker
 import cycle_log
 import dag/types as dag_types
 import dprime/gate
 import dprime/types as dprime_types
+import frontdoor/types as frontdoor_types
 import gleam/dict
 import gleam/dynamic/decode
 import gleam/erlang/process.{type Subject}
@@ -178,7 +180,20 @@ fn handle_own_human_input(
 ) -> CognitiveState {
   let question = framework.parse_human_input_question(call.input_json)
 
-  // Send decoupled notification
+  // Publish to Frontdoor — the routing layer drops the question for
+  // SchedulerSource cycles and synthesises an answer back into the
+  // cognitive inbox. UserSource cycles still receive the broadcast
+  // notification below for backward compatibility while the WS / TUI
+  // adapters migrate to Delivery sinks.
+  output.publish_human_question(
+    state,
+    question,
+    frontdoor_types.CognitiveLoopOrigin,
+  )
+
+  // Send decoupled notification (legacy path — every connected client
+  // sees this; Frontdoor migration replaces it with source-routed
+  // delivery in a follow-up PR).
   process.send(
     state.notify,
     QuestionForHuman(question:, source: CognitiveQuestion),
@@ -559,16 +574,15 @@ fn dispatch_agent_calls(
       let assistant_msg =
         llm_types.Message(role: llm_types.Assistant, content: resp.content)
       let messages = list.append(state.messages, [assistant_msg])
-      process.send(
+      output.send_reply(
+        state,
         reply_to,
-        CognitiveReply(
-          response: reply_text,
-          model: state.model,
-          usage: Some(resp.usage),
-          // Phase 3b: the scheduler runner reads this to enforce
-          // required_tools on scheduled cycles.
-          tools_fired: list.map(state.cycle_tool_calls, fn(t) { t.name }),
-        ),
+        reply_text,
+        state.model,
+        Some(resp.usage),
+        // Phase 3b: the scheduler runner reads this to enforce
+        // required_tools on scheduled cycles.
+        list.map(state.cycle_tool_calls, fn(t) { t.name }),
       )
       CognitiveState(
         ..state,
@@ -800,14 +814,13 @@ fn do_dispatch_agents(
   case new_pending_agents {
     [] -> {
       let error_text = "[Error: no matching agents available]"
-      process.send(
+      output.send_reply(
+        state,
         reply_to,
-        CognitiveReply(
-          response: error_text,
-          model: state.model,
-          usage: Some(resp.usage),
-          tools_fired: list.map(state.cycle_tool_calls, fn(t) { t.name }),
-        ),
+        error_text,
+        state.model,
+        Some(resp.usage),
+        list.map(state.cycle_tool_calls, fn(t) { t.name }),
       )
       // Add single assistant message with the original response content + error
       // so message history stays well-formed (alternating user/assistant).
@@ -1337,6 +1350,15 @@ pub fn handle_agent_question(
   agent: String,
   reply_to: Subject(String),
 ) -> CognitiveState {
+  // Frontdoor publish — drop or deliver based on the cycle's source.
+  output.publish_human_question(
+    state,
+    question,
+    frontdoor_types.AgentOrigin(agent_name: agent),
+  )
+  // Legacy broadcast notification — every connected client sees this.
+  // Replaced by Frontdoor delivery once the WS / TUI adapters move to
+  // Delivery sinks in a follow-up PR.
   process.send(
     state.notify,
     QuestionForHuman(question:, source: AgentQuestionSource(agent:)),

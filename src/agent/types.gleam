@@ -294,8 +294,17 @@ pub type SupervisorMessage {
 // ---------------------------------------------------------------------------
 
 pub type CognitiveMessage {
-  UserInput(text: String, reply_to: Subject(CognitiveReply))
+  /// `source_id` is the Frontdoor destination token. Senders that don't
+  /// use Frontdoor yet pass "" — cognitive then skips the ClaimCycle
+  /// and Frontdoor publishes become dead drops. Once every caller
+  /// threads a real source_id, Phase 5 removes `reply_to`.
+  UserInput(source_id: String, text: String, reply_to: Subject(CognitiveReply))
   UserAnswer(answer: String)
+  /// Sent by Frontdoor when an autonomous cycle raised a human question
+  /// but has no human destination to ask. Cognitive treats it exactly
+  /// like a UserAnswer — the waiting react loop resumes with the
+  /// synthesised "no human available" text instead of hanging.
+  InjectUserAnswer(text: String)
   ThinkComplete(task_id: String, response: LlmResponse)
   ThinkError(task_id: String, error: String, retryable: Bool)
   ThinkWorkerDown(task_id: String, reason: String)
@@ -332,6 +341,7 @@ pub type CognitiveMessage {
   )
   SetSupervisor(supervisor: Subject(SupervisorMessage))
   SchedulerInput(
+    source_id: String,
     job_name: String,
     query: String,
     kind: scheduler_types.JobKind,
@@ -510,8 +520,13 @@ pub type SensoryEvent {
 // ---------------------------------------------------------------------------
 
 pub type QueuedInput {
-  QueuedInput(text: String, reply_to: Subject(CognitiveReply))
+  QueuedInput(
+    source_id: String,
+    text: String,
+    reply_to: Subject(CognitiveReply),
+  )
   QueuedSchedulerInput(
+    source_id: String,
     job_name: String,
     query: String,
     kind: scheduler_types.JobKind,

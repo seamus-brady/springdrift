@@ -8,10 +8,11 @@
 import affect/correlation as affect_correlation
 import agent/cognitive/llm as cognitive_llm
 import agent/cognitive/memory as cognitive_memory
+import agent/cognitive/output
 import agent/cognitive_state.{type CognitiveState, CognitiveState}
 import agent/types.{
-  type CognitiveReply, CognitiveReply, Idle, PendingThink, SafetyGateNotice,
-  SensoryEvent, Thinking,
+  type CognitiveReply, Idle, PendingThink, SafetyGateNotice, SensoryEvent,
+  Thinking,
 }
 import agent/worker
 import cycle_log
@@ -1003,15 +1004,7 @@ pub fn handle_input_safety_gate_complete(
       let user_text = build_user_response(result)
       // Agent's history gets the technical details for pattern learning
       let agent_text = build_rejection_notice("input", result, "user query")
-      process.send(
-        reply_to,
-        CognitiveReply(
-          response: user_text,
-          model:,
-          usage: None,
-          tools_fired: [],
-        ),
-      )
+      output.send_reply(state, reply_to, user_text, model, None, [])
       let state = cognitive_state.apply_meta_observation(state, 0)
       let state = with_assistant_error(state, agent_text)
       CognitiveState(..state, status: Idle)
@@ -1236,14 +1229,13 @@ pub fn check_deterministic_only(
         usage.output_tokens,
         state.model,
       )
-      process.send(
+      output.send_reply(
+        state,
         reply_to,
-        CognitiveReply(
-          response: reply_text,
-          model: state.model,
-          usage: Some(usage),
-          tools_fired: list.map(state.cycle_tool_calls, fn(t) { t.name }),
-        ),
+        reply_text,
+        state.model,
+        Some(usage),
+        list.map(state.cycle_tool_calls, fn(t) { t.name }),
       )
       // Spawn Archivist (fire-and-forget narrative + CBR generation)
       cognitive_memory.maybe_spawn_archivist(
@@ -1415,14 +1407,13 @@ pub fn handle_output_gate_complete(
         None -> #(0, 0)
       }
       finalise_dag_node(state, tokens_in, tokens_out, state.model)
-      process.send(
+      output.send_reply(
+        state,
         reply_to,
-        CognitiveReply(
-          response: report_text,
-          model: state.model,
-          usage:,
-          tools_fired: list.map(state.cycle_tool_calls, fn(t) { t.name }),
-        ),
+        report_text,
+        state.model,
+        usage,
+        list.map(state.cycle_tool_calls, fn(t) { t.name }),
       )
       // Spawn Archivist (fire-and-forget narrative + CBR generation)
       cognitive_memory.maybe_spawn_archivist(
@@ -1465,14 +1456,13 @@ pub fn handle_output_gate_complete(
             None -> #(0, 0)
           }
           finalise_dag_node(state, tokens_in, tokens_out, state.model)
-          process.send(
+          output.send_reply(
+            state,
             reply_to,
-            CognitiveReply(
-              response: full_text,
-              model: state.model,
-              usage:,
-              tools_fired: list.map(state.cycle_tool_calls, fn(t) { t.name }),
-            ),
+            full_text,
+            state.model,
+            usage,
+            list.map(state.cycle_tool_calls, fn(t) { t.name }),
           )
           cognitive_memory.maybe_spawn_archivist(
             state,
@@ -1559,14 +1549,13 @@ pub fn handle_output_gate_complete(
         None -> #(0, 0)
       }
       finalise_dag_node(state, tokens_in, tokens_out, state.model)
-      process.send(
+      output.send_reply(
+        state,
         reply_to,
-        CognitiveReply(
-          response: user_text,
-          model: state.model,
-          usage:,
-          tools_fired: list.map(state.cycle_tool_calls, fn(t) { t.name }),
-        ),
+        user_text,
+        state.model,
+        usage,
+        list.map(state.cycle_tool_calls, fn(t) { t.name }),
       )
       let state =
         cognitive_state.apply_meta_observation(state, tokens_in + tokens_out)
@@ -1607,14 +1596,13 @@ pub fn handle_gate_timeout(
       // Use the stored pending_output_reply to deliver the report
       case state.pending_output_reply {
         Some(#(reply_to, report_text)) -> {
-          process.send(
+          output.send_reply(
+            state,
             reply_to,
-            CognitiveReply(
-              response: report_text,
-              model: state.model,
-              usage: None,
-              tools_fired: list.map(state.cycle_tool_calls, fn(t) { t.name }),
-            ),
+            report_text,
+            state.model,
+            None,
+            list.map(state.cycle_tool_calls, fn(t) { t.name }),
           )
           let new_state =
             CognitiveState(

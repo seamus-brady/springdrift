@@ -883,6 +883,11 @@ fn spawn_job(
     process.send(
       cognitive,
       agent_types.SchedulerInput(
+        // Per-job source_id — Frontdoor uses this to route any human
+        // questions raised during the cycle back to nowhere (autonomous
+        // source, nobody listening) rather than broadcasting to every
+        // connected browser.
+        source_id: "scheduler:" <> name,
         job_name: name,
         query: job.query,
         kind: job.kind,
