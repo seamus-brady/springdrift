@@ -8,9 +8,7 @@
 import agent/cognitive/output
 import agent/cognitive_state.{type CognitiveState, CognitiveState}
 import agent/registry
-import agent/types.{
-  type CognitiveReply, PendingThink, SensoryEvent, Thinking,
-}
+import agent/types.{type CognitiveReply, PendingThink, SensoryEvent, Thinking}
 import agent/worker
 import context
 import cycle_log

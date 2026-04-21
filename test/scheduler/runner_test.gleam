@@ -90,7 +90,7 @@ fn auto_reply_loop(subj: process.Subject(agent_types.CognitiveMessage)) -> Nil {
     |> process.select(subj)
   let msg = process.selector_receive_forever(selector)
   case msg {
-    agent_types.UserInput(text: _, reply_to:) -> {
+    agent_types.UserInput(text: _, reply_to:, ..) -> {
       process.send(
         reply_to,
         agent_types.CognitiveReply(

@@ -28,6 +28,7 @@ import agentlair/emitter as agentlair_emitter
 import cycle_log
 import dag/types as dag_types
 import dprime/meta as dprime_meta
+import frontdoor/types as frontdoor_types
 import gleam/dict
 import gleam/erlang/process.{type Subject}
 import gleam/float
@@ -253,7 +254,8 @@ fn handle_message(
     state.cycle_id,
   )
   let next = case msg {
-    UserInput(text, reply_to) -> handle_user_input(state, text, reply_to)
+    UserInput(source_id, text, reply_to) ->
+      handle_user_input(state, source_id, text, reply_to)
     UserAnswer(answer) -> cognitive_agents.handle_user_answer(state, answer)
     ThinkComplete(task_id, resp) -> handle_think_complete(state, task_id, resp)
     ThinkError(task_id, error, retryable) ->
@@ -332,6 +334,7 @@ fn handle_message(
     types.SetSupervisor(supervisor:) ->
       CognitiveState(..state, supervisor: Some(supervisor))
     types.SchedulerInput(
+      source_id:,
       job_name:,
       query:,
       kind:,
@@ -343,6 +346,7 @@ fn handle_message(
     ) ->
       handle_scheduler_input(
         state,
+        source_id,
         job_name,
         query,
         kind,
@@ -431,9 +435,25 @@ fn handle_message(
   maybe_drain_queue(next)
 }
 
+/// Bind cycle_id ↔ source_id on the Frontdoor routing table when a
+/// non-empty source_id is present. Callers with no Frontdoor wiring
+/// pass "" and this is a no-op.
+fn claim_cycle_if_present(
+  state: CognitiveState,
+  cycle_id: String,
+  source_id: String,
+) -> Nil {
+  case state.config.frontdoor, source_id {
+    Some(frontdoor), s if s != "" -> {
+      process.send(frontdoor, frontdoor_types.ClaimCycle(cycle_id:, source_id:))
+    }
+    _, _ -> Nil
+  }
+}
+
 fn maybe_drain_queue(state: CognitiveState) -> CognitiveState {
   case state.status, state.input_queue {
-    Idle, [QueuedInput(text:, reply_to:), ..rest] -> {
+    Idle, [QueuedInput(source_id:, text:, reply_to:), ..rest] -> {
       slog.info(
         "cognitive",
         "maybe_drain_queue",
@@ -444,6 +464,7 @@ fn maybe_drain_queue(state: CognitiveState) -> CognitiveState {
       )
       handle_user_input(
         CognitiveState(..state, input_queue: rest),
+        source_id,
         text,
         reply_to,
       )
@@ -451,6 +472,7 @@ fn maybe_drain_queue(state: CognitiveState) -> CognitiveState {
     Idle,
       [
         QueuedSchedulerInput(
+          source_id:,
           job_name:,
           query:,
           kind:,
@@ -475,6 +497,7 @@ fn maybe_drain_queue(state: CognitiveState) -> CognitiveState {
       )
       handle_scheduler_input(
         CognitiveState(..state, input_queue: rest),
+        source_id,
         job_name,
         query,
         kind,
@@ -560,6 +583,7 @@ fn handle_watchdog_timeout(
 
 fn handle_user_input(
   state: CognitiveState,
+  source_id: String,
   text: String,
   reply_to: Subject(CognitiveReply),
 ) -> CognitiveState {
@@ -573,6 +597,9 @@ fn handle_user_input(
   case state.status {
     Idle -> {
       let cycle_id = cycle_log.generate_uuid()
+      // If a Frontdoor source is named, register the cycle so the
+      // terminal reply lands back on the originating destination.
+      claim_cycle_if_present(state, cycle_id, source_id)
       cycle_log.log_human_input(
         cycle_id,
         state.cycle_id,
@@ -669,7 +696,9 @@ fn handle_user_input(
         False -> {
           let position = queue_len + 1
           let new_queue =
-            list.append(state.input_queue, [QueuedInput(text:, reply_to:)])
+            list.append(state.input_queue, [
+              QueuedInput(source_id:, text:, reply_to:),
+            ])
           slog.info(
             "cognitive",
             "handle_user_input",
@@ -697,6 +726,7 @@ fn handle_user_input(
 
 fn handle_scheduler_input(
   state: CognitiveState,
+  source_id: String,
   job_name: String,
   query: String,
   kind: scheduler_types.JobKind,
@@ -710,6 +740,7 @@ fn handle_scheduler_input(
   case state.status {
     Idle -> {
       let cycle_id = cycle_log.generate_uuid()
+      claim_cycle_if_present(state, cycle_id, source_id)
       cycle_log.log_human_input(
         cycle_id,
         state.cycle_id,
@@ -854,6 +885,7 @@ fn handle_scheduler_input(
           let new_queue =
             list.append(state.input_queue, [
               types.QueuedSchedulerInput(
+                source_id:,
                 job_name:,
                 query:,
                 kind:,

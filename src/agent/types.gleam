@@ -294,7 +294,11 @@ pub type SupervisorMessage {
 // ---------------------------------------------------------------------------
 
 pub type CognitiveMessage {
-  UserInput(text: String, reply_to: Subject(CognitiveReply))
+  /// `source_id` is the Frontdoor destination token. Senders that don't
+  /// use Frontdoor yet pass "" — cognitive then skips the ClaimCycle
+  /// and Frontdoor publishes become dead drops. Once every caller
+  /// threads a real source_id, Phase 5 removes `reply_to`.
+  UserInput(source_id: String, text: String, reply_to: Subject(CognitiveReply))
   UserAnswer(answer: String)
   ThinkComplete(task_id: String, response: LlmResponse)
   ThinkError(task_id: String, error: String, retryable: Bool)
@@ -332,6 +336,7 @@ pub type CognitiveMessage {
   )
   SetSupervisor(supervisor: Subject(SupervisorMessage))
   SchedulerInput(
+    source_id: String,
     job_name: String,
     query: String,
     kind: scheduler_types.JobKind,
@@ -510,8 +515,13 @@ pub type SensoryEvent {
 // ---------------------------------------------------------------------------
 
 pub type QueuedInput {
-  QueuedInput(text: String, reply_to: Subject(CognitiveReply))
+  QueuedInput(
+    source_id: String,
+    text: String,
+    reply_to: Subject(CognitiveReply),
+  )
   QueuedSchedulerInput(
+    source_id: String,
     job_name: String,
     query: String,
     kind: scheduler_types.JobKind,

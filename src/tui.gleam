@@ -167,6 +167,7 @@ pub fn start(
   process.send(
     cognitive,
     agent_types.UserInput(
+      source_id: "tui",
       text: "[Session started. Greet the operator briefly — one or two sentences. Mention anything notable from your sensorium.]",
       reply_to: cognitive_reply,
     ),
@@ -568,6 +569,7 @@ fn handle_chat_enter(state: TuiState) -> Nil {
               process.send(
                 state.cognitive,
                 agent_types.UserInput(
+                  source_id: "tui",
                   text: input_text,
                   reply_to: state.cognitive_reply,
                 ),

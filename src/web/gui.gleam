@@ -86,6 +86,10 @@ type WsState {
     librarian: Option(Subject(LibrarianMessage)),
     scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
     ws_max_bytes: Int,
+    /// Frontdoor source token for this connection. Passed on every
+    /// outbound `UserInput` so cognitive can register the cycle with
+    /// Frontdoor and the reply routes back to *this* browser.
+    source_id: String,
   )
 }
 
@@ -95,6 +99,9 @@ type WsState {
 
 @external(erlang, "springdrift_ffi", "get_env")
 fn get_env(name: String) -> Result(String, Nil)
+
+@external(erlang, "springdrift_ffi", "generate_uuid")
+fn generate_uuid() -> String
 
 // ---------------------------------------------------------------------------
 // Auth helpers
@@ -291,6 +298,7 @@ fn ws_on_init(
       librarian: lib,
       scheduler:,
       ws_max_bytes:,
+      source_id: "ws:" <> generate_uuid(),
     )
 
   // Ask the relay to fire a startup greeting addressed to this connection's
@@ -352,7 +360,11 @@ fn ws_handler(
               // Dispatch to cognitive loop
               process.send(
                 state.cognitive,
-                agent_types.UserInput(text:, reply_to: state.reply_subject),
+                agent_types.UserInput(
+                  source_id: state.source_id,
+                  text:,
+                  reply_to: state.reply_subject,
+                ),
               )
               mist.continue(state)
             }
@@ -864,6 +876,7 @@ fn forward_loop(
                 process.send(
                   cognitive,
                   agent_types.UserInput(
+                    source_id: "",
                     text: "[Session started. Greet the operator briefly — one or two sentences. Mention anything notable from your sensorium.]",
                     reply_to:,
                   ),

@@ -33,7 +33,10 @@ fn start_cognitive(provider) {
 
 fn send_and_receive(cognitive_subj, text: String) -> CognitiveReply {
   let reply_subj = process.new_subject()
-  process.send(cognitive_subj, UserInput(text:, reply_to: reply_subj))
+  process.send(
+    cognitive_subj,
+    UserInput(source_id: "", text:, reply_to: reply_subj),
+  )
   let assert Ok(reply) = process.receive(reply_subj, 5000)
   reply
 }
@@ -117,7 +120,10 @@ pub fn request_human_input_tool_test() {
 
   // Send initial message
   let reply_subj = process.new_subject()
-  process.send(cognitive, UserInput(text: "Hello", reply_to: reply_subj))
+  process.send(
+    cognitive,
+    UserInput(source_id: "", text: "Hello", reply_to: reply_subj),
+  )
 
   // Should receive a QuestionForHuman notification (decoupled, no Subject)
   let assert Ok(notification) = process.receive(notify, 5000)
@@ -251,6 +257,7 @@ pub fn model_fallback_on_retryable_error_test() {
   process.send(
     cognitive,
     UserInput(
+      source_id: "",
       text: "Explain step by step how to implement a distributed architecture",
       reply_to: reply_subj,
     ),
@@ -276,6 +283,7 @@ pub fn scheduler_input_text_response_test() {
   process.send(
     cognitive,
     types.SchedulerInput(
+      source_id: "",
       job_name: "daily-digest",
       query: "Generate today's digest",
       kind: scheduler_types.RecurringTask,
@@ -330,6 +338,7 @@ pub fn scheduler_input_reminder_uses_body_test() {
   process.send(
     cognitive,
     types.SchedulerInput(
+      source_id: "",
       job_name: "remind-call",
       query: "Call reminder",
       kind: scheduler_types.Reminder,
@@ -353,6 +362,7 @@ pub fn scheduler_input_for_user_sends_reminder_notification_test() {
   process.send(
     cognitive,
     types.SchedulerInput(
+      source_id: "",
       job_name: "user-remind",
       query: "reminder",
       kind: scheduler_types.Reminder,
@@ -394,7 +404,10 @@ pub fn scheduler_input_queued_when_busy_test() {
 
   // Send a regular UserInput first to make the loop busy
   let reply1_subj = process.new_subject()
-  process.send(cognitive, UserInput(text: "first", reply_to: reply1_subj))
+  process.send(
+    cognitive,
+    UserInput(source_id: "", text: "first", reply_to: reply1_subj),
+  )
 
   // Wait for the first LLM call to start (classification worker)
   let assert Ok(_) = process.receive(call_count, 5000)
@@ -404,6 +417,7 @@ pub fn scheduler_input_queued_when_busy_test() {
   process.send(
     cognitive,
     types.SchedulerInput(
+      source_id: "",
       job_name: "queued-job",
       query: "queued query",
       kind: scheduler_types.RecurringTask,
@@ -453,6 +467,7 @@ pub fn scheduler_input_includes_context_xml_test() {
   process.send(
     cognitive,
     types.SchedulerInput(
+      source_id: "",
       job_name: "test-job",
       query: "Run analysis",
       kind: scheduler_types.RecurringTask,

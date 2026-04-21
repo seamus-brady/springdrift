@@ -253,6 +253,7 @@ fn handle_tick(state: PollerState) -> PollerState {
         process.send(
           state.cognitive,
           agent_types.SchedulerInput(
+            source_id: "comms:" <> m.message_id,
             job_name: "email-inbound-" <> m.message_id,
             query: body,
             kind: scheduler_types.Reminder,
