@@ -250,12 +250,15 @@ fn handle_message(
       types.GetMessages(..) -> "GetMessages"
       types.GateTimeout(..) -> "GateTimeout"
       types.WatchdogTimeout(..) -> "WatchdogTimeout"
+      types.InjectUserAnswer(..) -> "InjectUserAnswer"
     },
     state.cycle_id,
   )
   let next = case msg {
     UserInput(source_id, text, reply_to) ->
       handle_user_input(state, source_id, text, reply_to)
+    types.InjectUserAnswer(text:) ->
+      cognitive_agents.handle_user_answer(state, text)
     UserAnswer(answer) -> cognitive_agents.handle_user_answer(state, answer)
     ThinkComplete(task_id, resp) -> handle_think_complete(state, task_id, resp)
     ThinkError(task_id, error, retryable) ->

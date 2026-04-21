@@ -62,3 +62,32 @@ fn publish_reply_to_frontdoor(
     _, _ -> Nil
   }
 }
+
+/// Publish a human-question raised inside the current cycle. Frontdoor
+/// routes the question to the originating source's sink, or — for
+/// scheduler-owned cycles — drops it and synthesises an answer back
+/// into cognitive's inbox. Inert when no cycle_id or no Frontdoor.
+pub fn publish_human_question(
+  state: CognitiveState,
+  question: String,
+  origin: frontdoor_types.QuestionOrigin,
+) -> Nil {
+  case state.config.frontdoor, state.cycle_id {
+    Some(frontdoor), Some(cycle_id) -> {
+      let question_id = generate_uuid()
+      process.send(
+        frontdoor,
+        frontdoor_types.Publish(output: frontdoor_types.HumanQuestionOutput(
+          cycle_id:,
+          question_id:,
+          question:,
+          origin:,
+        )),
+      )
+    }
+    _, _ -> Nil
+  }
+}
+
+@external(erlang, "springdrift_ffi", "generate_uuid")
+fn generate_uuid() -> String

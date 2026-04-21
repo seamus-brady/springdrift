@@ -15,6 +15,7 @@
 // by the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 
+import agent/types as agent_types
 import gleam/erlang/process.{type Subject}
 import gleam/option.{type Option}
 import llm/types as llm_types
@@ -88,6 +89,11 @@ pub type Delivery {
 
 /// Messages accepted by the Frontdoor actor.
 pub type FrontdoorMessage {
+  // -- setup --
+  /// Called once during startup. The subject is the cognitive loop's
+  /// main inbox; Frontdoor only ever sends `InjectUserAnswer` on it.
+  SetCognitiveInbox(inbox: Subject(agent_types.CognitiveMessage))
+
   // -- destination lifecycle --
   Subscribe(source_id: SourceId, kind: SourceKind, sink: Subject(Delivery))
   Unsubscribe(source_id: SourceId)

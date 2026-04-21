@@ -18,12 +18,13 @@
 // by the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 
+import agent/types.{InjectUserAnswer} as agent_types
 import frontdoor/types.{
   type CognitiveOutput, type Delivery, type FrontdoorMessage, type SourceId,
   type SourceKind, ClaimCycle, CognitiveReplyOutput, DeliverClosed,
   DeliverQuestion, DeliverReply, HumanQuestionOutput, InboundScheduler,
-  InboundUserAnswer, InboundUserMessage, Publish, SchedulerSource, Subscribe,
-  Unsubscribe, UserSource,
+  InboundUserAnswer, InboundUserMessage, Publish, SchedulerSource,
+  SetCognitiveInbox, Subscribe, Unsubscribe, UserSource,
 }
 import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Subject}
@@ -44,11 +45,20 @@ type State {
     destinations: Dict(SourceId, Destination),
     /// cycle_id → source_id, populated by ClaimCycle, consumed on Publish.
     cycle_owners: Dict(String, SourceId),
+    /// Cognitive loop inbox for injected answers — wired via
+    /// `SetCognitiveInbox` during startup. Without it, SchedulerSource
+    /// questions are logged and dropped; with it, Frontdoor replies
+    /// synthetically so the autonomous cycle does not hang.
+    cognitive_inbox: option.Option(Subject(agent_types.CognitiveMessage)),
   )
 }
 
 fn initial_state() -> State {
-  State(destinations: dict.new(), cycle_owners: dict.new())
+  State(
+    destinations: dict.new(),
+    cycle_owners: dict.new(),
+    cognitive_inbox: None,
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -78,6 +88,11 @@ fn loop(self: Subject(FrontdoorMessage), state: State) -> Nil {
 
 fn handle(msg: FrontdoorMessage, state: State) -> State {
   case msg {
+    SetCognitiveInbox(inbox:) -> {
+      slog.debug("frontdoor", "set_cognitive_inbox", "wired", None)
+      State(..state, cognitive_inbox: Some(inbox))
+    }
+
     Subscribe(source_id:, kind:, sink:) -> {
       slog.debug("frontdoor", "subscribe", source_id, None)
       State(
@@ -160,13 +175,17 @@ fn route_output(output: CognitiveOutput, state: State) -> Nil {
           )
           Nil
         }
-        Ok(dest) -> deliver(dest, output)
+        Ok(dest) -> deliver(state, dest, output)
       }
     }
   }
 }
 
-fn deliver(dest: Destination, output: CognitiveOutput) -> Nil {
+fn deliver(
+  state: State,
+  dest: Destination,
+  output: CognitiveOutput,
+) -> Nil {
   case output {
     CognitiveReplyOutput(cycle_id:, response:, model:, usage:, tools_fired:) -> {
       process.send(
@@ -182,19 +201,44 @@ fn deliver(dest: Destination, output: CognitiveOutput) -> Nil {
             DeliverQuestion(cycle_id:, question_id:, question:, origin:),
           )
         }
-        SchedulerSource -> {
-          // No human at a scheduler destination — drop here. Phase 6
-          // wires a canned-answer callback so cognitive does not hang
-          // waiting for a reply that will never come.
-          slog.info(
-            "frontdoor",
-            "deliver",
-            "dropping human question raised inside scheduler cycle " <> cycle_id,
-            Some(cycle_id),
-          )
-          Nil
-        }
+        SchedulerSource -> deliver_scheduler_question(state, cycle_id, question)
       }
     }
+  }
+}
+
+/// SchedulerSource cannot field a human question — there is no human
+/// at the destination. Log the drop and synthesise an answer back to
+/// cognitive so the paused react loop resumes without a broadcast.
+fn deliver_scheduler_question(
+  state: State,
+  cycle_id: String,
+  question: String,
+) -> Nil {
+  slog.info(
+    "frontdoor",
+    "deliver",
+    "autonomous cycle "
+      <> cycle_id
+      <> " raised a human question — synthesising 'no human available' reply",
+    Some(cycle_id),
+  )
+  let canned =
+    "[Frontdoor: no human is attached to this autonomous cycle. "
+    <> "Answer your own question based on your best current estimate, "
+    <> "or return what you already have. Your question was: "
+    <> question
+    <> "]"
+  case state.cognitive_inbox {
+    Some(inbox) -> process.send(inbox, InjectUserAnswer(text: canned))
+    None ->
+      slog.warn(
+        "frontdoor",
+        "deliver",
+        "no cognitive inbox wired — scheduler cycle "
+          <> cycle_id
+          <> " will hang until watchdog fires",
+        Some(cycle_id),
+      )
   }
 }

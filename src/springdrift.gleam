@@ -8,6 +8,8 @@
 import agent/cognitive
 import agent/cognitive/escalation as agent_cognitive_escalation
 import agent/cognitive_config.{CognitiveConfig}
+import frontdoor
+import frontdoor/types as frontdoor_types
 import agent/registry
 import agent/supervisor
 import agent/team as agent_team
@@ -803,6 +805,11 @@ fn run(cfg: AppConfig) -> Nil {
     False -> option.None
   }
 
+  // Start Frontdoor before cognitive so cognitive receives a live
+  // output channel at construction. Adapters (web GUI, TUI, scheduler,
+  // comms poller) subscribe separately once cognitive is up.
+  let frontdoor_subj = frontdoor.start()
+
   let cognitive_subj = case
     cognitive.start(CognitiveConfig(
       provider: p,
@@ -885,7 +892,7 @@ fn run(cfg: AppConfig) -> Nil {
         True,
       ),
       evidence_config: provenance_check.default_config(),
-      frontdoor: option.None,
+      frontdoor: option.Some(frontdoor_subj),
     ))
   {
     Ok(subj) -> subj
@@ -900,6 +907,13 @@ fn run(cfg: AppConfig) -> Nil {
     option.Some(mgr) -> sandbox_manager_mod.set_cognitive(mgr, cognitive_subj)
     option.None -> Nil
   }
+
+  // Tell Frontdoor about cognitive's inbox so it can inject canned
+  // answers when an autonomous cycle raises a human question.
+  process.send(
+    frontdoor_subj,
+    frontdoor_types.SetCognitiveInbox(inbox: cognitive_subj),
+  )
 
   // Start supervisor and register agents via StartChild
   let restart_window_ms = option.unwrap(cfg.restart_window_ms, 60_000)

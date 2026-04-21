@@ -300,6 +300,11 @@ pub type CognitiveMessage {
   /// threads a real source_id, Phase 5 removes `reply_to`.
   UserInput(source_id: String, text: String, reply_to: Subject(CognitiveReply))
   UserAnswer(answer: String)
+  /// Sent by Frontdoor when an autonomous cycle raised a human question
+  /// but has no human destination to ask. Cognitive treats it exactly
+  /// like a UserAnswer — the waiting react loop resumes with the
+  /// synthesised "no human available" text instead of hanging.
+  InjectUserAnswer(text: String)
   ThinkComplete(task_id: String, response: LlmResponse)
   ThinkError(task_id: String, error: String, retryable: Bool)
   ThinkWorkerDown(task_id: String, reason: String)

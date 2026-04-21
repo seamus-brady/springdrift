@@ -24,6 +24,7 @@ import cycle_log
 import dag/types as dag_types
 import dprime/gate
 import dprime/types as dprime_types
+import frontdoor/types as frontdoor_types
 import gleam/dict
 import gleam/dynamic/decode
 import gleam/erlang/process.{type Subject}
@@ -179,7 +180,20 @@ fn handle_own_human_input(
 ) -> CognitiveState {
   let question = framework.parse_human_input_question(call.input_json)
 
-  // Send decoupled notification
+  // Publish to Frontdoor — the routing layer drops the question for
+  // SchedulerSource cycles and synthesises an answer back into the
+  // cognitive inbox. UserSource cycles still receive the broadcast
+  // notification below for backward compatibility while the WS / TUI
+  // adapters migrate to Delivery sinks.
+  output.publish_human_question(
+    state,
+    question,
+    frontdoor_types.CognitiveLoopOrigin,
+  )
+
+  // Send decoupled notification (legacy path — every connected client
+  // sees this; Frontdoor migration replaces it with source-routed
+  // delivery in a follow-up PR).
   process.send(
     state.notify,
     QuestionForHuman(question:, source: CognitiveQuestion),
@@ -1336,6 +1350,15 @@ pub fn handle_agent_question(
   agent: String,
   reply_to: Subject(String),
 ) -> CognitiveState {
+  // Frontdoor publish — drop or deliver based on the cycle's source.
+  output.publish_human_question(
+    state,
+    question,
+    frontdoor_types.AgentOrigin(agent_name: agent),
+  )
+  // Legacy broadcast notification — every connected client sees this.
+  // Replaced by Frontdoor delivery once the WS / TUI adapters move to
+  // Delivery sinks in a follow-up PR.
   process.send(
     state.notify,
     QuestionForHuman(question:, source: AgentQuestionSource(agent:)),
