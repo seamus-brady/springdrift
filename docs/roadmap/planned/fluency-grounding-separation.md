@@ -93,13 +93,17 @@ Without this clause, Phase 2's integrity block risks producing more drift, not l
 
 Action: draft a revised `persona.md` that retunes the reflective voice for *both* affect and integrity narration. Keep Curragh as Curragh; change how Curragh talks to itself in narrative and reflection.
 
-### 1b. Retune the Archivist's reflection prompt
+### 1b. Retune the Archivist's reflection prompt — both phases
 
-The Archivist currently asks the agent to reflect on what worked and what didn't during a cycle. That invites identity-narration. Revise to ask for reflection **alongside the tool-call record** — "what you did (per the tool log), what you noticed (per signals), where they align or diverge."
+The Archivist runs a two-phase pipeline: Phase 1 (Reflector) produces plain-text reflection; Phase 2 (Curator) structures that reflection into a `NarrativeEntry` and `CbrCase`. Today, Phase 1 asks the agent to reflect on what worked and didn't. That invites identity-narration. Revise to ask for reflection **alongside the tool-call record** — "what you did (per the tool log), what you noticed (per signals), where they align or diverge."
 
-The Archivist still produces a prose narrative in the agent's voice. Nothing becomes mechanical. What changes is the truth-serum clause: if the tool calls show X, the prose mentions X. If the agent's summary claimed Y that the tool calls did not support, the prose notes the gap rather than papering over it.
+Equally important: **Phase 2 needs the tool-call record too**. Today the Curator receives only the Phase 1 reflection text and the original cycle context (a count of tool calls, nothing more). If Phase 1 hallucinates — exactly what happened on April 20 — Phase 2 faithfully structures the hallucination into durable memory records with no independent check. The narrative entry and the CbrCase both inherit the fabrication.
 
-The agent writes its own honesty. Prose stays prose, but prose held accountable to what the cycle log shows.
+Give Phase 2 the tool-call list directly, not via Phase 1's summary. The Curator then has an independent anchor: when it assigns `outcome.status`, it can compare the reflection's claims against what actually fired, rather than trusting that Phase 1 already did the reconciliation. This doesn't add a new LLM call or a new layer — it just stops running the two Archivist phases in sequence as if Phase 1 were ground truth.
+
+The Archivist still produces a prose narrative in the agent's voice. Nothing becomes mechanical. What changes is the truth-serum clause at both phases: if the tool calls show X, the prose mentions X, and the structured record reflects X. If the agent's summary claimed Y that the tool calls did not support, both phases note the gap rather than papering over it.
+
+The agent writes its own honesty. Prose stays prose, but prose held accountable to what the cycle log shows — and the structured records downstream hold the same standard.
 
 ### 1c. Sweep identity files
 
