@@ -32,7 +32,7 @@ fn enabled_cfg() -> config.AppConfig {
 pub fn enabled_when_unset_test() {
   // Default config (no meta_scheduler_enabled set) emits the full task list.
   let tasks = meta_scheduler.build_tasks(base_cfg())
-  list.length(tasks) |> should.equal(7)
+  list.length(tasks) |> should.equal(4)
 }
 
 pub fn disabled_when_explicitly_false_test() {
@@ -41,12 +41,14 @@ pub fn disabled_when_explicitly_false_test() {
 }
 
 // ---------------------------------------------------------------------------
-// Enabled — seven recurring tasks (five original + two integrity audits)
+// Enabled — four judgement tasks. The three mechanical audits (affect
+// correlation, fabrication audit, voice drift) moved to BEAM workers
+// in meta_learning/worker.gleam and run off the cognitive loop.
 // ---------------------------------------------------------------------------
 
-pub fn enabled_emits_seven_tasks_test() {
+pub fn enabled_emits_four_tasks_test() {
   let tasks = meta_scheduler.build_tasks(enabled_cfg())
-  list.length(tasks) |> should.equal(7)
+  list.length(tasks) |> should.equal(4)
 }
 
 pub fn task_names_unique_and_namespaced_test() {
@@ -111,13 +113,13 @@ pub fn task_queries_reference_correct_tools_test() {
       string.contains(t.query, "list_learning_goals") |> should.equal(True)
     Error(_) -> should.fail()
   }
+  // affect_correlation is no longer a scheduler task — it runs as a
+  // BEAM worker. Confirm it's absent from the scheduler's task list.
   case
     list.find(tasks, fn(t) { t.name == "meta_learning_affect_correlation" })
   {
-    Ok(t) ->
-      string.contains(t.query, "analyze_affect_performance")
-      |> should.equal(True)
-    Error(_) -> should.fail()
+    Ok(_) -> should.fail()
+    Error(_) -> Nil
   }
 }
 
