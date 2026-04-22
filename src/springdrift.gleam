@@ -55,6 +55,7 @@ import llm/provider.{type Provider}
 import llm/retry
 import llm/types as llm_types
 import meta_learning/scheduler as meta_scheduler
+import meta_learning/workers as meta_workers
 import narrative/appraiser
 import narrative/curator
 import narrative/housekeeper
@@ -1048,6 +1049,45 @@ fn run(cfg: AppConfig) -> Nil {
     option.Some(hk) -> curator.set_housekeeper(curator_subj, hk)
     option.None -> Nil
   }
+
+  // Start Phase 2 meta-learning BEAM workers. These run three
+  // mechanical audits (affect correlation, fabrication audit, voice
+  // drift) on their own timers, bypassing the cognitive loop so
+  // operator chat is never interrupted by a housekeeping tick.
+  // Judgement jobs stay on the scheduler (Phase 1 idle-gate handles
+  // those).
+  let worker_ctx =
+    tools_remembrancer.RemembrancerContext(
+      narrative_dir: option.unwrap(cfg.narrative_dir, paths.narrative_dir()),
+      cbr_dir: paths.cbr_dir(),
+      facts_dir: paths.facts_dir(),
+      knowledge_consolidation_dir: paths.knowledge_consolidation_dir(),
+      consolidation_log_dir: paths.consolidation_log_dir(),
+      cycle_id: "meta-worker",
+      agent_id: "meta-worker",
+      librarian: option.Some(librarian_subj),
+      review_confidence_threshold: option.unwrap(
+        cfg.remembrancer_review_confidence_threshold,
+        0.3,
+      ),
+      dormant_thread_days: option.unwrap(
+        cfg.remembrancer_dormant_thread_days,
+        7,
+      ),
+      min_pattern_cases: option.unwrap(cfg.remembrancer_min_pattern_cases, 3),
+      fact_decay_half_life_days: option.unwrap(
+        cfg.fact_decay_half_life_days,
+        30,
+      ),
+      gate_provider: option.None,
+      gate_model: "",
+      skills_dir: case option.unwrap(cfg.skills_dirs, default_skill_dirs()) {
+        [first, ..] -> first
+        [] -> paths.project_dir() <> "/skills"
+      },
+      max_promotions_per_day: option.unwrap(cfg.meta_max_promotions_per_day, 3),
+    )
+  let _meta_worker_subjects = meta_workers.start_all(cfg, worker_ctx)
 
   // Start Forecaster if enabled (needs cognitive_subj + librarian)
   case option.unwrap(cfg.forecaster_enabled, False) {
