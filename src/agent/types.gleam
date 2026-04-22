@@ -372,6 +372,11 @@ pub type CognitiveMessage {
     reply_to: Subject(CognitiveReply),
   )
   GetMessages(reply_to: Subject(List(Message)))
+  /// Cheap liveness check: cognitive replies with its current status
+  /// tag. Used by /health to distinguish "alive and processing" from
+  /// "queue jammed / crashed". Does not touch message history or any
+  /// other state; safe to call from external pingers.
+  Ping(reply_to: Subject(PingReply))
   GateTimeout(task_id: String, gate: String)
   /// Watchdog: fires if the cognitive loop stays non-Idle too long.
   /// Generation prevents stale timeouts from prior cycles.
@@ -397,6 +402,15 @@ pub type CognitiveReply {
     /// of JobComplete. Ordering preserved.
     tools_fired: List(String),
   )
+}
+
+/// Reply payload for the `Ping` liveness check. `status_tag` is a
+/// short string naming the current `CognitiveStatus` variant (e.g.
+/// "Idle", "Thinking", "WaitingForAgents") — useful for the /health
+/// endpoint to distinguish a busy-but-alive loop from a hung one.
+/// `cycle_id` is the current cycle's id when non-Idle, None when Idle.
+pub type PingReply {
+  PingReply(status_tag: String, cycle_id: Option(String))
 }
 
 // ---------------------------------------------------------------------------

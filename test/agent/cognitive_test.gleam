@@ -8,8 +8,8 @@
 import agent/cognitive
 import agent/cognitive_config
 import agent/types.{
-  type CognitiveReply, type Notification, SchedulerJobStarted, SetModel,
-  UserAnswer, UserInput,
+  type CognitiveReply, type Notification, Ping, PingReply, SchedulerJobStarted,
+  SetModel, UserAnswer, UserInput,
 }
 import frontdoor
 import frontdoor/types.{DeliverQuestion, Subscribe, UserSource} as frontdoor_types
@@ -96,6 +96,21 @@ pub fn multiple_turns_test() {
 
   let reply2 = send_and_receive(cognitive, "Second message")
   reply2.response |> should.equal("response")
+}
+
+// ---------------------------------------------------------------------------
+// Ping — liveness check used by the /health endpoint
+// ---------------------------------------------------------------------------
+
+pub fn ping_idle_returns_idle_tag_test() {
+  let provider = mock.provider_with_text("ok")
+  let #(cognitive, _notify) = start_cognitive(provider)
+  let reply_subj = process.new_subject()
+  process.send(cognitive, Ping(reply_to: reply_subj))
+  let assert Ok(PingReply(status_tag:, cycle_id:)) =
+    process.receive(reply_subj, 1000)
+  status_tag |> should.equal("Idle")
+  cycle_id |> should.equal(None)
 }
 
 // ---------------------------------------------------------------------------
