@@ -249,6 +249,7 @@ fn handle_message(
       types.ForecasterSuggestion(..) -> "ForecasterSuggestion"
       types.AgentProgress(..) -> "AgentProgress"
       types.GetMessages(..) -> "GetMessages"
+      types.Ping(..) -> "Ping"
       types.GateTimeout(..) -> "GateTimeout"
       types.WatchdogTimeout(..) -> "WatchdogTimeout"
       types.InjectUserAnswer(..) -> "InjectUserAnswer"
@@ -279,6 +280,27 @@ fn handle_message(
       CognitiveState(..state, scheduler: Some(scheduler))
     types.GetMessages(reply_to:) -> {
       process.send(reply_to, state.messages)
+      state
+    }
+    types.Ping(reply_to:) -> {
+      // Cheap liveness + status tag for /health. Deliberately avoids
+      // copying the messages list (which can be large on a long
+      // session); the pinger only needs to know we're reachable and
+      // in what coarse state.
+      let tag = case state.status {
+        types.Idle -> "Idle"
+        types.Classifying(..) -> "Classifying"
+        types.Thinking(..) -> "Thinking"
+        types.WaitingForAgents(..) -> "WaitingForAgents"
+        types.WaitingForUser(..) -> "WaitingForUser"
+        types.EvaluatingSafety(..) -> "EvaluatingSafety"
+        types.EvaluatingInputSafety(..) -> "EvaluatingInputSafety"
+        types.EvaluatingPostExecution(..) -> "EvaluatingPostExecution"
+      }
+      process.send(
+        reply_to,
+        types.PingReply(status_tag: tag, cycle_id: state.cycle_id),
+      )
       state
     }
     types.GateTimeout(task_id:, gate:) ->

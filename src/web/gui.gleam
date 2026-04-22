@@ -195,6 +195,44 @@ fn handle_request(
   scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
   frontdoor: Subject(FrontdoorMessage),
 ) -> Response(ResponseData) {
+  // /health is unauthenticated by design — Uptime-Kuma, cron jobs,
+  // and similar external pingers don't speak bearer auth, and the
+  // information is non-sensitive (status tag, timestamps, pending
+  // counts). Anything sensitive stays behind auth on other routes.
+  case request.path_segments(req) {
+    ["health"] -> health_response(cognitive, scheduler)
+    _ ->
+      handle_authenticated_request(
+        req,
+        cognitive,
+        relay,
+        initial_messages,
+        narrative_dir,
+        auth_token,
+        lib,
+        agent_name,
+        agent_version,
+        ws_max_bytes,
+        scheduler,
+        frontdoor,
+      )
+  }
+}
+
+fn handle_authenticated_request(
+  req: Request(Connection),
+  cognitive: Subject(agent_types.CognitiveMessage),
+  relay: Subject(RelayMsg),
+  initial_messages: List(Message),
+  narrative_dir: String,
+  auth_token: Option(String),
+  lib: Option(Subject(LibrarianMessage)),
+  agent_name: String,
+  agent_version: String,
+  ws_max_bytes: Int,
+  scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
+  frontdoor: Subject(FrontdoorMessage),
+) -> Response(ResponseData) {
   case auth.check_auth(req, auth_token) {
     False ->
       response.new(401)
@@ -1322,3 +1360,95 @@ fn build_normative_config_json() -> String {
       )
   }
 }
+
+// ---------------------------------------------------------------------------
+// /health — unauthenticated liveness endpoint
+// ---------------------------------------------------------------------------
+
+/// Build a health-check response. Unauthenticated; designed to be
+/// pinged by Uptime Kuma / cron / similar. Reports:
+///   - "status": always "ok" if the HTTP server is answering
+///   - "timestamp": current ISO-8601 (confirms clock is running)
+///   - "cognitive": "responsive" | "unresponsive" (Ping round-trip)
+///   - "cognitive_status": Idle / Thinking / WaitingForUser / ...
+///     (only populated when cognitive is responsive)
+///   - "scheduler_pending": count of jobs the scheduler has in queue
+///     (0 when scheduler isn't configured)
+///
+/// The endpoint never returns 500. If any subsystem is unreachable,
+/// the field for that subsystem carries the failure state and the
+/// overall response is still 200 — monitoring callers parse the body
+/// to decide what counts as unhealthy.
+fn health_response(
+  cognitive: Subject(agent_types.CognitiveMessage),
+  scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
+) -> Response(ResponseData) {
+  let #(cog_reachable, cog_status) = probe_cognitive(cognitive)
+  let sched_pending = probe_scheduler_pending(scheduler)
+  let body =
+    json.object([
+      #("status", json.string("ok")),
+      #("timestamp", json.string(current_iso_timestamp())),
+      #(
+        "cognitive",
+        json.string(case cog_reachable {
+          True -> "responsive"
+          False -> "unresponsive"
+        }),
+      ),
+      #("cognitive_status", case cog_status {
+        Some(tag) -> json.string(tag)
+        None -> json.null()
+      }),
+      #("scheduler_pending", json.int(sched_pending)),
+    ])
+    |> json.to_string
+  response.new(200)
+  |> response.set_header("content-type", "application/json; charset=utf-8")
+  |> response.set_body(mist.Bytes(bytes_tree.from_string(body)))
+}
+
+/// Send a Ping to cognitive with a short timeout. Returns
+/// (reachable?, status_tag). Timeout = 500 ms — long enough for any
+/// live cog loop to answer, short enough that a jammed loop doesn't
+/// block the /health response.
+fn probe_cognitive(
+  cognitive: Subject(agent_types.CognitiveMessage),
+) -> #(Bool, Option(String)) {
+  let reply: Subject(agent_types.PingReply) = process.new_subject()
+  process.send(cognitive, agent_types.Ping(reply_to: reply))
+  case process.receive(reply, 500) {
+    Ok(agent_types.PingReply(status_tag:, ..)) -> #(True, Some(status_tag))
+    Error(_) -> #(False, None)
+  }
+}
+
+/// Count pending jobs in the scheduler. Returns 0 when no scheduler
+/// is configured or the call times out — health-check callers can
+/// treat scheduler_pending=0 as "no backlog" and distinguish a real
+/// outage via the "cognitive" field.
+fn probe_scheduler_pending(
+  scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
+) -> Int {
+  case scheduler {
+    None -> 0
+    Some(sched) -> {
+      let reply: Subject(List(scheduler_types.ScheduledJob)) =
+        process.new_subject()
+      process.send(sched, scheduler_types.GetStatus(reply_to: reply))
+      case process.receive(reply, 500) {
+        Ok(jobs) ->
+          list.count(jobs, fn(j) {
+            case j.status {
+              scheduler_types.Pending -> True
+              _ -> False
+            }
+          })
+        Error(_) -> 0
+      }
+    }
+  }
+}
+
+@external(erlang, "springdrift_ffi", "get_datetime")
+fn current_iso_timestamp() -> String
