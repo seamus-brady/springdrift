@@ -63,7 +63,18 @@ pub type ExecResult {
 }
 
 pub type ServeResult {
-  ServeResult(host_port: Int, container_port: Int, slot_id: Int)
+  /// `verification` is a human-readable evidence line produced by a
+  /// probe run from inside the container just after the serve process
+  /// starts. Strings starting "VERIFIED" confirm the port answered a
+  /// GET /; "UNVERIFIED" strings name the failure reason. Shown
+  /// verbatim to the delegating agent so it can judge whether to
+  /// claim success or escalate.
+  ServeResult(
+    host_port: Int,
+    container_port: Int,
+    slot_id: Int,
+    verification: String,
+  )
 }
 
 // ---------------------------------------------------------------------------

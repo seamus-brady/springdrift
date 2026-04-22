@@ -365,10 +365,13 @@ fn handle_message(state: ManagerState, msg: SandboxMessage) -> Nil {
     types.StopServe(slot_id, reply_to) -> {
       case dict.get(state.slots, slot_id) {
         Ok(slot) -> {
+          // -9 (SIGKILL): some Python servers trap SIGTERM and linger;
+          // ghost processes on the port block the next serve. A SIGKILL
+          // on /workspace/-scoped processes is the reliable end.
           let _ =
             podman_ffi.run_cmd(
               "podman",
-              ["exec", slot.container_id, "pkill", "-f", "/workspace/"],
+              ["exec", slot.container_id, "pkill", "-9", "-f", "/workspace/"],
               5000,
             )
           clean_workspace(slot.workspace)
@@ -642,9 +645,17 @@ fn serve_in_slot(
       case simplifile.write(filepath, code) {
         Error(_) -> Error("Failed to write code to workspace")
         Ok(_) -> {
+          // --workdir /workspace is critical: without it the process's
+          // CWD is the container's default (typically `/`), which means
+          // Python's SimpleHTTPRequestHandler serves the container root
+          // rather than the app files under /workspace. The Serve tool
+          // documentation now promises CWD=/workspace; keep this in
+          // sync if the promise changes.
           let args = [
             "exec",
             "-d",
+            "--workdir",
+            "/workspace",
             slot.container_id,
             interpreter,
             "/workspace/" <> filename,
@@ -661,10 +672,12 @@ fn serve_in_slot(
                       port_index,
                     )
                   let cp = types.internal_port_base + port_index
+                  let verification = probe_serve(slot.container_id, cp)
                   Ok(types.ServeResult(
                     host_port: hp,
                     container_port: cp,
                     slot_id: slot.slot_id,
+                    verification:,
                   ))
                 }
                 _ -> Error("Failed to start serve process: " <> result.stderr)
@@ -712,6 +725,50 @@ fn get_slot(slots: Dict(Int, SandboxSlot), slot_id: Int) -> SandboxSlot {
         workspace: "",
         host_ports: [],
       )
+  }
+}
+
+/// Verify the serve process is actually serving on its port.
+/// Runs a short Python probe inside the container after `serve` has
+/// returned; the detached process needs a moment to bind, so the probe
+/// sleeps briefly before requesting. Returns a human-readable evidence
+/// string — the coder/agent sees this verbatim and can judge whether
+/// the server did what it promised.
+///
+/// Probe failure is NOT an error for the serve call itself — the
+/// process may still be starting up, or the server may legitimately
+/// not answer GET / on the root (custom routing, auth). The evidence
+/// string just distinguishes "verified 200 from /" from "unverified".
+fn probe_serve(container_id: String, container_port: Int) -> String {
+  // Single-line Python: sleep 1s (let the serve process bind),
+  // request /, print first line of the response or a marker.
+  let probe_script =
+    "import time, urllib.request as u\n"
+    <> "time.sleep(1)\n"
+    <> "try:\n"
+    <> "    r=u.urlopen('http://127.0.0.1:"
+    <> int.to_string(container_port)
+    <> "/', timeout=3)\n"
+    <> "    body=r.read(200).decode('utf-8','replace').replace(chr(10),' ')\n"
+    <> "    print('VERIFIED status='+str(r.status)+' preview='+body[:120])\n"
+    <> "except Exception as e:\n"
+    <> "    print('UNVERIFIED '+type(e).__name__+': '+str(e)[:160])\n"
+  let args = [
+    "exec",
+    "--workdir",
+    "/workspace",
+    container_id,
+    "python3",
+    "-c",
+    probe_script,
+  ]
+  case podman_ffi.run_cmd("podman", args, 8000) {
+    Ok(result) ->
+      case result.exit_code {
+        0 -> string.trim(result.stdout)
+        _ -> "UNVERIFIED probe exited " <> int.to_string(result.exit_code)
+      }
+    Error(msg) -> "UNVERIFIED probe failed: " <> msg
   }
 }
 

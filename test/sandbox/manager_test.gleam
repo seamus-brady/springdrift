@@ -143,7 +143,14 @@ pub fn exec_result_construction_test() {
 
 pub fn serve_result_construction_test() {
   let result =
-    types.ServeResult(host_port: 10_000, container_port: 47_200, slot_id: 0)
+    types.ServeResult(
+      host_port: 10_000,
+      container_port: 47_200,
+      slot_id: 0,
+      verification: "VERIFIED status=200 preview=hello",
+    )
   result.host_port
   |> should.equal(10_000)
+  result.verification
+  |> should.equal("VERIFIED status=200 preview=hello")
 }

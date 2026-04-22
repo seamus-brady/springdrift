@@ -48,11 +48,23 @@ pub fn run_code_tool() -> Tool {
 pub fn serve_tool() -> Tool {
   tool.new("serve")
   |> tool.with_description(
-    "Start a long-lived process (web server, API, etc.) in the sandbox with port forwarding. Returns the host URL where the app is accessible. Use stop_serve to stop it.",
+    "Start a long-lived process (web server, API, etc.) in the sandbox "
+    <> "with port forwarding. Returns the host URL plus a Verification "
+    <> "line showing whether a probe just successfully fetched GET / "
+    <> "from the container. 'Verification: VERIFIED ...' means the "
+    <> "server is answering correctly; 'UNVERIFIED ...' means the "
+    <> "process started but the probe didn't get a response — do NOT "
+    <> "claim success without checking this line. "
+    <> "The server process's working directory is /workspace — use "
+    <> "relative paths to access files you wrote there. "
+    <> "Use stop_serve to stop it.",
   )
   |> tool.add_string_param(
     "code",
-    "The server code to run. Must listen on the container port (47200 + port index).",
+    "The server code to run. Must listen on the container port "
+      <> "(47200 + port index). Runs with CWD=/workspace. If you use "
+      <> "Python's http.server or similar default handler, it will "
+      <> "serve files from /workspace.",
     True,
   )
   |> tool.add_string_param(
@@ -259,7 +271,9 @@ fn execute_serve(
                   <> "\n"
                   <> "Slot ID: "
                   <> int.to_string(sr.slot_id)
-                  <> " (use this with stop_serve)",
+                  <> " (use this with stop_serve)\n"
+                  <> "Verification: "
+                  <> sr.verification,
               )
           }
         }
