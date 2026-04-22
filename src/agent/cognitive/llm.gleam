@@ -21,6 +21,7 @@ import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
+import llm/message_repair
 import llm/request
 import llm/types as llm_types
 import meta/types as meta_types
@@ -221,15 +222,18 @@ pub fn handle_think_error(
           )
         }
         False -> {
-          let error_text = "[Error: " <> error <> "]"
-          output.send_reply(state, rt, error_text, state.model, None, [])
+          // Sanitised user-facing message. Raw error stays in slog +
+          // cycle_log above; what the operator sees in chat is a short
+          // classified notice, not a raw API payload.
+          let user_text = render_user_error(classify_think_error(error))
+          output.send_reply(state, rt, user_text, state.model, None, [])
           // Add synthetic assistant message so message history stays
           // well-formed (alternating user/assistant). Without this, the
           // next user input would create two consecutive user messages
           // and the API would reject the request.
           let error_msg =
             llm_types.Message(role: llm_types.Assistant, content: [
-              llm_types.TextContent(text: error_text),
+              llm_types.TextContent(text: user_text),
             ])
           let messages = list.append(state.messages, [error_msg])
           CognitiveState(
@@ -255,11 +259,18 @@ pub fn handle_think_down(
   case dict.get(state.pending, task_id) {
     Error(_) -> state
     Ok(PendingThink(reply_to: rt, ..)) -> {
-      let error_text = "[Error: think worker crashed: " <> reason <> "]"
-      output.send_reply(state, rt, error_text, state.model, None, [])
+      // Raw crash reason goes to logs; user sees a sanitised notice.
+      slog.log_error(
+        "cognitive",
+        "handle_think_down",
+        "Think worker crashed: " <> reason,
+        state.cycle_id,
+      )
+      let user_text = render_user_error(InternalCrash)
+      output.send_reply(state, rt, user_text, state.model, None, [])
       let error_msg =
         llm_types.Message(role: llm_types.Assistant, content: [
-          llm_types.TextContent(text: error_text),
+          llm_types.TextContent(text: user_text),
         ])
       let messages = list.append(state.messages, [error_msg])
       CognitiveState(
@@ -287,10 +298,18 @@ pub fn build_request_with_model(
   model: String,
   messages: List(llm_types.Message),
 ) -> llm_types.LlmRequest {
+  // Defensive repair: inject synthetic tool_result blocks for any
+  // orphaned tool_use ids. Anthropic's API rejects histories where an
+  // assistant tool_use isn't immediately followed by a matching
+  // tool_result; once an orphan lands in state.messages, every cycle
+  // keeps sending it until something repairs it. This is the last
+  // line of defence — upstream paths still need to be tidy. We
+  // slog.warn on any repair so orphan sources stay visible.
+  let repaired = repair_orphans_and_warn(messages, state.cycle_id)
   // Message count trim (configurable)
   let trimmed = case state.max_context_messages {
-    None -> context.ensure_alternation(messages)
-    Some(max) -> context.trim(messages, max)
+    None -> context.ensure_alternation(repaired)
+    Some(max) -> context.trim(repaired, max)
   }
   // Token budget safety net — hard cap to prevent API 400 errors.
   // System prompt + tools + response budget need headroom, so cap messages
@@ -308,6 +327,30 @@ pub fn build_request_with_model(
   case state.tools {
     [] -> base
     tools -> request.with_tools(base, tools)
+  }
+}
+
+/// Wrap `message_repair.repair` with a warn log when it has to act.
+/// Each orphan is a bug upstream — we want the logs to point operators
+/// (and us) at the code path that left it dangling.
+fn repair_orphans_and_warn(
+  messages: List(llm_types.Message),
+  cycle_id: option.Option(String),
+) -> List(llm_types.Message) {
+  case message_repair.find_orphans(messages) {
+    [] -> messages
+    orphans -> {
+      slog.warn(
+        "cognitive/llm",
+        "build_request",
+        "Repairing "
+          <> int.to_string(list.length(orphans))
+          <> " orphaned tool_use id(s): "
+          <> string.join(orphans, ", "),
+        cycle_id,
+      )
+      message_repair.repair(messages)
+    }
   }
 }
 
@@ -435,4 +478,86 @@ fn float_max(a: Float, b: Float) -> Float {
     True -> a
     False -> b
   }
+}
+
+// ---------------------------------------------------------------------------
+// Error sanitation
+// ---------------------------------------------------------------------------
+
+/// Coarse category for a think-worker error. Drives the user-facing
+/// message; raw payloads are kept out of chat (and kept in slog +
+/// cycle_log for operator diagnosis).
+pub type ErrorClass {
+  /// API 4xx other than 401/403/429 — usually a structural issue with
+  /// the request we sent (e.g. malformed message history).
+  ClientError
+  /// 401/403 — provider API key missing, expired, or lacks scope.
+  AuthError
+  /// 429 / 529 / explicit "overloaded" / "rate limit".
+  RateLimit
+  /// Network, DNS, TLS, socket, timeout — transport-layer failures.
+  NetworkError
+  /// Think worker process itself crashed (OTP monitor down).
+  InternalCrash
+  /// Anything that doesn't match the other categories.
+  Unknown
+}
+
+/// Classify a raw think-worker error string. Pattern-matches on the
+/// string content because the adapter layer collapses all upstream
+/// error types into a string on its way out of llm/retry. Kept
+/// conservative: falls through to Unknown rather than mis-classifying.
+pub fn classify_think_error(error: String) -> ErrorClass {
+  let lower = string.lowercase(error)
+  case True {
+    _ if "auth" == "" -> Unknown
+    _ ->
+      case contains_any(lower, ["401", "403", "unauthorized", "forbidden"]) {
+        True -> AuthError
+        False ->
+          case contains_any(lower, ["429", "529", "rate limit", "overloaded"]) {
+            True -> RateLimit
+            False ->
+              case
+                contains_any(lower, [
+                  "timeout", "timed out", "connection", "network", "tls", "dns",
+                  "socket",
+                ])
+              {
+                True -> NetworkError
+                False ->
+                  case contains_any(lower, ["400", "invalid", "bad request"]) {
+                    True -> ClientError
+                    False -> Unknown
+                  }
+              }
+          }
+      }
+  }
+}
+
+/// User-facing text for each error class. Short, actionable, no
+/// implementation detail. Operator gets the full payload in slog +
+/// cycle_log.
+pub fn render_user_error(class: ErrorClass) -> String {
+  case class {
+    ClientError ->
+      "[Internal error: the cycle couldn't complete due to a "
+      <> "message-history issue. It's been logged — please retry.]"
+    AuthError ->
+      "[Provider authentication failed — operator should check the "
+      <> "API key configuration.]"
+    RateLimit ->
+      "[The provider is rate-limited or overloaded. Retrying with a "
+      <> "different model may help; otherwise wait a moment and retry.]"
+    NetworkError -> "[Network error reaching the provider. Please retry.]"
+    InternalCrash ->
+      "[Internal error: a background process crashed mid-cycle. "
+      <> "It's been logged — please retry.]"
+    Unknown -> "[The cycle couldn't complete. Details in the logs.]"
+  }
+}
+
+fn contains_any(haystack: String, needles: List(String)) -> Bool {
+  list.any(needles, fn(n) { string.contains(haystack, n) })
 }
