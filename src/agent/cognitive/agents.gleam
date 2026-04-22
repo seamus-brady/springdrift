@@ -810,16 +810,37 @@ fn do_dispatch_agents(
         Some(resp.usage),
         list.map(state.cycle_tool_calls, fn(t) { t.name }),
       )
-      // Add single assistant message with the original response content + error
-      // so message history stays well-formed (alternating user/assistant).
+      // Message-history hygiene: the original assistant response
+      // contains tool_use blocks that will never be dispatched.
+      // Anthropic's API requires every tool_use to be followed by a
+      // matching tool_result in the next user message — if we skip
+      // that, every subsequent cycle re-sends this orphaned tool_use
+      // and the API 400s. Emit a user message with synthesised error
+      // tool_result blocks for every tool_use we refused to dispatch.
       let assistant_msg =
-        llm_types.Message(
-          role: llm_types.Assistant,
-          content: list.append(resp.content, [
-            llm_types.TextContent(text: error_text),
-          ]),
-        )
-      let messages = list.append(state.messages, [assistant_msg])
+        llm_types.Message(role: llm_types.Assistant, content: resp.content)
+      let tool_use_calls =
+        list.filter_map(resp.content, fn(block) {
+          case block {
+            llm_types.ToolUseContent(id: id, name: name, ..) -> Ok(#(id, name))
+            _ -> Error(Nil)
+          }
+        })
+      let error_results =
+        list.map(tool_use_calls, fn(pair) {
+          let #(id, name) = pair
+          llm_types.ToolResultContent(
+            tool_use_id: id,
+            content: "[Error: " <> name <> " — no matching agent registered]",
+            is_error: True,
+          )
+        })
+      let user_msg =
+        llm_types.Message(role: llm_types.User, content: error_results)
+      let messages = case error_results {
+        [] -> list.append(state.messages, [assistant_msg])
+        _ -> list.append(state.messages, [assistant_msg, user_msg])
+      }
       CognitiveState(
         ..state,
         messages:,
