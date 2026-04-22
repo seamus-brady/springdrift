@@ -12,7 +12,7 @@ import gleam/string
 import gleeunit/should
 import narrative/export as narrative_export
 import narrative/types.{
-  type DelegationStep, type NarrativeEntry, type Outcome, type Thread,
+  type DelegationStep, type NarrativeEntry, type Thread,
   DataReport, DelegationStep, Entities, Failure, Intent, Metrics, Narrative,
   NarrativeEntry, Outcome, Success, Thread,
 }
