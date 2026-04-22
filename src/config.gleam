@@ -191,6 +191,17 @@ pub type AppConfig {
     // ── Scheduler resource limits ──
     max_autonomous_cycles_per_hour: Option(Int),
     autonomous_token_budget_per_hour: Option(Int),
+    // ── Scheduler idle-gate ──
+    /// When the cognitive loop has processed a user message within this
+    /// window, recurring scheduler ticks defer instead of firing. Default
+    /// 10 min. Set to 0 to disable idle-gating entirely.
+    scheduler_idle_window_minutes: Option(Int),
+    /// Hard ceiling on deferral: after the scheduled fire time is this
+    /// many minutes in the past, the job fires regardless of operator
+    /// activity. Default 60 min.
+    scheduler_max_defer_minutes: Option(Int),
+    /// Retry interval for deferred ticks (seconds). Default 60.
+    scheduler_retry_interval_seconds: Option(Int),
     // ── XStructor ──
     xstructor_max_retries: Option(Int),
     // ── Preamble budget ──
@@ -457,6 +468,9 @@ pub fn default() -> AppConfig {
     scheduler_tool_timeout_ms: None,
     max_autonomous_cycles_per_hour: None,
     autonomous_token_budget_per_hour: None,
+    scheduler_idle_window_minutes: None,
+    scheduler_max_defer_minutes: None,
+    scheduler_retry_interval_seconds: None,
     xstructor_max_retries: None,
     preamble_budget_chars: None,
     vertex_project_id: None,
@@ -944,6 +958,18 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     autonomous_token_budget_per_hour: option.or(
       override_cfg.autonomous_token_budget_per_hour,
       base.autonomous_token_budget_per_hour,
+    ),
+    scheduler_idle_window_minutes: option.or(
+      override_cfg.scheduler_idle_window_minutes,
+      base.scheduler_idle_window_minutes,
+    ),
+    scheduler_max_defer_minutes: option.or(
+      override_cfg.scheduler_max_defer_minutes,
+      base.scheduler_max_defer_minutes,
+    ),
+    scheduler_retry_interval_seconds: option.or(
+      override_cfg.scheduler_retry_interval_seconds,
+      base.scheduler_retry_interval_seconds,
     ),
     xstructor_max_retries: option.or(
       override_cfg.xstructor_max_retries,
@@ -1807,6 +1833,15 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     autonomous_token_budget_per_hour: get_toml_int(table, [
       "scheduler", "autonomous_token_budget_per_hour",
     ]),
+    scheduler_idle_window_minutes: get_toml_int(table, [
+      "scheduler", "idle_window_minutes",
+    ]),
+    scheduler_max_defer_minutes: get_toml_int(table, [
+      "scheduler", "max_defer_minutes",
+    ]),
+    scheduler_retry_interval_seconds: get_toml_int(table, [
+      "scheduler", "retry_interval_seconds",
+    ]),
     // ── [xstructor] ──
     xstructor_max_retries: get_toml_int(table, ["xstructor", "max_retries"]),
     // ── [narrative] preamble budget ──
@@ -2217,6 +2252,20 @@ fn validate_config_values(cfg: AppConfig) -> Nil {
     "scheduler.autonomous_token_budget_per_hour",
     cfg.autonomous_token_budget_per_hour,
   )
+  // Idle-gate values are allowed to be 0 (disables gating), so these
+  // use validate_non_negative rather than validate_positive.
+  validate_non_negative(
+    "scheduler.idle_window_minutes",
+    cfg.scheduler_idle_window_minutes,
+  )
+  validate_non_negative(
+    "scheduler.max_defer_minutes",
+    cfg.scheduler_max_defer_minutes,
+  )
+  validate_positive(
+    "scheduler.retry_interval_seconds",
+    cfg.scheduler_retry_interval_seconds,
+  )
   validate_positive(
     "narrative.preamble_budget_chars",
     cfg.preamble_budget_chars,
@@ -2274,6 +2323,19 @@ fn validate_positive(name: String, value: Option(Int)) -> Nil {
         "config",
         "validate",
         name <> " must be positive, got " <> int.to_string(n),
+        None,
+      )
+    _ -> Nil
+  }
+}
+
+fn validate_non_negative(name: String, value: Option(Int)) -> Nil {
+  case value {
+    Some(n) if n < 0 ->
+      slog.warn(
+        "config",
+        "validate",
+        name <> " must be non-negative, got " <> int.to_string(n),
         None,
       )
     _ -> Nil

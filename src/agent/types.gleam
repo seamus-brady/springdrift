@@ -318,6 +318,13 @@ pub type CognitiveMessage {
   AgentQuestion(question: String, agent: String, reply_to: Subject(String))
   AgentEvent(event: AgentLifecycleEvent)
   SetModel(model: String)
+  /// Post-startup wiring: hands cognitive a handle on the scheduler
+  /// runner so it can push `UserInputObserved` signals back whenever a
+  /// UserInput arrives. The scheduler uses those signals to idle-gate
+  /// recurring ticks so meta jobs don't hijack an active operator
+  /// conversation. Called once from `springdrift.gleam` after both the
+  /// cognitive loop and the scheduler have started.
+  SetScheduler(scheduler: Subject(scheduler_types.SchedulerMessage))
   ClassifyComplete(
     cycle_id: String,
     complexity: QueryComplexity,

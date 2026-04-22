@@ -157,9 +157,38 @@ pub type JobQuery {
 // Scheduler messages
 // ---------------------------------------------------------------------------
 
+/// Idle-gate config. When the cognitive loop has seen a UserInput
+/// within `idle_window_ms`, recurring ticks defer by `retry_interval_ms`
+/// rather than fire — up to `max_defer_ms` after the scheduled fire
+/// time, at which point the job fires regardless so long-running chats
+/// cannot starve recurring work forever. Set `idle_window_ms = 0` to
+/// disable gating entirely (back to pre-fix behaviour).
+pub type IdleConfig {
+  IdleConfig(idle_window_ms: Int, max_defer_ms: Int, retry_interval_ms: Int)
+}
+
+/// Sensible defaults: 10 min idle window, 60 min max defer, 60 s retry.
+pub fn default_idle_config() -> IdleConfig {
+  IdleConfig(
+    idle_window_ms: 10 * 60 * 1000,
+    max_defer_ms: 60 * 60 * 1000,
+    retry_interval_ms: 60_000,
+  )
+}
+
+/// Gating disabled. Used in tests and when the operator explicitly
+/// opts out via `scheduler_idle_window_minutes = 0`.
+pub fn disabled_idle_config() -> IdleConfig {
+  IdleConfig(idle_window_ms: 0, max_defer_ms: 0, retry_interval_ms: 60_000)
+}
+
 pub type SchedulerMessage {
   /// Timer fired for a specific job
   Tick(name: String)
+  /// Cognitive pushes this every time a UserInput arrives. The runner
+  /// records the timestamp and uses it to gate recurring ticks against
+  /// an active operator conversation.
+  UserInputObserved(at_ms: Int)
   /// Job completed with result text, token usage, and the list of tools
   /// that fired during the cycle. Used by the runner to apply the
   /// required_tools check: if any required tool is absent from

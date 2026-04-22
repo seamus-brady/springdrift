@@ -69,6 +69,7 @@ import sandbox/manager as sandbox_manager_mod
 import sandbox/types as sandbox_types
 import scheduler/log as schedule_log
 import scheduler/runner as scheduler_runner
+import scheduler/types as scheduler_types
 import simplifile
 import skills
 import slog
@@ -974,6 +975,19 @@ fn run(cfg: AppConfig) -> Nil {
       )
   }
   let meta_budget_pct = option.unwrap(cfg.meta_max_reflection_budget_pct, 25)
+  // Idle-gate config. Defaults: 10 min idle window, 60 min hard defer
+  // ceiling, 60 s retry interval. Set idle_window_minutes=0 in the
+  // config to disable gating entirely.
+  let idle_window_minutes = option.unwrap(cfg.scheduler_idle_window_minutes, 10)
+  let max_defer_minutes = option.unwrap(cfg.scheduler_max_defer_minutes, 60)
+  let retry_interval_seconds =
+    option.unwrap(cfg.scheduler_retry_interval_seconds, 60)
+  let idle_config =
+    scheduler_types.IdleConfig(
+      idle_window_ms: idle_window_minutes * 60 * 1000,
+      max_defer_ms: max_defer_minutes * 60 * 1000,
+      retry_interval_ms: retry_interval_seconds * 1000,
+    )
   let runner_result =
     scheduler_runner.start(
       meta_tasks,
@@ -984,6 +998,7 @@ fn run(cfg: AppConfig) -> Nil {
       token_budget_per_hour,
       meta_budget_pct,
       frontdoor_subj,
+      idle_config,
     )
   let scheduler_subj = case runner_result {
     Ok(runner_subj) -> {
@@ -1007,6 +1022,15 @@ fn run(cfg: AppConfig) -> Nil {
       io.println("Scheduler: failed to start")
       option.None
     }
+  }
+
+  // Wire scheduler to cognitive for idle-gate signalling: cognitive
+  // pushes UserInputObserved on each UserInput so the scheduler can
+  // defer recurring ticks while the operator is active.
+  case scheduler_subj {
+    option.Some(sched) ->
+      process.send(cognitive_subj, agent_types.SetScheduler(scheduler: sched))
+    option.None -> Nil
   }
 
   // Wire scheduler to curator for open_commitments slot

@@ -28,6 +28,7 @@ import llm/retry
 import llm/types as llm_types
 import normative/drift as normative_drift
 import normative/types as normative_types
+import scheduler/types as scheduler_types
 
 @external(erlang, "springdrift_ffi", "get_datetime")
 fn get_datetime() -> String
@@ -160,6 +161,11 @@ pub type CognitiveState {
     active_delegations: Dict(String, DelegationInfo),
     last_user_input: String,
     supervisor: Option(Subject(SupervisorMessage)),
+    /// Scheduler runner subject, wired post-startup via SetScheduler.
+    /// When present, cognitive pushes UserInputObserved signals on
+    /// each user message so the scheduler can idle-gate recurring
+    /// ticks. None in tests and at boot before the scheduler exists.
+    scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
     // --- Team specs (registered at startup) ---
     team_specs: List(team.TeamSpec),
     // --- Cycle telemetry ---

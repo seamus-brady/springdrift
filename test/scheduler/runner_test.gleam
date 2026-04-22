@@ -150,6 +150,7 @@ pub fn start_returns_subject_test() {
       500_000,
       0,
       fd,
+      types.disabled_idle_config(),
     )
 
   let status_subj = process.new_subject()
@@ -172,6 +173,7 @@ pub fn start_with_multiple_tasks_test() {
       500_000,
       0,
       fd,
+      types.disabled_idle_config(),
     )
 
   let status_subj = process.new_subject()
@@ -198,6 +200,7 @@ pub fn stop_all_terminates_test() {
       500_000,
       0,
       fd,
+      types.disabled_idle_config(),
     )
 
   process.send(sched, StopAll)
@@ -216,7 +219,17 @@ pub fn auto_execution_completes_job_test() {
   // initial_delay returns 0, so tick fires at 1ms
   let tasks = [make_task("auto-run", 600_000)]
   let assert Ok(sched) =
-    runner.start(tasks, cognitive, cp, 600_000, 20, 500_000, 0, fd)
+    runner.start(
+      tasks,
+      cognitive,
+      cp,
+      600_000,
+      20,
+      500_000,
+      0,
+      fd,
+      types.disabled_idle_config(),
+    )
 
   // Poll until the job has run at least once. Recurring tasks return to Pending
   // after each completion, so we check run_count rather than status.
@@ -239,6 +252,47 @@ pub fn auto_execution_completes_job_test() {
 }
 
 // ---------------------------------------------------------------------------
+// Idle-gate: defer recurring ticks while the operator is active
+// ---------------------------------------------------------------------------
+
+pub fn idle_gate_defers_when_user_active_test() {
+  let cp = "/tmp/springdrift-test-sched-idle"
+  clean_schedule_dir(cp)
+  let fd = frontdoor.start()
+  let cognitive = auto_reply_cognitive(fd)
+  // 100ms job interval — tick fires almost immediately. Idle window
+  // is 5s — user activity within the last 5s blocks the fire. Max
+  // defer is 10s so the test won't run forever even if a regression
+  // disables the gate.
+  let idle_cfg =
+    types.IdleConfig(
+      idle_window_ms: 5000,
+      max_defer_ms: 10_000,
+      retry_interval_ms: 100,
+    )
+  let tasks = [make_task("idle-gated", 100)]
+  let assert Ok(sched) =
+    runner.start(tasks, cognitive, cp, 600_000, 0, 0, 0, fd, idle_cfg)
+
+  // Tell the scheduler the operator just typed. The job should NOT
+  // fire while the idle window is in force.
+  process.send(sched, types.UserInputObserved(at_ms: monotonic_now_ms_test()))
+
+  // Wait 1s — short enough to stay inside the idle window. Job must
+  // not have fired.
+  process.sleep(1000)
+  let status_subj = process.new_subject()
+  process.send(sched, GetStatus(reply_to: status_subj))
+  let assert Ok(jobs) = process.receive(status_subj, 5000)
+  let assert Ok(job) =
+    list.find(jobs, fn(j: ScheduledJob) { j.name == "idle-gated" })
+  job.run_count |> should.equal(0)
+}
+
+@external(erlang, "springdrift_ffi", "monotonic_now_ms")
+fn monotonic_now_ms_test() -> Int
+
+// ---------------------------------------------------------------------------
 // Unknown job names are silently ignored
 // ---------------------------------------------------------------------------
 
@@ -256,6 +310,7 @@ pub fn unknown_job_complete_ignored_test() {
       500_000,
       0,
       fd,
+      types.disabled_idle_config(),
     )
 
   process.send(
@@ -289,6 +344,7 @@ pub fn unknown_job_failed_ignored_test() {
       500_000,
       0,
       fd,
+      types.disabled_idle_config(),
     )
 
   process.send(sched, JobFailed(name: "ghost-job", reason: "phantom"))
@@ -317,6 +373,7 @@ pub fn start_with_no_tasks_test() {
       500_000,
       0,
       fd,
+      types.disabled_idle_config(),
     )
 
   let status_subj = process.new_subject()
@@ -336,7 +393,17 @@ pub fn job_transitions_through_running_test() {
   let cognitive = auto_reply_cognitive(fd)
   let tasks = [make_task("transitions", 600_000)]
   let assert Ok(sched) =
-    runner.start(tasks, cognitive, cp, 600_000, 20, 500_000, 0, fd)
+    runner.start(
+      tasks,
+      cognitive,
+      cp,
+      600_000,
+      20,
+      500_000,
+      0,
+      fd,
+      types.disabled_idle_config(),
+    )
 
   // Poll until the job has left Pending (Running, Completed, or back to Pending
   // with run_count > 0 for recurring tasks).
@@ -370,7 +437,17 @@ pub fn multiple_tasks_all_complete_test() {
   let cognitive = auto_reply_cognitive(fd)
   let tasks = [make_task("task-1", 600_000), make_task("task-2", 600_000)]
   let assert Ok(sched) =
-    runner.start(tasks, cognitive, cp, 600_000, 20, 500_000, 0, fd)
+    runner.start(
+      tasks,
+      cognitive,
+      cp,
+      600_000,
+      20,
+      500_000,
+      0,
+      fd,
+      types.disabled_idle_config(),
+    )
 
   // Poll until both jobs have run at least once (recurring tasks return to
   // Pending after completion, so check run_count).
@@ -453,7 +530,18 @@ pub fn complete_job_refuses_recurring_test() {
   clean_schedule_dir(cp)
   let fd = frontdoor.start()
   let cognitive = auto_reply_cognitive(fd)
-  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0, fd)
+  let assert Ok(sched) =
+    runner.start(
+      [],
+      cognitive,
+      cp,
+      600_000,
+      0,
+      0,
+      0,
+      fd,
+      types.disabled_idle_config(),
+    )
 
   // Add a recurring task with no fire budget exhaustion.
   let add_reply = process.new_subject()
@@ -492,7 +580,18 @@ pub fn complete_job_succeeds_for_one_shot_reminder_test() {
   clean_schedule_dir(cp)
   let fd = frontdoor.start()
   let cognitive = auto_reply_cognitive(fd)
-  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0, fd)
+  let assert Ok(sched) =
+    runner.start(
+      [],
+      cognitive,
+      cp,
+      600_000,
+      0,
+      0,
+      0,
+      fd,
+      types.disabled_idle_config(),
+    )
 
   let add_reply = process.new_subject()
   process.send(
@@ -522,7 +621,18 @@ pub fn complete_job_succeeds_for_recurring_with_max_reached_test() {
   clean_schedule_dir(cp)
   let fd = frontdoor.start()
   let cognitive = auto_reply_cognitive(fd)
-  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0, fd)
+  let assert Ok(sched) =
+    runner.start(
+      [],
+      cognitive,
+      cp,
+      600_000,
+      0,
+      0,
+      0,
+      fd,
+      types.disabled_idle_config(),
+    )
 
   // Recurring job that has already exhausted its max_occurrences.
   let job =
@@ -560,7 +670,18 @@ pub fn recovery_rearms_completed_recurring_job_test() {
 
   let fd = frontdoor.start()
   let cognitive = auto_reply_cognitive(fd)
-  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0, fd)
+  let assert Ok(sched) =
+    runner.start(
+      [],
+      cognitive,
+      cp,
+      600_000,
+      0,
+      0,
+      0,
+      fd,
+      types.disabled_idle_config(),
+    )
 
   let status_subj = process.new_subject()
   process.send(sched, GetStatus(reply_to: status_subj))
@@ -589,7 +710,18 @@ pub fn recovery_leaves_exhausted_recurring_completed_test() {
 
   let fd = frontdoor.start()
   let cognitive = auto_reply_cognitive(fd)
-  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0, fd)
+  let assert Ok(sched) =
+    runner.start(
+      [],
+      cognitive,
+      cp,
+      600_000,
+      0,
+      0,
+      0,
+      fd,
+      types.disabled_idle_config(),
+    )
 
   let status_subj = process.new_subject()
   process.send(sched, GetStatus(reply_to: status_subj))
@@ -621,7 +753,18 @@ pub fn auto_purge_keeps_recurring_jobs_test() {
 
   let fd = frontdoor.start()
   let cognitive = auto_reply_cognitive(fd)
-  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0, fd)
+  let assert Ok(sched) =
+    runner.start(
+      [],
+      cognitive,
+      cp,
+      600_000,
+      0,
+      0,
+      0,
+      fd,
+      types.disabled_idle_config(),
+    )
   let status_subj = process.new_subject()
   process.send(sched, GetStatus(reply_to: status_subj))
   let assert Ok(jobs) = process.receive(status_subj, 5000)
@@ -684,7 +827,18 @@ pub fn auto_purge_drops_old_terminal_one_shot_test() {
 
   let fd = frontdoor.start()
   let cognitive = auto_reply_cognitive(fd)
-  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0, fd)
+  let assert Ok(sched) =
+    runner.start(
+      [],
+      cognitive,
+      cp,
+      600_000,
+      0,
+      0,
+      0,
+      fd,
+      types.disabled_idle_config(),
+    )
 
   let status_subj = process.new_subject()
   process.send(sched, GetStatus(reply_to: status_subj))
@@ -710,7 +864,18 @@ pub fn complete_job_with_missing_required_tool_routes_to_failed_test() {
   clean_schedule_dir(cp)
   let fd = frontdoor.start()
   let cognitive = auto_reply_cognitive(fd)
-  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0, fd)
+  let assert Ok(sched) =
+    runner.start(
+      [],
+      cognitive,
+      cp,
+      600_000,
+      0,
+      0,
+      0,
+      fd,
+      types.disabled_idle_config(),
+    )
 
   // Add a job that requires analyze_affect_performance.
   let add_reply = process.new_subject()
@@ -753,7 +918,18 @@ pub fn complete_job_with_required_tools_fired_succeeds_test() {
   clean_schedule_dir(cp)
   let fd = frontdoor.start()
   let cognitive = auto_reply_cognitive(fd)
-  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0, fd)
+  let assert Ok(sched) =
+    runner.start(
+      [],
+      cognitive,
+      cp,
+      600_000,
+      0,
+      0,
+      0,
+      fd,
+      types.disabled_idle_config(),
+    )
 
   let add_reply = process.new_subject()
   let job =
@@ -792,7 +968,18 @@ pub fn complete_job_with_empty_required_tools_skips_check_test() {
   clean_schedule_dir(cp)
   let fd = frontdoor.start()
   let cognitive = auto_reply_cognitive(fd)
-  let assert Ok(sched) = runner.start([], cognitive, cp, 600_000, 0, 0, 0, fd)
+  let assert Ok(sched) =
+    runner.start(
+      [],
+      cognitive,
+      cp,
+      600_000,
+      0,
+      0,
+      0,
+      fd,
+      types.disabled_idle_config(),
+    )
 
   // Default required_tools is []; the check is disabled.
   let add_reply = process.new_subject()

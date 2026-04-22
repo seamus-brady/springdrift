@@ -419,6 +419,9 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `default_profile` | `--profile` | None | Profile to load at startup |
 | `max_autonomous_cycles_per_hour` | — | 20 | Max scheduler-triggered cycles per hour (0 = unlimited) |
 | `autonomous_token_budget_per_hour` | — | 500000 | Max tokens (input+output) scheduler may consume per hour (0 = unlimited) |
+| `scheduler_idle_window_minutes` | — | 10 | Defer recurring scheduler ticks if a UserInput arrived within this window. 0 disables idle-gating. |
+| `scheduler_max_defer_minutes` | — | 60 | Hard ceiling on deferral. After this many minutes past the scheduled fire time, the job fires regardless of operator activity. |
+| `scheduler_retry_interval_seconds` | — | 60 | How often a deferred tick re-checks the idle condition while waiting. |
 | `xstructor_max_retries` | — | 3 | Max XStructor XML validation+retry attempts |
 | `preamble_budget_chars` | — | 8000 | Max chars for rendered preamble slots (~2000 tokens) |
 | `cbr_embedding_enabled` | — | True | Enable Ollama embedding for CBR retrieval (fails on startup if Ollama unreachable) |

@@ -136,6 +136,7 @@ pub fn start(
         input_queue: [],
         input_queue_cap: cfg.input_queue_cap,
         supervisor: None,
+        scheduler: None,
         identity: IdentityContext(
           agent_uuid: cfg.agent_uuid,
           agent_name: cfg.agent_name,
@@ -251,6 +252,7 @@ fn handle_message(
       types.GateTimeout(..) -> "GateTimeout"
       types.WatchdogTimeout(..) -> "WatchdogTimeout"
       types.InjectUserAnswer(..) -> "InjectUserAnswer"
+      types.SetScheduler(..) -> "SetScheduler"
     },
     state.cycle_id,
   )
@@ -273,6 +275,8 @@ fn handle_message(
       cognitive_agents.handle_agent_question(state, question, agent, reply_to)
     AgentEvent(event) -> cognitive_agents.handle_agent_event(state, event)
     SetModel(model) -> CognitiveState(..state, model:)
+    types.SetScheduler(scheduler) ->
+      CognitiveState(..state, scheduler: Some(scheduler))
     types.GetMessages(reply_to:) -> {
       process.send(reply_to, state.messages)
       state
@@ -596,6 +600,17 @@ fn handle_user_input(
     "Input: " <> string.slice(text, 0, 80),
     state.cycle_id,
   )
+  // Idle-gate signal. Pushed on every UserInput regardless of whether
+  // we accept or queue — the scheduler only cares that the operator is
+  // active. Skipped when no scheduler is wired (tests, boot order).
+  case state.scheduler {
+    option.Some(sched) ->
+      process.send(
+        sched,
+        scheduler_types.UserInputObserved(at_ms: monotonic_now_ms()),
+      )
+    option.None -> Nil
+  }
   // Guard: ignore input if not idle
   case state.status {
     Idle -> {
