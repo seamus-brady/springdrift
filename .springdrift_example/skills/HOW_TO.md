@@ -377,6 +377,23 @@ Active tasks and forecaster events appear in the `<tasks>` and `<events>` sectio
 of the sensorium. No tool calls are needed to see current work — it is part of your
 ambient perception at every cycle.
 
+## Captures (MVP commitment tracker)
+
+A post-cycle scanner extracts commitments and promises from each cycle's prose —
+"I'll follow up", "remind me to check X tomorrow", etc. Results are **captures**:
+short records in `.springdrift/memory/captures/` with a count visible in the
+sensorium as `<captures pending="N"/>`.
+
+- **list_captures**(status?) — view captures (default pending; `status="all"` for full log)
+- **clarify_capture**(id, due_at, description) — schedule a cycle for a pending capture
+  (delegates to scheduler; capture marked clarified)
+- **dismiss_capture**(id, reason) — drop a capture with a short reason
+
+Rule of thumb: respond to the operator first. Only look at captures when the current
+message references one, or act on them when they genuinely belong to the conversation
+now. Captures you don't clarify or dismiss auto-expire after 14 days. Full guidance
+in the `captures` skill.
+
 ## Degradation Paths
 
 When a required API key is missing, fall back gracefully:
@@ -385,6 +402,7 @@ When a required API key is missing, fall back gracefully:
 - **jina_reader unavailable** (no `JINA_API_KEY`) → use `fetch_url` as fallback
 - **Sandbox unavailable** (no podman) → coder uses `request_human_input` to ask user to run code
 - **Comms unavailable** (no `AGENTMAIL_API_KEY` or `comms_enabled = false`) → comms agent not loaded, email tools unavailable
+- **Captures scanner disabled** (`captures_scanner_enabled = false`) → no `<captures>` block in sensorium; `list_captures` / `clarify_capture` / `dismiss_capture` still available but act on existing log only
 
 ## What to Avoid
 

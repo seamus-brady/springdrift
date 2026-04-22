@@ -49,6 +49,7 @@ import query_complexity
 import scheduler/types as scheduler_types
 import slog
 import tools/builtin
+import tools/captures as captures_tools
 import tools/learning_goals as learning_goal_tools
 import tools/memory
 import tools/planner as planner_tools
@@ -73,6 +74,10 @@ pub fn start(
 ) -> Result(Subject(CognitiveMessage), Nil) {
   // The cognitive loop gets agent tools + team tools + request_human_input + memory + planner tools
   let team_tools = list.map(cfg.team_specs, team.team_to_tool)
+  let captures_tool_set = case cfg.captures_scanner_enabled {
+    True -> captures_tools.all()
+    False -> []
+  }
   let tools =
     list.flatten([
       [builtin.human_input_tool()],
@@ -80,6 +85,7 @@ pub fn start(
       planner_tools.all(),
       learning_goal_tools.all(),
       strategy_tools.all(),
+      captures_tool_set,
       cfg.agent_tools,
       team_tools,
     ])
@@ -162,6 +168,9 @@ pub fn start(
           strategy_registry_enabled: cfg.strategy_registry_enabled,
           evidence_config: cfg.evidence_config,
           frontdoor: cfg.frontdoor,
+          captures_scanner_enabled: cfg.captures_scanner_enabled,
+          captures_dir: cfg.captures_dir,
+          captures_max_per_cycle: cfg.captures_max_per_cycle,
         ),
         redact_secrets: cfg.redact_secrets,
         pending_sensory_events: [],

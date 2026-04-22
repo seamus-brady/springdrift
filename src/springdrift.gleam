@@ -24,6 +24,7 @@ import agents/researcher
 import agents/scheduler as scheduler_agent
 import agents/writer
 import backup/actor as backup_actor
+import captures/expiry as captures_expiry
 import cbr/bridge as cbr_bridge
 import comms/email as comms_email
 import comms/poller as comms_poller
@@ -490,6 +491,18 @@ fn run(cfg: AppConfig) -> Nil {
   }
   let lib = option.Some(librarian_subj)
 
+  // Captures (MVP commitment tracker): sweep expired pending captures at
+  // startup, then populate the Librarian's pending cache from disk. The
+  // sweep is startup-only in MVP — a long-running agent picks up any
+  // captures that aged out since the last boot.
+  let _ =
+    captures_expiry.sweep(
+      paths.captures_dir(),
+      option.unwrap(cfg.captures_expiry_days, 14),
+      option.None,
+    )
+  librarian.init_captures(librarian_subj, paths.captures_dir())
+
   // Start the Housekeeper (non-critical — log + continue on failure)
   let hk_default = housekeeper.default_config()
   let housekeeper_config =
@@ -895,6 +908,12 @@ fn run(cfg: AppConfig) -> Nil {
       ),
       evidence_config: provenance_check.default_config(),
       frontdoor: option.Some(frontdoor_subj),
+      captures_scanner_enabled: option.unwrap(
+        cfg.captures_scanner_enabled,
+        True,
+      ),
+      captures_dir: paths.captures_dir(),
+      captures_max_per_cycle: option.unwrap(cfg.captures_max_per_cycle, 10),
     ))
   {
     Ok(subj) -> subj

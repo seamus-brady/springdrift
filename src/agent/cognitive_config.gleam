@@ -99,6 +99,14 @@ pub type CognitiveConfig {
     /// legacy reply_to path is authoritative. Expected non-None once
     /// Phase 5 lands.
     frontdoor: Option(Subject(frontdoor_types.FrontdoorMessage)),
+    /// Captures (MVP commitment tracker). When True, the post-cycle
+    /// scanner spawns alongside the Archivist and appends detected
+    /// commitments to the captures JSONL. Default False for tests.
+    captures_scanner_enabled: Bool,
+    /// Captures directory. Used by scanner + tools + expiry sweep.
+    captures_dir: String,
+    /// Max captures kept per cycle after the sanity filter.
+    captures_max_per_cycle: Int,
   )
 }
 
@@ -167,5 +175,8 @@ pub fn default_test_config(
     strategy_registry_enabled: True,
     evidence_config: provenance_check.default_config(),
     frontdoor: None,
+    captures_scanner_enabled: False,
+    captures_dir: base <> "/captures",
+    captures_max_per_cycle: 10,
   )
 }
