@@ -31,6 +31,7 @@ import gleam/set
 import gleam/string
 import llm/types.{type Message, Assistant, TextContent, User}
 import mist.{type Connection, type ResponseData}
+import narrative/export as narrative_export
 import narrative/librarian.{type LibrarianMessage}
 import narrative/log as narrative_log
 import narrative/types as narrative_types
@@ -240,6 +241,10 @@ fn handle_request(
               bytes_tree.from_string(html.admin_page(agent_name, agent_version)),
             ),
           )
+
+        // Thread export as markdown — /export/thread/<thread_id>.md
+        ["export", "thread", filename] ->
+          export_thread_response(filename, narrative_dir)
 
         // WebSocket upgrade
         ["ws"] ->
@@ -1321,4 +1326,39 @@ fn build_normative_config_json() -> String {
         ]),
       )
   }
+}
+
+// ---------------------------------------------------------------------------
+// /export/thread/<id>.md — markdown export of a narrative thread
+// ---------------------------------------------------------------------------
+
+/// Render a thread's narrative entries as markdown for handoff or
+/// offline review. Accepts either a bare thread_id or
+/// thread_id.md — the .md suffix is stripped so browsers get a
+/// sensible filename on direct-link opens.
+fn export_thread_response(
+  filename: String,
+  narrative_dir: String,
+) -> Response(ResponseData) {
+  let thread_id = case string.ends_with(filename, ".md") {
+    True -> string.drop_end(filename, 3)
+    False -> filename
+  }
+  let entries = narrative_log.load_thread(narrative_dir, thread_id)
+  let title = case entries {
+    [] -> "Thread " <> thread_id <> " (no entries found)"
+    [first_entry, ..] ->
+      case first_entry.thread {
+        option.Some(t) -> t.thread_name <> " (" <> thread_id <> ")"
+        option.None -> "Thread " <> thread_id
+      }
+  }
+  let body = narrative_export.render_thread(title, entries)
+  response.new(200)
+  |> response.set_header("content-type", "text/markdown; charset=utf-8")
+  |> response.set_header(
+    "content-disposition",
+    "inline; filename=\"" <> thread_id <> ".md\"",
+  )
+  |> response.set_body(mist.Bytes(bytes_tree.from_string(body)))
 }
