@@ -20,6 +20,7 @@ import llm/tool
 import llm/types.{
   type Tool, type ToolCall, type ToolResult, ToolFailure, ToolSuccess,
 }
+import llm/verification
 import sandbox/types as sandbox_types
 import slog
 
@@ -490,6 +491,15 @@ fn format_exec_result(
     0 -> output
     code -> output <> "\n\nExit code: " <> int.to_string(code)
   }
+
+  // Append the canonical Verification: line so the coder (and any
+  // future tool consumer) can read a single evidence phrase without
+  // parsing stderr/exit_code. Unverified stderr on a zero exit is
+  // still marked Unverified — the agent has to judge the content
+  // rather than bluff past.
+  let outcome =
+    verification.from_exec(exec_result.exit_code, exec_result.stderr)
+  let output = verification.append(output, outcome)
 
   case exec_result.exit_code {
     0 -> ToolSuccess(tool_use_id:, content: output)
