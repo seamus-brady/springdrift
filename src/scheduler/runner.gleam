@@ -22,10 +22,10 @@ import gleam/string
 import scheduler/delivery
 import scheduler/log as schedule_log
 import scheduler/types.{
-  type ScheduleTaskConfig, type ScheduledJob, type SchedulerMessage, Cancelled,
-  Completed, Failed, ForAgent, GetStatus, JobComplete, JobFailed, Pending,
-  ProfileJob, RecurringTask, Running, ScheduledJob, StopAll, StuckJobCheck, Tick,
-  WebhookDelivery,
+  type IdleConfig, type ScheduleTaskConfig, type ScheduledJob,
+  type SchedulerMessage, Cancelled, Completed, Failed, ForAgent, GetStatus,
+  JobComplete, JobFailed, Pending, ProfileJob, RecurringTask, Running,
+  ScheduledJob, StopAll, StuckJobCheck, Tick, UserInputObserved, WebhookDelivery,
 }
 import slog
 
@@ -47,6 +47,7 @@ pub fn start(
   token_budget_per_hour: Int,
   meta_max_reflection_budget_pct: Int,
   frontdoor: Subject(frontdoor_types.FrontdoorMessage),
+  idle_config: IdleConfig,
 ) -> Result(Subject(SchedulerMessage), Nil) {
   let setup = process.new_subject()
   process.spawn_unlinked(fn() {
@@ -201,6 +202,9 @@ pub fn start(
       token_budget_per_hour,
       meta_max_reflection_budget_pct,
       frontdoor,
+      idle_config,
+      None,
+      dict.new(),
       [],
       [],
       [],
@@ -231,6 +235,9 @@ fn scheduler_loop(
   token_budget_per_hour: Int,
   meta_max_reflection_budget_pct: Int,
   frontdoor: Subject(frontdoor_types.FrontdoorMessage),
+  idle_config: IdleConfig,
+  last_user_input_at_ms: option.Option(Int),
+  defer_start_ms: Dict(String, Int),
   cycle_timestamps: List(Int),
   meta_cycle_timestamps: List(Int),
   token_usage: List(#(Int, Int)),
@@ -251,6 +258,9 @@ fn scheduler_loop(
       token_budget_per_hour,
       meta_max_reflection_budget_pct,
       frontdoor,
+      idle_config,
+      last_user_input_at_ms,
+      defer_start_ms,
       cycle_timestamps,
       meta_cycle_timestamps,
       token_usage,
@@ -267,6 +277,66 @@ fn scheduler_loop(
       token_budget_per_hour,
       meta_max_reflection_budget_pct,
       frontdoor,
+      idle_config,
+      last_user_input_at_ms,
+      defer_start_ms,
+      cts,
+      mts,
+      tu,
+    )
+  }
+  let loop_with_idle = fn(liu, defers) {
+    scheduler_loop(
+      self,
+      jobs,
+      cognitive,
+      schedule_dir,
+      stuck_timeout_ms,
+      max_cycles_per_hour,
+      token_budget_per_hour,
+      meta_max_reflection_budget_pct,
+      frontdoor,
+      idle_config,
+      liu,
+      defers,
+      cycle_timestamps,
+      meta_cycle_timestamps,
+      token_usage,
+    )
+  }
+  let loop_full = fn(j, defers) {
+    scheduler_loop(
+      self,
+      j,
+      cognitive,
+      schedule_dir,
+      stuck_timeout_ms,
+      max_cycles_per_hour,
+      token_budget_per_hour,
+      meta_max_reflection_budget_pct,
+      frontdoor,
+      idle_config,
+      last_user_input_at_ms,
+      defers,
+      cycle_timestamps,
+      meta_cycle_timestamps,
+      token_usage,
+    )
+  }
+  let loop_fire = fn(j, defers, cts, mts, tu) {
+    scheduler_loop(
+      self,
+      j,
+      cognitive,
+      schedule_dir,
+      stuck_timeout_ms,
+      max_cycles_per_hour,
+      token_budget_per_hour,
+      meta_max_reflection_budget_pct,
+      frontdoor,
+      idle_config,
+      last_user_input_at_ms,
+      defers,
       cts,
       mts,
       tu,
@@ -282,6 +352,10 @@ fn scheduler_loop(
       let status_list = dict.values(jobs)
       process.send(reply_to, status_list)
       loop(jobs)
+    }
+
+    UserInputObserved(at_ms:) -> {
+      loop_with_idle(Some(at_ms), defer_start_ms)
     }
 
     Tick(name:) -> {
@@ -360,38 +434,99 @@ fn scheduler_loop(
                   loop(jobs)
                 }
                 False -> {
-                  slog.info(
-                    "scheduler",
-                    "loop",
-                    "Tick: running job '" <> name <> "'",
-                    None,
-                  )
-                  // Mark as running
-                  let updated_job = ScheduledJob(..job, status: Running)
-                  let updated_jobs = dict.insert(jobs, name, updated_job)
-
-                  // Spawn async query to cognitive loop
-                  spawn_job(self, cognitive, frontdoor, job)
-
-                  // Schedule stuck-job timeout check
-                  process.send_after(
-                    self,
-                    stuck_timeout_ms,
-                    StuckJobCheck(name:),
-                  )
-
-                  // Track this cycle for rate limiting
-                  let new_timestamps = [now, ..recent_cycles]
-                  let new_meta_timestamps = case is_meta {
-                    True -> [now, ..recent_meta]
-                    False -> recent_meta
+                  // Idle-gate: defer recurring ticks while the operator
+                  // is actively typing, up to a max deferral window
+                  // after which we fire anyway so long conversations
+                  // cannot starve recurring work.
+                  let should_defer = case
+                    job.kind,
+                    idle_config.idle_window_ms > 0
+                  {
+                    RecurringTask, True ->
+                      case last_user_input_at_ms {
+                        Some(ts) -> now - ts < idle_config.idle_window_ms
+                        None -> False
+                      }
+                    _, _ -> False
                   }
-                  loop_with_tracking(
-                    updated_jobs,
-                    new_timestamps,
-                    new_meta_timestamps,
-                    recent_tokens,
-                  )
+                  let defer_started_at = case dict.get(defer_start_ms, name) {
+                    Ok(started) -> started
+                    Error(_) -> now
+                  }
+                  let deferral_exhausted =
+                    should_defer
+                    && now - defer_started_at >= idle_config.max_defer_ms
+                  case should_defer && !deferral_exhausted {
+                    True -> {
+                      slog.info(
+                        "scheduler",
+                        "loop",
+                        "Idle-gate: deferring job '"
+                          <> name
+                          <> "' (operator active; retry in "
+                          <> int_to_string(idle_config.retry_interval_ms)
+                          <> "ms)",
+                        None,
+                      )
+                      schedule_tick(self, name, idle_config.retry_interval_ms)
+                      let new_defers = case dict.get(defer_start_ms, name) {
+                        Ok(_) -> defer_start_ms
+                        Error(_) -> dict.insert(defer_start_ms, name, now)
+                      }
+                      loop_full(jobs, new_defers)
+                    }
+                    False -> {
+                      case deferral_exhausted {
+                        True ->
+                          slog.warn(
+                            "scheduler",
+                            "loop",
+                            "Idle-gate: max defer ("
+                              <> int_to_string(idle_config.max_defer_ms)
+                              <> "ms) exhausted for '"
+                              <> name
+                              <> "' — firing despite operator activity",
+                            None,
+                          )
+                        False -> Nil
+                      }
+                      slog.info(
+                        "scheduler",
+                        "loop",
+                        "Tick: running job '" <> name <> "'",
+                        None,
+                      )
+                      // Clear any deferral bookkeeping for this job.
+                      let cleared_defers = dict.delete(defer_start_ms, name)
+                      // Mark as running
+                      let updated_job = ScheduledJob(..job, status: Running)
+                      let updated_jobs = dict.insert(jobs, name, updated_job)
+
+                      // Spawn async query to cognitive loop
+                      spawn_job(self, cognitive, frontdoor, job)
+
+                      // Schedule stuck-job timeout check
+                      process.send_after(
+                        self,
+                        stuck_timeout_ms,
+                        StuckJobCheck(name:),
+                      )
+
+                      // Track this cycle for rate limiting
+                      let new_timestamps = [now, ..recent_cycles]
+                      let new_meta_timestamps = case is_meta {
+                        True -> [now, ..recent_meta]
+                        False -> recent_meta
+                      }
+                      loop_fire(
+                        updated_jobs,
+                        cleared_defers,
+                        new_timestamps,
+                        new_meta_timestamps,
+                        recent_tokens,
+                      )
+                    }
+                  }
                 }
               }
             }

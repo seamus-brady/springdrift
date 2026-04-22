@@ -197,6 +197,19 @@ pub fn consolidation_log_dir() -> String {
   project_dir() <> "/memory/consolidation"
 }
 
+/// Meta-learning worker state dir: .springdrift/memory/meta_learning/
+/// Used by BEAM workers (affect correlation, fabrication audit, voice
+/// drift) to persist `last_run_at` between restarts so a VM bounce
+/// doesn't retrigger an audit that just ran.
+pub fn meta_learning_dir() -> String {
+  project_dir() <> "/memory/meta_learning"
+}
+
+/// Sidecar file tracking last-run timestamps for meta-learning workers.
+pub fn meta_learning_state_file() -> String {
+  meta_learning_dir() <> "/workers.json"
+}
+
 /// XStructor schema directory: .springdrift/schemas/
 pub fn schemas_dir() -> String {
   project_dir() <> "/schemas"

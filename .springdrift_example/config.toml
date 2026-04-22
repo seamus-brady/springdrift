@@ -198,6 +198,13 @@ summary_schedule = "weekly"
 # max_autonomous_cycles_per_hour = 20
 # autonomous_token_budget_per_hour = 500000
 
+# Idle-gate: defers recurring scheduler ticks when the operator is
+# actively using the chat. Prevents meta-jobs from hijacking a live
+# conversation. Set idle_window_minutes = 0 to disable gating.
+# idle_window_minutes = 10       # Defer if last UserInput was within 10 min
+# max_defer_minutes   = 60       # Hard ceiling — fire after this regardless
+# retry_interval_seconds = 60    # How often to re-check while deferred
+
 # ── Web GUI ──────────────────────────────────────────────────────────────────
 
 [web]

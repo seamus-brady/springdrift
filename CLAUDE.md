@@ -419,6 +419,9 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `default_profile` | `--profile` | None | Profile to load at startup |
 | `max_autonomous_cycles_per_hour` | — | 20 | Max scheduler-triggered cycles per hour (0 = unlimited) |
 | `autonomous_token_budget_per_hour` | — | 500000 | Max tokens (input+output) scheduler may consume per hour (0 = unlimited) |
+| `scheduler_idle_window_minutes` | — | 10 | Defer recurring scheduler ticks if a UserInput arrived within this window. 0 disables idle-gating. |
+| `scheduler_max_defer_minutes` | — | 60 | Hard ceiling on deferral. After this many minutes past the scheduled fire time, the job fires regardless of operator activity. |
+| `scheduler_retry_interval_seconds` | — | 60 | How often a deferred tick re-checks the idle condition while waiting. |
 | `xstructor_max_retries` | — | 3 | Max XStructor XML validation+retry attempts |
 | `preamble_budget_chars` | — | 8000 | Max chars for rendered preamble slots (~2000 tokens) |
 | `cbr_embedding_enabled` | — | True | Enable Ollama embedding for CBR retrieval (fails on startup if Ollama unreachable) |
@@ -456,12 +459,14 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `remembrancer_dormant_thread_days` | — | 7 | Min days idle before a thread is dormant |
 | `remembrancer_min_pattern_cases` | — | 3 | Min cases to form a mined pattern |
 | `strategy_registry_enabled` | — | True | Meta-Learning Phase A. Future config gate; field parses today, no-op without seeded strategies |
-| `meta_scheduler_enabled` | — | False | Phase F. Opt-in. Adds 5 recurring meta-learning jobs to the scheduler at startup |
-| `meta_consolidation_interval_hours` | — | 168 | Phase F. Weekly consolidation cadence |
-| `meta_goal_review_interval_hours` | — | 24 | Phase F. Daily goal-review cadence |
-| `meta_skill_decay_interval_hours` | — | 168 | Phase F. Weekly skill-decay audit cadence |
-| `meta_affect_correlation_interval_hours` | — | 168 | Phase F. Weekly affect-performance correlation cadence |
-| `meta_strategy_review_interval_hours` | — | 336 | Phase F. Fortnightly strategy review cadence |
+| `meta_scheduler_enabled` | — | True | Gate for **both** the scheduler's judgement jobs AND the BEAM workers. Set False to disable all meta-learning housekeeping. |
+| `meta_consolidation_interval_hours` | — | 168 | Weekly consolidation cadence (scheduler, judgement job) |
+| `meta_goal_review_interval_hours` | — | 24 | Daily goal-review cadence (scheduler, judgement job) |
+| `meta_skill_decay_interval_hours` | — | 168 | Weekly skill-decay audit cadence (scheduler, judgement job) |
+| `meta_strategy_review_interval_hours` | — | 336 | Fortnightly strategy review cadence (scheduler, judgement job) |
+| `meta_affect_correlation_interval_hours` | — | 168 | Weekly affect-performance correlation (BEAM worker, off-cog) |
+| `meta_fabrication_audit_interval_hours` | — | 24 | Daily fabrication audit (BEAM worker, off-cog) |
+| `meta_voice_drift_interval_hours` | — | 24 | Daily voice-drift check (BEAM worker, off-cog) |
 
 ## Memory architecture
 

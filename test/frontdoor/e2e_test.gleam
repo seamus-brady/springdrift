@@ -21,7 +21,7 @@ import agent/types.{type Notification, UserAnswer, UserInput}
 import frontdoor
 import frontdoor/types.{
   type Delivery, DeliverQuestion, DeliverReply, Subscribe, UserSource,
-} as frontdoor_types
+} as _
 import gleam/erlang/process.{type Subject}
 import gleam/list
 import gleam/option.{Some}

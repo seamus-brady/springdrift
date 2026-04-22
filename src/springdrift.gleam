@@ -55,6 +55,7 @@ import llm/provider.{type Provider}
 import llm/retry
 import llm/types as llm_types
 import meta_learning/scheduler as meta_scheduler
+import meta_learning/workers as meta_workers
 import narrative/appraiser
 import narrative/curator
 import narrative/housekeeper
@@ -69,6 +70,7 @@ import sandbox/manager as sandbox_manager_mod
 import sandbox/types as sandbox_types
 import scheduler/log as schedule_log
 import scheduler/runner as scheduler_runner
+import scheduler/types as scheduler_types
 import simplifile
 import skills
 import slog
@@ -974,6 +976,19 @@ fn run(cfg: AppConfig) -> Nil {
       )
   }
   let meta_budget_pct = option.unwrap(cfg.meta_max_reflection_budget_pct, 25)
+  // Idle-gate config. Defaults: 10 min idle window, 60 min hard defer
+  // ceiling, 60 s retry interval. Set idle_window_minutes=0 in the
+  // config to disable gating entirely.
+  let idle_window_minutes = option.unwrap(cfg.scheduler_idle_window_minutes, 10)
+  let max_defer_minutes = option.unwrap(cfg.scheduler_max_defer_minutes, 60)
+  let retry_interval_seconds =
+    option.unwrap(cfg.scheduler_retry_interval_seconds, 60)
+  let idle_config =
+    scheduler_types.IdleConfig(
+      idle_window_ms: idle_window_minutes * 60 * 1000,
+      max_defer_ms: max_defer_minutes * 60 * 1000,
+      retry_interval_ms: retry_interval_seconds * 1000,
+    )
   let runner_result =
     scheduler_runner.start(
       meta_tasks,
@@ -984,6 +999,7 @@ fn run(cfg: AppConfig) -> Nil {
       token_budget_per_hour,
       meta_budget_pct,
       frontdoor_subj,
+      idle_config,
     )
   let scheduler_subj = case runner_result {
     Ok(runner_subj) -> {
@@ -1009,6 +1025,15 @@ fn run(cfg: AppConfig) -> Nil {
     }
   }
 
+  // Wire scheduler to cognitive for idle-gate signalling: cognitive
+  // pushes UserInputObserved on each UserInput so the scheduler can
+  // defer recurring ticks while the operator is active.
+  case scheduler_subj {
+    option.Some(sched) ->
+      process.send(cognitive_subj, agent_types.SetScheduler(scheduler: sched))
+    option.None -> Nil
+  }
+
   // Wire scheduler to curator for open_commitments slot
   case scheduler_subj {
     option.Some(sched) -> curator.set_scheduler(curator_subj, sched)
@@ -1024,6 +1049,45 @@ fn run(cfg: AppConfig) -> Nil {
     option.Some(hk) -> curator.set_housekeeper(curator_subj, hk)
     option.None -> Nil
   }
+
+  // Start Phase 2 meta-learning BEAM workers. These run three
+  // mechanical audits (affect correlation, fabrication audit, voice
+  // drift) on their own timers, bypassing the cognitive loop so
+  // operator chat is never interrupted by a housekeeping tick.
+  // Judgement jobs stay on the scheduler (Phase 1 idle-gate handles
+  // those).
+  let worker_ctx =
+    tools_remembrancer.RemembrancerContext(
+      narrative_dir: option.unwrap(cfg.narrative_dir, paths.narrative_dir()),
+      cbr_dir: paths.cbr_dir(),
+      facts_dir: paths.facts_dir(),
+      knowledge_consolidation_dir: paths.knowledge_consolidation_dir(),
+      consolidation_log_dir: paths.consolidation_log_dir(),
+      cycle_id: "meta-worker",
+      agent_id: "meta-worker",
+      librarian: option.Some(librarian_subj),
+      review_confidence_threshold: option.unwrap(
+        cfg.remembrancer_review_confidence_threshold,
+        0.3,
+      ),
+      dormant_thread_days: option.unwrap(
+        cfg.remembrancer_dormant_thread_days,
+        7,
+      ),
+      min_pattern_cases: option.unwrap(cfg.remembrancer_min_pattern_cases, 3),
+      fact_decay_half_life_days: option.unwrap(
+        cfg.fact_decay_half_life_days,
+        30,
+      ),
+      gate_provider: option.None,
+      gate_model: "",
+      skills_dir: case option.unwrap(cfg.skills_dirs, default_skill_dirs()) {
+        [first, ..] -> first
+        [] -> paths.project_dir() <> "/skills"
+      },
+      max_promotions_per_day: option.unwrap(cfg.meta_max_promotions_per_day, 3),
+    )
+  let _meta_worker_subjects = meta_workers.start_all(cfg, worker_ctx)
 
   // Start Forecaster if enabled (needs cognitive_subj + librarian)
   case option.unwrap(cfg.forecaster_enabled, False) {
