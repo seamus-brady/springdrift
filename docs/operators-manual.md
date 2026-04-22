@@ -435,6 +435,68 @@ file is filtered to remove gate-injection messages so the agent
 doesn't relearn self-censorship on resume. Stale by more than a day
 triggers a warning in the log but loads anyway.
 
+### Selective rollback via forward-write
+
+**There is no "undo" primitive.** Springdrift's append-only JSONL
+stores do not support deleting or editing a past entry — that's a
+feature, not a gap, because it preserves an audit trail that survives
+the same mistake being made twice. What you have instead are
+**forward-write primitives** that change the agent's current view of
+memory without erasing history. Most operator requests for "undo
+the last X" map to one of these.
+
+| You want to undo... | Use this, because... | Tool / ask the agent to call |
+|---|---|---|
+| A fact the agent wrote with the wrong value | Supersede it. The replay logic uses the most recent write, so the bad value disappears from retrieval. The old write stays in the log for audit. | `memory_write` with the corrected value (same key) |
+| A fact you want gone entirely | Clear the key. Reads return nothing; history preserved. | `memory_clear_key` |
+| A CBR case the agent shouldn't retrieve anymore (e.g. wrong lesson drawn) | Suppress it. The case is filtered out of future retrievals but stays on disk. Reversible via `unsuppress_case`. | Observer agent: `suppress_case` |
+| A CBR case that's technically correct but misleading without caveats | Annotate it. Adds a pitfall note that's shown alongside the case whenever it's retrieved. | Observer agent: `annotate_case` |
+| A CBR case with factually wrong content (wrong domain, wrong outcome) | Correct it. Writes a correction entry; retrieval applies the correction at read time. | Observer agent: `correct_case` |
+| A CBR case whose retrieval weight is too high or low | Boost it. Explicitly raises or lowers confidence; influences retrieval ordering. | Observer agent: `boost_case` |
+| A planner task that shouldn't be active anymore | Abandon it. Task stops accruing forecast-score evaluations; history preserved. | Planner agent: `abandon_task` |
+| An endeavour that should be shelved | Cancel it via the Project Manager. Phases and work sessions stay on record. | `update_endeavour` with status change |
+| A bad D' rejection the safety system made | Report it as a false positive. The meta observer factors this into threshold tuning. | Observer agent: `report_false_positive` |
+| A scheduled job that shouldn't fire again | Cancel it via the scheduler agent. The schedule file keeps the record. | Scheduler: `cancel_item` |
+
+Mental model: you are **adding a correcting entry**, not removing a
+wrong one. The agent's current behaviour is controlled by the replay
+result; the replay respects ordering and supersession rules; so the
+newest correct entry wins without requiring you to delete anything.
+
+When operator intervention is needed (you're in the chat, not asking
+the agent), the simplest pattern is to tell the agent what you want
+and let it pick the tool:
+
+> "The fact `project_deadline` is wrong — should be 2026-05-15."
+> "Suppress the CBR case about the Dublin rent analysis; the outcome
+> classification was wrong."
+> "Abandon the `cleanup-legacy-auth` task, superseded by the new
+> auth endeavour."
+
+If something needs to happen without the agent in the loop (agent
+down, unsafe to chat), the JSONL files can be hand-edited with care —
+but see the "General principle" at the top of this section before
+doing that.
+
+### When forward-write isn't enough
+
+If the corruption spans many entries or the replay logic itself is
+misbehaving, the appropriate move is still the full-state git rollback:
+
+```bash
+cd .springdrift/
+git log --oneline -20               # pick a known-good commit
+git diff HEAD~1 --stat              # sanity-check what changed
+git checkout <sha>                  # roll back everything
+# or, to review first:
+git checkout <sha> -- memory/cbr/cases.jsonl
+```
+
+This nukes everything back to a point in time, including audit
+history. It's the right answer for "the fact store has been
+corrupted by a bad test run," not for "the agent learned the wrong
+lesson from one cycle."
+
 ---
 
 ## 7. Auditing
