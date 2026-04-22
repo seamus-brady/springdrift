@@ -21,6 +21,7 @@ import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
+import llm/message_repair
 import llm/request
 import llm/types as llm_types
 import meta/types as meta_types
@@ -287,10 +288,18 @@ pub fn build_request_with_model(
   model: String,
   messages: List(llm_types.Message),
 ) -> llm_types.LlmRequest {
+  // Defensive repair: inject synthetic tool_result blocks for any
+  // orphaned tool_use ids. Anthropic's API rejects histories where an
+  // assistant tool_use isn't immediately followed by a matching
+  // tool_result; once an orphan lands in state.messages, every cycle
+  // keeps sending it until something repairs it. This is the last
+  // line of defence — upstream paths still need to be tidy. We
+  // slog.warn on any repair so orphan sources stay visible.
+  let repaired = repair_orphans_and_warn(messages, state.cycle_id)
   // Message count trim (configurable)
   let trimmed = case state.max_context_messages {
-    None -> context.ensure_alternation(messages)
-    Some(max) -> context.trim(messages, max)
+    None -> context.ensure_alternation(repaired)
+    Some(max) -> context.trim(repaired, max)
   }
   // Token budget safety net — hard cap to prevent API 400 errors.
   // System prompt + tools + response budget need headroom, so cap messages
@@ -308,6 +317,30 @@ pub fn build_request_with_model(
   case state.tools {
     [] -> base
     tools -> request.with_tools(base, tools)
+  }
+}
+
+/// Wrap `message_repair.repair` with a warn log when it has to act.
+/// Each orphan is a bug upstream — we want the logs to point operators
+/// (and us) at the code path that left it dangling.
+fn repair_orphans_and_warn(
+  messages: List(llm_types.Message),
+  cycle_id: option.Option(String),
+) -> List(llm_types.Message) {
+  case message_repair.find_orphans(messages) {
+    [] -> messages
+    orphans -> {
+      slog.warn(
+        "cognitive/llm",
+        "build_request",
+        "Repairing "
+          <> int.to_string(list.length(orphans))
+          <> " orphaned tool_use id(s): "
+          <> string.join(orphans, ", "),
+        cycle_id,
+      )
+      message_repair.repair(messages)
+    }
   }
 }
 
