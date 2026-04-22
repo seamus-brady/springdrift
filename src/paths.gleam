@@ -138,6 +138,11 @@ pub fn comms_dir() -> String {
   project_dir() <> "/memory/comms"
 }
 
+/// Captures directory: .springdrift/memory/captures/
+pub fn captures_dir() -> String {
+  project_dir() <> "/memory/captures"
+}
+
 // ---------------------------------------------------------------------------
 // Knowledge
 // ---------------------------------------------------------------------------

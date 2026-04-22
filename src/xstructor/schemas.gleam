@@ -795,6 +795,42 @@ pub const skill_body_example = "<skill_body>
 </skill_body>"
 
 // ---------------------------------------------------------------------------
+// 10. Captures (captures/scanner.gleam) — MVP commitment tracker
+// ---------------------------------------------------------------------------
+
+pub const captures_xsd = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">
+  <xs:element name=\"captures\">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name=\"capture\" minOccurs=\"0\" maxOccurs=\"unbounded\">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name=\"text\" type=\"xs:string\"/>
+              <xs:element name=\"source\" type=\"xs:string\"/>
+              <xs:element name=\"due_hint\" type=\"xs:string\" minOccurs=\"0\"/>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>"
+
+pub const captures_example = "<captures>
+  <capture>
+    <text>Check scheduler logs after the research run completes</text>
+    <source>agent_self</source>
+    <due_hint>after research run</due_hint>
+  </capture>
+  <capture>
+    <text>Email the weekly summary to the operator</text>
+    <source>operator_ask</source>
+    <due_hint>Friday afternoon</due_hint>
+  </capture>
+</captures>"
+
+// ---------------------------------------------------------------------------
 // System prompt fragments
 // ---------------------------------------------------------------------------
 

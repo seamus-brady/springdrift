@@ -9,6 +9,7 @@ import affect/monitor as affect_monitor
 import affect/types as affect_types
 import agent/cognitive_state.{type CognitiveState}
 import agent/types as agent_types
+import captures/scanner as captures_scanner
 import dag/types as dag_types
 import gleam/erlang/process
 import gleam/float
@@ -81,6 +82,29 @@ pub fn maybe_spawn_archivist(
     state.config.threading_config,
     state.redact_secrets,
   )
+
+  // Captures scanner — post-cycle, fire-and-forget. Uses task_model
+  // (cheapest) and a small token budget; most cycles return empty.
+  case state.config.captures_scanner_enabled {
+    True ->
+      captures_scanner.spawn(
+        captures_scanner.ScannerContext(
+          cycle_id: cycle_id,
+          user_input: state.last_user_input,
+          final_response: response_text,
+        ),
+        captures_scanner.ScannerConfig(
+          enabled: True,
+          max_per_cycle: state.config.captures_max_per_cycle,
+          captures_dir: state.config.captures_dir,
+        ),
+        state.provider,
+        state.task_model,
+        400,
+        state.memory.librarian,
+      )
+    False -> Nil
+  }
 
   // Compute affect snapshot and send to Curator
   case affect_monitor.after_cycle(state, paths.affect_dir()) {

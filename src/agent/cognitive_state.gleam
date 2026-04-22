@@ -108,6 +108,14 @@ pub type RuntimeConfig {
     /// published here in parallel with the existing reply_to path
     /// during the migration. When None the publish is a no-op.
     frontdoor: Option(Subject(frontdoor_types.FrontdoorMessage)),
+    /// Captures MVP — when True, the post-cycle scanner spawns and
+    /// tools register. Default False in tests, True when springdrift
+    /// wires the main process.
+    captures_scanner_enabled: Bool,
+    /// Captures directory for scanner, tools, and expiry sweep.
+    captures_dir: String,
+    /// Max captures kept per cycle after the sanity filter.
+    captures_max_per_cycle: Int,
   )
 }
 

@@ -1134,6 +1134,12 @@ fn build_sensorium(
   let endeavours = librarian.get_all_endeavours(state.librarian)
   let tasks_section = render_sensorium_tasks(active_tasks, endeavours)
 
+  // Captures — MVP commitment tracker count.
+  let captures_section =
+    render_sensorium_captures(librarian.get_pending_capture_count(
+      state.librarian,
+    ))
+
   let knowledge_section = render_sensorium_knowledge(state)
   let memory_section = render_sensorium_memory()
   let strategies_section = render_sensorium_strategies()
@@ -1147,9 +1153,9 @@ fn build_sensorium(
   let sections =
     [
       clock, situation, schedule, vitals, sandbox_section, delegations, events,
-      tasks_section, strategies_section, goals_section, affect_warnings_section,
-      integrity_section, skill_procedures_section, meta_recommendations_section,
-      knowledge_section, memory_section,
+      tasks_section, captures_section, strategies_section, goals_section,
+      affect_warnings_section, integrity_section, skill_procedures_section,
+      meta_recommendations_section, knowledge_section, memory_section,
     ]
     |> list.filter(fn(s) { s != "" })
     |> string.join("\n")
@@ -1687,6 +1693,15 @@ fn find_last_failure(entries: List(narrative_types.NarrativeEntry)) -> String {
         }
         _ -> find_last_failure(rest)
       }
+  }
+}
+
+/// Render the <captures> element — MVP commitment tracker count.
+/// Omitted when there are no pending captures.
+pub fn render_sensorium_captures(pending: Int) -> String {
+  case pending > 0 {
+    False -> ""
+    True -> "  <captures pending=\"" <> int.to_string(pending) <> "\"/>"
   }
 }
 

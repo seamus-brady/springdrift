@@ -41,6 +41,7 @@ import paths
 import planner/log as planner_log
 import planner/types as planner_types
 import slog
+import tools/captures as captures_tools
 import tools/knowledge as knowledge_tools
 import tools/learning_goals as learning_goal_tools
 import tools/memory
@@ -141,9 +142,13 @@ pub fn dispatch_tool_calls(
         list.partition(after_knowledge, fn(c) {
           learning_goal_tools.is_learning_goal_tool(c.name)
         })
-      let #(strategy_calls, remaining_calls) =
+      let #(strategy_calls, after_strategy) =
         list.partition(after_goals, fn(c) {
           strategy_tools.is_strategy_tool(c.name)
+        })
+      let #(captures_calls, remaining_calls) =
+        list.partition(after_strategy, fn(c) {
+          captures_tools.is_captures_tool(c.name)
         })
       let sync_calls =
         list.flatten([
@@ -152,6 +157,7 @@ pub fn dispatch_tool_calls(
           knowledge_calls,
           learning_goal_calls,
           strategy_calls,
+          captures_calls,
         ])
       case sync_calls {
         [] ->
@@ -343,18 +349,38 @@ fn handle_memory_tools(
                         strategy_tools.StrategyContext(cycle_id: cycle_id),
                       )
                     False ->
-                      memory.execute_with_how_to(
-                        call,
-                        state.memory.narrative_dir,
-                        state.memory.librarian,
-                        facts_ctx,
-                        introspect_ctx,
-                        state.config.memory_limits,
-                        state.config.how_to_content,
-                        option.Some(memory.AgentManagementContext(
-                          supervisor: state.supervisor,
-                        )),
-                      )
+                      case captures_tools.is_captures_tool(call.name) {
+                        True ->
+                          case state.memory.librarian {
+                            Some(lib) ->
+                              captures_tools.execute(
+                                call,
+                                captures_tools.CapturesContext(
+                                  captures_dir: state.config.captures_dir,
+                                  librarian: lib,
+                                  scheduler: state.scheduler,
+                                ),
+                              )
+                            None ->
+                              llm_types.ToolFailure(
+                                tool_use_id: call.id,
+                                error: "Captures unavailable (no librarian)",
+                              )
+                          }
+                        False ->
+                          memory.execute_with_how_to(
+                            call,
+                            state.memory.narrative_dir,
+                            state.memory.librarian,
+                            facts_ctx,
+                            introspect_ctx,
+                            state.config.memory_limits,
+                            state.config.how_to_content,
+                            option.Some(memory.AgentManagementContext(
+                              supervisor: state.supervisor,
+                            )),
+                          )
+                      }
                   }
               }
           }

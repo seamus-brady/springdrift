@@ -32,6 +32,8 @@
 import agent/types as agent_types
 import artifacts/log as artifacts_log
 import artifacts/types as artifacts_types
+import captures/log as captures_log
+import captures/types as captures_types
 import cbr/bridge
 import cbr/log as cbr_log
 import cbr/types as cbr_types
@@ -335,6 +337,19 @@ pub type LibrarianMessage {
   /// Evict artifact metadata older than cutoff_date from artifact ETS tables.
   TrimArtifactWindow(cutoff_date: String, reply_to: Subject(Int))
 
+  // --- Captures (MVP commitment tracker) ---
+  /// Populate the captures pending-list from disk. Called once after start
+  /// by the main process. Safe to call again to refresh.
+  InitCaptures(captures_dir: String)
+  /// Index a newly-created pending capture (fire-and-forget).
+  IndexCapture(capture: captures_types.Capture)
+  /// Remove a capture from the pending list (after clarify/dismiss/expire).
+  RemoveCapture(id: String)
+  /// Count of pending captures — cheap, used by the sensorium every cycle.
+  QueryPendingCaptureCount(reply_to: Subject(Int))
+  /// Full list of pending captures — used by list_captures tool.
+  QueryPendingCaptures(reply_to: Subject(List(captures_types.Capture)))
+
   /// Shutdown
   Shutdown
 }
@@ -377,6 +392,9 @@ type LibrarianState {
     planner_dir: String,
     planner_tasks: planner_index.Table,
     planner_endeavours: planner_index.Table,
+    // Captures (MVP commitment tracker) — pure list, populated on InitCaptures
+    captures_dir: String,
+    pending_captures: List(captures_types.Capture),
   )
 }
 
@@ -493,6 +511,8 @@ fn start_with_pid(
           planner_dir:,
           planner_tasks: planner_tasks_table,
           planner_endeavours: planner_endeavours_table,
+          captures_dir: "",
+          pending_captures: [],
         )
 
       // Replay narrative JSONL files
@@ -1933,6 +1953,48 @@ fn loop(state: LibrarianState) -> Nil {
           loop(state)
         }
 
+        // --- Captures messages (MVP commitment tracker) ---
+        InitCaptures(captures_dir:) -> {
+          let pending = captures_log.pending_from_disk(captures_dir)
+          slog.info(
+            "librarian",
+            "init_captures",
+            "Loaded "
+              <> int.to_string(list.length(pending))
+              <> " pending capture(s) from disk",
+            None,
+          )
+          loop(
+            LibrarianState(
+              ..state,
+              captures_dir: captures_dir,
+              pending_captures: pending,
+            ),
+          )
+        }
+
+        IndexCapture(capture:) -> {
+          let updated =
+            list.filter(state.pending_captures, fn(c) { c.id != capture.id })
+          loop(LibrarianState(..state, pending_captures: [capture, ..updated]))
+        }
+
+        RemoveCapture(id:) -> {
+          let updated =
+            list.filter(state.pending_captures, fn(c) { c.id != id })
+          loop(LibrarianState(..state, pending_captures: updated))
+        }
+
+        QueryPendingCaptureCount(reply_to:) -> {
+          process.send(reply_to, list.length(state.pending_captures))
+          loop(state)
+        }
+
+        QueryPendingCaptures(reply_to:) -> {
+          process.send(reply_to, state.pending_captures)
+          loop(state)
+        }
+
         // --- Planner messages ---
         NotifyTaskOp(op:) -> {
           planner_index.apply_task_op(state.planner_tasks, op)
@@ -2188,6 +2250,74 @@ pub fn load_by_cycle_ids(
       slog.warn(
         "librarian",
         "load_by_cycle_ids",
+        "Timeout waiting for reply",
+        None,
+      )
+      []
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Synchronous query helpers — Captures (MVP commitment tracker)
+// ---------------------------------------------------------------------------
+
+/// Populate the pending-captures list from disk. Call once after start.
+pub fn init_captures(
+  librarian: Subject(LibrarianMessage),
+  captures_dir: String,
+) -> Nil {
+  process.send(librarian, InitCaptures(captures_dir:))
+}
+
+/// Notify the Librarian to index a newly-created pending capture
+/// (fire-and-forget).
+pub fn notify_new_capture(
+  librarian: Subject(LibrarianMessage),
+  capture: captures_types.Capture,
+) -> Nil {
+  process.send(librarian, IndexCapture(capture:))
+}
+
+/// Notify the Librarian to drop a capture from the pending list
+/// (fire-and-forget). Called after clarify/dismiss/expire.
+pub fn notify_remove_capture(
+  librarian: Subject(LibrarianMessage),
+  id: String,
+) -> Nil {
+  process.send(librarian, RemoveCapture(id:))
+}
+
+/// Count of pending captures. Blocks until reply. Returns 0 on timeout.
+pub fn get_pending_capture_count(librarian: Subject(LibrarianMessage)) -> Int {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryPendingCaptureCount(reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(n) -> n
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "get_pending_capture_count",
+        "Timeout waiting for reply",
+        None,
+      )
+      0
+    }
+  }
+}
+
+/// Full list of pending captures. Blocks until reply. Returns [] on timeout.
+pub fn get_pending_captures(
+  librarian: Subject(LibrarianMessage),
+) -> List(captures_types.Capture) {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryPendingCaptures(reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(captures) -> captures
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "get_pending_captures",
         "Timeout waiting for reply",
         None,
       )

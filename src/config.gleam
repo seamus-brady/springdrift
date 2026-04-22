@@ -335,6 +335,15 @@ pub type AppConfig {
     /// Auto-archive strategies whose last event is older than this
     /// many days. 0 disables stale pruning. Default: 60.
     strategy_stale_archive_days: Option(Int),
+    // ── Captures (MVP commitment tracker) ──
+    /// Enable the post-cycle capture scanner. When True, after each cycle
+    /// a cheap Haiku call looks for commitment-shaped statements and writes
+    /// them to .springdrift/memory/captures/. Default: True.
+    captures_scanner_enabled: Option(Bool),
+    /// Auto-dismiss pending captures older than this many days. Default: 14.
+    captures_expiry_days: Option(Int),
+    /// Maximum captures kept per cycle after the sanity filter. Default: 10.
+    captures_max_per_cycle: Option(Int),
   )
 }
 
@@ -548,6 +557,9 @@ pub fn default() -> AppConfig {
     strategy_low_success_threshold: None,
     strategy_low_success_min_uses: None,
     strategy_stale_archive_days: None,
+    captures_scanner_enabled: None,
+    captures_expiry_days: None,
+    captures_max_per_cycle: None,
   )
 }
 
@@ -1262,6 +1274,18 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     strategy_stale_archive_days: option.or(
       override_cfg.strategy_stale_archive_days,
       base.strategy_stale_archive_days,
+    ),
+    captures_scanner_enabled: option.or(
+      override_cfg.captures_scanner_enabled,
+      base.captures_scanner_enabled,
+    ),
+    captures_expiry_days: option.or(
+      override_cfg.captures_expiry_days,
+      base.captures_expiry_days,
+    ),
+    captures_max_per_cycle: option.or(
+      override_cfg.captures_max_per_cycle,
+      base.captures_max_per_cycle,
     ),
   )
 }
@@ -2016,6 +2040,15 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     strategy_stale_archive_days: get_toml_int(table, [
       "meta_learning",
       "strategy_stale_archive_days",
+    ]),
+    captures_scanner_enabled: get_toml_bool(table, [
+      "captures",
+      "scanner_enabled",
+    ]),
+    captures_expiry_days: get_toml_int(table, ["captures", "expiry_days"]),
+    captures_max_per_cycle: get_toml_int(table, [
+      "captures",
+      "max_per_cycle",
     ]),
   )
 }

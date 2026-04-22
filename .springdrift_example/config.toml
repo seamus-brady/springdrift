@@ -436,3 +436,13 @@ summary_schedule = "weekly"
 # interval_ms = 300000                # Commit interval in ms (default: 300000 = 5 minutes)
 # remote_url = ""                     # Git remote URL (recommended — e.g. git@github.com:org/data.git)
 # branch = "main"                     # Branch name (default: main)
+
+# ── Captures ────────────────────────────────────────────────────────────────
+# MVP commitment tracker. After each cycle a small LLM call scans the cycle
+# output for commitments and promises; results are written as "captures" the
+# agent can clarify to a scheduled cycle or dismiss.
+
+[captures]
+# scanner_enabled = true        # Post-cycle commitment scanner (default: true)
+# expiry_days = 14              # Auto-expire pending captures after N days (default: 14)
+# max_per_cycle = 10            # Max captures kept per cycle after sanity filter (default: 10)
