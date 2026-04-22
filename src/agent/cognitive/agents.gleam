@@ -614,7 +614,19 @@ fn dispatch_single_agent(
     None -> Error(Nil)
     Some(task_subject) -> {
       let agent_task_id = cycle_log.generate_uuid()
-      let #(instruction, ctx) = parse_agent_params(call.input_json)
+      let #(raw_instruction, ctx) = parse_agent_params(call.input_json)
+      // L2 failure-context injection: when an agent is re-dispatched
+      // this cycle after a prior failure (same agent_id), prepend a
+      // short block describing what failed last time. Blind retries
+      // on the same instruction repeat the same mistake; with
+      // context the sub-agent can at least try a different approach
+      // or escalate.
+      let instruction =
+        prepend_prior_failures(
+          raw_instruction,
+          agent_name,
+          state.agent_completions,
+        )
       let base_task =
         AgentTask(
           task_id: agent_task_id,
@@ -1513,6 +1525,75 @@ pub fn handle_agent_event(
       )
   }
 }
+
+/// Prepend a short block describing the most recent prior failures
+/// of the same agent in this cycle (if any) to the raw instruction.
+/// Returns the raw instruction unchanged when there are no prior
+/// failures. Pure — no I/O, table-testable.
+///
+/// Only failures from the current cycle are considered. agent_completions
+/// is reset at the start of each handle_user_input, so cross-cycle
+/// failures are not carried — the CBR + narrative take that role.
+///
+/// Capped at the 2 most recent failures with the error truncated to
+/// 500 chars per failure, to prevent an instruction balloon on
+/// repeated retries.
+pub fn prepend_prior_failures(
+  raw_instruction: String,
+  agent_name: String,
+  completions: List(types.AgentCompletionRecord),
+) -> String {
+  let failures =
+    completions
+    |> list.filter(fn(c) {
+      c.agent_id == agent_name
+      && case c.result {
+        Error(_) -> True
+        Ok(_) -> False
+      }
+    })
+  case failures {
+    [] -> raw_instruction
+    _ -> {
+      // completions is prepended during handle_agent_complete, so the
+      // head is the most recent. Keep up to 2 most recent failures.
+      let recent = list.take(failures, 2)
+      let blocks =
+        recent
+        |> list.index_map(fn(c, i) {
+          let err = case c.result {
+            Error(e) -> e
+            Ok(_) -> ""
+          }
+          let truncated_err = case string.length(err) > 500 {
+            True -> string.slice(err, 0, 500) <> "…"
+            False -> err
+          }
+          let truncated_instr = case string.length(c.instruction) > 300 {
+            True -> string.slice(c.instruction, 0, 300) <> "…"
+            False -> c.instruction
+          }
+          "PRIOR FAILURE in this cycle (agent: "
+          <> agent_name
+          <> ", attempt "
+          <> int_to_string(i + 1)
+          <> "):\n  Your previous instruction: "
+          <> truncated_instr
+          <> "\n  Your result (error): "
+          <> truncated_err
+        })
+      let prelude =
+        string.join(blocks, "\n\n")
+        <> "\n\nLearn from what failed — do NOT repeat the same approach"
+        <> " blindly. If the same failure condition recurs, escalate"
+        <> " rather than retry.\n\n---\nNew instruction:\n"
+      prelude <> raw_instruction
+    }
+  }
+}
+
+@external(erlang, "erlang", "integer_to_binary")
+fn int_to_string(n: Int) -> String
 
 pub fn parse_agent_params(input_json: String) -> #(String, String) {
   let decoder = {
