@@ -38,6 +38,7 @@ import cbr/bridge
 import cbr/log as cbr_log
 import cbr/types as cbr_types
 import dag/types as dag_types
+import deputy/types as deputy_types
 import facts/types as facts_types
 import gleam/erlang/process.{type Pid, type Subject}
 import gleam/float
@@ -350,8 +351,64 @@ pub type LibrarianMessage {
   /// Full list of pending captures — used by list_captures tool.
   QueryPendingCaptures(reply_to: Subject(List(captures_types.Capture)))
 
+  // --- Deputies (MVP Phase 1) ---
+  /// Register an active deputy (spawned, briefing in flight).
+  IndexActiveDeputy(meta: ActiveDeputyMeta)
+  /// Remove an active deputy when it completes, fails, or is killed.
+  RemoveActiveDeputy(id: String)
+  /// Append a completed deputy to the recent-deputies ring buffer.
+  AppendRecentDeputy(record: RecentDeputyRecord)
+  /// Query active deputies — used by introspect and kill_deputy.
+  QueryActiveDeputies(reply_to: Subject(List(ActiveDeputyMeta)))
+  /// Query a single active deputy by id — for kill_deputy lookup.
+  QueryActiveDeputyById(
+    id: String,
+    reply_to: Subject(Result(ActiveDeputyMeta, Nil)),
+  )
+  /// Query the recent-deputies ring — used by the sensorium block.
+  QueryRecentDeputies(reply_to: Subject(List(RecentDeputyRecord)))
+  /// Count of active deputies — cheap sensorium signal.
+  QueryActiveDeputyCount(reply_to: Subject(Int))
+
   /// Shutdown
   Shutdown
+}
+
+// ---------------------------------------------------------------------------
+// Deputy metadata shared between the Librarian and call sites
+// ---------------------------------------------------------------------------
+
+/// In-flight deputy metadata. Used by introspect + kill_deputy.
+pub type ActiveDeputyMeta {
+  ActiveDeputyMeta(
+    id: String,
+    cycle_id: String,
+    hierarchy_cycle_id: String,
+    root_agent: String,
+    spawned_at: String,
+    subject: Subject(deputy_types.DeputyMessage),
+  )
+}
+
+/// Completed deputy record retained in the ring buffer.
+pub type RecentDeputyRecord {
+  RecentDeputyRecord(
+    id: String,
+    cycle_id: String,
+    root_agent: String,
+    signal: String,
+    cases_count: Int,
+    facts_count: Int,
+    elapsed_ms: Int,
+    completed_at: String,
+    outcome: RecentDeputyOutcome,
+  )
+}
+
+pub type RecentDeputyOutcome {
+  BriefingOk
+  BriefingFailed(reason: String)
+  BriefingKilled(reason: String)
 }
 
 // ---------------------------------------------------------------------------
@@ -395,8 +452,14 @@ type LibrarianState {
     // Captures (MVP commitment tracker) — pure list, populated on InitCaptures
     captures_dir: String,
     pending_captures: List(captures_types.Capture),
+    // Deputies (MVP) — active deputies (in-flight) and recent completions
+    active_deputies: List(ActiveDeputyMeta),
+    recent_deputies: List(RecentDeputyRecord),
   )
 }
+
+/// Cap on retained recent-deputy records.
+const recent_deputies_cap: Int = 20
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -513,6 +576,8 @@ fn start_with_pid(
           planner_endeavours: planner_endeavours_table,
           captures_dir: "",
           pending_captures: [],
+          active_deputies: [],
+          recent_deputies: [],
         )
 
       // Replay narrative JSONL files
@@ -1995,6 +2060,45 @@ fn loop(state: LibrarianState) -> Nil {
           loop(state)
         }
 
+        // --- Deputies messages ---
+        IndexActiveDeputy(meta:) -> {
+          let updated =
+            list.filter(state.active_deputies, fn(d) { d.id != meta.id })
+          loop(LibrarianState(..state, active_deputies: [meta, ..updated]))
+        }
+
+        RemoveActiveDeputy(id:) -> {
+          let updated = list.filter(state.active_deputies, fn(d) { d.id != id })
+          loop(LibrarianState(..state, active_deputies: updated))
+        }
+
+        AppendRecentDeputy(record:) -> {
+          let updated = [record, ..state.recent_deputies]
+          let capped = list.take(updated, recent_deputies_cap)
+          loop(LibrarianState(..state, recent_deputies: capped))
+        }
+
+        QueryActiveDeputies(reply_to:) -> {
+          process.send(reply_to, state.active_deputies)
+          loop(state)
+        }
+
+        QueryActiveDeputyById(id:, reply_to:) -> {
+          let result = list.find(state.active_deputies, fn(d) { d.id == id })
+          process.send(reply_to, result)
+          loop(state)
+        }
+
+        QueryRecentDeputies(reply_to:) -> {
+          process.send(reply_to, state.recent_deputies)
+          loop(state)
+        }
+
+        QueryActiveDeputyCount(reply_to:) -> {
+          process.send(reply_to, list.length(state.active_deputies))
+          loop(state)
+        }
+
         // --- Planner messages ---
         NotifyTaskOp(op:) -> {
           planner_index.apply_task_op(state.planner_tasks, op)
@@ -2323,5 +2427,80 @@ pub fn get_pending_captures(
       )
       []
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Synchronous query helpers — Deputies (MVP Phase 1)
+// ---------------------------------------------------------------------------
+
+/// Register a newly-spawned deputy (fire-and-forget).
+pub fn notify_active_deputy(
+  librarian: Subject(LibrarianMessage),
+  meta: ActiveDeputyMeta,
+) -> Nil {
+  process.send(librarian, IndexActiveDeputy(meta:))
+}
+
+/// Deregister an active deputy — called on completion/failure/kill.
+pub fn notify_remove_active_deputy(
+  librarian: Subject(LibrarianMessage),
+  id: String,
+) -> Nil {
+  process.send(librarian, RemoveActiveDeputy(id:))
+}
+
+/// Append a completed deputy record to the recent-deputies ring.
+pub fn notify_recent_deputy(
+  librarian: Subject(LibrarianMessage),
+  record: RecentDeputyRecord,
+) -> Nil {
+  process.send(librarian, AppendRecentDeputy(record:))
+}
+
+/// Count of currently in-flight deputies. Timeout returns 0.
+pub fn get_active_deputy_count(librarian: Subject(LibrarianMessage)) -> Int {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryActiveDeputyCount(reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(n) -> n
+    Error(_) -> 0
+  }
+}
+
+/// Full list of active deputies. Timeout returns [].
+pub fn get_active_deputies(
+  librarian: Subject(LibrarianMessage),
+) -> List(ActiveDeputyMeta) {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryActiveDeputies(reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(list) -> list
+    Error(_) -> []
+  }
+}
+
+/// Recently-completed deputies (ring buffer). Timeout returns [].
+pub fn get_recent_deputies(
+  librarian: Subject(LibrarianMessage),
+) -> List(RecentDeputyRecord) {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryRecentDeputies(reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(list) -> list
+    Error(_) -> []
+  }
+}
+
+/// Look up an active deputy by id. Error when no match or timeout.
+pub fn get_active_deputy_by_id(
+  librarian: Subject(LibrarianMessage),
+  id: String,
+) -> Result(ActiveDeputyMeta, Nil) {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryActiveDeputyById(id:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(result) -> result
+    Error(_) -> Error(Nil)
   }
 }

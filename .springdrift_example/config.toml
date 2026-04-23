@@ -446,3 +446,17 @@ summary_schedule = "weekly"
 # scanner_enabled = true        # Post-cycle commitment scanner (default: true)
 # expiry_days = 14              # Auto-expire pending captures after N days (default: 14)
 # max_per_cycle = 10            # Max captures kept per cycle after sanity filter (default: 10)
+
+# ── Deputies ────────────────────────────────────────────────────────────────
+# MVP delegated-attention layer. When enabled, cog spawns an ephemeral read-only
+# deputy for each root delegation that produces a <briefing> XML block prepended
+# to the specialist agent's instruction. The briefing cites relevant CBR cases,
+# facts, and known pitfalls — same smarts the cog loop has, now available to
+# the specialist before its react loop starts. Full design:
+# docs/roadmap/planned/deputy-agents.md
+
+[deputies]
+# enabled = false               # Deputy briefings (default: false — opt in to measure)
+# model = "claude-haiku-4-5"    # LLM used for briefings (default: same as task_model)
+# max_tokens = 800              # Max tokens per briefing call (default: 800)
+# timeout_ms = 15000            # Timeout awaiting briefing (default: 15000 — agent proceeds without if exceeded)

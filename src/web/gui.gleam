@@ -1160,6 +1160,7 @@ fn encode_cycle_node(node: dag_types.CycleNode) -> json.Json {
         dag_types.CognitiveCycle -> "cognitive"
         dag_types.AgentCycle -> "agent"
         dag_types.SchedulerCycle -> "scheduler"
+        dag_types.DeputyCycle -> "deputy"
       }),
     ),
     #(
@@ -1291,6 +1292,7 @@ fn extract_dprime_gates(
       dag_types.CognitiveCycle -> "cognitive"
       dag_types.AgentCycle -> "agent"
       dag_types.SchedulerCycle -> "scheduler"
+      dag_types.DeputyCycle -> "deputy"
     }
     list.map(node.dprime_gates, fn(g) {
       DprimeGateRecord(

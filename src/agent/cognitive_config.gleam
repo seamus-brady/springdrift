@@ -107,6 +107,17 @@ pub type CognitiveConfig {
     captures_dir: String,
     /// Max captures kept per cycle after the sanity filter.
     captures_max_per_cycle: Int,
+    /// Deputies (Phase 1 MVP). When True, cog spawns a deputy for each
+    /// root delegation; the deputy produces a briefing prepended to the
+    /// agent's instruction.
+    deputies_enabled: Bool,
+    /// Model used by deputies (typically task_model = Haiku).
+    deputies_model: String,
+    /// Max tokens for the deputy briefing call.
+    deputies_max_tokens: Int,
+    /// Timeout for the deputy briefing call. On expiry the agent
+    /// proceeds without a briefing.
+    deputy_timeout_ms: Int,
   )
 }
 
@@ -178,5 +189,9 @@ pub fn default_test_config(
     captures_scanner_enabled: False,
     captures_dir: base <> "/captures",
     captures_max_per_cycle: 10,
+    deputies_enabled: False,
+    deputies_model: "mock-model",
+    deputies_max_tokens: 800,
+    deputy_timeout_ms: 15_000,
   )
 }

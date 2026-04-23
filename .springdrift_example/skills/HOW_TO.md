@@ -377,6 +377,25 @@ Active tasks and forecaster events appear in the `<tasks>` and `<events>` sectio
 of the sensorium. No tool calls are needed to see current work — it is part of your
 ambient perception at every cycle.
 
+## Deputies (MVP — delegated attention)
+
+A deputy is an ephemeral, read-only cog-loop variant spawned alongside each root
+delegation. Before the specialist agent starts, the deputy produces a
+`<briefing>` block prepended to its instruction — cites relevant CBR cases,
+facts, and known pitfalls. Then the deputy dies.
+
+- **Deputies are read-only.** No writes, no delegation, no external actions.
+- **One per root delegation.** Sub-delegations within the hierarchy inherit
+  the deputy (MVP is one-shot, so this mainly matters in Phase 2+).
+- **Sensorium**: `<deputies active="N" completed_recent="M">...</deputies>`
+  shows which deputies are active and recently completed.
+- **Kill control**: `kill_deputy(deputy_id, reason)` terminates a stuck or
+  misbehaving deputy. The hierarchy continues without a briefing.
+- **Enable**: `deputies_enabled = true` in `[deputies]` config section. Off
+  by default during MVP — operator opts in to measure.
+
+Full design: `docs/roadmap/planned/deputy-agents.md`. Self-model: HTWAHN skill.
+
 ## Captures (MVP commitment tracker)
 
 A post-cycle scanner extracts commitments and promises from each cycle's prose —
@@ -403,6 +422,7 @@ When a required API key is missing, fall back gracefully:
 - **Sandbox unavailable** (no podman) → coder uses `request_human_input` to ask user to run code
 - **Comms unavailable** (no `AGENTMAIL_API_KEY` or `comms_enabled = false`) → comms agent not loaded, email tools unavailable
 - **Captures scanner disabled** (`captures_scanner_enabled = false`) → no `<captures>` block in sensorium; `list_captures` / `clarify_capture` / `dismiss_capture` still available but act on existing log only
+- **Deputies disabled** (`deputies_enabled = false`) → no `<deputies>` sensorium block; specialist agents receive the raw instruction with no briefing prepended; `kill_deputy` returns "no active deputy" when called
 
 ## What to Avoid
 

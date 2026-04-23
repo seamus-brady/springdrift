@@ -37,6 +37,9 @@ pub type CycleNodeType {
   CognitiveCycle
   AgentCycle
   SchedulerCycle
+  /// Deputy-loop cycle — an ephemeral, restricted cog loop that briefs
+  /// specialist agents on delegated attention. See docs/roadmap/planned/deputy-agents.md.
+  DeputyCycle
 }
 
 pub type NodeOutcome {

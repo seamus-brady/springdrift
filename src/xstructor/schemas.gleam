@@ -831,6 +831,74 @@ pub const captures_example = "<captures>
 </captures>"
 
 // ---------------------------------------------------------------------------
+// 11. Deputy briefing (deputy/briefing.gleam) — Phase 1 MVP
+// ---------------------------------------------------------------------------
+
+pub const deputy_briefing_xsd = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">
+  <xs:element name=\"deputy_briefing\">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name=\"signal\" type=\"xs:string\"/>
+        <xs:element name=\"relevant_cases\" minOccurs=\"0\">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name=\"case\" minOccurs=\"0\" maxOccurs=\"unbounded\">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name=\"case_id\" type=\"xs:string\"/>
+                    <xs:element name=\"similarity\" type=\"xs:decimal\"/>
+                    <xs:element name=\"summary\" type=\"xs:string\"/>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+        <xs:element name=\"relevant_facts\" minOccurs=\"0\">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name=\"fact\" minOccurs=\"0\" maxOccurs=\"unbounded\">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name=\"key\" type=\"xs:string\"/>
+                    <xs:element name=\"value\" type=\"xs:string\"/>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+        <xs:element name=\"known_pitfalls\" type=\"xs:string\" minOccurs=\"0\"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>"
+
+pub const deputy_briefing_example = "<deputy_briefing>
+  <signal>high_novelty</signal>
+  <relevant_cases>
+    <case>
+      <case_id>CBR-042</case_id>
+      <similarity>0.87</similarity>
+      <summary>Similar coding task — pitfall: test date FFI needed override</summary>
+    </case>
+    <case>
+      <case_id>CBR-019</case_id>
+      <similarity>0.64</similarity>
+      <summary>Related — rewrite broken tests rather than patch</summary>
+    </case>
+  </relevant_cases>
+  <relevant_facts>
+    <fact>
+      <key>cycle_log_test_pattern</key>
+      <value>Tests use override_date_fn; see test/cycle_log_test.gleam</value>
+    </fact>
+  </relevant_facts>
+  <known_pitfalls>Three similar fixes in last two weeks took more than 5 cycles each. Consider reading the test first.</known_pitfalls>
+</deputy_briefing>"
+
+// ---------------------------------------------------------------------------
 // System prompt fragments
 // ---------------------------------------------------------------------------
 

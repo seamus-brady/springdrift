@@ -677,6 +677,27 @@ operator-auditable lifecycle log.
 See [architecture/agents.md](docs/architecture/agents.md) for delegation
 management, teams, structured output, and error surfacing.
 
+### Deputies — delegated attention (MVP)
+
+Specialist agents used to receive just a plain instruction string — they had
+no access to the CBR cases, facts, or recent patterns the cog loop had
+already retrieved. "A tribe of Einsteins who use Mr Bean as a valet," as one
+design session put it. Deputies close that gap.
+
+A **deputy** is an ephemeral restricted cog-loop variant spawned alongside
+each root delegation. Before the specialist's react loop starts, the deputy
+reads memory and produces a `<briefing>` block (relevant CBR cases with
+similarity scores, relevant facts, known pitfalls) that's prepended to the
+specialist's instruction. Then the deputy dies.
+
+Deputies are read-only by construction — they get a dedicated tool subset
+with no write paths. They can't delegate, can't take external actions, and
+can't respond on the agent's behalf. Cog can `kill_deputy` any in-flight
+deputy if it's stuck; the hierarchy continues without a briefing.
+
+See [architecture/deputies.md](docs/architecture/deputies.md) for the full
+design, phasing, and invariant analysis. Opt in via `[deputies] enabled = true`.
+
 ### The agent reviews its own work
 
 Springdrift schedules its own self-review without you having to prompt it.

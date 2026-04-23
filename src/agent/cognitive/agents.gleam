@@ -21,6 +21,8 @@ import agent/types.{
 import agent/worker
 import cycle_log
 import dag/types as dag_types
+import deputy/framework as deputy_framework
+import deputy/types as deputy_types
 import dprime/gate
 import dprime/types as dprime_types
 import frontdoor/types as frontdoor_types
@@ -653,6 +655,19 @@ fn dispatch_single_agent(
           agent_name,
           state.agent_completions,
         )
+      // Deputy briefing — if deputies are enabled, spawn a deputy to
+      // produce a briefing that's prepended to the agent's instruction.
+      // Fire-and-forget on failure; the agent proceeds without a briefing.
+      let instruction = case state.config.deputies_enabled {
+        False -> instruction
+        True ->
+          maybe_prepend_deputy_briefing(
+            state,
+            agent_name,
+            instruction,
+            agent_task_id,
+          )
+      }
       let base_task =
         AgentTask(
           task_id: agent_task_id,
@@ -1922,5 +1937,108 @@ fn parse_importance(s: String) -> Result(dprime_types.Importance, Nil) {
     "medium" -> Ok(dprime_types.Medium)
     "low" -> Ok(dprime_types.Low)
     _ -> Error(Nil)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Deputy briefing — spawn a deputy before a root delegation and prepend
+// its briefing to the agent's instruction. Fire-and-forget on failure.
+// ---------------------------------------------------------------------------
+
+fn maybe_prepend_deputy_briefing(
+  state: CognitiveState,
+  agent_name: String,
+  instruction: String,
+  agent_task_id: String,
+) -> String {
+  case state.memory.librarian {
+    None -> instruction
+    Some(lib) -> {
+      let spec =
+        deputy_framework.DeputySpec(
+          root_agent: agent_name,
+          instruction: instruction,
+          hierarchy_cycle_id: agent_task_id,
+          provider: state.provider,
+          model: state.config.deputies_model,
+          max_tokens: state.config.deputies_max_tokens,
+          librarian: Some(lib),
+        )
+      let meta = deputy_framework.spawn(spec)
+      // Index the deputy cycle as pending in the DAG.
+      process.send(
+        lib,
+        librarian.IndexNode(node: dag_types.CycleNode(
+          cycle_id: meta.cycle_id,
+          parent_id: Some(agent_task_id),
+          node_type: dag_types.DeputyCycle,
+          timestamp: meta.spawned_at,
+          outcome: dag_types.NodePending,
+          model: state.config.deputies_model,
+          complexity: "deputy",
+          tool_calls: [],
+          dprime_gates: [],
+          tokens_in: 0,
+          tokens_out: 0,
+          duration_ms: 0,
+          agent_output: None,
+          instance_name: "",
+          instance_id: "",
+        )),
+      )
+      // Register the active deputy so kill_deputy and introspect can see it.
+      librarian.notify_active_deputy(
+        lib,
+        librarian.ActiveDeputyMeta(
+          id: meta.id,
+          cycle_id: meta.cycle_id,
+          hierarchy_cycle_id: meta.hierarchy_cycle_id,
+          root_agent: meta.root_agent,
+          spawned_at: meta.spawned_at,
+          subject: meta.subject,
+        ),
+      )
+      case
+        deputy_framework.await_briefing(meta, state.config.deputy_timeout_ms)
+      {
+        Ok(b) -> {
+          librarian.notify_remove_active_deputy(lib, meta.id)
+          librarian.notify_recent_deputy(
+            lib,
+            librarian.RecentDeputyRecord(
+              id: meta.id,
+              cycle_id: meta.cycle_id,
+              root_agent: meta.root_agent,
+              signal: b.signal,
+              cases_count: list.length(b.relevant_cases),
+              facts_count: list.length(b.relevant_facts),
+              elapsed_ms: b.elapsed_ms,
+              completed_at: get_datetime(),
+              outcome: librarian.BriefingOk,
+            ),
+          )
+          let xml = deputy_types.render_briefing(b)
+          xml <> "\n\n" <> instruction
+        }
+        Error(reason) -> {
+          librarian.notify_remove_active_deputy(lib, meta.id)
+          librarian.notify_recent_deputy(
+            lib,
+            librarian.RecentDeputyRecord(
+              id: meta.id,
+              cycle_id: meta.cycle_id,
+              root_agent: meta.root_agent,
+              signal: "silent",
+              cases_count: 0,
+              facts_count: 0,
+              elapsed_ms: 0,
+              completed_at: get_datetime(),
+              outcome: librarian.BriefingFailed(reason),
+            ),
+          )
+          instruction
+        }
+      }
+    }
   }
 }
