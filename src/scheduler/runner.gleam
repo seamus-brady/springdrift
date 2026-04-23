@@ -1061,9 +1061,6 @@ fn spawn_job(
       ),
     )
 
-    // Legacy reply_to kept for now — cognitive still writes to it on
-    // terminal reply. Discarded when reply_to leaves UserInput.
-    let throwaway = process.new_subject()
     process.send(
       cognitive,
       agent_types.SchedulerInput(
@@ -1075,7 +1072,6 @@ fn spawn_job(
         title: job.title,
         body: job.body,
         tags: job.tags,
-        reply_to: throwaway,
       ),
     )
 

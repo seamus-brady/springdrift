@@ -59,11 +59,7 @@ pub fn isolated_reply_routing_test() {
   let bob_sink = subscribe_user(fd, "ws:bob")
 
   // Alice sends. Bob is a bystander — must not receive anything.
-  let throwaway = process.new_subject()
-  process.send(
-    cog,
-    UserInput(source_id: "ws:alice", text: "hello", reply_to: throwaway),
-  )
+  process.send(cog, UserInput(source_id: "ws:alice", text: "hello"))
 
   let assert Ok(delivery) = process.receive(alice_sink, 5000)
   case delivery {
@@ -101,11 +97,7 @@ pub fn isolated_question_routing_test() {
   let alice_sink = subscribe_user(fd, "ws:alice")
   let bob_sink = subscribe_user(fd, "ws:bob")
 
-  let reply_subj = process.new_subject()
-  process.send(
-    cog,
-    UserInput(source_id: "ws:alice", text: "hi", reply_to: reply_subj),
-  )
+  process.send(cog, UserInput(source_id: "ws:alice", text: "hi"))
 
   // Alice sees the question; Bob does not.
   let assert Ok(q) = process.receive(alice_sink, 5000)

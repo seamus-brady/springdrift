@@ -445,17 +445,9 @@ fn ws_handler(
                   protocol.encode_server_message(protocol.Thinking),
                 )
               // Dispatch to cognitive loop. reply_to is now a
-              // throwaway — the real reply path is Frontdoor Delivery
-              // keyed on source_id. reply_to will be removed from
-              // UserInput entirely in a later commit in this branch.
-              let throwaway = process.new_subject()
               process.send(
                 state.cognitive,
-                agent_types.UserInput(
-                  source_id: state.source_id,
-                  text:,
-                  reply_to: throwaway,
-                ),
+                agent_types.UserInput(source_id: state.source_id, text:),
               )
               mist.continue(state)
             }
@@ -977,17 +969,13 @@ fn forward_loop(
             case process.selector_receive(inner_selector, 2000) {
               Ok([]) | Error(_) -> {
                 // Dispatch the greeting UserInput via Frontdoor's
-                // source_id. The reply flows back through the
-                // delivery sink registered at connect time.
-                // reply_to is a throwaway — cognitive still accepts
-                // it on the legacy path during the migration.
-                let throwaway = process.new_subject()
+                // source_id. The reply flows back through the delivery
+                // sink registered at connect time.
                 process.send(
                   cognitive,
                   agent_types.UserInput(
                     source_id:,
                     text: "[Session started. Greet the operator briefly — one or two sentences. Mention anything notable from your sensorium.]",
-                    reply_to: throwaway,
                   ),
                 )
               }

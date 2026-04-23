@@ -10,10 +10,7 @@ import agent/cognitive/llm as cognitive_llm
 import agent/cognitive/memory as cognitive_memory
 import agent/cognitive/output
 import agent/cognitive_state.{type CognitiveState, CognitiveState}
-import agent/types.{
-  type CognitiveReply, Idle, PendingThink, SafetyGateNotice, SensoryEvent,
-  Thinking,
-}
+import agent/types.{Idle, PendingThink, SafetyGateNotice, SensoryEvent, Thinking}
 import agent/worker
 import cycle_log
 import dag/types as dag_types
@@ -27,7 +24,7 @@ import dprime/types as dprime_types
 import facts/log as facts_log
 import facts/types as facts_types
 import gleam/dict
-import gleam/erlang/process.{type Subject}
+import gleam/erlang/process
 import gleam/float
 import gleam/int
 import gleam/list
@@ -157,7 +154,6 @@ pub fn spawn_safety_gate(
   task_id: String,
   resp: llm_types.LlmResponse,
   calls: List(llm_types.ToolCall),
-  reply_to: Subject(CognitiveReply),
   dprime_st: dprime_types.DprimeState,
 ) -> CognitiveState {
   slog.info(
@@ -229,7 +225,6 @@ pub fn spawn_safety_gate(
             result: reject_result,
             response: resp,
             calls:,
-            reply_to:,
           ),
         )
       }
@@ -254,13 +249,7 @@ pub fn spawn_safety_gate(
           )
         process.send(
           self,
-          types.SafetyGateComplete(
-            task_id:,
-            result:,
-            response: resp,
-            calls:,
-            reply_to:,
-          ),
+          types.SafetyGateComplete(task_id:, result:, response: resp, calls:),
         )
       }
       Pass -> {
@@ -277,13 +266,7 @@ pub fn spawn_safety_gate(
           )
         process.send(
           self,
-          types.SafetyGateComplete(
-            task_id:,
-            result:,
-            response: resp,
-            calls:,
-            reply_to:,
-          ),
+          types.SafetyGateComplete(task_id:, result:, response: resp, calls:),
         )
       }
     }
@@ -291,7 +274,7 @@ pub fn spawn_safety_gate(
 
   CognitiveState(
     ..state,
-    status: types.EvaluatingSafety(task_id:, response: resp, calls:, reply_to:),
+    status: types.EvaluatingSafety(task_id:, response: resp, calls:),
   )
 }
 
@@ -303,13 +286,11 @@ pub fn handle_safety_gate_complete(
   result: dprime_types.GateResult,
   resp: llm_types.LlmResponse,
   calls: List(llm_types.ToolCall),
-  reply_to: Subject(CognitiveReply),
   dispatch_fn: fn(
     CognitiveState,
     String,
     llm_types.LlmResponse,
     List(llm_types.ToolCall),
-    Subject(CognitiveReply),
   ) ->
     CognitiveState,
 ) -> CognitiveState {
@@ -400,7 +381,7 @@ pub fn handle_safety_gate_complete(
   case result.decision {
     dprime_types.Accept -> {
       // Proceed normally — delegate to the dispatch function
-      dispatch_fn(state, task_id, resp, calls, reply_to)
+      dispatch_fn(state, task_id, resp, calls)
     }
 
     dprime_types.Modify -> {
@@ -469,7 +450,6 @@ pub fn handle_safety_gate_complete(
                 task_id: new_task_id,
                 model: state.model,
                 fallback_from: None,
-                reply_to:,
                 output_gate_count: 0,
                 empty_retried: False,
                 node_type: pending_node_type,
@@ -514,7 +494,6 @@ pub fn handle_safety_gate_complete(
                 task_id: new_task_id,
                 model: state.model,
                 fallback_from: None,
-                reply_to:,
                 output_gate_count: 0,
                 empty_retried: False,
                 node_type: pending_node_type,
@@ -570,7 +549,6 @@ pub fn handle_safety_gate_complete(
             task_id: new_task_id,
             model: state.model,
             fallback_from: None,
-            reply_to:,
             output_gate_count: 0,
             empty_retried: False,
             node_type: pending_node_type,
@@ -587,7 +565,6 @@ pub fn spawn_input_safety_gate(
   cycle_id: String,
   model: String,
   text: String,
-  reply_to: Subject(CognitiveReply),
   dprime_st: dprime_types.DprimeState,
 ) -> CognitiveState {
   slog.info(
@@ -748,20 +725,14 @@ pub fn spawn_input_safety_gate(
 
     process.send(
       self,
-      types.InputSafetyGateComplete(
-        cycle_id:,
-        result:,
-        model:,
-        text:,
-        reply_to:,
-      ),
+      types.InputSafetyGateComplete(cycle_id:, result:, model:, text:),
     )
   })
 
   CognitiveState(
     ..state,
     cycle_id: Some(cycle_id),
-    status: types.EvaluatingInputSafety(cycle_id:, model:, text:, reply_to:),
+    status: types.EvaluatingInputSafety(cycle_id:, model:, text:),
   )
 }
 
@@ -854,7 +825,6 @@ pub fn handle_input_safety_gate_complete(
   result: dprime_types.GateResult,
   model: String,
   text: String,
-  reply_to: Subject(CognitiveReply),
 ) -> CognitiveState {
   // Track canary probe failures for operator alerting
   let state = case result.canary_result {
@@ -974,7 +944,6 @@ pub fn handle_input_safety_gate_complete(
         model,
         text,
         cycle_id,
-        reply_to,
         dag_types.CognitiveCycle,
       )
     }
@@ -994,7 +963,6 @@ pub fn handle_input_safety_gate_complete(
         model,
         text,
         cycle_id,
-        reply_to,
         dag_types.CognitiveCycle,
       )
     }
@@ -1004,7 +972,7 @@ pub fn handle_input_safety_gate_complete(
       let user_text = build_user_response(result)
       // Agent's history gets the technical details for pattern learning
       let agent_text = build_rejection_notice("input", result, "user query")
-      output.send_reply(state, reply_to, user_text, model, None, [])
+      output.send_reply(state, user_text, model, None, [])
       let state = cognitive_state.apply_meta_observation(state, 0)
       let state = with_assistant_error(state, agent_text)
       CognitiveState(..state, status: Idle)
@@ -1018,7 +986,6 @@ pub fn handle_post_execution_gate_complete(
   cycle_id: String,
   result: dprime_types.GateResult,
   pre_score: Float,
-  _reply_to: Subject(CognitiveReply),
 ) -> CognitiveState {
   let decision_str = case result.decision {
     dprime_types.Accept -> "ACCEPT"
@@ -1157,7 +1124,6 @@ pub fn handle_post_execution_gate_complete(
 pub fn check_deterministic_only(
   state: CognitiveState,
   reply_text: String,
-  reply_to: Subject(CognitiveReply),
   messages: List(llm_types.Message),
   task_id: String,
   usage: llm_types.Usage,
@@ -1202,14 +1168,13 @@ pub fn check_deterministic_only(
           ),
           report_text: reply_text,
           modification_count: 0,
-          reply_to:,
         ),
       )
       CognitiveState(
         ..state,
         messages:,
         status: Thinking(task_id:),
-        pending_output_reply: Some(#(reply_to, reply_text)),
+        pending_output_reply: Some(reply_text),
       )
     }
     False -> {
@@ -1231,7 +1196,6 @@ pub fn check_deterministic_only(
       )
       output.send_reply(
         state,
-        reply_to,
         reply_text,
         state.model,
         Some(usage),
@@ -1260,7 +1224,6 @@ pub fn spawn_output_gate(
   state: CognitiveState,
   output_state: dprime_types.DprimeState,
   report_text: String,
-  reply_to: Subject(CognitiveReply),
   messages: List(llm_types.Message),
   task_id: String,
   modification_count: Int,
@@ -1323,7 +1286,6 @@ pub fn spawn_output_gate(
         result:,
         report_text:,
         modification_count:,
-        reply_to:,
       ),
     )
   })
@@ -1340,7 +1302,7 @@ pub fn spawn_output_gate(
     messages:,
     status: Thinking(task_id:),
     pending: dict.delete(state.pending, task_id),
-    pending_output_reply: Some(#(reply_to, report_text)),
+    pending_output_reply: Some(report_text),
   )
 }
 
@@ -1351,7 +1313,6 @@ pub fn handle_output_gate_complete(
   result: dprime_types.GateResult,
   report_text: String,
   modification_count: Int,
-  reply_to: Subject(CognitiveReply),
 ) -> CognitiveState {
   // Clear the pending output reply — the gate completed normally
   let state = CognitiveState(..state, pending_output_reply: None)
@@ -1409,7 +1370,6 @@ pub fn handle_output_gate_complete(
       finalise_dag_node(state, tokens_in, tokens_out, state.model)
       output.send_reply(
         state,
-        reply_to,
         report_text,
         state.model,
         usage,
@@ -1458,7 +1418,6 @@ pub fn handle_output_gate_complete(
           finalise_dag_node(state, tokens_in, tokens_out, state.model)
           output.send_reply(
             state,
-            reply_to,
             full_text,
             state.model,
             usage,
@@ -1521,7 +1480,6 @@ pub fn handle_output_gate_complete(
                 task_id:,
                 model: new_state.model,
                 fallback_from: None,
-                reply_to:,
                 output_gate_count: modification_count + 1,
                 empty_retried: False,
                 node_type: state.cycle_node_type,
@@ -1551,7 +1509,6 @@ pub fn handle_output_gate_complete(
       finalise_dag_node(state, tokens_in, tokens_out, state.model)
       output.send_reply(
         state,
-        reply_to,
         user_text,
         state.model,
         usage,
@@ -1595,10 +1552,9 @@ pub fn handle_gate_timeout(
       )
       // Use the stored pending_output_reply to deliver the report
       case state.pending_output_reply {
-        Some(#(reply_to, report_text)) -> {
+        Some(report_text) -> {
           output.send_reply(
             state,
-            reply_to,
             report_text,
             state.model,
             None,

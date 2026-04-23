@@ -261,7 +261,6 @@ fn handle_tick(state: PollerState) -> PollerState {
         // unsubscribes on timeout to keep the routing table bounded.
         let source_id = "comms:" <> m.message_id
         subscribe_and_drain(state.frontdoor, source_id)
-        let throwaway = process.new_subject()
         process.send(
           state.cognitive,
           agent_types.SchedulerInput(
@@ -278,7 +277,6 @@ fn handle_tick(state: PollerState) -> PollerState {
               <> "\n\n"
               <> body,
             tags: ["email", "inbound"],
-            reply_to: throwaway,
           ),
         )
         // Don't block waiting for reply — fire and forget

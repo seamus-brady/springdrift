@@ -8,14 +8,14 @@
 import agent/cognitive
 import agent/cognitive_config
 import agent/types.{
-  type CognitiveReply, type Notification, Ping, PingReply, SchedulerJobStarted,
-  SetModel, UserAnswer, UserInput,
+  type Notification, Ping, PingReply, SchedulerJobStarted, SetModel, UserAnswer,
+  UserInput,
 }
 import frontdoor
-import frontdoor/types.{DeliverQuestion, Subscribe, UserSource} as frontdoor_types
+import frontdoor/types.{DeliverQuestion, DeliverReply, Subscribe, UserSource} as frontdoor_types
 import gleam/erlang/process
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{type Option, None, Some}
 import gleam/string
 import gleeunit/should
 import llm/adapters/mock
@@ -25,13 +25,6 @@ import scheduler/types as scheduler_types
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-fn start_cognitive(provider) {
-  let notify_subj: process.Subject(Notification) = process.new_subject()
-  let cfg = cognitive_config.default_test_config(provider, notify_subj)
-  let assert Ok(subj) = cognitive.start(cfg)
-  #(subj, notify_subj)
-}
 
 /// Start cognitive with a Frontdoor wired and a UserSource subscriber
 /// for `source_id`. Returns the cognitive subject, notify subject,
@@ -48,14 +41,41 @@ fn start_cognitive_with_frontdoor(provider, source_id: String) {
   #(subj, notify_subj, fd, sink)
 }
 
-fn send_and_receive(cognitive_subj, text: String) -> CognitiveReply {
-  let reply_subj = process.new_subject()
-  process.send(
-    cognitive_subj,
-    UserInput(source_id: "", text:, reply_to: reply_subj),
-  )
-  let assert Ok(reply) = process.receive(reply_subj, 5000)
-  reply
+/// Backwards-compatible helper for tests that don't care about Frontdoor
+/// details — spin up cognitive with a throwaway source, send input,
+/// wait for a DeliverReply. Returns the DeliverReply so callers can
+/// inspect response/model/usage fields.
+fn start_cognitive(provider) {
+  let #(cognitive, notify, _fd, sink) =
+    start_cognitive_with_frontdoor(provider, "test:default")
+  #(cognitive, notify, sink)
+}
+
+/// Send a user input and wait for the DeliverReply on the Frontdoor
+/// sink. The returned tuple exposes the fields tests actually check
+/// (response, model, usage) without forcing every caller to pattern-
+/// match on the Delivery enum.
+fn send_and_receive(
+  cognitive_subj,
+  sink: process.Subject(frontdoor_types.Delivery),
+  text: String,
+) -> #(String, String, Option(llm_types.Usage)) {
+  process.send(cognitive_subj, UserInput(source_id: "test:default", text:))
+  let assert Ok(DeliverReply(response:, model:, usage:, ..)) =
+    receive_reply(sink, 5000)
+  #(response, model, usage)
+}
+
+fn receive_reply(
+  sink: process.Subject(frontdoor_types.Delivery),
+  timeout_ms: Int,
+) -> Result(frontdoor_types.Delivery, Nil) {
+  // Skip non-reply deliveries (e.g. DeliverQuestion) until we get a reply.
+  case process.receive(sink, timeout_ms) {
+    Error(_) -> Error(Nil)
+    Ok(DeliverReply(..) as d) -> Ok(d)
+    Ok(_) -> receive_reply(sink, timeout_ms)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -64,12 +84,12 @@ fn send_and_receive(cognitive_subj, text: String) -> CognitiveReply {
 
 pub fn single_turn_text_response_test() {
   let provider = mock.provider_with_text("Hello from cognitive!")
-  let #(cognitive, _notify) = start_cognitive(provider)
-  let reply = send_and_receive(cognitive, "Hi there")
-  reply.response |> should.equal("Hello from cognitive!")
-  reply.model |> should.equal("mock-model")
+  let #(cognitive, _notify, sink) = start_cognitive(provider)
+  let #(response, model, usage) = send_and_receive(cognitive, sink, "Hi there")
+  response |> should.equal("Hello from cognitive!")
+  model |> should.equal("mock-model")
   // Usage should be present for successful responses
-  should.be_true(reply.usage != None)
+  should.be_true(usage != None)
 }
 
 // ---------------------------------------------------------------------------
@@ -78,9 +98,10 @@ pub fn single_turn_text_response_test() {
 
 pub fn provider_error_test() {
   let provider = mock.provider_with_error("test failure")
-  let #(cognitive, _notify) = start_cognitive(provider)
-  let reply = send_and_receive(cognitive, "Hi there")
-  should.be_true(reply.response != "")
+  let #(cognitive, _notify, sink) = start_cognitive(provider)
+  let #(response, _model, _usage) =
+    send_and_receive(cognitive, sink, "Hi there")
+  should.be_true(response != "")
 }
 
 // ---------------------------------------------------------------------------
@@ -89,13 +110,13 @@ pub fn provider_error_test() {
 
 pub fn multiple_turns_test() {
   let provider = mock.provider_with_text("response")
-  let #(cognitive, _notify) = start_cognitive(provider)
+  let #(cognitive, _notify, sink) = start_cognitive(provider)
 
-  let reply1 = send_and_receive(cognitive, "First message")
-  reply1.response |> should.equal("response")
+  let #(r1, _, _) = send_and_receive(cognitive, sink, "First message")
+  r1 |> should.equal("response")
 
-  let reply2 = send_and_receive(cognitive, "Second message")
-  reply2.response |> should.equal("response")
+  let #(r2, _, _) = send_and_receive(cognitive, sink, "Second message")
+  r2 |> should.equal("response")
 }
 
 // ---------------------------------------------------------------------------
@@ -104,7 +125,7 @@ pub fn multiple_turns_test() {
 
 pub fn ping_idle_returns_idle_tag_test() {
   let provider = mock.provider_with_text("ok")
-  let #(cognitive, _notify) = start_cognitive(provider)
+  let #(cognitive, _notify, _sink) = start_cognitive(provider)
   let reply_subj = process.new_subject()
   process.send(cognitive, Ping(reply_to: reply_subj))
   let assert Ok(PingReply(status_tag:, cycle_id:)) =
@@ -121,9 +142,9 @@ pub fn save_result_handled_test() {
   // This is a basic smoke test — verify the cognitive loop doesn't crash
   // when receiving save results
   let provider = mock.provider_with_text("ok")
-  let #(cognitive, _notify) = start_cognitive(provider)
-  let reply = send_and_receive(cognitive, "test")
-  reply.response |> should.equal("ok")
+  let #(cognitive, _notify, sink) = start_cognitive(provider)
+  let #(response, _model, _usage) = send_and_receive(cognitive, sink, "test")
+  response |> should.equal("ok")
 }
 
 // ---------------------------------------------------------------------------
@@ -153,11 +174,7 @@ pub fn request_human_input_tool_test() {
 
   // Send initial message — source_id claims the cycle on Frontdoor so
   // the question routes back to our sink.
-  let reply_subj = process.new_subject()
-  process.send(
-    cognitive,
-    UserInput(source_id: "test:src", text: "Hello", reply_to: reply_subj),
-  )
+  process.send(cognitive, UserInput(source_id: "test:src", text: "Hello"))
 
   // Should receive a DeliverQuestion on the Frontdoor sink.
   let assert Ok(delivery) = process.receive(sink, 5000)
@@ -175,9 +192,9 @@ pub fn request_human_input_tool_test() {
   // Send the answer back
   process.send(cognitive, UserAnswer(answer: "Alice"))
 
-  // Should receive the final reply
-  let assert Ok(reply) = process.receive(reply_subj, 5000)
-  reply.response |> should.equal("Got your answer, thanks!")
+  // Should receive the final reply on the same sink.
+  let assert Ok(DeliverReply(response: r, ..)) = receive_reply(sink, 5000)
+  r |> should.equal("Got your answer, thanks!")
 }
 
 // ---------------------------------------------------------------------------
@@ -190,16 +207,16 @@ pub fn request_human_input_tool_test() {
 
 pub fn set_model_test() {
   let provider = mock.provider_with_text("Hello!")
-  let #(cognitive, _notify) = start_cognitive(provider)
+  let #(cognitive, _notify, sink) = start_cognitive(provider)
 
   // Send SetModel to change the model
   process.send(cognitive, SetModel(model: "new-model"))
 
   // Classification routes Simple queries to task_model regardless of SetModel.
   // SetModel updates state.model but classification overrides it.
-  let reply = send_and_receive(cognitive, "Hi")
-  reply.response |> should.equal("Hello!")
-  reply.model |> should.equal("mock-model")
+  let #(response, model, _usage) = send_and_receive(cognitive, sink, "Hi")
+  response |> should.equal("Hello!")
+  model |> should.equal("mock-model")
 }
 
 // ---------------------------------------------------------------------------
@@ -216,9 +233,9 @@ pub fn set_model_test() {
 
 pub fn error_reply_has_no_usage_test() {
   let provider = mock.provider_with_error("test failure")
-  let #(cognitive, _notify) = start_cognitive(provider)
-  let reply = send_and_receive(cognitive, "Hi")
-  reply.usage |> should.equal(None)
+  let #(cognitive, _notify, sink) = start_cognitive(provider)
+  let #(_response, _model, usage) = send_and_receive(cognitive, sink, "Hi")
+  usage |> should.equal(None)
 }
 
 pub fn agent_question_decoupled_test() {
@@ -227,7 +244,7 @@ pub fn agent_question_decoupled_test() {
   // (Question routing to external destinations is exercised directly
   // in test/frontdoor_test.gleam.)
   let provider = mock.provider_with_text("ok")
-  let #(cognitive, _notify) = start_cognitive(provider)
+  let #(cognitive, _notify, _sink) = start_cognitive(provider)
 
   // Simulate an agent asking a question
   let agent_reply_subj = process.new_subject()
@@ -266,33 +283,39 @@ pub fn model_fallback_on_retryable_error_test() {
     })
 
   let notify_subj: process.Subject(types.Notification) = process.new_subject()
+  let fd = frontdoor.start()
   let cfg =
     cognitive_config.CognitiveConfig(
       ..cognitive_config.default_test_config(provider, notify_subj),
       task_model: "mock-task",
       reasoning_model: "mock-reasoning",
       archivist_model: "mock-task",
+      frontdoor: Some(fd),
     )
   let assert Ok(cognitive) = cognitive.start(cfg)
+  let sink: process.Subject(frontdoor_types.Delivery) = process.new_subject()
+  process.send(
+    fd,
+    Subscribe(source_id: "test:fallback", kind: UserSource, sink:),
+  )
 
   // Use a query with complexity keywords so heuristic classifies as Complex,
   // routing to reasoning_model (mock-reasoning) which returns 529
-  let reply_subj = process.new_subject()
   process.send(
     cognitive,
     UserInput(
-      source_id: "",
+      source_id: "test:fallback",
       text: "Explain step by step how to implement a distributed architecture",
-      reply_to: reply_subj,
     ),
   )
   // Longer timeout: worker retries 3x with 2s base backoff (~14s) + fallback
-  let assert Ok(reply) = process.receive(reply_subj, 25_000)
+  let assert Ok(DeliverReply(response:, usage:, ..)) =
+    receive_reply(sink, 25_000)
 
   // Should include fallback prefix and the actual response
-  should.be_true(string.contains(reply.response, "mock-reasoning unavailable"))
-  should.be_true(string.contains(reply.response, "Fallback response"))
-  should.be_true(reply.usage != None)
+  should.be_true(string.contains(response, "mock-reasoning unavailable"))
+  should.be_true(string.contains(response, "Fallback response"))
+  should.be_true(usage != None)
 }
 
 // ---------------------------------------------------------------------------
@@ -301,13 +324,12 @@ pub fn model_fallback_on_retryable_error_test() {
 
 pub fn scheduler_input_text_response_test() {
   let provider = mock.provider_with_text("Scheduler result")
-  let #(cognitive, notify) = start_cognitive(provider)
+  let #(cognitive, notify, sink) = start_cognitive(provider)
 
-  let reply_subj = process.new_subject()
   process.send(
     cognitive,
     types.SchedulerInput(
-      source_id: "",
+      source_id: "test:default",
       job_name: "daily-digest",
       query: "Generate today's digest",
       kind: scheduler_types.RecurringTask,
@@ -315,7 +337,6 @@ pub fn scheduler_input_text_response_test() {
       title: "Daily Digest",
       body: "",
       tags: ["digest", "daily"],
-      reply_to: reply_subj,
     ),
   )
 
@@ -330,10 +351,10 @@ pub fn scheduler_input_text_response_test() {
   }
 
   // Should receive the reply
-  let assert Ok(reply) = process.receive(reply_subj, 5000)
-  reply.response |> should.equal("Scheduler result")
+  let assert Ok(DeliverReply(response:, model:, ..)) = receive_reply(sink, 5000)
+  response |> should.equal("Scheduler result")
   // Should use task_model (scheduler skips classification)
-  reply.model |> should.equal("mock-model")
+  model |> should.equal("mock-model")
 }
 
 pub fn scheduler_input_reminder_uses_body_test() {
@@ -356,13 +377,12 @@ pub fn scheduler_input_reminder_uses_body_test() {
         False -> Ok(mock.text_response("Missing body"))
       }
     })
-  let #(cognitive, _notify) = start_cognitive(provider)
+  let #(cognitive, _notify, sink) = start_cognitive(provider)
 
-  let reply_subj = process.new_subject()
   process.send(
     cognitive,
     types.SchedulerInput(
-      source_id: "",
+      source_id: "test:default",
       job_name: "remind-call",
       query: "Call reminder",
       kind: scheduler_types.Reminder,
@@ -370,23 +390,21 @@ pub fn scheduler_input_reminder_uses_body_test() {
       title: "Call Alice",
       body: "Remember to call Alice at 3pm",
       tags: [],
-      reply_to: reply_subj,
     ),
   )
 
-  let assert Ok(reply) = process.receive(reply_subj, 5000)
-  reply.response |> should.equal("Got the reminder body")
+  let assert Ok(DeliverReply(response:, ..)) = receive_reply(sink, 5000)
+  response |> should.equal("Got the reminder body")
 }
 
 pub fn scheduler_input_for_user_sends_reminder_notification_test() {
   let provider = mock.provider_with_text("ok")
-  let #(cognitive, notify) = start_cognitive(provider)
+  let #(cognitive, notify, _sink) = start_cognitive(provider)
 
-  let reply_subj = process.new_subject()
   process.send(
     cognitive,
     types.SchedulerInput(
-      source_id: "",
+      source_id: "test:default",
       job_name: "user-remind",
       query: "reminder",
       kind: scheduler_types.Reminder,
@@ -394,7 +412,6 @@ pub fn scheduler_input_for_user_sends_reminder_notification_test() {
       title: "Meeting soon",
       body: "Meeting in 15 min",
       tags: [],
-      reply_to: reply_subj,
     ),
   )
 
@@ -424,24 +441,19 @@ pub fn scheduler_input_queued_when_busy_test() {
       process.send(call_count, 1)
       Ok(mock.text_response("response"))
     })
-  let #(cognitive, notify) = start_cognitive(provider)
+  let #(cognitive, notify, sink) = start_cognitive(provider)
 
   // Send a regular UserInput first to make the loop busy
-  let reply1_subj = process.new_subject()
-  process.send(
-    cognitive,
-    UserInput(source_id: "", text: "first", reply_to: reply1_subj),
-  )
+  process.send(cognitive, UserInput(source_id: "test:default", text: "first"))
 
   // Wait for the first LLM call to start (classification worker)
   let assert Ok(_) = process.receive(call_count, 5000)
 
   // Now send a SchedulerInput while busy — should be queued
-  let reply2_subj = process.new_subject()
   process.send(
     cognitive,
     types.SchedulerInput(
-      source_id: "",
+      source_id: "test:default",
       job_name: "queued-job",
       query: "queued query",
       kind: scheduler_types.RecurringTask,
@@ -449,19 +461,17 @@ pub fn scheduler_input_queued_when_busy_test() {
       title: "Queued",
       body: "",
       tags: [],
-      reply_to: reply2_subj,
     ),
   )
 
   // Should receive InputQueued notification
   let assert Ok(_queued_notif) = process.receive(notify, 5000)
 
-  // Wait for first reply
-  let assert Ok(_reply1) = process.receive(reply1_subj, 5000)
-
-  // Wait for queued scheduler reply (it should drain after first completes)
-  let assert Ok(reply2) = process.receive(reply2_subj, 10_000)
-  reply2.response |> should.equal("response")
+  // Wait for first reply on the Frontdoor sink, then the queued scheduler
+  // reply (both route through the same source_id subscription).
+  let assert Ok(DeliverReply(..)) = receive_reply(sink, 5000)
+  let assert Ok(DeliverReply(response: r2, ..)) = receive_reply(sink, 10_000)
+  r2 |> should.equal("response")
 }
 
 pub fn scheduler_input_includes_context_xml_test() {
@@ -485,13 +495,12 @@ pub fn scheduler_input_includes_context_xml_test() {
         False -> Ok(mock.text_response("No context"))
       }
     })
-  let #(cognitive, _notify) = start_cognitive(provider)
+  let #(cognitive, _notify, sink) = start_cognitive(provider)
 
-  let reply_subj = process.new_subject()
   process.send(
     cognitive,
     types.SchedulerInput(
-      source_id: "",
+      source_id: "test:default",
       job_name: "test-job",
       query: "Run analysis",
       kind: scheduler_types.RecurringTask,
@@ -499,10 +508,9 @@ pub fn scheduler_input_includes_context_xml_test() {
       title: "Test Job",
       body: "",
       tags: ["test"],
-      reply_to: reply_subj,
     ),
   )
 
-  let assert Ok(reply) = process.receive(reply_subj, 5000)
-  reply.response |> should.equal("Context received")
+  let assert Ok(DeliverReply(response:, ..)) = receive_reply(sink, 5000)
+  response |> should.equal("Context received")
 }

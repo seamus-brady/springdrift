@@ -15,7 +15,7 @@ import llm/provider.{type Provider}
 import llm/tool
 import llm/types.{
   type ContentBlock, type LlmResponse, type Message, type Tool, type ToolCall,
-  type ToolResult, type Usage,
+  type ToolResult,
 }
 import query_complexity.{type QueryComplexity}
 import scheduler/types as scheduler_types
@@ -314,12 +314,7 @@ pub type CognitiveMessage {
   /// token — cognitive ClaimCycle's it, and every reply and question
   /// for the resulting cycle routes through Frontdoor to whichever
   /// sink is registered. Callers with no Frontdoor interest pass "".
-  /// `reply_to` is vestigial — adapters pass a throwaway subject. It
-  /// exists because cognitive's internal `PendingThink` chain still
-  /// threads a `Subject(CognitiveReply)` through gate callbacks; the
-  /// cycle-terminal `output.send_reply` helper is the only actual
-  /// caller and it publishes to Frontdoor regardless.
-  UserInput(source_id: String, text: String, reply_to: Subject(CognitiveReply))
+  UserInput(source_id: String, text: String)
   UserAnswer(answer: String)
   /// Sent by Frontdoor when an autonomous cycle raised a human question
   /// but has no human destination to ask. Cognitive treats it exactly
@@ -341,31 +336,23 @@ pub type CognitiveMessage {
   /// conversation. Called once from `springdrift.gleam` after both the
   /// cognitive loop and the scheduler have started.
   SetScheduler(scheduler: Subject(scheduler_types.SchedulerMessage))
-  ClassifyComplete(
-    cycle_id: String,
-    complexity: QueryComplexity,
-    text: String,
-    reply_to: Subject(CognitiveReply),
-  )
+  ClassifyComplete(cycle_id: String, complexity: QueryComplexity, text: String)
   SafetyGateComplete(
     task_id: String,
     result: dprime_types.GateResult,
     response: LlmResponse,
     calls: List(ToolCall),
-    reply_to: Subject(CognitiveReply),
   )
   InputSafetyGateComplete(
     cycle_id: String,
     result: dprime_types.GateResult,
     model: String,
     text: String,
-    reply_to: Subject(CognitiveReply),
   )
   PostExecutionGateComplete(
     cycle_id: String,
     result: dprime_types.GateResult,
     pre_score: Float,
-    reply_to: Subject(CognitiveReply),
   )
   SetSupervisor(supervisor: Subject(SupervisorMessage))
   SchedulerInput(
@@ -377,15 +364,12 @@ pub type CognitiveMessage {
     title: String,
     body: String,
     tags: List(String),
-    /// Vestigial — see UserInput.reply_to.
-    reply_to: Subject(CognitiveReply),
   )
   OutputGateComplete(
     cycle_id: String,
     result: dprime_types.GateResult,
     report_text: String,
     modification_count: Int,
-    reply_to: Subject(CognitiveReply),
   )
   GetMessages(reply_to: Subject(List(Message)))
   /// Cheap liveness check: cognitive replies with its current status
@@ -403,20 +387,6 @@ pub type CognitiveMessage {
     task_title: String,
     plan_dprime: Float,
     explanation: String,
-  )
-}
-
-pub type CognitiveReply {
-  CognitiveReply(
-    response: String,
-    model: String,
-    usage: Option(Usage),
-    /// Names of tools the cognitive loop fired during the cycle that
-    /// produced this reply. Used by the scheduler runner to enforce
-    /// the Phase 3b required_tools check — a job that didn't actually
-    /// call its declared required tools is marked JobFailed instead
-    /// of JobComplete. Ordering preserved.
-    tools_fired: List(String),
   )
 }
 
@@ -440,26 +410,15 @@ pub type CognitiveStatus {
   WaitingForAgents(
     pending_ids: List(String),
     accumulated_results: List(ContentBlock),
-    reply_to: Subject(CognitiveReply),
   )
   WaitingForUser(question: String, context: WaitingContext)
   EvaluatingSafety(
     task_id: String,
     response: LlmResponse,
     calls: List(ToolCall),
-    reply_to: Subject(CognitiveReply),
   )
-  EvaluatingInputSafety(
-    cycle_id: String,
-    model: String,
-    text: String,
-    reply_to: Subject(CognitiveReply),
-  )
-  EvaluatingPostExecution(
-    cycle_id: String,
-    pre_score: Float,
-    reply_to: Subject(CognitiveReply),
-  )
+  EvaluatingInputSafety(cycle_id: String, model: String, text: String)
+  EvaluatingPostExecution(cycle_id: String, pre_score: Float)
 }
 
 // ---------------------------------------------------------------------------
@@ -467,7 +426,7 @@ pub type CognitiveStatus {
 // ---------------------------------------------------------------------------
 
 pub type WaitingContext {
-  OwnToolWaiting(tool_use_id: String, reply_to: Subject(CognitiveReply))
+  OwnToolWaiting(tool_use_id: String)
   AgentWaiting(reply_to: Subject(String))
 }
 
@@ -480,17 +439,11 @@ pub type PendingTask {
     task_id: String,
     model: String,
     fallback_from: Option(String),
-    reply_to: Subject(CognitiveReply),
     output_gate_count: Int,
     empty_retried: Bool,
     node_type: dag_types.CycleNodeType,
   )
-  PendingAgent(
-    task_id: String,
-    tool_use_id: String,
-    agent: String,
-    reply_to: Subject(CognitiveReply),
-  )
+  PendingAgent(task_id: String, tool_use_id: String, agent: String)
 }
 
 // ---------------------------------------------------------------------------
@@ -563,11 +516,7 @@ pub type SensoryEvent {
 // ---------------------------------------------------------------------------
 
 pub type QueuedInput {
-  QueuedInput(
-    source_id: String,
-    text: String,
-    reply_to: Subject(CognitiveReply),
-  )
+  QueuedInput(source_id: String, text: String)
   QueuedSchedulerInput(
     source_id: String,
     job_name: String,
@@ -577,7 +526,6 @@ pub type QueuedInput {
     title: String,
     body: String,
     tags: List(String),
-    reply_to: Subject(CognitiveReply),
   )
   QueuedSensoryInput(event: SensoryEvent)
 }

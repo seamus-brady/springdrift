@@ -8,14 +8,14 @@
 import agent/cognitive/output
 import agent/cognitive_state.{type CognitiveState, CognitiveState}
 import agent/registry
-import agent/types.{type CognitiveReply, PendingThink, SensoryEvent, Thinking}
+import agent/types.{PendingThink, SensoryEvent, Thinking}
 import agent/worker
 import context
 import cycle_log
 import dag/types as dag_types
 import dprime/types as dprime_types
 import gleam/dict
-import gleam/erlang/process.{type Subject}
+import gleam/erlang/process
 import gleam/float
 import gleam/int
 import gleam/list
@@ -39,7 +39,6 @@ pub fn proceed_with_model(
   model: String,
   text: String,
   cycle_id: String,
-  reply_to: Subject(CognitiveReply),
   node_type: dag_types.CycleNodeType,
 ) -> CognitiveState {
   slog.info(
@@ -149,7 +148,6 @@ pub fn proceed_with_model(
         task_id:,
         model:,
         fallback_from: None,
-        reply_to:,
         output_gate_count: 0,
         empty_retried: False,
         node_type:,
@@ -181,7 +179,7 @@ pub fn handle_think_error(
   cycle_log.log_llm_error(cycle_id, error)
   case dict.get(state.pending, task_id) {
     Error(_) -> state
-    Ok(PendingThink(model: failed_model, reply_to: rt, node_type:, ..)) -> {
+    Ok(PendingThink(model: failed_model, node_type:, ..)) -> {
       // If the error is retryable and we have a different model to try, fall back
       case retryable && failed_model != state.task_model {
         True -> {
@@ -213,7 +211,6 @@ pub fn handle_think_error(
                 task_id: new_task_id,
                 model: state.task_model,
                 fallback_from: Some(failed_model),
-                reply_to: rt,
                 output_gate_count: 0,
                 empty_retried: False,
                 node_type:,
@@ -226,7 +223,7 @@ pub fn handle_think_error(
           // cycle_log above; what the operator sees in chat is a short
           // classified notice, not a raw API payload.
           let user_text = render_user_error(classify_think_error(error))
-          output.send_reply(state, rt, user_text, state.model, None, [])
+          output.send_reply(state, user_text, state.model, None, [])
           // Add synthetic assistant message so message history stays
           // well-formed (alternating user/assistant). Without this, the
           // next user input would create two consecutive user messages
@@ -258,7 +255,7 @@ pub fn handle_think_down(
   // Only act if we still have this pending (may already be resolved)
   case dict.get(state.pending, task_id) {
     Error(_) -> state
-    Ok(PendingThink(reply_to: rt, ..)) -> {
+    Ok(PendingThink(..)) -> {
       // Raw crash reason goes to logs; user sees a sanitised notice.
       slog.log_error(
         "cognitive",
@@ -267,7 +264,7 @@ pub fn handle_think_down(
         state.cycle_id,
       )
       let user_text = render_user_error(InternalCrash)
-      output.send_reply(state, rt, user_text, state.model, None, [])
+      output.send_reply(state, user_text, state.model, None, [])
       let error_msg =
         llm_types.Message(role: llm_types.Assistant, content: [
           llm_types.TextContent(text: user_text),

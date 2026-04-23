@@ -13,10 +13,10 @@ import agent/framework
 import agent/registry
 import agent/team
 import agent/types.{
-  type AgentOutcome, type CognitiveReply, type DelegationProgress, AgentFailure,
-  AgentSuccess, AgentTask, AgentWaiting, DelegationInfo, Idle, ModelEscalation,
-  OwnToolWaiting, PendingAgent, PendingThink, Thinking, ToolCalling,
-  WaitingForAgents, WaitingForUser,
+  type AgentOutcome, type DelegationProgress, AgentFailure, AgentSuccess,
+  AgentTask, AgentWaiting, DelegationInfo, Idle, ModelEscalation, OwnToolWaiting,
+  PendingAgent, PendingThink, Thinking, ToolCalling, WaitingForAgents,
+  WaitingForUser,
 }
 import agent/worker
 import cycle_log
@@ -122,12 +122,10 @@ pub fn dispatch_tool_calls(
   task_id: String,
   resp: llm_types.LlmResponse,
   calls: List(llm_types.ToolCall),
-  reply_to: Subject(CognitiveReply),
 ) -> CognitiveState {
   // Check for request_human_input first
   case list.find(calls, fn(c) { c.name == "request_human_input" }) {
-    Ok(hi_call) ->
-      handle_own_human_input(state, task_id, resp, hi_call, reply_to)
+    Ok(hi_call) -> handle_own_human_input(state, task_id, resp, hi_call)
     Error(_) -> {
       // Check for memory and planner tools — execute synchronously, then re-think
       let #(memory_calls, after_memory) =
@@ -162,17 +160,9 @@ pub fn dispatch_tool_calls(
           captures_calls,
         ])
       case sync_calls {
-        [] ->
-          dispatch_agent_calls(state, task_id, resp, remaining_calls, reply_to)
+        [] -> dispatch_agent_calls(state, task_id, resp, remaining_calls)
         _ ->
-          handle_memory_tools(
-            state,
-            task_id,
-            resp,
-            sync_calls,
-            remaining_calls,
-            reply_to,
-          )
+          handle_memory_tools(state, task_id, resp, sync_calls, remaining_calls)
       }
     }
   }
@@ -183,7 +173,6 @@ fn handle_own_human_input(
   task_id: String,
   resp: llm_types.LlmResponse,
   call: llm_types.ToolCall,
-  reply_to: Subject(CognitiveReply),
 ) -> CognitiveState {
   let question = framework.parse_human_input_question(call.input_json)
 
@@ -201,7 +190,7 @@ fn handle_own_human_input(
     llm_types.Message(role: llm_types.Assistant, content: resp.content)
   let messages = list.append(state.messages, [assistant_msg])
 
-  let ctx = OwnToolWaiting(tool_use_id: call.id, reply_to:)
+  let ctx = OwnToolWaiting(tool_use_id: call.id)
 
   CognitiveState(
     ..state,
@@ -217,7 +206,6 @@ fn handle_memory_tools(
   resp: llm_types.LlmResponse,
   memory_calls: List(llm_types.ToolCall),
   remaining_calls: List(llm_types.ToolCall),
-  reply_to: Subject(CognitiveReply),
 ) -> CognitiveState {
   let cycle_id = option.unwrap(state.cycle_id, task_id)
   // Execute memory tools synchronously, logging each call/result
@@ -471,7 +459,6 @@ fn handle_memory_tools(
             task_id: new_task_id,
             model: state.model,
             fallback_from: None,
-            reply_to:,
             output_gate_count: 0,
             empty_retried: False,
             node_type: pending_node_type(state, task_id),
@@ -534,7 +521,6 @@ fn handle_memory_tools(
                 task_id: new_task_id,
                 model: state.model,
                 fallback_from: None,
-                reply_to:,
                 output_gate_count: 0,
                 empty_retried: False,
                 node_type: pending_node_type(state, task_id),
@@ -542,15 +528,7 @@ fn handle_memory_tools(
             ),
           )
         }
-        _ ->
-          do_dispatch_agents(
-            state,
-            task_id,
-            resp,
-            agent_calls,
-            initial,
-            reply_to,
-          )
+        _ -> do_dispatch_agents(state, task_id, resp, agent_calls, initial)
       }
     }
   }
@@ -561,7 +539,6 @@ fn dispatch_agent_calls(
   task_id: String,
   resp: llm_types.LlmResponse,
   calls: List(llm_types.ToolCall),
-  reply_to: Subject(CognitiveReply),
 ) -> CognitiveState {
   // Separate agent calls, team calls, and unknown calls
   let #(agent_calls, non_agent) =
@@ -577,7 +554,7 @@ fn dispatch_agent_calls(
   case all_dispatchable, other_calls {
     // Only agent/team calls
     dispatchable, [] -> {
-      do_dispatch_agents(state, task_id, resp, dispatchable, [], reply_to)
+      do_dispatch_agents(state, task_id, resp, dispatchable, [])
     }
 
     // No agent or team calls — unknown tools, send error
@@ -592,7 +569,6 @@ fn dispatch_agent_calls(
       let messages = list.append(state.messages, [assistant_msg])
       output.send_reply(
         state,
-        reply_to,
         reply_text,
         state.model,
         Some(resp.usage),
@@ -618,14 +594,7 @@ fn dispatch_agent_calls(
             is_error: True,
           )
         })
-      do_dispatch_agents(
-        state,
-        task_id,
-        resp,
-        dispatchable,
-        error_blocks,
-        reply_to,
-      )
+      do_dispatch_agents(state, task_id, resp, dispatchable, error_blocks)
     }
   }
 }
@@ -636,7 +605,6 @@ fn dispatch_single_agent(
   call: llm_types.ToolCall,
   agent_name: String,
   cycle_id: String,
-  reply_to: Subject(CognitiveReply),
 ) -> Result(types.PendingTask, Nil) {
   case registry.get_task_subject(state.registry, agent_name) {
     None -> Error(Nil)
@@ -711,7 +679,6 @@ fn dispatch_single_agent(
         task_id: agent_task_id,
         tool_use_id: call.id,
         agent: agent_name,
-        reply_to:,
       ))
     }
   }
@@ -724,7 +691,6 @@ fn dispatch_team_call(
   call: llm_types.ToolCall,
   team_name: String,
   cycle_id: String,
-  reply_to: Subject(CognitiveReply),
 ) -> Result(types.PendingTask, Nil) {
   // Find the team spec
   case list.find(state.team_specs, fn(t) { t.name == team_name }) {
@@ -791,7 +757,6 @@ fn dispatch_team_call(
         task_id: team_task_id,
         tool_use_id: call.id,
         agent: "team:" <> team_name,
-        reply_to:,
       ))
     }
   }
@@ -803,7 +768,6 @@ fn do_dispatch_agents(
   resp: llm_types.LlmResponse,
   agent_calls: List(llm_types.ToolCall),
   initial_results: List(llm_types.ContentBlock),
-  reply_to: Subject(CognitiveReply),
 ) -> CognitiveState {
   let cycle_id = option.unwrap(state.cycle_id, task_id)
 
@@ -826,8 +790,8 @@ fn do_dispatch_agents(
         False -> string.drop_start(call.name, string.length("agent_"))
       }
       case is_team {
-        True -> dispatch_team_call(state, call, name, cycle_id, reply_to)
-        False -> dispatch_single_agent(state, call, name, cycle_id, reply_to)
+        True -> dispatch_team_call(state, call, name, cycle_id)
+        False -> dispatch_single_agent(state, call, name, cycle_id)
       }
     })
 
@@ -854,7 +818,6 @@ fn do_dispatch_agents(
       let error_text = "[Error: no matching agents available]"
       output.send_reply(
         state,
-        reply_to,
         error_text,
         state.model,
         Some(resp.usage),
@@ -979,7 +942,6 @@ fn do_dispatch_agents(
         status: WaitingForAgents(
           pending_ids:,
           accumulated_results: initial_results,
-          reply_to:,
         ),
         pending: new_pending,
       )
@@ -1288,7 +1250,7 @@ pub fn handle_agent_complete(
         True -> {
           // More agents pending — accumulate result in WaitingForAgents status
           case state.status {
-            WaitingForAgents(pending_ids:, accumulated_results:, reply_to:) -> {
+            WaitingForAgents(pending_ids:, accumulated_results:) -> {
               CognitiveState(
                 ..state,
                 status: WaitingForAgents(
@@ -1296,7 +1258,6 @@ pub fn handle_agent_complete(
                   accumulated_results: list.append(accumulated_results, [
                     tool_result_block,
                   ]),
-                  reply_to:,
                 ),
                 pending: remaining,
                 active_delegations: updated_delegations,
@@ -1311,20 +1272,11 @@ pub fn handle_agent_complete(
           }
         }
         False -> {
-          // All agents done — get reply_to and accumulated results from status
-          let #(all_results, reply_to) = case state.status {
-            WaitingForAgents(accumulated_results:, reply_to:, ..) -> #(
-              list.append(accumulated_results, [tool_result_block]),
-              reply_to,
-            )
-            _ -> {
-              // Fallback — shouldn't happen, but extract reply_to from pending
-              let rt = case pending_agent {
-                PendingAgent(reply_to: r, ..) -> r
-                PendingThink(reply_to: r, ..) -> r
-              }
-              #([tool_result_block], rt)
-            }
+          // All agents done — pull accumulated results from status
+          let all_results = case state.status {
+            WaitingForAgents(accumulated_results:, ..) ->
+              list.append(accumulated_results, [tool_result_block])
+            _ -> [tool_result_block]
           }
 
           // Build ONE user message with ALL accumulated results
@@ -1379,7 +1331,6 @@ pub fn handle_agent_complete(
                     cycle_id:,
                     result: post_result,
                     pre_score:,
-                    reply_to:,
                   ),
                 )
               })
@@ -1419,7 +1370,6 @@ pub fn handle_agent_complete(
                 task_id: new_task_id,
                 model: state.model,
                 fallback_from: None,
-                reply_to:,
                 output_gate_count: 0,
                 empty_retried: False,
                 node_type: state.cycle_node_type,
@@ -1463,7 +1413,7 @@ pub fn handle_user_answer(
       process.send(reply_to, answer)
       CognitiveState(..state, status: Idle)
     }
-    WaitingForUser(context: OwnToolWaiting(tool_use_id:, reply_to:), ..) -> {
+    WaitingForUser(context: OwnToolWaiting(tool_use_id:), ..) -> {
       // Cognitive loop's own request_human_input — build tool result and continue
       let tool_result_block =
         llm_types.ToolResultContent(
@@ -1502,7 +1452,6 @@ pub fn handle_user_answer(
             task_id: new_task_id,
             model: state.model,
             fallback_from: None,
-            reply_to:,
             output_gate_count: 0,
             empty_retried: False,
             node_type: state.cycle_node_type,
@@ -1728,13 +1677,9 @@ pub fn dispatch_deferred(
       )
     }
     True -> {
-      // Dependency succeeded — dispatch each deferred agent
-      // reply_to is not used for agent dispatches (agents reply to state.self)
-      let reply_subj: Subject(types.CognitiveReply) = process.new_subject()
+      // Dependency succeeded — dispatch each deferred agent.
       list.fold(ready, state, fn(s, d) {
-        case
-          dispatch_single_agent(s, d.call, d.agent_name, d.cycle_id, reply_subj)
-        {
+        case dispatch_single_agent(s, d.call, d.agent_name, d.cycle_id) {
           Ok(pending_task) -> {
             let new_pending = dict.insert(s.pending, d.call.id, pending_task)
             CognitiveState(..s, pending: new_pending)

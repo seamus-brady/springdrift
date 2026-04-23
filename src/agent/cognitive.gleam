@@ -18,10 +18,10 @@ import agent/cognitive_state.{
 import agent/registry as agent_registry
 import agent/team
 import agent/types.{
-  type CognitiveMessage, type CognitiveReply, AgentComplete, AgentEvent,
-  Classifying, Idle, InputQueueFull, InputQueued, PendingThink, QueuedInput,
-  QueuedSchedulerInput, QueuedSensoryInput, SchedulerJobStarted, SetModel,
-  ThinkComplete, ThinkError, ThinkWorkerDown, Thinking, UserAnswer, UserInput,
+  type CognitiveMessage, AgentComplete, AgentEvent, Classifying, Idle,
+  InputQueueFull, InputQueued, PendingThink, QueuedInput, QueuedSchedulerInput,
+  QueuedSensoryInput, SchedulerJobStarted, SetModel, ThinkComplete, ThinkError,
+  ThinkWorkerDown, Thinking, UserAnswer, UserInput,
 }
 import agent/worker
 import agentlair/emitter as agentlair_emitter
@@ -271,8 +271,7 @@ fn handle_message(
     state.cycle_id,
   )
   let next = case msg {
-    UserInput(source_id, text, reply_to) ->
-      handle_user_input(state, source_id, text, reply_to)
+    UserInput(source_id, text) -> handle_user_input(state, source_id, text)
     types.InjectUserAnswer(text:) ->
       cognitive_agents.handle_user_answer(state, text)
     UserAnswer(answer) -> cognitive_agents.handle_user_answer(state, answer)
@@ -320,9 +319,9 @@ fn handle_message(
       cognitive_safety.handle_gate_timeout(state, task_id, gate)
     types.WatchdogTimeout(generation:) ->
       handle_watchdog_timeout(state, generation)
-    types.ClassifyComplete(cycle_id, complexity, text, reply_to) ->
-      handle_classify_complete(state, cycle_id, complexity, text, reply_to)
-    types.SafetyGateComplete(task_id, result, resp, calls, reply_to) -> {
+    types.ClassifyComplete(cycle_id, complexity, text) ->
+      handle_classify_complete(state, cycle_id, complexity, text)
+    types.SafetyGateComplete(task_id, result, resp, calls) -> {
       agentlair_emitter.emit_gate_decision(
         state.config.agentlair_config,
         state.identity.agent_uuid,
@@ -336,11 +335,10 @@ fn handle_message(
         result,
         resp,
         calls,
-        reply_to,
         cognitive_agents.dispatch_tool_calls,
       )
     }
-    types.InputSafetyGateComplete(cycle_id, result, model, text, reply_to) -> {
+    types.InputSafetyGateComplete(cycle_id, result, model, text) -> {
       agentlair_emitter.emit_gate_decision(
         state.config.agentlair_config,
         state.identity.agent_uuid,
@@ -354,10 +352,9 @@ fn handle_message(
         result,
         model,
         text,
-        reply_to,
       )
     }
-    types.PostExecutionGateComplete(cycle_id, result, pre_score, reply_to) -> {
+    types.PostExecutionGateComplete(cycle_id, result, pre_score) -> {
       agentlair_emitter.emit_gate_decision(
         state.config.agentlair_config,
         state.identity.agent_uuid,
@@ -370,7 +367,6 @@ fn handle_message(
         cycle_id,
         result,
         pre_score,
-        reply_to,
       )
     }
     types.SetSupervisor(supervisor:) ->
@@ -384,7 +380,6 @@ fn handle_message(
       title:,
       body:,
       tags:,
-      reply_to:,
     ) ->
       handle_scheduler_input(
         state,
@@ -396,15 +391,8 @@ fn handle_message(
         title,
         body,
         tags,
-        reply_to,
       )
-    types.OutputGateComplete(
-      cycle_id,
-      result,
-      report_text,
-      modification_count,
-      reply_to,
-    ) -> {
+    types.OutputGateComplete(cycle_id, result, report_text, modification_count) -> {
       agentlair_emitter.emit_gate_decision(
         state.config.agentlair_config,
         state.identity.agent_uuid,
@@ -418,7 +406,6 @@ fn handle_message(
         result,
         report_text,
         modification_count,
-        reply_to,
       )
     }
     types.QueuedSensoryEvent(event:) -> {
@@ -495,7 +482,7 @@ fn claim_cycle_if_present(
 
 fn maybe_drain_queue(state: CognitiveState) -> CognitiveState {
   case state.status, state.input_queue {
-    Idle, [QueuedInput(source_id:, text:, reply_to:), ..rest] -> {
+    Idle, [QueuedInput(source_id:, text:), ..rest] -> {
       slog.info(
         "cognitive",
         "maybe_drain_queue",
@@ -508,7 +495,6 @@ fn maybe_drain_queue(state: CognitiveState) -> CognitiveState {
         CognitiveState(..state, input_queue: rest),
         source_id,
         text,
-        reply_to,
       )
     }
     Idle,
@@ -522,7 +508,6 @@ fn maybe_drain_queue(state: CognitiveState) -> CognitiveState {
           title:,
           body:,
           tags:,
-          reply_to:,
         ),
         ..rest
       ]
@@ -547,7 +532,6 @@ fn maybe_drain_queue(state: CognitiveState) -> CognitiveState {
         title,
         body,
         tags,
-        reply_to,
       )
     }
     Idle, [QueuedSensoryInput(event:), ..rest] -> {
@@ -627,7 +611,6 @@ fn handle_user_input(
   state: CognitiveState,
   source_id: String,
   text: String,
-  reply_to: Subject(CognitiveReply),
 ) -> CognitiveState {
   slog.debug(
     "cognitive",
@@ -712,7 +695,7 @@ fn handle_user_input(
         }
         process.send(
           self,
-          types.ClassifyComplete(cycle_id:, complexity:, text:, reply_to:),
+          types.ClassifyComplete(cycle_id:, complexity:, text:),
         )
       })
 
@@ -736,7 +719,6 @@ fn handle_user_input(
           )
           output.send_reply(
             state,
-            reply_to,
             "[System: input queue full ("
               <> int.to_string(state.input_queue_cap)
               <> " pending), please wait.]",
@@ -749,9 +731,7 @@ fn handle_user_input(
         False -> {
           let position = queue_len + 1
           let new_queue =
-            list.append(state.input_queue, [
-              QueuedInput(source_id:, text:, reply_to:),
-            ])
+            list.append(state.input_queue, [QueuedInput(source_id:, text:)])
           slog.info(
             "cognitive",
             "handle_user_input",
@@ -787,7 +767,6 @@ fn handle_scheduler_input(
   title: String,
   body: String,
   tags: List(String),
-  reply_to: Subject(CognitiveReply),
 ) -> CognitiveState {
   // Guard: queue if not idle
   case state.status {
@@ -902,7 +881,6 @@ fn handle_scheduler_input(
         state.task_model,
         text_with_context,
         cycle_id,
-        reply_to,
         dag_types.SchedulerCycle,
       )
     }
@@ -923,7 +901,6 @@ fn handle_scheduler_input(
           )
           output.send_reply(
             state,
-            reply_to,
             "[System: input queue full, scheduler job '"
               <> job_name
               <> "' rejected]",
@@ -946,7 +923,6 @@ fn handle_scheduler_input(
                 title:,
                 body:,
                 tags:,
-                reply_to:,
               ),
             ])
           slog.info(
@@ -974,7 +950,6 @@ fn handle_classify_complete(
   cycle_id: String,
   complexity: query_complexity.QueryComplexity,
   text: String,
-  reply_to: Subject(CognitiveReply),
 ) -> CognitiveState {
   slog.info(
     "cognitive",
@@ -1018,7 +993,6 @@ fn handle_classify_complete(
             model,
             text,
             cycle_id,
-            reply_to,
             dag_types.CognitiveCycle,
           )
         Some(dprime_st) ->
@@ -1027,7 +1001,6 @@ fn handle_classify_complete(
             cycle_id,
             model,
             text,
-            reply_to,
             dprime_st,
           )
       }
@@ -1050,7 +1023,6 @@ fn handle_think_complete(
     Ok(PendingThink(
       model: req_model,
       fallback_from:,
-      reply_to: rt,
       output_gate_count: ogc,
       empty_retried:,
       node_type:,
@@ -1102,7 +1074,6 @@ fn handle_think_complete(
                     task_id: new_task_id,
                     model: req_model,
                     fallback_from:,
-                    reply_to: rt,
                     output_gate_count: ogc,
                     empty_retried: True,
                     node_type:,
@@ -1167,7 +1138,6 @@ fn handle_think_complete(
                     state,
                     output_state,
                     reply_text,
-                    rt,
                     messages,
                     task_id,
                     ogc,
@@ -1178,7 +1148,6 @@ fn handle_think_complete(
                   cognitive_safety.check_deterministic_only(
                     state,
                     reply_text,
-                    rt,
                     messages,
                     task_id,
                     resp.usage,
@@ -1226,7 +1195,6 @@ fn handle_think_complete(
                   }
                   output.send_reply(
                     state,
-                    rt,
                     reply_text,
                     reply_model,
                     Some(resp.usage),
@@ -1278,28 +1246,15 @@ fn handle_think_complete(
             list.all(calls, fn(c) { memory.is_dprime_exempt(c.name) })
           case state.tool_dprime_state {
             _ if all_exempt ->
-              cognitive_agents.dispatch_tool_calls(
-                state,
-                task_id,
-                resp,
-                calls,
-                rt,
-              )
+              cognitive_agents.dispatch_tool_calls(state, task_id, resp, calls)
             None ->
-              cognitive_agents.dispatch_tool_calls(
-                state,
-                task_id,
-                resp,
-                calls,
-                rt,
-              )
+              cognitive_agents.dispatch_tool_calls(state, task_id, resp, calls)
             Some(dprime_st) ->
               cognitive_safety.spawn_safety_gate(
                 state,
                 task_id,
                 resp,
                 calls,
-                rt,
                 dprime_st,
               )
           }
@@ -1446,9 +1401,6 @@ fn handle_forecaster_suggestion(
             ),
           )
 
-          // Create a synthetic reply_to for the cycle
-          let cycle_reply = process.new_subject()
-
           CognitiveState(
             ..state,
             cycle_id: Some(cycle_id),
@@ -1457,7 +1409,6 @@ fn handle_forecaster_suggestion(
             status: types.WaitingForAgents(
               pending_ids: [agent_task_id],
               accumulated_results: [],
-              reply_to: cycle_reply,
             ),
             pending: dict.insert(
               state.pending,
@@ -1466,7 +1417,6 @@ fn handle_forecaster_suggestion(
                 task_id: agent_task_id,
                 tool_use_id: "forecaster_replan_" <> task_id,
                 agent: "planner",
-                reply_to: cycle_reply,
               ),
             ),
           )
