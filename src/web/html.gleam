@@ -2255,6 +2255,12 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
         var threadHtml = '';
         if (e.thread && e.thread.thread_name) {
           threadHtml = '<span class=\"narrative-thread\">' + escapeHtml(e.thread.thread_name) + ' #' + (e.thread.position || 0) + '</span>';
+          if (e.thread.thread_id) {
+            var tokenParam = new URLSearchParams(location.search).get('token');
+            var exportQs = tokenParam ? '?token=' + encodeURIComponent(tokenParam) : '';
+            var exportHref = '/export/thread/' + encodeURIComponent(e.thread.thread_id) + '.md' + exportQs;
+            threadHtml += '<a class=\"narrative-thread-export\" href=\"' + escapeHtml(exportHref) + '\" target=\"_blank\" rel=\"noopener\" title=\"Export thread as markdown\" aria-label=\"Export thread as markdown\">\\u2b07</a>';
+          }
         }
         var keywordsHtml = '';
         if (e.keywords && e.keywords.length > 0) {
@@ -3408,6 +3414,22 @@ fn shared_css() -> String {
     padding: 2px 8px;
     background: var(--code-bg);
     border-radius: 5px;
+  }
+  .narrative-thread-export {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 2px 7px;
+    font-size: 13px;
+    line-height: 1;
+    color: var(--text-dim);
+    background: var(--code-bg);
+    border-radius: 5px;
+    text-decoration: none;
+    transition: background 0.15s, color 0.15s;
+  }
+  .narrative-thread-export:hover {
+    color: var(--accent, #0a84ff);
+    background: rgba(10,132,255,0.12);
   }
   .narrative-summary {
     font-size: 16px;
