@@ -9,8 +9,8 @@ import agent/framework
 import agent/types.{
   type AgentLifecycleEvent, type AgentSpec, type CognitiveMessage,
   type SupervisorMessage, AgentCrashed, AgentEvent, AgentRestartFailed,
-  AgentRestarted, AgentStarted, AgentStopped, Permanent, ShutdownAll, StartChild,
-  StopChild, Temporary, Transient,
+  AgentRestarted, AgentStarted, AgentStopped, LookupAgentSubject, Permanent,
+  ShutdownAll, StartChild, StopChild, Temporary, Transient,
 }
 import gleam/erlang/process.{type ExitMessage, type Pid, type Subject}
 import gleam/int
@@ -123,6 +123,7 @@ fn handle_external(state: SupervisorState, msg: SupervisorMessage) -> Nil {
       StartChild(spec:, ..) -> "StartChild: " <> spec.name
       StopChild(name:) -> "StopChild: " <> name
       ShutdownAll -> "ShutdownAll"
+      LookupAgentSubject(name:, ..) -> "LookupAgentSubject: " <> name
     },
     None,
   )
@@ -172,6 +173,17 @@ fn handle_external(state: SupervisorState, msg: SupervisorMessage) -> Nil {
         notify(state.cognitive, AgentStopped(name: c.spec.name))
       })
       Nil
+    }
+
+    LookupAgentSubject(name:, reply_to:) -> {
+      let result = case
+        list.find(state.children, fn(c) { c.spec.name == name })
+      {
+        Ok(child) -> Some(child.task_subject)
+        Error(_) -> None
+      }
+      process.send(reply_to, result)
+      supervisor_loop(state)
     }
   }
 }

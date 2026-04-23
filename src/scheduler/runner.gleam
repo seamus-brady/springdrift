@@ -55,7 +55,33 @@ pub fn start(
     process.send(setup, self)
 
     // Load persisted jobs from JSONL operation log (survives restarts)
-    let persisted_jobs = schedule_log.resolve_current(schedule_dir)
+    // then sweep any legacy meta-learning jobs. Meta-learning work now
+    // runs as BEAM workers off-cog (see `src/meta_learning/workers.gleam`);
+    // any `meta_learning_*` entries in the log are historical artifacts
+    // from before that migration. We ignore them at resolve time — the
+    // append-only log is preserved for audit but never resurrects old
+    // jobs into the operator-visible scheduler.
+    let raw_persisted = schedule_log.resolve_current(schedule_dir)
+    let #(persisted_jobs, swept_count) =
+      list.fold(raw_persisted, #([], 0), fn(acc, job) {
+        case is_meta_learning_job(job.name) {
+          True -> #(acc.0, acc.1 + 1)
+          False -> #([job, ..acc.0], acc.1)
+        }
+      })
+    let persisted_jobs = list.reverse(persisted_jobs)
+    case swept_count > 0 {
+      True ->
+        slog.info(
+          "scheduler",
+          "start",
+          "Swept "
+            <> int.to_string(swept_count)
+            <> " legacy meta_learning_* job(s) from persisted scheduler state",
+          None,
+        )
+      False -> Nil
+    }
 
     let now = monotonic_now_ms()
 

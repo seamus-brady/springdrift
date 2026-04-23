@@ -314,8 +314,12 @@ summary_schedule = "weekly"
 # threads, consolidating narrative entries into higher-level knowledge.
 
 [remembrancer]
-# Enable the Remembrancer agent (default: false)
-# enabled = false
+# Enable the Remembrancer agent (default: true — core subsystem).
+# Meta-learning judgement workers (consolidation, goal review, skill
+# decay, strategy review) dispatch to this agent off-cog. Disabling
+# leaves the three mechanical audits running but the judgement workers
+# will log-warn and skip each tick.
+# enabled = true
 
 # Model for consolidation synthesis (default: reasoning_model — needs strong synthesis)
 # model = ""
@@ -349,13 +353,12 @@ summary_schedule = "weekly"
 # surfaces top-N active strategies. Default: true.
 # strategy_registry_enabled = true
 
-# Phase F - Metacognitive Scheduler. When True (the default), five
-# recurring meta-learning jobs are added to the scheduler at startup:
-# consolidation (weekly), goal review (daily), skill decay (weekly),
-# affect correlation (weekly), strategy review (fortnightly). Each fires
-# as a SchedulerInput cycle; the cognitive loop delegates to the
-# appropriate Remembrancer tool. Set to false to disable entirely.
-# scheduler_enabled = true                      # Default: true
+# Meta-learning worker pool. Seven BEAM workers run off-cog and
+# never appear in the operator-visible scheduler. Three are mechanical
+# audits (pure compute, no LLM); four are judgement jobs that dispatch
+# to the running Remembrancer agent via its task_subject. Set enabled
+# = false to disable the entire pool.
+# enabled = true                                # Default: true
 # consolidation_interval_hours = 168            # Default: 168 (weekly)
 # goal_review_interval_hours = 24               # Default: 24 (daily)
 # skill_decay_interval_hours = 168              # Default: 168 (weekly)
