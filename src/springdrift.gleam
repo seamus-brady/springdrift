@@ -68,6 +68,7 @@ import planner/forecaster
 import planner/types as planner_types
 import sandbox/manager as sandbox_manager_mod
 import sandbox/types as sandbox_types
+import scenario/runner as scenario_runner
 import scheduler/log as schedule_log
 import scheduler/runner as scheduler_runner
 import scheduler/types as scheduler_types
@@ -136,24 +137,39 @@ pub fn main() -> Nil {
       do_halt(0)
     }
     False ->
-      case list.contains(args, "--print-config") {
-        True -> {
-          let cfg = resolve_config()
-          io.println(config.to_string(cfg))
-          do_halt(0)
-        }
-        False ->
-          case list.contains(args, "--selftest") {
+      case find_arg_value(args, "--scenario") {
+        option.Some(path) -> scenario_runner.run(path)
+        option.None ->
+          case list.contains(args, "--print-config") {
             True -> {
               let cfg = resolve_config()
-              run_selftest(cfg)
+              io.println(config.to_string(cfg))
+              do_halt(0)
             }
-            False -> {
-              let cfg = resolve_config()
-              run(cfg)
-            }
+            False ->
+              case list.contains(args, "--selftest") {
+                True -> {
+                  let cfg = resolve_config()
+                  run_selftest(cfg)
+                }
+                False -> {
+                  let cfg = resolve_config()
+                  run(cfg)
+                }
+              }
           }
       }
+  }
+}
+
+/// Look up a flag argument's value. `find_arg_value(["--scenario", "foo.toml"],
+/// "--scenario")` returns `Some("foo.toml")`. Returns None if the flag is
+/// absent or at the tail with no value.
+fn find_arg_value(args: List(String), flag: String) -> option.Option(String) {
+  case args {
+    [] -> option.None
+    [head, next, ..] if head == flag -> option.Some(next)
+    [_, ..rest] -> find_arg_value(rest, flag)
   }
 }
 

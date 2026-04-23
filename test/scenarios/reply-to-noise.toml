@@ -1,0 +1,35 @@
+# Regression test for PR #113 — the dead reply_to CognitiveReply channel.
+#
+# Before the fix, cognitive was sending CognitiveReply messages to "throwaway"
+# subjects owned by actors (TUI event loop, WebSocket handler) that had no
+# clause for that type. gleam_otp logged "Actor discarding unexpected message"
+# per send, with FORMAT ERROR from the Erlang logger. Visible in stderr on
+# every user cycle.
+#
+# The fix deleted the legacy send path entirely. This scenario verifies the
+# warnings stay gone — drive a user input through the cognitive loop, wait
+# for the reply, confirm the log has no "Actor discarding" lines.
+
+[scenario]
+name = "reply_to noise regression"
+description = "Verify PR #113's removal of the dead reply_to channel stays in place"
+catches_regression_of = ["PR-113"]
+
+[[step]]
+type = "send_user_input"
+source_id = "scenario:reply-to-noise"
+text = "Hello"
+
+[[step]]
+type = "wait_for_reply"
+timeout_ms = 30000
+
+[[assert]]
+type = "log_absent"
+pattern = "Actor discarding unexpected message"
+message = "reply_to channel was delivering to the wrong mailbox — see PR #113"
+
+[[assert]]
+type = "log_absent"
+pattern = "FORMAT ERROR"
+message = "Erlang logger format error — implies unhandled message type still being sent"

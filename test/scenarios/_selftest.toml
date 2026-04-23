@@ -1,0 +1,23 @@
+# Selftest scenario — deliberately designed to FAIL every assertion.
+# Used to verify the runner actually fails scenarios that should fail,
+# rather than silently passing nothing. Exit code should be 1.
+#
+# Filename prefixed with _ so alphabetical scenario runs hit it last.
+
+[scenario]
+name = "runner selftest (must fail)"
+description = "Every assertion here is expected to fail. Exit 1 means runner works."
+
+[[step]]
+type = "wait_duration"
+duration_ms = 100
+
+[[assert]]
+type = "log_present"
+pattern = "A_PATTERN_THAT_WILL_NEVER_APPEAR_IN_LOGS_9f8e7d6c"
+message = "log_present with impossible pattern must fail — this proves the assertion actually evaluates"
+
+[[assert]]
+type = "narrative_entry_count"
+min = 999999
+message = "narrative_entry_count with absurd minimum must fail"
