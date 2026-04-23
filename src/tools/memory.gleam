@@ -20,6 +20,7 @@ import agent/types as agent_types
 import cbr/types as cbr_types
 import cycle_log
 import dag/types as dag_types
+import deputy/types as deputy_types
 import dprime/decay
 import facts/log as facts_log
 import facts/provenance_check
@@ -108,6 +109,9 @@ pub fn is_dprime_exempt(name: String) -> Bool {
     "report_false_positive" -> True
     // Agent management
     "cancel_agent" -> True
+    // Deputy management (MVP Phases 1+2)
+    "kill_deputy" -> True
+    "recall_deputy" -> True
     // Built-in tools
     "calculator" | "get_current_datetime" | "read_skill" -> True
     // Agent and team delegations — sub-agents have their own D' gates on
@@ -134,6 +138,8 @@ pub fn all() -> List(Tool) {
     introspect_tool(),
     how_to_tool(),
     cancel_agent_tool(),
+    kill_deputy_tool(),
+    recall_deputy_tool(),
     list_affect_history_tool(),
   ]
 }
@@ -469,6 +475,8 @@ pub fn is_memory_tool(name: String) -> Bool {
   || name == "introspect"
   || name == "how_to"
   || name == "cancel_agent"
+  || name == "kill_deputy"
+  || name == "recall_deputy"
   || name == "list_affect_history"
   || name == "review_learning_goals"
 }
@@ -646,6 +654,8 @@ pub fn execute_with_how_to(
     "unsuppress_case" -> run_unsuppress_case(call, lib)
     "boost_case" -> run_boost_case(call, lib)
     "cancel_agent" -> run_cancel_agent(call, agent_mgmt)
+    "kill_deputy" -> run_kill_deputy(call, lib)
+    "recall_deputy" -> run_recall_deputy(call, lib)
     "report_false_positive" -> run_report_false_positive(call)
     "list_affect_history" -> run_list_affect_history(call)
     "review_learning_goals" -> run_review_learning_goals(call)
@@ -1500,6 +1510,7 @@ fn format_subtree(
         None -> "sub-agent"
       }
     dag_types.SchedulerCycle -> "scheduler"
+    dag_types.DeputyCycle -> "deputy"
   }
   let outcome_str = format_node_outcome(node, current_cycle_id)
   let tools_str = case node.tool_calls {
@@ -2855,6 +2866,211 @@ fn cancel_agent_tool() -> Tool {
     True,
   )
   |> tool.build()
+}
+
+fn recall_deputy_tool() -> Tool {
+  tool.new("recall_deputy")
+  |> tool.with_description(
+    "Snapshot an active deputy's current state — non-destructive. "
+    <> "Returns the deputy's last signal, whether its briefing completed, "
+    <> "how many ask_deputy questions it has answered, and how many "
+    <> "escalations it has emitted. Use this when you want to know what "
+    <> "the deputy knows without interrupting it. Check the <deputies> "
+    <> "sensorium block for active deputy ids.",
+  )
+  |> tool.add_string_param(
+    "deputy_id",
+    "The deputy id (e.g. dep-ab12cd34)",
+    True,
+  )
+  |> tool.build()
+}
+
+fn run_recall_deputy(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+) -> ToolResult {
+  case lib {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "recall_deputy not available: Librarian not initialised",
+      )
+    Some(l) -> {
+      let decoder = {
+        use deputy_id <- decode.field("deputy_id", decode.string)
+        decode.success(deputy_id)
+      }
+      case json.parse(call.input_json, decoder) {
+        Error(_) ->
+          ToolFailure(
+            tool_use_id: call.id,
+            error: "Invalid recall_deputy input: missing deputy_id",
+          )
+        Ok(deputy_id) -> {
+          let deputy_id = string.trim(deputy_id)
+          case deputy_id {
+            "" ->
+              ToolFailure(
+                tool_use_id: call.id,
+                error: "deputy_id must not be empty",
+              )
+            _ ->
+              case librarian.get_active_deputy_by_id(l, deputy_id) {
+                Error(_) ->
+                  ToolFailure(
+                    tool_use_id: call.id,
+                    error: "No active deputy with id " <> deputy_id,
+                  )
+                Ok(meta) -> {
+                  let reply = process.new_subject()
+                  process.send(
+                    meta.subject,
+                    deputy_types.Recall(reply_to: reply),
+                  )
+                  case process.receive(reply, 5000) {
+                    Ok(snapshot) ->
+                      ToolSuccess(
+                        tool_use_id: call.id,
+                        content: "Deputy "
+                          <> snapshot.id
+                          <> " (agent="
+                          <> snapshot.root_agent
+                          <> ", cycle="
+                          <> snapshot.cycle_id
+                          <> "):\n  spawned_at: "
+                          <> snapshot.spawned_at
+                          <> "\n  last_signal: "
+                          <> snapshot.last_signal
+                          <> "\n  briefing_complete: "
+                          <> case snapshot.briefing_complete {
+                          True -> "true"
+                          False -> "false"
+                        }
+                          <> "\n  questions_answered: "
+                          <> int.to_string(snapshot.questions_answered)
+                          <> "\n  escalations_emitted: "
+                          <> int.to_string(snapshot.escalations_emitted),
+                      )
+                    Error(_) ->
+                      ToolFailure(
+                        tool_use_id: call.id,
+                        error: "Timeout waiting for deputy snapshot",
+                      )
+                  }
+                }
+              }
+          }
+        }
+      }
+    }
+  }
+}
+
+fn kill_deputy_tool() -> Tool {
+  tool.new("kill_deputy")
+  |> tool.with_description(
+    "Kill an in-flight deputy by id. Use when a deputy is hanging on a "
+    <> "slow LLM call, emitting escalation storms, or otherwise misbehaving. "
+    <> "The hierarchy continues without a deputy — the specialist proceeds "
+    <> "without its briefing. Check the <deputies> sensorium block for active "
+    <> "deputy ids.",
+  )
+  |> tool.add_string_param(
+    "deputy_id",
+    "The deputy id (e.g. dep-ab12cd34)",
+    True,
+  )
+  |> tool.add_string_param(
+    "reason",
+    "Short reason for killing (e.g. 'stuck', 'expensive', 'operator_request')",
+    True,
+  )
+  |> tool.build()
+}
+
+fn run_kill_deputy(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+) -> ToolResult {
+  case lib {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "kill_deputy not available: Librarian not initialised",
+      )
+    Some(l) -> {
+      let decoder = {
+        use deputy_id <- decode.field("deputy_id", decode.string)
+        use reason <- decode.field("reason", decode.string)
+        decode.success(#(deputy_id, reason))
+      }
+      case json.parse(call.input_json, decoder) {
+        Error(_) ->
+          ToolFailure(
+            tool_use_id: call.id,
+            error: "Invalid kill_deputy input: expected {deputy_id, reason}",
+          )
+        Ok(#(deputy_id, reason)) -> {
+          let deputy_id = string.trim(deputy_id)
+          let reason = string.trim(reason)
+          case deputy_id, reason {
+            "", _ ->
+              ToolFailure(
+                tool_use_id: call.id,
+                error: "deputy_id must not be empty",
+              )
+            _, "" ->
+              ToolFailure(
+                tool_use_id: call.id,
+                error: "reason must not be empty",
+              )
+            _, _ ->
+              case librarian.get_active_deputy_by_id(l, deputy_id) {
+                Error(_) ->
+                  ToolFailure(
+                    tool_use_id: call.id,
+                    error: "No active deputy with id " <> deputy_id,
+                  )
+                Ok(meta) -> {
+                  process.send(meta.subject, deputy_types.Kill(reason))
+                  librarian.notify_remove_active_deputy(l, deputy_id)
+                  librarian.notify_recent_deputy(
+                    l,
+                    librarian.RecentDeputyRecord(
+                      id: meta.id,
+                      cycle_id: meta.cycle_id,
+                      root_agent: meta.root_agent,
+                      signal: "silent",
+                      cases_count: 0,
+                      facts_count: 0,
+                      elapsed_ms: 0,
+                      completed_at: get_datetime(),
+                      outcome: librarian.BriefingKilled(reason),
+                    ),
+                  )
+                  slog.info(
+                    "memory",
+                    "kill_deputy",
+                    "Killed deputy " <> deputy_id <> ": " <> reason,
+                    None,
+                  )
+                  ToolSuccess(
+                    tool_use_id: call.id,
+                    content: "Deputy "
+                      <> deputy_id
+                      <> " (agent="
+                      <> meta.root_agent
+                      <> ") killed: "
+                      <> reason,
+                  )
+                }
+              }
+          }
+        }
+      }
+    }
+  }
 }
 
 fn run_cancel_agent(

@@ -680,6 +680,9 @@ fn dispatch_members(
             reply_to: self,
             depth: ctx.depth + 1,
             max_turns_override: None,
+            // Team members don't currently share a deputy — deferred to a
+            // follow-up once deputy-per-team semantics are designed.
+            deputy_subject: None,
           )
         process.send(task_subject, task)
 

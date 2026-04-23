@@ -344,6 +344,19 @@ pub type AppConfig {
     captures_expiry_days: Option(Int),
     /// Maximum captures kept per cycle after the sanity filter. Default: 10.
     captures_max_per_cycle: Option(Int),
+    // ── Deputies (MVP Phase 1) ──
+    /// Enable deputy agents — ephemeral restricted cog loops that brief
+    /// specialist agents on delegated attention. When True, cog spawns
+    /// a deputy for each root delegation that produces a briefing
+    /// prepended to the agent's instruction. Default: False (opt-in).
+    deputies_enabled: Option(Bool),
+    /// Model used by deputies for the briefing call. Default: task_model.
+    deputies_model: Option(String),
+    /// Max tokens for the deputy briefing call. Default: 800.
+    deputies_max_tokens: Option(Int),
+    /// Timeout (ms) for awaiting the deputy briefing. On timeout the
+    /// agent proceeds without a briefing. Default: 15000.
+    deputy_timeout_ms: Option(Int),
   )
 }
 
@@ -560,6 +573,10 @@ pub fn default() -> AppConfig {
     captures_scanner_enabled: None,
     captures_expiry_days: None,
     captures_max_per_cycle: None,
+    deputies_enabled: None,
+    deputies_model: None,
+    deputies_max_tokens: None,
+    deputy_timeout_ms: None,
   )
 }
 
@@ -1286,6 +1303,19 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     captures_max_per_cycle: option.or(
       override_cfg.captures_max_per_cycle,
       base.captures_max_per_cycle,
+    ),
+    deputies_enabled: option.or(
+      override_cfg.deputies_enabled,
+      base.deputies_enabled,
+    ),
+    deputies_model: option.or(override_cfg.deputies_model, base.deputies_model),
+    deputies_max_tokens: option.or(
+      override_cfg.deputies_max_tokens,
+      base.deputies_max_tokens,
+    ),
+    deputy_timeout_ms: option.or(
+      override_cfg.deputy_timeout_ms,
+      base.deputy_timeout_ms,
     ),
   )
 }
@@ -2050,6 +2080,10 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
       "captures",
       "max_per_cycle",
     ]),
+    deputies_enabled: get_toml_bool(table, ["deputies", "enabled"]),
+    deputies_model: get_toml_str(table, ["deputies", "model"]),
+    deputies_max_tokens: get_toml_int(table, ["deputies", "max_tokens"]),
+    deputy_timeout_ms: get_toml_int(table, ["deputies", "timeout_ms"]),
   )
 }
 

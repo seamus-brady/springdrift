@@ -121,6 +121,7 @@ pub fn multiple_agents_complete_tasks_test() {
       reply_to: reply_subj,
       depth: 1,
       max_turns_override: None,
+      deputy_subject: None,
     ),
   )
   process.send(
@@ -134,6 +135,7 @@ pub fn multiple_agents_complete_tasks_test() {
       reply_to: reply_subj,
       depth: 1,
       max_turns_override: None,
+      deputy_subject: None,
     ),
   )
   process.send(
@@ -147,6 +149,7 @@ pub fn multiple_agents_complete_tasks_test() {
       reply_to: reply_subj,
       depth: 1,
       max_turns_override: None,
+      deputy_subject: None,
     ),
   )
 
@@ -207,6 +210,7 @@ pub fn mixed_success_and_failure_test() {
       reply_to: reply_subj,
       depth: 1,
       max_turns_override: None,
+      deputy_subject: None,
     ),
   )
   process.send(
@@ -220,6 +224,7 @@ pub fn mixed_success_and_failure_test() {
       reply_to: reply_subj,
       depth: 1,
       max_turns_override: None,
+      deputy_subject: None,
     ),
   )
 
@@ -347,6 +352,7 @@ pub fn agent_tool_execution_test() {
       reply_to: reply_subj,
       depth: 1,
       max_turns_override: None,
+      deputy_subject: None,
     ),
   )
 
@@ -412,6 +418,7 @@ pub fn stop_one_agent_others_continue_test() {
       reply_to: reply_subj,
       depth: 1,
       max_turns_override: None,
+      deputy_subject: None,
     ),
   )
 

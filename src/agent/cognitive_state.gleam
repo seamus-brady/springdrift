@@ -116,6 +116,15 @@ pub type RuntimeConfig {
     captures_dir: String,
     /// Max captures kept per cycle after the sanity filter.
     captures_max_per_cycle: Int,
+    /// Deputies MVP — when True, cog spawns a deputy per root
+    /// delegation to brief the specialist.
+    deputies_enabled: Bool,
+    /// Model used by deputies (typically the task_model).
+    deputies_model: String,
+    /// Max tokens for the deputy briefing call.
+    deputies_max_tokens: Int,
+    /// Timeout for awaiting the deputy briefing.
+    deputy_timeout_ms: Int,
   )
 }
 

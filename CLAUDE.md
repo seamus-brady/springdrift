@@ -8,6 +8,7 @@ Detailed architecture docs live in `docs/architecture/`:
 |---|---|
 | [cognitive-loop.md](docs/architecture/cognitive-loop.md) | Central orchestration — status machine, message types, cycle lifecycle, model switching, input queue |
 | [agents.md](docs/architecture/agents.md) | Agent substrate, 7 specialist agents, teams, delegation, structured output |
+| [deputies.md](docs/architecture/deputies.md) | Ephemeral read-only cog loops that brief specialist agents before each root delegation (MVP Phase 1) |
 | [work-management.md](docs/architecture/work-management.md) | PM agent, Planner, tasks, endeavours, Appraiser (pre/post-mortems), Forecaster, sprint contracts |
 | [memory.md](docs/architecture/memory.md) | 9 memory stores, Librarian, Archivist, CBR, facts, artifacts, threading |
 | [safety.md](docs/architecture/safety.md) | D' gates, normative calculus, canary probes, meta observer, agent overrides |

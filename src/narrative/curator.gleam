@@ -1140,6 +1140,13 @@ fn build_sensorium(
       state.librarian,
     ))
 
+  // Deputies — Phase 1 MVP. Ambient awareness of recent briefings.
+  let deputies_section =
+    render_sensorium_deputies(
+      librarian.get_active_deputy_count(state.librarian),
+      librarian.get_recent_deputies(state.librarian),
+    )
+
   let knowledge_section = render_sensorium_knowledge(state)
   let memory_section = render_sensorium_memory()
   let strategies_section = render_sensorium_strategies()
@@ -1153,9 +1160,10 @@ fn build_sensorium(
   let sections =
     [
       clock, situation, schedule, vitals, sandbox_section, delegations, events,
-      tasks_section, captures_section, strategies_section, goals_section,
-      affect_warnings_section, integrity_section, skill_procedures_section,
-      meta_recommendations_section, knowledge_section, memory_section,
+      tasks_section, captures_section, deputies_section, strategies_section,
+      goals_section, affect_warnings_section, integrity_section,
+      skill_procedures_section, meta_recommendations_section, knowledge_section,
+      memory_section,
     ]
     |> list.filter(fn(s) { s != "" })
     |> string.join("\n")
@@ -1703,6 +1711,68 @@ pub fn render_sensorium_captures(pending: Int) -> String {
     False -> ""
     True -> "  <captures pending=\"" <> int.to_string(pending) <> "\"/>"
   }
+}
+
+/// Render the <deputies> element — MVP Phase 1 ambient awareness.
+///
+/// Shows active deputy count + compact rows for the most recent completed
+/// briefings. Omitted entirely when no deputies are active and there are
+/// no recent records. This is the passive-pull channel (alongside the
+/// active-push channel of sensory events and wakeups that arrive later
+/// in Phase 3).
+pub fn render_sensorium_deputies(
+  active_count: Int,
+  recent: List(librarian.RecentDeputyRecord),
+) -> String {
+  case active_count == 0 && recent == [] {
+    True -> ""
+    False -> {
+      let completed_last = list.length(recent)
+      let header =
+        "  <deputies active=\""
+        <> int.to_string(active_count)
+        <> "\" completed_recent=\""
+        <> int.to_string(completed_last)
+        <> "\""
+      case recent {
+        [] -> header <> "/>"
+        _ -> {
+          let shown = list.take(recent, 3)
+          let rest = list.length(recent) - list.length(shown)
+          let rows =
+            shown
+            |> list.map(render_recent_deputy_row)
+            |> string.join("\n")
+          let overflow = case rest > 0 {
+            True -> "\n    <more count=\"" <> int.to_string(rest) <> "\"/>"
+            False -> ""
+          }
+          header <> ">\n" <> rows <> overflow <> "\n  </deputies>"
+        }
+      }
+    }
+  }
+}
+
+fn render_recent_deputy_row(r: librarian.RecentDeputyRecord) -> String {
+  let outcome = case r.outcome {
+    librarian.BriefingOk -> "ok"
+    librarian.BriefingFailed(_) -> "failed"
+    librarian.BriefingKilled(_) -> "killed"
+  }
+  "    <deputy id=\""
+  <> r.id
+  <> "\" agent=\""
+  <> r.root_agent
+  <> "\" signal=\""
+  <> r.signal
+  <> "\" cases=\""
+  <> int.to_string(r.cases_count)
+  <> "\" facts=\""
+  <> int.to_string(r.facts_count)
+  <> "\" outcome=\""
+  <> outcome
+  <> "\"/>"
 }
 
 /// Render the <memory> element — deep-memory freshness, only when the

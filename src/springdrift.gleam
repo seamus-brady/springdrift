@@ -914,6 +914,13 @@ fn run(cfg: AppConfig) -> Nil {
       ),
       captures_dir: paths.captures_dir(),
       captures_max_per_cycle: option.unwrap(cfg.captures_max_per_cycle, 10),
+      deputies_enabled: option.unwrap(cfg.deputies_enabled, False),
+      deputies_model: option.unwrap(
+        cfg.deputies_model,
+        option.unwrap(cfg.task_model, "claude-haiku-4-5-20251001"),
+      ),
+      deputies_max_tokens: option.unwrap(cfg.deputies_max_tokens, 800),
+      deputy_timeout_ms: option.unwrap(cfg.deputy_timeout_ms, 15_000),
     ))
   {
     Ok(subj) -> subj

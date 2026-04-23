@@ -171,6 +171,10 @@ pub fn start(
           captures_scanner_enabled: cfg.captures_scanner_enabled,
           captures_dir: cfg.captures_dir,
           captures_max_per_cycle: cfg.captures_max_per_cycle,
+          deputies_enabled: cfg.deputies_enabled,
+          deputies_model: cfg.deputies_model,
+          deputies_max_tokens: cfg.deputies_max_tokens,
+          deputy_timeout_ms: cfg.deputy_timeout_ms,
         ),
         redact_secrets: cfg.redact_secrets,
         pending_sensory_events: [],
@@ -1428,6 +1432,9 @@ fn handle_forecaster_suggestion(
               reply_to: state.self,
               depth: 1,
               max_turns_override: None,
+              // Forecaster-triggered replans don't get a deputy — they're
+              // internal planner work, not externally-facing delegations.
+              deputy_subject: None,
             )
           process.send(task_subject, agent_task)
           process.send(

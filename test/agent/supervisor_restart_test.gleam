@@ -196,6 +196,7 @@ pub fn agent_survives_task_completion_test() {
       reply_to: reply1,
       depth: 1,
       max_turns_override: None,
+      deputy_subject: None,
     ),
   )
   let assert Ok(AgentComplete(outcome: AgentSuccess(task_id: "t1", ..))) =
@@ -214,6 +215,7 @@ pub fn agent_survives_task_completion_test() {
       reply_to: reply2,
       depth: 1,
       max_turns_override: None,
+      deputy_subject: None,
     ),
   )
   let assert Ok(AgentComplete(outcome: AgentSuccess(task_id: "t2", ..))) =

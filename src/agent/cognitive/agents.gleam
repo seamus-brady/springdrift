@@ -21,6 +21,8 @@ import agent/types.{
 import agent/worker
 import cycle_log
 import dag/types as dag_types
+import deputy/framework as deputy_framework
+import deputy/types as deputy_types
 import dprime/gate
 import dprime/types as dprime_types
 import frontdoor/types as frontdoor_types
@@ -653,6 +655,15 @@ fn dispatch_single_agent(
           agent_name,
           state.agent_completions,
         )
+      // Deputy briefing — if deputies are enabled, spawn a deputy to
+      // produce a briefing that's prepended to the agent's instruction
+      // AND stays alive to serve ask_deputy calls. Fire-and-forget on
+      // failure; the agent proceeds without a briefing or deputy.
+      let #(instruction, deputy_subject) = case state.config.deputies_enabled {
+        False -> #(instruction, None)
+        True ->
+          maybe_spawn_deputy(state, agent_name, instruction, agent_task_id)
+      }
       let base_task =
         AgentTask(
           task_id: agent_task_id,
@@ -663,6 +674,7 @@ fn dispatch_single_agent(
           reply_to: state.self,
           depth: 1,
           max_turns_override: parse_max_turns(call.input_json),
+          deputy_subject: deputy_subject,
         )
       let enriched_task = case state.memory.curator {
         Some(cur) -> curator.inject_context(cur, base_task)
@@ -1037,6 +1049,35 @@ pub fn handle_agent_complete(
   state: CognitiveState,
   outcome: AgentOutcome,
 ) -> CognitiveState {
+  // Phase 2 — shut down any deputy watching this hierarchy before the
+  // rest of the outcome handling runs. The deputy is scoped to the
+  // root delegation's lifetime; hand it a Shutdown now so it can
+  // record its final state and exit cleanly.
+  let completed_task_id = case outcome {
+    AgentSuccess(task_id, ..) -> task_id
+    AgentFailure(task_id, ..) -> task_id
+  }
+  let hierarchy_outcome_tag = case outcome {
+    AgentSuccess(..) -> "ok"
+    AgentFailure(..) -> "failed"
+  }
+  case state.memory.librarian {
+    Some(lib) ->
+      case
+        list.find(librarian.get_active_deputies(lib), fn(d) {
+          d.hierarchy_cycle_id == completed_task_id
+        })
+      {
+        Ok(deputy) ->
+          shutdown_hierarchy_deputy(
+            state,
+            deputy.subject,
+            hierarchy_outcome_tag,
+          )
+        Error(_) -> Nil
+      }
+    None -> Nil
+  }
   let #(outcome_task_id, result_text) = case outcome {
     AgentSuccess(task_id, agent:, result:, tool_errors:, ..) -> {
       // If the agent "succeeded" but had tool failures, prefix them so the
@@ -1922,5 +1963,160 @@ fn parse_importance(s: String) -> Result(dprime_types.Importance, Nil) {
     "medium" -> Ok(dprime_types.Medium)
     "low" -> Ok(dprime_types.Low)
     _ -> Error(Nil)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Deputy briefing — spawn a deputy before a root delegation and prepend
+// its briefing to the agent's instruction. Fire-and-forget on failure.
+// ---------------------------------------------------------------------------
+
+/// Phase 2 — spawn a deputy for a root delegation, await the briefing,
+/// return (instruction-with-briefing-prepended, deputy_subject).
+///
+/// The deputy stays alive after the briefing to serve ask_deputy calls
+/// from the specialist agent and any sub-agents it delegates to. Cog
+/// shuts it down via `shutdown_hierarchy_deputy` when the root
+/// delegation's AgentOutcome arrives. Callers should record the
+/// returned subject in the AgentTask so it propagates to sub-agents.
+fn maybe_spawn_deputy(
+  state: CognitiveState,
+  agent_name: String,
+  instruction: String,
+  agent_task_id: String,
+) -> #(String, Option(Subject(deputy_types.DeputyMessage))) {
+  case state.memory.librarian {
+    None -> #(instruction, None)
+    Some(lib) -> {
+      let spec =
+        deputy_framework.DeputySpec(
+          root_agent: agent_name,
+          instruction: instruction,
+          hierarchy_cycle_id: agent_task_id,
+          provider: state.provider,
+          model: state.config.deputies_model,
+          max_tokens: state.config.deputies_max_tokens,
+          librarian: Some(lib),
+          // Phase 3 — deputy emits sensory events (e.g. unanswered)
+          // back to cog. Always passes state.self since we're in the
+          // cognitive loop's dispatch path.
+          cognitive: Some(state.self),
+        )
+      let meta = deputy_framework.spawn(spec)
+      // Index the deputy cycle as pending in the DAG.
+      process.send(
+        lib,
+        librarian.IndexNode(node: dag_types.CycleNode(
+          cycle_id: meta.cycle_id,
+          parent_id: Some(agent_task_id),
+          node_type: dag_types.DeputyCycle,
+          timestamp: meta.spawned_at,
+          outcome: dag_types.NodePending,
+          model: state.config.deputies_model,
+          complexity: "deputy",
+          tool_calls: [],
+          dprime_gates: [],
+          tokens_in: 0,
+          tokens_out: 0,
+          duration_ms: 0,
+          agent_output: None,
+          instance_name: "",
+          instance_id: "",
+        )),
+      )
+      // Register the active deputy so kill_deputy, recall, introspect
+      // and sensorium can see it. Unlike Phase 1, we leave the entry
+      // in active_deputies until the hierarchy completes.
+      librarian.notify_active_deputy(
+        lib,
+        librarian.ActiveDeputyMeta(
+          id: meta.id,
+          cycle_id: meta.cycle_id,
+          hierarchy_cycle_id: meta.hierarchy_cycle_id,
+          root_agent: meta.root_agent,
+          spawned_at: meta.spawned_at,
+          subject: meta.subject,
+        ),
+      )
+      case
+        deputy_framework.await_briefing(meta, state.config.deputy_timeout_ms)
+      {
+        Ok(b) -> {
+          // Phase 2: don't remove from active — deputy is alive for the
+          // hierarchy's lifetime. Recent-deputy record is appended when
+          // the hierarchy finishes (see shutdown_hierarchy_deputy).
+          let xml = deputy_types.render_briefing(b)
+          #(xml <> "\n\n" <> instruction, Some(meta.subject))
+        }
+        Error(reason) -> {
+          // Briefing failed. The deputy may or may not still be alive
+          // (await_briefing kills on timeout). Record the failure and
+          // remove from active. Still return the subject so ask_deputy
+          // works from whatever context the deputy has.
+          librarian.notify_remove_active_deputy(lib, meta.id)
+          librarian.notify_recent_deputy(
+            lib,
+            librarian.RecentDeputyRecord(
+              id: meta.id,
+              cycle_id: meta.cycle_id,
+              root_agent: meta.root_agent,
+              signal: "silent",
+              cases_count: 0,
+              facts_count: 0,
+              elapsed_ms: 0,
+              completed_at: get_datetime(),
+              outcome: librarian.BriefingFailed(reason),
+            ),
+          )
+          #(instruction, None)
+        }
+      }
+    }
+  }
+}
+
+/// Shutdown a hierarchy's deputy when the root delegation completes,
+/// fails, or is cancelled. Removes from active-deputies and appends a
+/// recent-deputy record so the sensorium reflects completion.
+pub fn shutdown_hierarchy_deputy(
+  state: CognitiveState,
+  deputy_subject: Subject(deputy_types.DeputyMessage),
+  hierarchy_outcome: String,
+) -> Nil {
+  case state.memory.librarian {
+    None -> Nil
+    Some(lib) -> {
+      // Recall to get final state for the ring-buffer record, then
+      // Shutdown to end the actor.
+      let reply = process.new_subject()
+      process.send(deputy_subject, deputy_types.Recall(reply_to: reply))
+      case process.receive(reply, 2000) {
+        Ok(snapshot) -> {
+          librarian.notify_remove_active_deputy(lib, snapshot.id)
+          librarian.notify_recent_deputy(
+            lib,
+            librarian.RecentDeputyRecord(
+              id: snapshot.id,
+              cycle_id: snapshot.cycle_id,
+              root_agent: snapshot.root_agent,
+              signal: snapshot.last_signal,
+              cases_count: 0,
+              facts_count: 0,
+              elapsed_ms: 0,
+              completed_at: get_datetime(),
+              outcome: case hierarchy_outcome {
+                "killed" -> librarian.BriefingKilled("hierarchy killed")
+                "failed" -> librarian.BriefingFailed("hierarchy failed")
+                _ -> librarian.BriefingOk
+              },
+            ),
+          )
+          Nil
+        }
+        Error(_) -> Nil
+      }
+      process.send(deputy_subject, deputy_types.Shutdown)
+      Nil
+    }
   }
 }
