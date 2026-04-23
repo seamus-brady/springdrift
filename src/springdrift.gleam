@@ -1258,6 +1258,7 @@ fn run(cfg: AppConfig) -> Nil {
         ws_max_bytes,
         scheduler_subj,
         frontdoor_subj,
+        option.Some(sup),
       )
     }
     _ ->

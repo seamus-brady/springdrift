@@ -131,7 +131,7 @@ fn get_auth_token() -> Option(String) {
 pub fn start(
   cognitive: Subject(agent_types.CognitiveMessage),
   notify: Subject(agent_types.Notification),
-  _provider_name: String,
+  provider_name: String,
   _task_model: String,
   _reasoning_model: String,
   initial_messages: List(Message),
@@ -143,6 +143,7 @@ pub fn start(
   ws_max_bytes: Int,
   scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
   frontdoor: Subject(FrontdoorMessage),
+  supervisor: Option(Subject(agent_types.SupervisorMessage)),
 ) -> Nil {
   let auth_token = get_auth_token()
   let relay: Subject(RelayMsg) = process.new_subject()
@@ -167,6 +168,8 @@ pub fn start(
         ws_max_bytes,
         scheduler,
         frontdoor,
+        supervisor,
+        provider_name,
       )
     }
     |> mist.new
@@ -195,6 +198,8 @@ fn handle_request(
   ws_max_bytes: Int,
   scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
   frontdoor: Subject(FrontdoorMessage),
+  supervisor: Option(Subject(agent_types.SupervisorMessage)),
+  provider_name: String,
 ) -> Response(ResponseData) {
   // /health is unauthenticated by design — Uptime-Kuma, cron jobs,
   // and similar external pingers don't speak bearer auth, and the
@@ -216,6 +221,8 @@ fn handle_request(
         ws_max_bytes,
         scheduler,
         frontdoor,
+        supervisor,
+        provider_name,
       )
   }
 }
@@ -233,6 +240,8 @@ fn handle_authenticated_request(
   ws_max_bytes: Int,
   scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
   frontdoor: Subject(FrontdoorMessage),
+  supervisor: Option(Subject(agent_types.SupervisorMessage)),
+  provider_name: String,
 ) -> Response(ResponseData) {
   case auth.check_auth(req, auth_token) {
     False ->
@@ -283,6 +292,20 @@ fn handle_authenticated_request(
         // Thread export as markdown — /export/thread/<thread_id>.md
         ["export", "thread", filename] ->
           export_thread_response(filename, narrative_dir)
+
+        // /diagnostic — full system structural report. Authenticated
+        // unlike /health; aggregates agent roster, memory counts,
+        // scheduler state, meta-learning worker state, provider keys.
+        // Designed for scripts/fresh-instance.sh --diagnostic and
+        // similar offline validation.
+        ["diagnostic"] ->
+          diagnostic_response(
+            cognitive,
+            scheduler,
+            supervisor,
+            lib,
+            provider_name,
+          )
 
         // WebSocket upgrade
         ["ws"] ->
@@ -1494,3 +1517,209 @@ fn probe_scheduler_pending(
 
 @external(erlang, "springdrift_ffi", "get_datetime")
 fn current_iso_timestamp() -> String
+
+// ---------------------------------------------------------------------------
+// /diagnostic — structural report aggregating subsystem state
+// ---------------------------------------------------------------------------
+
+/// Always-on agents that every healthy instance should have registered.
+/// Presence/absence of each is a direct test for the Nemo-class failure
+/// mode (Remembrancer silently missing, etc). Kept as a const list
+/// rather than inferred from config so the diagnostic asserts the
+/// shape we want, not the shape we happen to have.
+///
+/// Deliberately excluded:
+/// - `comms` — opt-in via [comms] enabled; reporting missing would be
+///   a false positive on default configs.
+/// - `scheduler` — late-binding during startup, may not be registered
+///   yet when /health flips to 200. Its presence can be inferred via
+///   the top-level scheduler.pending field.
+const expected_agents = [
+  "planner", "project_manager", "researcher", "coder", "writer", "observer",
+  "remembrancer",
+]
+
+/// Env var names checked for provider API-key presence. We report only
+/// the NAMES that are set, never the values. A key listed here does
+/// not guarantee the key is valid — only that the env var exists.
+const provider_env_vars = [
+  "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "MISTRAL_API_KEY",
+  "KAGI_API_KEY", "BRAVE_SEARCH_API_KEY", "JINA_API_KEY", "AGENTMAIL_API_KEY",
+]
+
+fn diagnostic_response(
+  cognitive: Subject(agent_types.CognitiveMessage),
+  scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
+  supervisor: Option(Subject(agent_types.SupervisorMessage)),
+  lib: Option(Subject(LibrarianMessage)),
+  provider_name: String,
+) -> Response(ResponseData) {
+  let #(cog_reachable, cog_status) = probe_cognitive(cognitive)
+
+  let #(registered, missing) = probe_agents(supervisor)
+
+  let #(mem_threads, mem_facts, mem_cbr) = probe_memory(lib)
+
+  let #(sched_pending, sched_legacy) = probe_scheduler(scheduler)
+
+  let workers_state = read_workers_state()
+
+  let keys_present = probe_provider_keys()
+
+  // Overall status: ok if cognitive up AND no expected agents missing
+  // AND no legacy scheduler jobs hanging around. Otherwise degraded.
+  let overall = case cog_reachable, missing, sched_legacy {
+    True, [], 0 -> "ok"
+    _, _, _ -> "degraded"
+  }
+
+  let body =
+    json.object([
+      #("status", json.string(overall)),
+      #("timestamp", json.string(current_iso_timestamp())),
+      #(
+        "cognitive",
+        json.object([
+          #("responsive", json.bool(cog_reachable)),
+          #("status_tag", case cog_status {
+            Some(tag) -> json.string(tag)
+            None -> json.null()
+          }),
+        ]),
+      ),
+      #(
+        "agents",
+        json.object([
+          #("expected", json.array(expected_agents, json.string)),
+          #("registered", json.array(registered, json.string)),
+          #("missing", json.array(missing, json.string)),
+        ]),
+      ),
+      #(
+        "memory",
+        json.object([
+          #("threads", json.int(mem_threads)),
+          #("facts_persistent", json.int(mem_facts)),
+          #("cbr_cases", json.int(mem_cbr)),
+        ]),
+      ),
+      #(
+        "scheduler",
+        json.object([
+          #("pending", json.int(sched_pending)),
+          #("legacy_meta_learning_entries", json.int(sched_legacy)),
+        ]),
+      ),
+      #(
+        "workers",
+        json.object([
+          #("state_file", json.string(paths.meta_learning_state_file())),
+          #("state_json", case workers_state {
+            Some(raw) -> json.string(raw)
+            None -> json.null()
+          }),
+        ]),
+      ),
+      #(
+        "providers",
+        json.object([
+          #("configured", json.string(provider_name)),
+          #("api_keys_present", json.array(keys_present, json.string)),
+        ]),
+      ),
+    ])
+    |> json.to_string
+  response.new(200)
+  |> response.set_header("content-type", "application/json; charset=utf-8")
+  |> response.set_body(mist.Bytes(bytes_tree.from_string(body)))
+}
+
+/// Per-agent lookup via supervisor. Returns (registered, missing).
+/// Each lookup has a 500ms timeout; worst case ~4s for 8 agents when
+/// the supervisor is wedged. Acceptable — the diagnostic isn't hot-path.
+fn probe_agents(
+  supervisor: Option(Subject(agent_types.SupervisorMessage)),
+) -> #(List(String), List(String)) {
+  case supervisor {
+    None -> #([], expected_agents)
+    Some(sup) ->
+      list.fold(expected_agents, #([], []), fn(acc, name) {
+        let #(registered, missing) = acc
+        let reply: Subject(Option(Subject(agent_types.AgentTask))) =
+          process.new_subject()
+        process.send(
+          sup,
+          agent_types.LookupAgentSubject(name:, reply_to: reply),
+        )
+        case process.receive(reply, 500) {
+          Ok(Some(_)) -> #([name, ..registered], missing)
+          _ -> #(registered, [name, ..missing])
+        }
+      })
+  }
+}
+
+fn probe_memory(lib: Option(Subject(LibrarianMessage))) -> #(Int, Int, Int) {
+  case lib {
+    None -> #(0, 0, 0)
+    Some(l) -> #(
+      librarian.get_thread_count(l),
+      librarian.get_persistent_fact_count(l),
+      librarian.get_case_count(l),
+    )
+  }
+}
+
+/// (pending_count, legacy_meta_learning_count). Legacy count should be 0
+/// on any instance restarted after the meta-learning worker migration;
+/// a non-zero value indicates persisted scheduler state still references
+/// retired job names.
+fn probe_scheduler(
+  scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
+) -> #(Int, Int) {
+  case scheduler {
+    None -> #(0, 0)
+    Some(sched) -> {
+      let reply: Subject(List(scheduler_types.ScheduledJob)) =
+        process.new_subject()
+      process.send(sched, scheduler_types.GetStatus(reply_to: reply))
+      case process.receive(reply, 500) {
+        Ok(jobs) -> {
+          let pending =
+            list.count(jobs, fn(j) {
+              case j.status {
+                scheduler_types.Pending -> True
+                _ -> False
+              }
+            })
+          let legacy =
+            list.count(jobs, fn(j) {
+              string.starts_with(j.name, "meta_learning_")
+            })
+          #(pending, legacy)
+        }
+        Error(_) -> #(0, 0)
+      }
+    }
+  }
+}
+
+/// Read the meta-learning workers.json sidecar if present. Returned
+/// verbatim as a JSON string so the client can parse last-run
+/// timestamps per worker. Missing file → None (fresh install, no runs
+/// yet).
+fn read_workers_state() -> Option(String) {
+  case simplifile.read(paths.meta_learning_state_file()) {
+    Ok(content) -> Some(content)
+    Error(_) -> None
+  }
+}
+
+fn probe_provider_keys() -> List(String) {
+  list.filter(provider_env_vars, fn(name) {
+    case get_env(name) {
+      Ok(v) -> v != ""
+      Error(_) -> False
+    }
+  })
+}
