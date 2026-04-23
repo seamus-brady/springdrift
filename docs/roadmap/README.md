@@ -48,7 +48,7 @@ architecture; planned features include the design proposal and open questions.
 | [Communications agent](implemented/comms-agent.md) | Comms |
 | [Bug fixes (March 2026)](implemented/Bug%20fixes%2027-03-26.md) | Fixes |
 
-## Planned (26)
+## Planned (27)
 
 | Feature | Category |
 |---|---|
@@ -65,6 +65,7 @@ architecture; planned features include the design proposal and open questions.
 | [Metacognition reporting](planned/metacognition-reporting.md) | Observability |
 | [Cycles spanning midnight](planned/cycles-spanning-midnight.md) | Observability |
 | [Empirical evaluation](planned/empirical-evaluation.md) | Evaluation |
+| [Integration testing](planned/integration-testing.md) | Evaluation |
 | [Multi-provider failover](planned/multi-provider-failover.md) | Infrastructure |
 | [Hot reload config](planned/hot-reload-config.md) | Infrastructure |
 | [Multi-language sandbox](planned/sandbox-multi-language.md) | Infrastructure |
