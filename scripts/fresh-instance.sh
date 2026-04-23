@@ -12,7 +12,7 @@
 #
 # Usage:
 #   scripts/fresh-instance.sh [--provider NAME] [--isolate-home] [--web]
-#                             [-- extra gleam args]
+#                             [--diagnostic] [-- extra gleam args]
 #
 # Flags:
 #   --provider NAME Provider to use (anthropic, openai, mistral, vertex,
@@ -27,6 +27,12 @@
 #                   default.
 #   --web           Launch the web GUI instead of the TUI (passes
 #                   `--gui web` through to gleam run).
+#   --diagnostic    Launch in web mode, wait for /health, fetch
+#                   /diagnostic, pretty-print, then shut the instance
+#                   down. Exit 0 if status=ok, 1 if degraded, 2 on
+#                   timeout or fetch failure. Intended for offline
+#                   validation — does not block waiting for operator
+#                   input.
 #
 # Anything after `--` is forwarded to `gleam run --`.
 
@@ -50,6 +56,7 @@ fi
 PROVIDER="anthropic"
 ISOLATE_HOME=0
 WEB_GUI=0
+DIAGNOSTIC=0
 EXTRA_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -57,6 +64,7 @@ while [[ $# -gt 0 ]]; do
     --provider)     PROVIDER="$2"; shift 2 ;;
     --isolate-home) ISOLATE_HOME=1; shift ;;
     --web)          WEB_GUI=1; shift ;;
+    --diagnostic)   DIAGNOSTIC=1; WEB_GUI=1; shift ;;
     --)             shift; EXTRA_ARGS=("$@"); break ;;
     -h|--help)
       awk 'NR==1 {next} /^[^#]/ && !/^$/ {exit} {sub(/^# ?/, ""); print}' "$0"
@@ -160,4 +168,80 @@ has been modified. Delete $FRESH_ROOT when you're done with it.
 EOF
 
 cd "$PROJECT_ROOT"
+
+# ---------------------------------------------------------------------------
+# Diagnostic path: launch in background, probe, tear down
+# ---------------------------------------------------------------------------
+
+if [[ "$DIAGNOSTIC" -eq 1 ]]; then
+  # Find the configured web port. The example config doesn't uncomment
+  # [web].port, so the default is what matters — keep in sync with
+  # src/config.gleam's default of 12001.
+  PORT=$(awk -F'= ' '/^port = [0-9]+/ {print $2; exit}' \
+    "$DATA_DIR/config.toml" 2>/dev/null || echo "")
+  PORT=${PORT:-12001}
+
+  TOKEN_QS=""
+  if [[ -n "${SPRINGDRIFT_WEB_TOKEN:-}" ]]; then
+    TOKEN_QS="?token=$SPRINGDRIFT_WEB_TOKEN"
+  fi
+
+  DIAG_LOG="$FRESH_ROOT/diagnostic.log"
+  # Job control so the background gleam run gets its own process group —
+  # the `gleam` CLI spawns erl/beam.smp as children, and without a group
+  # we end up orphaning beam.smp when we kill the wrapper on cleanup.
+  set -m
+  gleam run -- "${GLEAM_ARGS[@]}" > "$DIAG_LOG" 2>&1 &
+  GLEAM_PID=$!
+  GLEAM_PGID=$(ps -o pgid= "$GLEAM_PID" | tr -d ' ' || echo "$GLEAM_PID")
+  cleanup_diagnostic() {
+    # TERM the whole group, give it a second, then SIGKILL any
+    # stragglers. beam.smp ignores SIGHUP; SIGTERM is cleaner.
+    kill -TERM -"$GLEAM_PGID" 2>/dev/null || true
+    sleep 1
+    kill -KILL -"$GLEAM_PGID" 2>/dev/null || true
+  }
+  trap cleanup_diagnostic EXIT INT TERM
+
+  echo "Diagnostic: waiting for http://localhost:$PORT/health (up to 60s)..."
+  READY=0
+  for _ in $(seq 1 60); do
+    if curl -s -f "http://localhost:$PORT/health" > /dev/null 2>&1; then
+      READY=1
+      break
+    fi
+    sleep 1
+  done
+
+  if [[ "$READY" -eq 0 ]]; then
+    echo "Diagnostic: instance did not become healthy within 60s" >&2
+    echo "Last 30 lines of log:" >&2
+    tail -30 "$DIAG_LOG" >&2
+    exit 2
+  fi
+
+  echo "Diagnostic: instance ready, fetching /diagnostic"
+  DIAG_BODY=$(curl -s -f "http://localhost:$PORT/diagnostic$TOKEN_QS" 2>/dev/null || echo "")
+
+  if [[ -z "$DIAG_BODY" ]]; then
+    echo "Diagnostic: /diagnostic fetch failed" >&2
+    tail -20 "$DIAG_LOG" >&2
+    exit 2
+  fi
+
+  if command -v jq > /dev/null 2>&1; then
+    echo "$DIAG_BODY" | jq .
+  else
+    echo "$DIAG_BODY"
+  fi
+
+  # Overall status: ok | degraded
+  STATUS=$(echo "$DIAG_BODY" | sed -nE 's/.*"status":"([^"]+)".*/\1/p' | head -1)
+  case "$STATUS" in
+    ok)       echo "Diagnostic: overall status = ok"; exit 0 ;;
+    degraded) echo "Diagnostic: overall status = degraded" >&2; exit 1 ;;
+    *)        echo "Diagnostic: could not parse status" >&2; exit 2 ;;
+  esac
+fi
+
 exec gleam run -- "${GLEAM_ARGS[@]}"
