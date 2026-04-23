@@ -164,6 +164,13 @@ pub type AppConfig {
     researcher_max_turns: Option(Int),
     researcher_max_errors: Option(Int),
     researcher_max_context: Option(Int),
+    /// Auto-store threshold for researcher tool results. When a web-fetching
+    /// tool returns content over this size (in characters), the executor
+    /// stores it as an artifact and returns a short preview + artifact_id
+    /// in place of the raw content. Keeps the researcher's context window
+    /// from filling up with 30KB article bodies. Set to 0 to disable.
+    /// Default: 8192.
+    researcher_auto_store_threshold_bytes: Option(Int),
     coder_max_tokens: Option(Int),
     coder_max_turns: Option(Int),
     coder_max_errors: Option(Int),
@@ -470,6 +477,7 @@ pub fn default() -> AppConfig {
     researcher_max_turns: None,
     researcher_max_errors: None,
     researcher_max_context: None,
+    researcher_auto_store_threshold_bytes: None,
     coder_max_tokens: None,
     coder_max_turns: None,
     coder_max_errors: None,
@@ -911,6 +919,10 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     researcher_max_context: option.or(
       override_cfg.researcher_max_context,
       base.researcher_max_context,
+    ),
+    researcher_auto_store_threshold_bytes: option.or(
+      override_cfg.researcher_auto_store_threshold_bytes,
+      base.researcher_auto_store_threshold_bytes,
     ),
     coder_max_tokens: option.or(
       override_cfg.coder_max_tokens,
@@ -1843,6 +1855,9 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     ]),
     researcher_max_context: get_toml_int(table, [
       "agents", "researcher", "max_context_messages",
+    ]),
+    researcher_auto_store_threshold_bytes: get_toml_int(table, [
+      "agents", "researcher", "auto_store_threshold_bytes",
     ]),
     coder_max_tokens: get_toml_int(table, ["agents", "coder", "max_tokens"]),
     coder_max_turns: get_toml_int(table, ["agents", "coder", "max_turns"]),

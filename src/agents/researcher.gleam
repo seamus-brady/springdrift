@@ -6,13 +6,18 @@
 // (at your option) any later version.
 
 import agent/types.{type AgentSpec, AgentSpec, Permanent}
+import artifacts/log as artifacts_log
+import artifacts/types as artifacts_types
 import gleam/erlang/process.{type Subject}
+import gleam/int
 import gleam/list
 import gleam/option.{type Option, Some}
+import gleam/string
 import llm/provider.{type Provider}
 import llm/types as llm_types
 import narrative/librarian.{type LibrarianMessage}
 import paths
+import slog
 import tools/artifacts
 import tools/brave
 import tools/builtin
@@ -22,6 +27,12 @@ import tools/kagi
 import tools/knowledge as knowledge_tools
 import tools/rate_limiter
 import tools/web
+
+@external(erlang, "springdrift_ffi", "generate_uuid")
+fn generate_uuid() -> String
+
+@external(erlang, "springdrift_ffi", "get_datetime")
+fn get_datetime() -> String
 
 const system_prompt = "You are a research agent. Your job is to gather information using web search and extraction tools.
 
@@ -58,7 +69,7 @@ You have 10 web tools arranged in tiers. Pick the right tool for the task:
 - No API keys available? → web_search (DuckDuckGo fallback)
 
 ## Context management
-When fetching large pages, immediately use **store_result** to save the content and work with the artifact_id. Use **retrieve_result** to re-read stored content. This keeps your context window lean across multi-turn research.
+Large tool results (over ~8KB) are auto-stored to artifacts by the executor. You will see a short preview plus `artifact_id=\"art-...\"` in place of the raw content. Call **retrieve_result** with that id when you need the full text to reason over. You can still call **store_result** explicitly for anything under the auto-store threshold that you want to persist.
 
 ## Quality signals
 After extraction, note: publication date, whether the source is primary or secondary, and any contradictions with earlier results. Prefer primary sources. When a snippet and full extraction conflict, trust the full extraction.
@@ -76,6 +87,7 @@ pub fn spec(
   brave_search_limiter: Option(Subject(rate_limiter.RateLimiterMessage)),
   brave_answers_limiter: Option(Subject(rate_limiter.RateLimiterMessage)),
   brave_cache_ttl_ms: Int,
+  auto_store_threshold_bytes: Int,
 ) -> AgentSpec {
   let tools =
     list.flatten([
@@ -109,6 +121,7 @@ pub fn spec(
       brave_search_limiter,
       brave_answers_limiter,
       brave_cache_ttl_ms,
+      auto_store_threshold_bytes,
     ),
     inter_turn_delay_ms: 200,
     redact_secrets: True,
@@ -123,9 +136,10 @@ fn researcher_executor(
   brave_search_limiter: Option(Subject(rate_limiter.RateLimiterMessage)),
   brave_answers_limiter: Option(Subject(rate_limiter.RateLimiterMessage)),
   brave_cache_ttl_ms: Int,
+  auto_store_threshold_bytes: Int,
 ) -> fn(llm_types.ToolCall) -> llm_types.ToolResult {
   fn(call: llm_types.ToolCall) -> llm_types.ToolResult {
-    case call.name {
+    let raw = case call.name {
       "save_to_library" | "search_library" | "read_section" | "get_document" ->
         knowledge_tools.execute(
           call,
@@ -170,6 +184,152 @@ fn researcher_executor(
         )
       _ -> builtin.execute(call)
     }
+    case should_auto_store(call.name), auto_store_threshold_bytes {
+      _, t if t <= 0 -> raw
+      False, _ -> raw
+      True, threshold ->
+        maybe_auto_store(
+          raw,
+          call.name,
+          threshold,
+          artifacts_dir,
+          lib,
+          max_artifact_chars,
+        )
+    }
+  }
+}
+
+/// The set of tools whose output can be bulky enough to blow the
+/// react-loop context window. store_result / retrieve_result are excluded
+/// to avoid re-storing their own output.
+pub fn should_auto_store(tool_name: String) -> Bool {
+  case tool_name {
+    "fetch_url"
+    | "web_search"
+    | "jina_reader"
+    | "kagi_search"
+    | "kagi_summarize"
+    | "brave_web_search"
+    | "brave_news_search"
+    | "brave_llm_context"
+    | "brave_summarizer"
+    | "brave_answer" -> True
+    _ -> False
+  }
+}
+
+/// If the tool succeeded AND its content exceeds `threshold_bytes`, persist
+/// the full content to artifacts and return a short preview + artifact_id
+/// in place of the raw content. Otherwise pass the result through unchanged.
+/// Preview size is threshold / 4 so the agent still has enough context to
+/// reason about what it fetched.
+fn maybe_auto_store(
+  result: llm_types.ToolResult,
+  tool_name: String,
+  threshold_bytes: Int,
+  artifacts_dir: String,
+  lib: Subject(LibrarianMessage),
+  max_artifact_chars: Int,
+) -> llm_types.ToolResult {
+  case result {
+    llm_types.ToolFailure(..) -> result
+    llm_types.ToolSuccess(tool_use_id:, content:) -> {
+      let char_count = string.length(content)
+      case char_count > threshold_bytes {
+        False -> result
+        True -> {
+          let artifact_id = "art-" <> generate_uuid()
+          let stored_at = get_datetime()
+          let summary = first_line(content)
+          let record =
+            artifacts_types.ArtifactRecord(
+              schema_version: 1,
+              artifact_id:,
+              cycle_id: "researcher_auto",
+              stored_at:,
+              tool: tool_name,
+              url: "",
+              summary:,
+              char_count:,
+              truncated: False,
+            )
+          artifacts_log.append(
+            artifacts_dir,
+            record,
+            content,
+            max_artifact_chars,
+          )
+          let meta =
+            artifacts_types.ArtifactMeta(
+              artifact_id:,
+              cycle_id: "researcher_auto",
+              stored_at:,
+              tool: tool_name,
+              url: "",
+              summary:,
+              char_count:,
+              truncated: False,
+            )
+          librarian.index_artifact(lib, meta)
+          slog.debug(
+            "agents/researcher",
+            "auto_store",
+            "Auto-stored "
+              <> int.to_string(char_count)
+              <> "-char result from "
+              <> tool_name
+              <> " as "
+              <> artifact_id,
+            option.None,
+          )
+          let wrapped =
+            render_auto_store_preview(
+              content,
+              tool_name,
+              artifact_id,
+              threshold_bytes,
+            )
+          llm_types.ToolSuccess(tool_use_id:, content: wrapped)
+        }
+      }
+    }
+  }
+}
+
+/// Build the wrapped tool_result content that replaces bulky output with
+/// a preview plus artifact pointer. Pure — no I/O. Preview is sized at
+/// one-quarter of the threshold so the agent retains enough context to
+/// reason about what was fetched without the full body hitting the
+/// react-loop context window.
+pub fn render_auto_store_preview(
+  content: String,
+  tool_name: String,
+  artifact_id: String,
+  threshold_bytes: Int,
+) -> String {
+  let char_count = string.length(content)
+  let preview_bytes = threshold_bytes / 4
+  let preview = string.slice(content, 0, preview_bytes)
+  "[Auto-stored "
+  <> int.to_string(char_count)
+  <> "-char result from "
+  <> tool_name
+  <> " as artifact_id=\""
+  <> artifact_id
+  <> "\"]\n\nPreview (first "
+  <> int.to_string(preview_bytes)
+  <> " chars):\n\n"
+  <> preview
+  <> "\n\n[Truncated. Call retrieve_result with artifact_id=\""
+  <> artifact_id
+  <> "\" to read the full text.]"
+}
+
+fn first_line(content: String) -> String {
+  case string.split_once(content, "\n") {
+    Ok(#(first, _)) -> string.slice(first, 0, 200)
+    Error(_) -> string.slice(content, 0, 200)
   }
 }
 

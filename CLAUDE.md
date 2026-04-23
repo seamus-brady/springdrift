@@ -1313,7 +1313,7 @@ The config is organized into these TOML sections:
 | `[xstructor]` | XStructor XML validation settings (max_retries) |
 | `[forecaster]` | Plan-health Forecaster: enabled, tick_ms, threshold, min_cycles |
 | `[agents.planner]` | Planner agent: max_tokens, max_turns, max_errors |
-| `[agents.researcher]` | Researcher agent: max_tokens, max_turns, max_errors, max_context |
+| `[agents.researcher]` | Researcher agent: max_tokens, max_turns, max_errors, max_context, auto_store_threshold_bytes |
 | `[agents.coder]` | Coder agent: max_tokens, max_turns, max_errors |
 | `[agents.writer]` | Writer agent: max_tokens, max_turns, max_errors |
 | `[web]` | Web GUI port |

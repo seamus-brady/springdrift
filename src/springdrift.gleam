@@ -1496,6 +1496,8 @@ fn default_agent_specs(
       appraiser_ctx,
     )
   let max_artifact_chars = option.unwrap(cfg.max_artifact_chars, 50_000)
+  let researcher_auto_store_threshold =
+    option.unwrap(cfg.researcher_auto_store_threshold_bytes, 8192)
   let r_spec =
     researcher.spec(
       provider,
@@ -1507,6 +1509,7 @@ fn default_agent_specs(
       brave_search_limiter,
       brave_answers_limiter,
       brave_cache_ttl_ms,
+      researcher_auto_store_threshold,
     )
   let c_spec =
     coder.spec(
