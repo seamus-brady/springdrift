@@ -128,12 +128,14 @@ that returns an `AgentSpec`.
 | Agent | File | Tools | max_turns | max_context | max_tokens | Restart | Purpose |
 |---|---|---|---|---|---|---|---|
 | Planner | `agents/planner.gleam` | None (pure XML reasoning) | 5 | unlimited | 2048 | Permanent | Decompose goals into structured plans with steps, dependencies, complexity, risks |
-| Project Manager | `agents/project_manager.gleam` | 19 planner tools | 15 | unlimited | 2048 | Permanent | Manage endeavours, phases, sessions, blockers, forecaster config |
-| Researcher | `agents/researcher.gleam` | web + artifacts + builtin | 8 | 30 | 2048 | Permanent | Web search and content extraction via Brave, Jina, DuckDuckGo, fetch_url |
+| Project Manager | `agents/project_manager.gleam` | planner tools | 15 | unlimited | 2048 | Permanent | Manage endeavours, phases, sessions, blockers, forecaster config |
+| Researcher | `agents/researcher.gleam` | web + artifacts + builtin | 8 | 30 | 2048 | Permanent | Web search and content extraction via Kagi, Brave, Jina, DuckDuckGo, fetch_url. Large results auto-stored as artifacts. |
 | Coder | `agents/coder.gleam` | sandbox + builtin | 10 | unlimited | 4096 | Permanent | Execute code in Podman sandbox, manage servers, iterate on errors |
-| Writer | `agents/writer.gleam` | builtin | 5 | unlimited | 4096 | Permanent | Synthesise research into structured, well-cited reports |
-| Observer | `agents/observer.gleam` | 17 diagnostic + CBR curation | 6 | 20 | 2048 | Transient | Cycle forensics, pattern detection, fact tracing, CBR curation |
-| Comms | `agents/comms.gleam` | 4 comms + builtin | configurable | 20 | configurable | Permanent | Send/receive email via AgentMail with three-layer safety |
+| Writer | `agents/writer.gleam` | knowledge drafts + artifacts + builtin | 5 | unlimited | 4096 | Permanent | Synthesise research into structured, well-cited reports |
+| Observer | `agents/observer.gleam` | diagnostic + CBR curation | 6 | 20 | 2048 | Transient | Cycle forensics, pattern detection, fact tracing, CBR curation |
+| Comms | `agents/comms.gleam` | comms + builtin | 6 | 20 | configurable | Permanent | Send/receive email via AgentMail with three-layer safety. Opt-in via `[comms] enabled`. |
+| Scheduler | `agents/scheduler.gleam` | scheduler tools | 4 | unlimited | 1024 | Permanent | Create, manage, and query scheduled jobs. Natural-language front-end over the scheduler runner. |
+| Remembrancer | `agents/remembrancer.gleam` | deep memory + skill proposals | 8 | 30 | configurable | Transient | Deep-memory operations across the archive, consolidation, pattern mining, skill proposals. Also dispatched by meta-learning BEAM workers off-cog. |
 
 ### Planner vs Project Manager split
 
@@ -147,11 +149,13 @@ and forecaster configuration through 19 planner tools. It implements a "Sprint
 Contract Protocol" -- before executing multi-step workflows, it states intent,
 success criteria, and assumptions.
 
-### Observer: Transient restart
+### Transient restart (Observer, Remembrancer)
 
-The Observer is the only agent with `Transient` restart. It is a diagnostic agent --
-if it crashes, it should be restarted (abnormal exit), but if it completes normally
-and is not needed, it stays stopped.
+Two agents use `Transient` restart. They are diagnostic / meta-level
+agents — if they crash they should be restarted (abnormal exit), but
+if they complete normally and aren't needed, they stay stopped.
+Everything else is `Permanent` so the tool surface the operator sees
+stays stable.
 
 ---
 

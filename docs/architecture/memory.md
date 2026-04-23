@@ -1,6 +1,6 @@
 # Memory Architecture
 
-Springdrift maintains nine persistent memory stores, all backed by append-only JSON-L
+Springdrift maintains twelve persistent memory stores, all backed by append-only JSON-L
 files on disk, with ETS-based in-memory indexes managed by the Librarian actor.
 
 ## 1. Overview
@@ -14,8 +14,11 @@ files on disk, with ETS-based in-memory indexes managed by the Librarian actor.
 | Artifacts | `.springdrift/memory/artifacts/artifacts-YYYY-MM-DD.jsonl` | `ArtifactRecord` | Large content stored on disk (web pages, extractions) |
 | Tasks | `.springdrift/memory/planner/YYYY-MM-DD-tasks.jsonl` | `PlannerTask` | Planned work with steps, dependencies, risks |
 | Endeavours | `.springdrift/memory/planner/YYYY-MM-DD-endeavours.jsonl` | `Endeavour` | Self-directed initiatives grouping multiple tasks |
+| Strategies | `.springdrift/memory/strategies/YYYY-MM-DD-strategies.jsonl` | `StrategyEvent` | Named approaches with tracked outcomes (success rate, last used) |
+| Learning goals | `.springdrift/memory/learning_goals/YYYY-MM-DD-goals.jsonl` | `GoalEvent` | Self-set goals with acceptance criteria and evidence cycles |
 | DAG | In-memory ETS, populated from cycle log | `CycleNode` | Operational telemetry: tokens, tool calls, D' gates, agent output |
 | Comms | `.springdrift/memory/comms/YYYY-MM-DD-comms.jsonl` | `CommsMessage` | Sent and received email messages with delivery status |
+| Affect | `.springdrift/memory/affect/YYYY-MM-DD-affect.jsonl` | `AffectSnapshot` | Per-cycle functional emotion readings (5 dimensions) |
 
 All stores share three properties:
 
@@ -314,8 +317,17 @@ Optional `FactProvenance` tracks where a fact came from:
 `src/artifacts/types.gleam`, `src/artifacts/log.gleam`, `src/tools/artifacts.gleam`
 
 Artifacts store large content (web pages, extractions) on disk with compact IDs.
-This keeps the agent's context window lean -- the researcher agent stores full page
-content via `store_result` and retrieves it on demand via `retrieve_result`.
+This keeps the agent's context window lean. The researcher agent has two paths:
+
+- **Auto-store** — the researcher's tool executor intercepts results from
+  network-fetching tools (Kagi, Brave, Jina, `fetch_url`, etc). When the
+  response exceeds `researcher_auto_store_threshold_bytes` (default 8192),
+  the full content is persisted to the artifacts log and the agent's
+  `tool_result` is rewritten to contain a preview + `artifact_id` instead of
+  the raw body. Doesn't depend on agent cooperation.
+- **Explicit** — the agent can still call `store_result` / `retrieve_result`
+  directly when it wants to persist something under the threshold or
+  re-read something it stored earlier.
 
 ```
 ArtifactRecord(

@@ -163,8 +163,10 @@ states from dropped messages.
     complete, results combined into a user message, loop re-thinks.
 11. **Output gate** -- interactive: deterministic rules only. Autonomous: full D'
     evaluation + normative calculus.
-12. **Deliver** -- send `CognitiveReply(response, model, usage)` to reply subject.
-    Spawn Archivist. Post-cycle meta observer. Transition to Idle.
+12. **Deliver** -- publish `CognitiveReplyOutput(cycle_id, response, model, usage,
+    tools_fired)` to Frontdoor; subscribers (Web GUI WebSocket, TUI) receive it
+    on the delivery sink keyed by the cycle's source_id. Spawn Archivist.
+    Post-cycle meta observer. Transition to Idle.
 13. **Drain queue** -- if Idle and queue non-empty, process next queued input.
 
 ### Scheduler input cycle

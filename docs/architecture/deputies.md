@@ -1,8 +1,9 @@
 # Deputies — Delegated Attention
 
-Ephemeral restricted cog-loop variants that hold delegated attention on a
-specialist agent's work tree. One deputy per root delegation hierarchy.
-Read-only. Parallel to the agent, never in its path.
+Restricted cog-loop variants that hold delegated attention on a
+specialist agent's work tree. One deputy per root delegation hierarchy,
+alive for the duration of that hierarchy. Read-only. Parallel to the
+agent, never in its path.
 
 Full design spec: [`docs/roadmap/planned/deputy-agents.md`](../roadmap/planned/deputy-agents.md).
 
@@ -10,7 +11,10 @@ Full design spec: [`docs/roadmap/planned/deputy-agents.md`](../roadmap/planned/d
 
 Before a specialist agent starts, a deputy reads memory and produces a
 `<briefing>` block (relevant CBR cases, facts, known pitfalls) that is
-prepended to the agent's instruction — then the deputy dies.
+prepended to the agent's instruction. The deputy then stays alive for
+the rest of the hierarchy and serves `ask_deputy` calls mid-task
+("precedent for this pitfall?", "did we try this URL before?"). It
+shuts down automatically when the root delegation completes.
 
 ## Why
 
@@ -51,14 +55,16 @@ paths.
 
 ## Data flow
 
-### Briefing path (Phase 1)
+### Briefing + ask-for-help path
 
 ```
 cog delegates → spawn deputy → deputy runs Haiku call with briefing schema
              → deputy returns DeputyBriefing or Error
              → if Ok: prepend <briefing> XML to agent's instruction
              → agent's react loop starts with the briefing in its user message
-             → deputy dies
+             → deputy stays alive; serves ask_deputy calls from agent (and
+               any sub-agents the hierarchy spawns)
+             → on root delegation completion: deputy shuts down cleanly
 ```
 
 Failure is benign — if the deputy LLM fails or times out, the agent proceeds
