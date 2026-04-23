@@ -1,8 +1,11 @@
 # Integration Testing — Scenario Runner over `--diagnostic`
 
-**Status**: Planned (design 2026-04-23)
+**Status**: Phase 1 shipped 2026-04-23 (#118). Scope reduced to one reference
+scenario; rationale in *Phase 1 — what shipped* below. Phase 2 is ongoing
+policy. Phase 3 remains deferred.
 **Priority**: Medium — catches a class of bug unit tests structurally can't
-**Effort**: Phase 1 ~300 LOC. Phase 2 grows with scenarios. Phase 3 (live-LLM) deferred indefinitely.
+**Effort**: Phase 1 ~600 LOC Gleam (runner + parser + tests). Phase 2 grows
+with scenarios. Phase 3 (live-LLM) deferred indefinitely.
 
 ## Problem
 
@@ -66,26 +69,28 @@ Explicitly **not** trying to build:
 
 **L4 is deferred indefinitely.** If L1-L3 prove insufficient after six months of use, revisit.
 
-### Harness = extend `scripts/fresh-instance.sh`
+### Harness = in-process Gleam runner
 
 ```bash
-scripts/fresh-instance.sh --scenario test/scenarios/reply-to-noise.toml
+gleam run -- --scenario test/scenarios/reply-to-noise.toml
 ```
 
-The flag implies `--web --diagnostic`. It:
+The runner (`src/scenario/`) boots a minimal cognitive + Frontdoor
+harness in the same VM, drives the scripted steps against it, then
+evaluates the assertions against the resulting log / narrative state.
 
-1. Boots the instance in a dedicated process group (reusing the existing
-   cleanup trap from `--diagnostic`).
-2. Waits for `/health` to respond.
-3. Parses the scenario file.
-4. Executes the scripted steps.
-5. Runs the declared assertions.
-6. Tears down via PGID kill.
-7. Exits 0 on all-pass, 1 on any-fail.
+1. Parse the TOML scenario file.
+2. Boot `cognitive_config.default_test_config` with a mock provider.
+3. For each step: send the message, wait for the reply on a Frontdoor
+   sink keyed by `source_id`, or sleep for a fixed duration.
+4. Evaluate assertions against the instance's slog output and narrative
+   JSONL.
+5. Exit 0 on all-pass, 1 on any-fail, 2 on parse/setup failure.
 
-No new Gleam code required for the MVP — the runner is a bash script
-orchestrating `curl` + `jq` + log-pattern checks. Keeps the harness
-language-independent and scriptable by the operator.
+Open question #1 (TOML parser choice) resolved in favour of writing the
+runner in Gleam — the `tom` dependency is already present, and keeping
+the runner in-VM removes subprocess fragility. The original bash-plus-
+`curl`-plus-`jq` sketch was dropped before implementation.
 
 ### Scenario format
 
@@ -141,20 +146,29 @@ path = "cognitive.responsive"
 equals = true
 ```
 
-Step types (MVP):
-- `send_user_input` — POST to the WebSocket as a scripted user message
-- `send_scheduler_job` — enqueue a scheduler job to fire immediately
-- `seed_file` — write a file into `.springdrift/` before boot (e.g., a
-  polluted scheduler log for migration tests)
-- `wait` — allow the instance to settle, with a timeout
+Step types shipped in Phase 1:
+- `send_user_input` — send a `UserInput` message to the cognitive loop
+  with a given `source_id`
+- `wait_for_reply` — block until a `DeliverReply` arrives on the
+  Frontdoor sink for the scenario's `source_id`, or the timeout expires
+- `wait_duration` — fixed-duration sleep, for scenarios that need
+  background work (scheduler ticks, archivist completion) to settle
 
-Assertion types (MVP):
-- `stderr_absent` / `stderr_present` — regex over the log file
-- `diagnostic_field` — JSONPath into `/diagnostic` response
-- `file_exists` / `file_absent` — relative to `.springdrift/`
-- `jsonl_contains` — at least one record in a given JSONL matches a
-  predicate (e.g., "artifacts log has an entry with `tool: jina_reader`")
-- `narrative_entry_count` — shape-level assertion on narrative output
+Dropped before implementation — built only when a scenario needs them:
+- `seed_file` (would need pre-boot file writes into `.springdrift/`)
+- `send_scheduler_job` (would need scheduler subject threaded into the
+  harness)
+
+Assertion types shipped in Phase 1:
+- `log_absent` / `log_present` — substring over the instance's slog
+  output
+- `narrative_entry_count` — count entries written this run; passes when
+  the count is in `[min, max]` inclusive
+
+Dropped before implementation — built only when a scenario needs them:
+- `diagnostic_field` (would need the web server running)
+- `file_exists` / `file_absent`
+- `jsonl_contains` (structured query into memory JSONL)
 
 ### Mock LLM by default
 
@@ -177,47 +191,63 @@ L4 concerns, deferred.
 
 ## Example scenarios
 
-Three reference scenarios to ship in Phase 1, each catching a
-regression of a bug from this session:
+### `reply-to-noise.toml` — shipped
 
-### `reply-to-noise.toml`
-
-Boot fresh, send two user inputs, assert stderr has no
+Boot fresh, send a user input, wait for reply, assert slog has no
 `Actor discarding unexpected message` patterns. Catches regression of
 #113.
 
-### `meta-learning-pollution.toml`
+### `meta-learning-pollution.toml` — dropped from Phase 1
 
-Before boot, write a fake `.springdrift/memory/schedule/2026-04-20-schedule.jsonl`
-with 5 `meta_learning_*` `JobAdded` events. Boot. Assert `/diagnostic`
-reports `scheduler.legacy_meta_learning_entries == 0`. Assert log
-contains `Swept 5 legacy meta_learning_* job(s)`. Catches regression
-of the startup sweep in #107.
+Would seed a pre-boot scheduler JSONL with legacy `meta_learning_*`
+entries, boot, and assert the sweep log line fires and the entries are
+gone. Dropped because seeding a valid `ScheduledJob` JSONL requires
+either a `seed_file` step (plus boot-order partitioning in the runner
+so seeds land before the harness starts the scheduler) or a Gleam-side
+helper that constructs records via `schedule_log.append`. The sweep
+itself is a five-line filter in `scheduler/runner.gleam`; the
+infrastructure cost to integration-test it didn't match the value.
+Revisit if a future scenario needs pre-boot seeding anyway.
 
-### `researcher-auto-store-smoke.toml`
+### `researcher-auto-store-smoke.toml` — dropped from Phase 1
 
-Configure mock provider to return a 30KB payload in response to a
-`jina_reader` tool call. Send user input triggering a research
-delegation. Wait for reply. Assert `.springdrift/memory/artifacts/artifacts-*.jsonl`
-has a new record with `tool: jina_reader` and `char_count > 8192`.
-Catches regression of #110's auto-store interception.
+Would configure the mock provider to return a 30KB payload for a
+`jina_reader` call and assert the artifact store picks it up. Dropped
+because the mock provider returns text, not tool-result bodies — the
+auto-store interception sits on the real HTTP tool executor, so
+integration-testing it needs an HTTP mocking layer (a stub `httpc` or
+a test-only jina adapter). Neither exists yet. Out of scope for Phase 1.
 
 ## Phasing
 
-### Phase 1 — MVP (~300 LOC bash + doc)
+### Phase 1 — what shipped (#118)
 
-1. Extend `scripts/fresh-instance.sh` with `--scenario <file>` flag.
-2. TOML scenario parser (probably a small Python or awk helper; bash
-   TOML parsing is painful). Or: require `yq` as a dev dependency.
-3. Implement the four step types and five assertion types listed above.
-4. Ship the three reference scenarios.
-5. Document the scenario format in `test/scenarios/README.md`.
-6. CI hook: `gleam test && bash scripts/fresh-instance.sh --scenario
-   test/scenarios/*.toml`.
+1. Gleam scenario runner in `src/scenario/` (types, parser, runner).
+2. `--scenario <path>` flag on `gleam run`.
+3. Three step types: `send_user_input`, `wait_for_reply`,
+   `wait_duration`.
+4. Three assertion types: `log_absent`, `log_present`,
+   `narrative_entry_count`.
+5. One reference scenario: `test/scenarios/reply-to-noise.toml`
+   (catches regression of #113).
+6. A deliberately-failing `test/scenarios/_selftest.toml` to verify the
+   runner reports failure when it should.
+7. Parser unit tests (`test/scenario/parser_test.gleam`, 13 tests).
+8. Format documentation in `test/scenarios/README.md`.
 
-**Acceptance**: the three reference scenarios pass against current
-main. Running them against a PR that reverts #107, #110, or #113 causes
-a relevant scenario to fail.
+Scope reduction vs the original proposal: two of the three reference
+scenarios (`meta-learning-pollution`, `researcher-auto-store-smoke`)
+were dropped — rationale in *Example scenarios* above. `seed_file`,
+`send_scheduler_job`, and five assertion types were not built; they
+cost more than the Phase 1 payoff warranted. Each is small enough to
+add when a future scenario actually needs it.
+
+No CI hook yet. Scenarios are run manually against local checkouts.
+Wiring into a build step is Phase 2 once there are several scenarios
+worth running on every PR.
+
+**Acceptance**: `reply-to-noise.toml` passes against current main;
+`_selftest.toml` fails as expected.
 
 ### Phase 2 — expand as bugs ship (no committed LOC)
 
@@ -260,10 +290,9 @@ category but was caught by operator observation instead.
 
 ## Open questions
 
-1. **TOML parser choice.** `yq` is well-known but adds a dev dependency.
-   A small Python helper would work on any Mac/Linux. Gleam has `tom`
-   already — worth writing the runner *in* Gleam and using the existing
-   parser? That adds ~500 LOC but removes the shell-parsing fragility.
+1. ~~**TOML parser choice.**~~ Resolved 2026-04-23: written in Gleam,
+   using the existing `tom` dependency. Keeping the runner in-VM
+   removed subprocess fragility entirely.
 2. **Assertion language extensibility.** The MVP's assertion types
    cover the reference scenarios. Future scenarios may need queries
    into narrative/CBR/facts — at what point does the assertion language
