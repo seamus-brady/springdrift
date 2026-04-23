@@ -64,6 +64,7 @@ pub fn agent_success_test() {
       reply_to: cognitive_subj,
       depth: 1,
       max_turns_override: option.None,
+      deputy_subject: option.None,
     )
   process.send(task_subj, task)
 
@@ -103,6 +104,7 @@ pub fn agent_failure_on_error_test() {
       reply_to: cognitive_subj,
       depth: 1,
       max_turns_override: option.None,
+      deputy_subject: option.None,
     )
   process.send(task_subj, task)
 
@@ -143,6 +145,7 @@ pub fn agent_handles_multiple_tasks_test() {
       reply_to: cognitive_subj,
       depth: 1,
       max_turns_override: option.None,
+      deputy_subject: option.None,
     ),
   )
   process.send(
@@ -156,6 +159,7 @@ pub fn agent_handles_multiple_tasks_test() {
       reply_to: cognitive_subj,
       depth: 1,
       max_turns_override: option.None,
+      deputy_subject: option.None,
     ),
   )
 

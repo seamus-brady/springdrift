@@ -24,10 +24,13 @@
 // by the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 
+import agent/types as agent_types
+import deputy/ask
 import deputy/briefing
 import deputy/types.{
-  type Deputy, type DeputyBriefing, type DeputyMessage, Briefing, Complete,
-  Deputy, Failed, GenerateBriefing, Kill, Killed, Shutdown,
+  type Deputy, type DeputyBriefing, type DeputyMessage, AskQuestion, Briefing,
+  Complete, Deputy, DeputySnapshot, Failed, GenerateBriefing, Kill, Killed,
+  Recall, Shutdown, render_briefing,
 }
 import gleam/erlang/process.{type Subject}
 import gleam/int
@@ -71,6 +74,10 @@ pub type DeputySpec {
     model: String,
     max_tokens: Int,
     librarian: Option(Subject(LibrarianMessage)),
+    /// Cognitive subject — used to emit sensory events (Tier 1
+    /// escalation). None during tests or early boot; when None the
+    /// deputy silently skips emission.
+    cognitive: Option(Subject(agent_types.CognitiveMessage)),
   )
 }
 
@@ -169,19 +176,56 @@ pub fn kill(meta: DeputyMeta, reason: String) -> Nil {
 }
 
 // ---------------------------------------------------------------------------
-// Actor loop
+// Actor loop — long-lived deputy (Phase 2)
 // ---------------------------------------------------------------------------
 
+/// Internal actor state that accumulates between messages. Held in the
+/// loop function's tail recursion; not exposed publicly.
+type DeputyState {
+  DeputyState(
+    deputy: Deputy,
+    /// Serialized briefing XML once produced — used as context for
+    /// AskQuestion answers.
+    briefing_context: String,
+    last_signal: String,
+    briefing_complete: Bool,
+    questions_answered: Int,
+    escalations_emitted: Int,
+  )
+}
+
 fn loop(self: Subject(DeputyMessage), deputy: Deputy, spec: DeputySpec) -> Nil {
-  case process.receive(self, 60_000) {
+  loop_with_state(
+    self,
+    DeputyState(
+      deputy: deputy,
+      briefing_context: "",
+      last_signal: "silent",
+      briefing_complete: False,
+      questions_answered: 0,
+      escalations_emitted: 0,
+    ),
+    spec,
+  )
+}
+
+fn loop_with_state(
+  self: Subject(DeputyMessage),
+  state: DeputyState,
+  spec: DeputySpec,
+) -> Nil {
+  // Deputies live as long as their hierarchy; wait a long time between
+  // messages. If nothing arrives in an hour, the hierarchy has almost
+  // certainly died elsewhere — shut down defensively.
+  case process.receive(self, 3_600_000) {
     Error(_) -> {
       slog.warn(
         "deputy/framework",
         "loop",
         "Deputy "
-          <> deputy.id
-          <> " timed out waiting for instruction; shutting down",
-        option.Some(deputy.cycle_id),
+          <> state.deputy.id
+          <> " idle timeout (1h) — shutting down defensively",
+        option.Some(state.deputy.cycle_id),
       )
       Nil
     }
@@ -190,7 +234,7 @@ fn loop(self: Subject(DeputyMessage), deputy: Deputy, spec: DeputySpec) -> Nil {
         GenerateBriefing(reply_to:) -> {
           case
             briefing.generate(
-              deputy.id,
+              state.deputy.id,
               spec.root_agent,
               spec.instruction,
               spec.provider,
@@ -200,40 +244,134 @@ fn loop(self: Subject(DeputyMessage), deputy: Deputy, spec: DeputySpec) -> Nil {
             )
           {
             Ok(b) -> {
-              briefing.log_briefing_summary(b, deputy.cycle_id)
-              let _ = Deputy(..deputy, status: Complete)
+              briefing.log_briefing_summary(b, state.deputy.cycle_id)
+              let rendered = render_briefing(b)
+              let new_state =
+                DeputyState(
+                  ..state,
+                  deputy: Deputy(..state.deputy, status: Complete),
+                  briefing_context: rendered,
+                  last_signal: b.signal,
+                  briefing_complete: True,
+                )
               process.send(reply_to, Ok(b))
+              loop_with_state(self, new_state, spec)
             }
             Error(e) -> {
               slog.warn(
                 "deputy/framework",
                 "briefing",
                 "Deputy "
-                  <> deputy.id
+                  <> state.deputy.id
                   <> " briefing failed: "
                   <> string.slice(e, 0, 200),
-                option.Some(deputy.cycle_id),
+                option.Some(state.deputy.cycle_id),
               )
-              let _ = Deputy(..deputy, status: Failed(string.slice(e, 0, 200)))
+              let new_state =
+                DeputyState(
+                  ..state,
+                  deputy: Deputy(
+                    ..state.deputy,
+                    status: Failed(string.slice(e, 0, 200)),
+                  ),
+                )
               process.send(reply_to, Error(e))
+              // Stay alive — agent may still call ask_deputy; we'll
+              // serve without briefing context.
+              loop_with_state(self, new_state, spec)
             }
           }
-          Nil
+        }
+        AskQuestion(question:, context:, reply_to:) -> {
+          case
+            ask.answer(
+              question,
+              context,
+              spec.root_agent,
+              state.briefing_context,
+              spec.provider,
+              spec.model,
+              spec.max_tokens,
+              spec.librarian,
+            )
+          {
+            ask.Answered(text) -> {
+              process.send(reply_to, Ok(text))
+              loop_with_state(
+                self,
+                DeputyState(
+                  ..state,
+                  questions_answered: state.questions_answered + 1,
+                ),
+                spec,
+              )
+            }
+            ask.Unanswered(reason) -> {
+              slog.info(
+                "deputy/framework",
+                "ask",
+                "Deputy "
+                  <> state.deputy.id
+                  <> " unanswered: "
+                  <> string.slice(reason, 0, 120),
+                option.Some(state.deputy.cycle_id),
+              )
+              // Phase 3 — Tier 1 escalation. Emit a sensory event so cog
+              // sees the deputy couldn't help on the next cycle.
+              emit_unanswered_event(spec, state, reason)
+              process.send(reply_to, Error(reason))
+              loop_with_state(
+                self,
+                DeputyState(
+                  ..state,
+                  questions_answered: state.questions_answered + 1,
+                  escalations_emitted: state.escalations_emitted + 1,
+                  last_signal: "unanswered",
+                ),
+                spec,
+              )
+            }
+          }
+        }
+        Recall(reply_to:) -> {
+          let snapshot =
+            DeputySnapshot(
+              id: state.deputy.id,
+              cycle_id: state.deputy.cycle_id,
+              root_agent: state.deputy.root_agent,
+              spawned_at: state.deputy.spawned_at,
+              last_signal: state.last_signal,
+              briefing_complete: state.briefing_complete,
+              questions_answered: state.questions_answered,
+              escalations_emitted: state.escalations_emitted,
+            )
+          process.send(reply_to, snapshot)
+          loop_with_state(self, state, spec)
         }
         Kill(reason:) -> {
           slog.info(
             "deputy/framework",
             "kill",
             "Deputy "
-              <> deputy.id
+              <> state.deputy.id
               <> " killed by cog: "
               <> string.slice(reason, 0, 200),
-            option.Some(deputy.cycle_id),
+            option.Some(state.deputy.cycle_id),
           )
-          let _ = Deputy(..deputy, status: Killed(reason))
+          let _ = Deputy(..state.deputy, status: Killed(reason))
           Nil
         }
-        Shutdown -> Nil
+        Shutdown -> {
+          slog.debug(
+            "deputy/framework",
+            "shutdown",
+            "Deputy "
+              <> state.deputy.id
+              <> " shutting down after hierarchy completion",
+            option.Some(state.deputy.cycle_id),
+          )
+          Nil
+        }
       }
   }
 }
@@ -248,4 +386,34 @@ fn make_deputy_id() -> String {
 
 fn make_cycle_id() -> String {
   generate_uuid()
+}
+
+// ---------------------------------------------------------------------------
+// Escalation — Phase 3 Tier 1 sensory events
+// ---------------------------------------------------------------------------
+
+fn emit_unanswered_event(
+  spec: DeputySpec,
+  state: DeputyState,
+  reason: String,
+) -> Nil {
+  case spec.cognitive {
+    option.None -> Nil
+    option.Some(cog) -> {
+      let event =
+        agent_types.SensoryEvent(
+          name: "deputy_unanswered",
+          title: "Deputy couldn't answer",
+          body: "Deputy "
+            <> state.deputy.id
+            <> " (agent="
+            <> state.deputy.root_agent
+            <> ") was asked a question but couldn't answer. Reason: "
+            <> string.slice(reason, 0, 200),
+          fired_at: get_datetime(),
+        )
+      process.send(cog, agent_types.QueuedSensoryEvent(event: event))
+      Nil
+    }
+  }
 }

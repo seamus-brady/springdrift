@@ -1432,6 +1432,9 @@ fn handle_forecaster_suggestion(
               reply_to: state.self,
               depth: 1,
               max_turns_override: None,
+              // Forecaster-triggered replans don't get a deputy — they're
+              // internal planner work, not externally-facing delegations.
+              deputy_subject: None,
             )
           process.send(task_subject, agent_task)
           process.send(

@@ -71,6 +71,7 @@ fn make_task(cycle_id: String, context: String) -> AgentTask {
     reply_to:,
     depth: 1,
     max_turns_override: option.None,
+    deputy_subject: option.None,
   )
 }
 

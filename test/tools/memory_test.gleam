@@ -30,8 +30,8 @@ pub fn main() -> Nil {
 
 pub fn memory_tools_defined_test() {
   let tools = memory.all()
-  // 14 memory tools on the cognitive loop (added kill_deputy for deputies MVP)
-  tools |> list.length |> should.equal(14)
+  // 15 memory tools on the cognitive loop (kill_deputy + recall_deputy added with deputies MVP)
+  tools |> list.length |> should.equal(15)
 }
 
 pub fn recall_recent_tool_exists_test() {

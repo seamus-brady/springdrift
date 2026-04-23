@@ -386,15 +386,20 @@ facts, and known pitfalls. Then the deputy dies.
 
 - **Deputies are read-only.** No writes, no delegation, no external actions.
 - **One per root delegation.** Sub-delegations within the hierarchy inherit
-  the deputy (MVP is one-shot, so this mainly matters in Phase 2+).
+  the parent deputy rather than spawning a new one (one deputy per work tree).
+- **Ask-for-help**: when a deputy is active, the specialist agent gains an
+  `ask_deputy(question, context?)` tool. The deputy answers concisely from
+  memory or returns "unanswered" (which emits a sensory event to cog).
 - **Sensorium**: `<deputies active="N" completed_recent="M">...</deputies>`
   shows which deputies are active and recently completed.
 - **Kill control**: `kill_deputy(deputy_id, reason)` terminates a stuck or
   misbehaving deputy. The hierarchy continues without a briefing.
+- **Recall**: `recall_deputy(deputy_id)` returns a non-destructive snapshot
+  (last signal, briefing complete, questions answered, escalations emitted).
 - **Enable**: `deputies_enabled = true` in `[deputies]` config section. Off
-  by default during MVP — operator opts in to measure.
+  by default — operator opts in to measure.
 
-Full design: `docs/roadmap/planned/deputy-agents.md`. Self-model: HTWAHN skill.
+Full design: `docs/roadmap/planned/deputy-agents.md`. Self-model surface: `system-map` skill.
 
 ## Captures (MVP commitment tracker)
 

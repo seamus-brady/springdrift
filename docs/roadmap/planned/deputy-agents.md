@@ -324,7 +324,7 @@ No new invariant required. No relaxation of existing ones.
 
 Deputies are a new first-class citizen in the architecture. The rest of the system needs to know about them — otherwise specialist agents don't recognise their briefings as deputy output, and cog has no framework for interpreting the `<deputies>` sensorium block or deputy-tagged sensory events.
 
-Create a shared skill, **HTWAHN** (`how-things-work-around-here-now`), that documents the current architectural surface. Scoped to `all` — every reasoning layer (cog, specialist agents, deputies) reads it.
+Create a shared skill, **`system-map`**, that documents the current architectural surface. Scoped to `all` — every reasoning layer (cog, specialist agents, deputies) reads it.
 
 **Minimum content for Phase 1:**
 
@@ -335,15 +335,15 @@ Create a shared skill, **HTWAHN** (`how-things-work-around-here-now`), that docu
 - Cog can recall or kill an active deputy via dedicated control tools.
 - When in doubt: ask the deputy, or escalate to cog.
 
-**Per-layer extensions** — HTWAHN is structured in sections scoped by reader role, or as separate skills that compose:
+**Per-layer extensions** — the system-map skill is structured in sections scoped by reader role, or as separate skills that compose:
 
 - **Cog-specific** — how to read the `<deputies>` sensorium block, when to recall or kill a deputy, how to interpret deputy wakeups that arrived as cycle inputs, what the signal tags mean for decision-making.
 - **Specialist agent** — how to use `ask_deputy`, when not to (routine cases the agent itself can handle), how to treat the initial briefing (advisory, not directive), what it means when your cycle starts with a `<briefing>` XML block.
-- **Deputy** — reinforced via the deputy's own skills (`deputy-briefing-format`, `deputy-escalation-criteria`, `deputy-ask-response`); HTWAHN provides broader architectural context.
+- **Deputy** — reinforced via the deputy's own skills (`deputy-briefing-format`, `deputy-escalation-criteria`, `deputy-ask-response`); the system-map skill provides broader architectural context.
 
-**HTWAHN is a maintenance surface.** Every architectural change that adds, removes, or restructures a subsystem should update HTWAHN in the same PR. Otherwise the skill drifts and the agents' self-model desyncs from reality.
+**The system-map skill is a maintenance surface.** Every architectural change that adds, removes, or restructures a subsystem should update the `system-map` skill in the same PR. Otherwise the skill drifts and the agents' self-model desyncs from reality.
 
-This requirement is not unique to deputies — the HTWAHN pattern is worth adopting system-wide. Start with deputies (it's the current change); make it the template for subsequent architectural work.
+This requirement is not unique to deputies — the system-map pattern is worth adopting system-wide. Start with deputies (it's the current change); make it the template for subsequent architectural work.
 
 ## Extra design points
 
@@ -385,21 +385,23 @@ MVP ships with mode = "briefing" and `enabled = False`. Operator opts in to meas
 
 ## Implementation phases
 
-| # | Name | LOC | Gated by |
-|---|---|---|---|
-| **1** | **Briefing MVP** (includes deputy prompt + skills, kill control, DAG wiring, HTWAHN skill) | ~600 | — |
-| 2 | Ask-for-help + recall control | ~400 | Phase 1 |
-| 3 | Escalation (sensory event + wakeup) | ~400 | Phase 2 |
-| **4** | **Sensorium + introspection** (extends DAG to full deputy branch rendering) | ~350 | Phase 1 |
+All four phases ship in the full MVP PR.
 
-**Total ~1750 LOC.** MVP at Phase 1 (~600 LOC). Each phase adds one vector of communication between deputy and the other actors:
+| # | Name | LOC | Status |
+|---|---|---|---|
+| **1** | **Briefing MVP** (deputy prompt + skills, kill control, DAG wiring, system-map skill) | ~600 | Shipped |
+| **2** | **Ask-for-help + recall control** (long-lived deputies, `ask_deputy` tool, hierarchy inheritance via `AgentTask.deputy_subject`, shutdown on hierarchy completion) | ~500 | Shipped |
+| **3** | **Escalation — Tier 1** (sensory event on `unanswered` ask answers via deputy's cog subject) | ~150 | Shipped (Tier 1 only) |
+| **4** | **Sensorium + introspection** (extends DAG to full deputy branch rendering) | ~350 | Shipped |
+
+**Total ~1600 LOC.** Each phase adds one vector of communication between deputy and the other actors:
 
 1. Deputy → agent (briefing, one-shot)
 2. Agent → deputy (pull, via `ask_deputy`) + cog → deputy (recall)
-3. Deputy → cog (push, via sensory events and wakeups)
+3. Deputy → cog (push, via sensory events)
 4. Deputy → cog ambient (passive surface, via sensorium)
 
-Recommended initial build: **Phase 1 + Phase 4 (~950 LOC).** Briefings flow to specialists; cog gets ambient awareness and DAG visibility. Measure for several weeks before committing to Phases 2 and 3. They are each independently valuable increments if the pattern earns them.
+**Deferred to a follow-up** — Tier 2 wakeup (the `DeputyWakeup` scheduler variant plumbing) is specced but not wired in this MVP: it requires pattern-watching the agent's turns, which is a meaningful new channel that deserves its own design iteration. The plumbing becomes useful the moment a detector wants to trigger it.
 
 Two phases were explicitly cut from an earlier draft:
 

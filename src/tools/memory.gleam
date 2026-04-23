@@ -109,8 +109,9 @@ pub fn is_dprime_exempt(name: String) -> Bool {
     "report_false_positive" -> True
     // Agent management
     "cancel_agent" -> True
-    // Deputy management (MVP Phase 1)
+    // Deputy management (MVP Phases 1+2)
     "kill_deputy" -> True
+    "recall_deputy" -> True
     // Built-in tools
     "calculator" | "get_current_datetime" | "read_skill" -> True
     // Agent and team delegations — sub-agents have their own D' gates on
@@ -138,6 +139,7 @@ pub fn all() -> List(Tool) {
     how_to_tool(),
     cancel_agent_tool(),
     kill_deputy_tool(),
+    recall_deputy_tool(),
     list_affect_history_tool(),
   ]
 }
@@ -474,6 +476,7 @@ pub fn is_memory_tool(name: String) -> Bool {
   || name == "how_to"
   || name == "cancel_agent"
   || name == "kill_deputy"
+  || name == "recall_deputy"
   || name == "list_affect_history"
   || name == "review_learning_goals"
 }
@@ -652,6 +655,7 @@ pub fn execute_with_how_to(
     "boost_case" -> run_boost_case(call, lib)
     "cancel_agent" -> run_cancel_agent(call, agent_mgmt)
     "kill_deputy" -> run_kill_deputy(call, lib)
+    "recall_deputy" -> run_recall_deputy(call, lib)
     "report_false_positive" -> run_report_false_positive(call)
     "list_affect_history" -> run_list_affect_history(call)
     "review_learning_goals" -> run_review_learning_goals(call)
@@ -2862,6 +2866,105 @@ fn cancel_agent_tool() -> Tool {
     True,
   )
   |> tool.build()
+}
+
+fn recall_deputy_tool() -> Tool {
+  tool.new("recall_deputy")
+  |> tool.with_description(
+    "Snapshot an active deputy's current state — non-destructive. "
+    <> "Returns the deputy's last signal, whether its briefing completed, "
+    <> "how many ask_deputy questions it has answered, and how many "
+    <> "escalations it has emitted. Use this when you want to know what "
+    <> "the deputy knows without interrupting it. Check the <deputies> "
+    <> "sensorium block for active deputy ids.",
+  )
+  |> tool.add_string_param(
+    "deputy_id",
+    "The deputy id (e.g. dep-ab12cd34)",
+    True,
+  )
+  |> tool.build()
+}
+
+fn run_recall_deputy(
+  call: ToolCall,
+  lib: Option(Subject(LibrarianMessage)),
+) -> ToolResult {
+  case lib {
+    None ->
+      ToolFailure(
+        tool_use_id: call.id,
+        error: "recall_deputy not available: Librarian not initialised",
+      )
+    Some(l) -> {
+      let decoder = {
+        use deputy_id <- decode.field("deputy_id", decode.string)
+        decode.success(deputy_id)
+      }
+      case json.parse(call.input_json, decoder) {
+        Error(_) ->
+          ToolFailure(
+            tool_use_id: call.id,
+            error: "Invalid recall_deputy input: missing deputy_id",
+          )
+        Ok(deputy_id) -> {
+          let deputy_id = string.trim(deputy_id)
+          case deputy_id {
+            "" ->
+              ToolFailure(
+                tool_use_id: call.id,
+                error: "deputy_id must not be empty",
+              )
+            _ ->
+              case librarian.get_active_deputy_by_id(l, deputy_id) {
+                Error(_) ->
+                  ToolFailure(
+                    tool_use_id: call.id,
+                    error: "No active deputy with id " <> deputy_id,
+                  )
+                Ok(meta) -> {
+                  let reply = process.new_subject()
+                  process.send(
+                    meta.subject,
+                    deputy_types.Recall(reply_to: reply),
+                  )
+                  case process.receive(reply, 5000) {
+                    Ok(snapshot) ->
+                      ToolSuccess(
+                        tool_use_id: call.id,
+                        content: "Deputy "
+                          <> snapshot.id
+                          <> " (agent="
+                          <> snapshot.root_agent
+                          <> ", cycle="
+                          <> snapshot.cycle_id
+                          <> "):\n  spawned_at: "
+                          <> snapshot.spawned_at
+                          <> "\n  last_signal: "
+                          <> snapshot.last_signal
+                          <> "\n  briefing_complete: "
+                          <> case snapshot.briefing_complete {
+                          True -> "true"
+                          False -> "false"
+                        }
+                          <> "\n  questions_answered: "
+                          <> int.to_string(snapshot.questions_answered)
+                          <> "\n  escalations_emitted: "
+                          <> int.to_string(snapshot.escalations_emitted),
+                      )
+                    Error(_) ->
+                      ToolFailure(
+                        tool_use_id: call.id,
+                        error: "Timeout waiting for deputy snapshot",
+                      )
+                  }
+                }
+              }
+          }
+        }
+      }
+    }
+  }
 }
 
 fn kill_deputy_tool() -> Tool {

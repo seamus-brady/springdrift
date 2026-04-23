@@ -62,12 +62,37 @@ pub type DeputyStatus {
 /// Subject type) can depend on it without circular imports.
 pub type DeputyMessage {
   /// Request the deputy generate its briefing. The reply_to receives
-  /// the result. Deputies handle this exactly once and then shut down.
+  /// the result. In MVP the deputy handles this once at the start of
+  /// its lifetime; Phase 2+ leaves it alive to serve AskQuestion after.
   GenerateBriefing(reply_to: Subject(Result(DeputyBriefing, String)))
+  /// Ask the deputy for help mid-task. The deputy answers from memory
+  /// + its accumulated context. Phase 2.
+  AskQuestion(
+    question: String,
+    context: String,
+    reply_to: Subject(Result(String, String)),
+  )
+  /// Snapshot the deputy's current state without killing it. Phase 2.
+  Recall(reply_to: Subject(DeputySnapshot))
   /// Kill the deputy with a reason. Any pending reply gets an Error.
   Kill(reason: String)
-  /// Explicit shutdown signal (used on natural completion).
+  /// Explicit shutdown signal — used by cog when the root delegation
+  /// completes and the deputy is no longer needed.
   Shutdown
+}
+
+/// Non-destructive state snapshot returned by a Recall.
+pub type DeputySnapshot {
+  DeputySnapshot(
+    id: String,
+    cycle_id: String,
+    root_agent: String,
+    spawned_at: String,
+    last_signal: String,
+    briefing_complete: Bool,
+    questions_answered: Int,
+    escalations_emitted: Int,
+  )
 }
 
 // ---------------------------------------------------------------------------

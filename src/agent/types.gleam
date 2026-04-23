@@ -6,6 +6,7 @@
 // (at your option) any later version.
 
 import dag/types as dag_types
+import deputy/types as deputy_types
 import dprime/types as dprime_types
 import gleam/erlang/process.{type Subject}
 import gleam/int
@@ -119,6 +120,11 @@ pub type AgentTask {
     /// Override the agent's default max_turns for this delegation.
     /// Capped by max_agent_turns_cap in config.
     max_turns_override: Option(Int),
+    /// Deputy subject for this hierarchy, if deputies are enabled and a
+    /// deputy was spawned. Sub-delegations inherit the parent's deputy
+    /// subject rather than spawning a new one. None when deputies are
+    /// disabled or the deputy spawn/briefing failed.
+    deputy_subject: Option(Subject(deputy_types.DeputyMessage)),
   )
 }
 

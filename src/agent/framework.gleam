@@ -12,6 +12,8 @@ import agent/types.{
 }
 import context
 import cycle_log
+import deputy/tool as deputy_tool
+import deputy/types as deputy_types
 import gleam/dict
 import gleam/dynamic/decode
 import gleam/erlang/process.{type ExitMessage, type Pid, type Subject}
@@ -19,7 +21,7 @@ import gleam/float
 import gleam/int
 import gleam/json
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{type Option, None, Some}
 import gleam/string
 import llm/request
 import llm/response
@@ -31,6 +33,10 @@ import xstructor
 import xstructor/schemas
 
 // inter_turn_delay_ms is now on AgentSpec — no module constant needed.
+
+/// Timeout (ms) for an ask_deputy call. Conservative default so the
+/// agent's react loop doesn't stall on a slow deputy LLM.
+const default_ask_deputy_timeout_ms: Int = 15_000
 
 @external(erlang, "springdrift_ffi", "monotonic_now_ms")
 fn monotonic_now_ms() -> Int
@@ -244,6 +250,7 @@ fn do_react_loop(
       task.reply_to,
       initial_stats,
       task.depth,
+      task.deputy_subject,
     )
   let duration_ms = monotonic_now_ms() - start_ms
   #(agent_cycle_id, react_result, duration_ms)
@@ -258,6 +265,7 @@ fn do_react(
   cognitive: Subject(CognitiveMessage),
   stats: ReactStats,
   task_depth: Int,
+  deputy_subject: Option(Subject(deputy_types.DeputyMessage)),
 ) -> ReactResult {
   let current_turn = spec.max_turns - remaining + 1
   slog.debug(
@@ -291,7 +299,14 @@ fn do_react(
               let call_results =
                 list.map(calls, fn(call) {
                   cycle_log.log_tool_call(cycle_id, call, spec.redact_secrets)
-                  let result = execute_tool(call, spec, cognitive)
+                  let result =
+                    execute_tool(
+                      call,
+                      spec,
+                      cognitive,
+                      deputy_subject,
+                      default_ask_deputy_timeout_ms,
+                    )
                   cycle_log.log_tool_result(
                     cycle_id,
                     result,
@@ -404,6 +419,7 @@ fn do_react(
                     cognitive,
                     stats_with_tools,
                     task_depth,
+                    deputy_subject,
                   )
                 }
               }
@@ -419,6 +435,8 @@ fn execute_tool(
   call: llm_types.ToolCall,
   spec: AgentSpec,
   cognitive: Subject(CognitiveMessage),
+  deputy_subject: Option(Subject(deputy_types.DeputyMessage)),
+  ask_deputy_timeout_ms: Int,
 ) -> llm_types.ToolResult {
   slog.debug(
     "framework",
@@ -437,6 +455,8 @@ fn execute_tool(
       let answer = process.receive_forever(answer_subj)
       llm_types.ToolSuccess(tool_use_id: call.id, content: answer)
     }
+    "ask_deputy" ->
+      deputy_tool.execute(call, deputy_subject, ask_deputy_timeout_ms)
     _ -> spec.tool_executor(call)
   }
 }
@@ -465,9 +485,15 @@ fn build_agent_request(spec: AgentSpec, task: AgentTask) -> llm_types.LlmRequest
     request.new(spec.model, spec.max_tokens)
     |> request.with_system(spec.system_prompt <> budget_note)
     |> request.with_user_message(user_content)
-  case spec.tools {
+  // Include ask_deputy in the tool set when a deputy is active for
+  // this hierarchy. Otherwise the agent sees the same tools it always has.
+  let tools = case task.deputy_subject {
+    Some(_) -> [deputy_tool.ask_deputy_tool(), ..spec.tools]
+    None -> spec.tools
+  }
+  case tools {
     [] -> base
-    tools -> request.with_tools(base, tools)
+    t -> request.with_tools(base, t)
   }
 }
 

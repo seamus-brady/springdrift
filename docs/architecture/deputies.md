@@ -112,8 +112,10 @@ Top 3 recent deputies rendered; overflow collapsed to `<more count="N"/>`.
 | Librarian registry | `src/narrative/librarian.gleam` (active_deputies, recent_deputies) |
 | Delegation integration | `src/agent/cognitive/agents.gleam` (`maybe_prepend_deputy_briefing`) |
 | Sensorium block | `src/narrative/curator.gleam` (`render_sensorium_deputies`) |
-| Kill tool | `src/tools/memory.gleam` (`kill_deputy_tool`, `run_kill_deputy`) |
-| HTWAHN skill | `.springdrift_example/skills/htwahn/SKILL.md` |
+| Kill / recall tools | `src/tools/memory.gleam` (`kill_deputy_tool`, `recall_deputy_tool`) |
+| Ask-for-help | `src/deputy/ask.gleam`, `src/deputy/tool.gleam` (ask_deputy) |
+| Agent-framework integration | `src/agent/framework.gleam` (ask_deputy injection + execute_tool routing) |
+| `system-map` skill | `.springdrift_example/skills/system-map/SKILL.md` |
 | Deputy-scope skills | `.springdrift_example/skills/deputy-*/SKILL.md` |
 
 ## Configuration
@@ -126,29 +128,54 @@ max_tokens = 800              # default: 800
 timeout_ms = 15000            # default: 15000
 ```
 
-## Phase 1 MVP scope
+## MVP scope — what ships
 
-Everything above. Deputies are one-shot: spawn, brief, die. The framework
-supports `Kill` messages during the brief window, primarily as a control
-surface (future phases need it more than MVP does).
+All four phases from the design spec:
 
-## Deferred to later phases
+- **Phase 1 (briefing)** — deputies spawn on root delegation, produce a
+  `<briefing>` XML prepended to the specialist's instruction.
+- **Phase 2 (ask-for-help)** — deputies stay alive for the hierarchy's
+  lifetime. Specialist agents (and any agents they delegate to) gain
+  `ask_deputy(question, context?)` to consult from memory. Cog has
+  `recall_deputy(deputy_id)` for non-destructive snapshots. Deputies are
+  shut down automatically when the root delegation completes.
+- **Phase 3 Tier 1 (sensory event escalation)** — when the deputy can't
+  answer an `ask_deputy` call, it emits a `deputy_unanswered` sensory
+  event to cog. Cog sees it in the `<events>` block on its next cycle.
+- **Phase 4 (sensorium + introspection)** — `<deputies>` block shows
+  active deputies and recent completions; `introspect` lists active
+  deputies; DAG includes `DeputyCycle` nodes linked to root delegations.
 
-- **Phase 2** — long-lived deputies, `ask_deputy(question)` tool for agent
-  consultation, `recall_deputy` control.
-- **Phase 3** — escalation (sensory events + scheduler wakeups for
-  `alarm`/`wtf`/`error` signals).
-- **Phase 4** — expanded sensorium + introspection, full DAG branch rendering
-  with inspect_cycle detail for deputy reasoning.
+### Hierarchy inheritance (Phase 2)
+
+`AgentTask` carries `deputy_subject: Option(Subject(DeputyMessage))`. When
+cog delegates to a root agent, the subject is populated with the new
+deputy. When that agent delegates to a sub-agent via `agent_*`, the task
+construction inherits the parent's deputy_subject rather than spawning
+a new deputy. The deputy sees the whole hierarchy's work.
+
+### ask_deputy tool registration (Phase 2)
+
+`ask_deputy` is not on any specific AgentSpec's tool list. It's injected
+at `build_agent_request` time when `task.deputy_subject` is Some. This
+keeps the 26+ AgentSpec construction sites unchanged and means agents
+without a deputy don't see a tool they can't use.
+
+## Deferred
+
+- **Phase 3 Tier 2 (wakeup)** — `DeputyWakeup` scheduler variant plumbing
+  is specced but not wired. Wakeups require pattern-watching the agent's
+  turn-by-turn activity, which is a meaningful new channel deserving its
+  own design iteration. Plumbing becomes useful when a detector triggers it.
 
 Explicitly NOT planned:
 - Deputy autonomous response (two reasoners producing output breaks
   auditability in practice)
-- Per-agent deputy prompt specialisation before Phase 4 data justifies it
+- Per-agent deputy prompt specialisation before data justifies it
 
-## Self-model upkeep — HTWAHN
+## System-map upkeep
 
-The `htwahn` skill (scoped to `all`) is the system's shared self-model. Any
+The `system-map` skill (scoped to `all`) is the system's shared self-model. Any
 architectural change that adds or removes a subsystem — deputies included —
-should update HTWAHN in the same PR. Otherwise the agents' self-model desyncs
+should update the `system-map` skill in the same PR. Otherwise the agents' self-model desyncs
 from reality.
