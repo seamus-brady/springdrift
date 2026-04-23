@@ -26,7 +26,9 @@ alternative frontends, selected at startup via `--gui tui` or `--gui web`.
 
 Both interfaces:
 - Send `UserInput` / `UserAnswer` messages to the cognitive loop
-- Receive `CognitiveReply` messages with response text, model, and token usage
+- Subscribe to Frontdoor as a `UserSource` sink, keyed by a per-connection
+  `source_id`. Replies arrive as `DeliverReply(cycle_id, response, model,
+  usage, tools_fired)`, questions as `DeliverQuestion`.
 - Subscribe to `Notification` events for tool calls, safety decisions, lifecycle
 
 ## 2. Terminal TUI
@@ -57,10 +59,10 @@ The TUI runs three concurrent processes:
 |---|---|---|
 | Main TUI loop | App | Render, message dispatch, state management |
 | Stdin reader | App | Blocking `read_char` loop → `StdinByte` messages |
-| Cognitive reply receiver | Per-message | Forwards `CognitiveReply` to TUI |
+| Frontdoor delivery sink | App | Receives `DeliverReply` / `DeliverQuestion` for the TUI's source_id |
 
-The TUI uses a `Selector` that multiplexes stdin bytes, cognitive replies, and
-notification messages into a single event stream.
+The TUI uses a `Selector` that multiplexes stdin bytes, Frontdoor deliveries,
+and notification messages into a single event stream.
 
 ### State
 

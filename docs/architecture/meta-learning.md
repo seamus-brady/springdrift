@@ -44,15 +44,18 @@ reference is the open empirical question.
 ## Components
 
 ```
-src/strategy/         Strategy Registry — named approaches with tracked outcomes
-src/learning_goal/    Self-directed goals with acceptance criteria
-src/affect/correlation.gleam   Pearson r between affect dimensions and outcomes
-src/meta_learning/scheduler.gleam   Builds the recurring task list
-src/tools/remembrancer.gleam   Mining + promotion tools (extract_insights,
-                               promote_insight, propose_strategies_from_patterns,
-                               propose_learning_goals_from_patterns,
-                               analyze_affect_performance)
-src/tools/learning_goals.gleam   Cognitive-loop goal CRUD
+src/strategy/                      Strategy Registry — named approaches with tracked outcomes
+src/learning_goal/                 Self-directed goals with acceptance criteria
+src/affect/correlation.gleam       Pearson r between affect dimensions and outcomes
+src/meta_learning/worker.gleam     Generic BEAM worker (DirectTool | AgentDelegation invocation)
+src/meta_learning/workers.gleam    Worker pool registry (3 mechanical audits + 4 judgement jobs)
+src/meta_learning/fabrication_audit.gleam   Pure audit: synthesis-fact vs tool-log cross-check
+src/meta_learning/voice_drift.gleam         Pure audit: self-narration phrase density
+src/tools/remembrancer.gleam       Mining + promotion tools (extract_insights,
+                                   promote_insight, propose_strategies_from_patterns,
+                                   propose_learning_goals_from_patterns,
+                                   analyze_affect_performance)
+src/tools/learning_goals.gleam     Cognitive-loop goal CRUD
 ```
 
 ### Strategy Registry (`src/strategy/`)
@@ -192,28 +195,41 @@ earlier work — `propose_skills_from_patterns` (skills),
 `propose_strategies_from_patterns` (strategies), and the Archivist's
 own narrative-to-CBR generation.
 
-### Metacognitive Scheduler (`src/meta_learning/scheduler.gleam`)
+### Worker pool (`src/meta_learning/workers.gleam`)
 
-Pure module that turns the `[meta_learning]` config block into a list
-of `ScheduleTaskConfig` records. The existing scheduler runner accepts
-them at startup and arranges recurring delivery; nothing new in the
-runner is needed beyond the budget cap (see below).
+Seven BEAM workers tick off-cog, outside the operator-visible
+scheduler. Each worker owns its own OTP process, its own timer
+(`process.send_after`), and a sidecar JSON file tracking
+`last_run_at` so a VM restart doesn't retrigger audits that just
+fired. None of these route through the cognitive loop's input queue.
 
-Each task's `query` is a natural-language instruction the cognitive
-loop receives as a `SchedulerInput` cycle. The loop delegates to the
-appropriate Remembrancer tool. Plain-text orchestration — the LLM is
-the orchestrator, the scheduler just brings the prompts to the door
-on time.
+Two invocation modes on `WorkerConfig.invocation`:
 
-Five recurring jobs at default cadence:
+- **DirectTool** — the worker calls a Remembrancer tool function
+  directly. Pure compute, no LLM. Used by the mechanical audits.
+- **AgentDelegation** — the worker dispatches an `AgentTask` to the
+  running Remembrancer agent via its `task_subject`, which the worker
+  resolves per-tick by sending `LookupAgentSubject` to the supervisor
+  (so a Transient restart of the Remembrancer doesn't wedge the
+  worker against a dead mailbox). The Remembrancer does the LLM
+  reasoning; the worker only decides when to ask.
 
-| Job | Interval | What it asks the agent to do |
-|---|---|---|
-| `meta_learning_consolidation` | Weekly | Run `consolidate_memory` for the past week, then `write_consolidation_report` |
-| `meta_learning_goal_review` | Daily | List active goals, judge progress against acceptance criteria, transition status |
-| `meta_learning_skill_decay` | Weekly | Audit skills against current practice, archive obsolete ones |
-| `meta_learning_affect_correlation` | Weekly | Run `analyze_affect_performance` over 30 days |
-| `meta_learning_strategy_review` | Fortnightly | Review active strategies; archive low-success ones |
+Seven workers at default cadence:
+
+| Worker | Mode | Interval | What it does |
+|---|---|---|---|
+| `affect_correlation` | DirectTool | Weekly | Pearson r between affect and outcome per domain; writes `affect_corr_*` facts |
+| `fabrication_audit` | DirectTool | Daily | Cross-reference synthesis-derivation facts against cycle-log tool calls; writes `integrity_suspect_facts_7d` |
+| `voice_drift` | DirectTool | Daily | Self-congratulatory phrase density in narrative entries; writes `integrity_voice_drift_7d` |
+| `consolidation` | AgentDelegation | Weekly | Remembrancer runs `consolidate_memory` + `write_consolidation_report` |
+| `goal_review` | AgentDelegation | Daily | Remembrancer evaluates active goals against acceptance criteria |
+| `skill_decay` | AgentDelegation | Weekly | Remembrancer audits skills against current practice |
+| `strategy_review` | AgentDelegation | Fortnightly | Remembrancer reviews Strategy Registry for low-success or stale entries |
+
+AgentDelegation worker outputs land in `.springdrift/meta_learning/outputs/`
+as dated markdown files for human-readable review. The three mechanical
+audits write their findings directly to facts so the sensorium surfaces
+them on the next cycle.
 
 In addition, when post-cycle signals cross thresholds (success_rate <
 0.5 OR novelty > 0.7), the Curator surfaces a `<meta_recommendations>`
@@ -222,21 +238,20 @@ block in the sensorium suggesting `analyze_affect_performance` or
 
 ## Budget enforcement
 
-The scheduler runner already caps total autonomous cycles per hour
-(`max_autonomous_cycles_per_hour`, default 20) and tokens per hour
-(`autonomous_token_budget_per_hour`, default 500_000). On top of those
-absolute ceilings the meta-learning subsystem adds a proportional cap:
+Since the worker pool runs off-cog, it doesn't consume
+`max_autonomous_cycles_per_hour` or `autonomous_token_budget_per_hour`
+— those caps apply only to scheduler-triggered cog-loop cycles.
+Meta-learning workers have their own bounds:
 
-- `meta_max_reflection_budget_pct` (default 25). Caps the share of
-  recent (rolling-hour) cycles that may be meta-learning fires. When
-  a `meta_learning_*` job ticks and the projected percentage would
-  exceed the cap, the fire is skipped and rescheduled. The
-  `max_autonomous_cycles_per_hour` ceiling is still enforced
-  independently.
-- `meta_max_promotions_per_day` (default 3). Caps `promote_insight`
+- Natural cadence (daily / weekly / fortnightly) is the primary
+  rate limit.
+- `meta_max_promotions_per_day` (default 3) caps `promote_insight`
   writes per rolling 24-hour window. The Strategy and Goal proposers
   carry their own per-day caps (3 and 2 respectively) defined at the
   tool level.
+- The legacy `meta_max_reflection_budget_pct` still parses for
+  backward compatibility but no longer has any enforcement path —
+  workers aren't scheduler jobs.
 
 ## Configuration
 
@@ -316,7 +331,7 @@ counts (entries / cases / facts reviewed, patterns found, facts
 restored, threads resurrected) plus the decayed-fact and dormant-thread
 snapshots from each run. Clicking a row reveals the run summary in a
 side box. Read-only by design — the agent decides when to consolidate;
-the Metacognitive Scheduler fires it weekly.
+the `consolidation` BEAM worker fires it weekly.
 
 The Skills tab shows skill metrics (read counts) — the primary
 behavioural signal for whether the agent treats skills as active
