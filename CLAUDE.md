@@ -134,8 +134,12 @@ src/
 │   ├── types.gleam            LearningGoal + GoalEvent (Created/EvidenceAdded/StatusChanged) + GoalSource + GoalStatus
 │   └── log.gleam              Per-day JSONL log + resolve_from_events + active_ranked (priority desc)
 │
-├── meta_learning/             Metacognitive Scheduler — meta-learning Phase F
-│   └── scheduler.gleam        Pure config -> List(ScheduleTaskConfig); 5 recurring jobs (consolidation, goal review, skill decay, affect correlation, strategy review); opt-in via [meta_learning] scheduler_enabled
+├── meta_learning/             BEAM workers — off-cog maintenance (post–Phase F)
+│   ├── worker.gleam           Generic worker actor: DirectTool | AgentDelegation invocation; persisted last_run_at; per-tick supervisor lookup for Remembrancer task_subject
+│   ├── workers.gleam          Registry: 3 mechanical audits + 4 judgement jobs. Agent scheduler is not involved — operator-visible queue stays clean
+│   ├── worker_state.gleam     Sidecar JSON state file (last_run_at per worker)
+│   ├── fabrication_audit.gleam  Pure audit: synthesis-fact vs tool-log cross-check
+│   └── voice_drift.gleam      Pure audit: self-narration phrase density trend
 │
 ├── affect/correlation.gleam   Affect-Performance Engine — meta-learning Phase D. Pure Pearson math + (snapshot, entry) join + fact key encoding
 │
@@ -466,7 +470,7 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `comms_allowed_recipients` | — | [] | Hard allowlist of permitted email recipients |
 | `comms_from_name` | — | agent_name | Display name on outbound emails |
 | `comms_max_outbound_per_hour` | — | 20 | Max outbound emails per rolling hour |
-| `remembrancer_enabled` | — | False | Enable Remembrancer agent (deep-memory consolidation) |
+| `remembrancer_enabled` | — | True | Enable Remembrancer agent (deep-memory consolidation). Core subsystem — meta-learning judgement workers dispatch to it. |
 | `remembrancer_model` | — | reasoning_model | Model for consolidation synthesis |
 | `remembrancer_max_turns` | — | 8 | Max react-loop iterations per invocation |
 | `remembrancer_consolidation_schedule` | — | "weekly" | Consolidation cadence: "weekly" \| "monthly" |
@@ -474,14 +478,14 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `remembrancer_dormant_thread_days` | — | 7 | Min days idle before a thread is dormant |
 | `remembrancer_min_pattern_cases` | — | 3 | Min cases to form a mined pattern |
 | `strategy_registry_enabled` | — | True | Meta-Learning Phase A. Future config gate; field parses today, no-op without seeded strategies |
-| `meta_scheduler_enabled` | — | True | Gate for **both** the scheduler's judgement jobs AND the BEAM workers. Set False to disable all meta-learning housekeeping. |
-| `meta_consolidation_interval_hours` | — | 168 | Weekly consolidation cadence (scheduler, judgement job) |
-| `meta_goal_review_interval_hours` | — | 24 | Daily goal-review cadence (scheduler, judgement job) |
-| `meta_skill_decay_interval_hours` | — | 168 | Weekly skill-decay audit cadence (scheduler, judgement job) |
-| `meta_strategy_review_interval_hours` | — | 336 | Fortnightly strategy review cadence (scheduler, judgement job) |
-| `meta_affect_correlation_interval_hours` | — | 168 | Weekly affect-performance correlation (BEAM worker, off-cog) |
-| `meta_fabrication_audit_interval_hours` | — | 24 | Daily fabrication audit (BEAM worker, off-cog) |
-| `meta_voice_drift_interval_hours` | — | 24 | Daily voice-drift check (BEAM worker, off-cog) |
+| `meta_learning_enabled` | — | True | Master gate for the meta-learning worker pool. Set False to disable all off-cog housekeeping. TOML key: `[meta_learning] enabled`. |
+| `meta_consolidation_interval_hours` | — | 168 | Weekly consolidation (AgentDelegation worker → Remembrancer) |
+| `meta_goal_review_interval_hours` | — | 24 | Daily goal-review (AgentDelegation worker → Remembrancer) |
+| `meta_skill_decay_interval_hours` | — | 168 | Weekly skill-decay audit (AgentDelegation worker → Remembrancer) |
+| `meta_strategy_review_interval_hours` | — | 336 | Fortnightly strategy review (AgentDelegation worker → Remembrancer) |
+| `meta_affect_correlation_interval_hours` | — | 168 | Weekly affect-performance correlation (DirectTool worker) |
+| `meta_fabrication_audit_interval_hours` | — | 24 | Daily fabrication audit (DirectTool worker) |
+| `meta_voice_drift_interval_hours` | — | 24 | Daily voice-drift check (DirectTool worker) |
 | `captures_scanner_enabled` | — | True | Post-cycle commitment scanner (Haiku call per cycle) |
 | `captures_expiry_days` | — | 14 | Auto-dismiss pending captures older than N days |
 | `captures_max_per_cycle` | — | 10 | Per-cycle cap on captures after sanity filter |

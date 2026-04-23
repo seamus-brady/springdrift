@@ -245,19 +245,34 @@ All settings live under `[meta_learning]` in `.springdrift/config.toml`:
 ```toml
 [meta_learning]
 strategy_registry_enabled = true             # Phase A on/off
-scheduler_enabled = true                     # Phase F on/off (auto-firing)
+enabled = true                               # Master gate for the worker pool
 consolidation_interval_hours = 168           # Weekly
 goal_review_interval_hours = 24              # Daily
 skill_decay_interval_hours = 168             # Weekly
 affect_correlation_interval_hours = 168      # Weekly
 strategy_review_interval_hours = 336         # Fortnightly
-max_reflection_budget_pct = 25               # Soft proportional cap
+fabrication_audit_interval_hours = 24        # Daily
+voice_drift_interval_hours = 24              # Daily
+max_reflection_budget_pct = 25               # Soft proportional cap (legacy)
 max_promotions_per_day = 3                   # Promotion rate limit
 ```
 
-Defaults are on. Operator opts out by setting `scheduler_enabled =
-false` (turns off auto-firing without disabling the underlying
-substrate — agent + Remembrancer can still invoke the tools on demand).
+Defaults are on. Operator opts out by setting `enabled = false` — this
+turns off the entire worker pool. The Remembrancer agent itself remains
+available and can invoke any of the meta-learning tools on demand when
+the operator asks.
+
+Meta-learning jobs run as BEAM workers off-cog, never as scheduler
+tasks. The agent scheduler is reserved for operator-visible work. The
+worker layer has two invocation modes:
+
+- **DirectTool** — pure compute, no LLM. Used by `fabrication_audit`,
+  `voice_drift`, `affect_correlation`.
+- **AgentDelegation** — dispatches an `AgentTask` to the running
+  Remembrancer agent (resolving its `task_subject` per-tick via the
+  supervisor, so a Transient restart doesn't wedge the worker). Used
+  by `consolidation`, `goal_review`, `skill_decay`, `strategy_review`.
+  Outcomes land in `.springdrift/meta_learning/outputs/`.
 
 ## How it surfaces in the running agent
 

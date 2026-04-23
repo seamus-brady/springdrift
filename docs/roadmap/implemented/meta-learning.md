@@ -277,9 +277,35 @@ mechanism (van de Ven et al., 2024). D' addresses hallucination risk.
 **Dependency**: Phase A (strategies) + Phase B (skills) for full
 coverage. A narrow version (CBR + facts only) could ship earlier.
 
-### 4.6 Phase F — Metacognitive Scheduler — SHIPPED 2026-04-19
+### 4.6 Phase F — Metacognitive Scheduler — SHIPPED 2026-04-19, **re-architected 2026-04-23**
 
-**Status**: Substrate shipped. Operator-opt-in (defaults to disabled).
+**Update (2026-04-23)**: The Phase F metacognitive scheduler has been
+retired in favour of a BEAM worker pool. The original design registered
+recurring meta-learning jobs with the agent scheduler, causing them to
+fire as `SchedulerInput` cycles that consumed cog-loop turns and
+polluted the operator-visible queue with "pending"/"failed" entries the
+operator could not act on. This violated the architectural principle
+that the agent scheduler is reserved for operator-visible work.
+
+All seven meta-learning jobs now run as BEAM workers off-cog
+(`src/meta_learning/workers.gleam`). Three are mechanical audits
+(DirectTool — pure compute, no LLM): `affect_correlation`,
+`fabrication_audit`, `voice_drift`. Four are judgement jobs
+(AgentDelegation — dispatches an `AgentTask` to the running Remembrancer
+agent via its `task_subject`, looked up per-tick through the supervisor
+so Transient restart doesn't wedge the worker): `consolidation`,
+`goal_review`, `skill_decay`, `strategy_review`. Outcome reports for the
+AgentDelegation workers land in `.springdrift/meta_learning/outputs/` —
+a parallel directory to `.springdrift/scheduler/outputs/` — so operator
+artifacts and maintenance artifacts don't mix. The config key
+`[meta_learning] scheduler_enabled` was renamed to `[meta_learning]
+enabled` and the default flipped to True (the Remembrancer agent is now
+a core subsystem rather than opt-in). Persisted `meta_learning_*` job
+names in existing scheduler logs are filtered at load time by
+`scheduler/runner.gleam` — the append-only log is preserved for audit
+but the jobs are never resurrected.
+
+**Status (original)**: Substrate shipped. Operator-opt-in (defaults to disabled).
 Performance-signal-triggered ad-hoc jobs (low success_rate, high novelty)
 remain a follow-up; budget cap and rate limit are inherited from the
 existing scheduler runner.

@@ -215,6 +215,15 @@ pub fn meta_learning_state_file() -> String {
   meta_learning_dir() <> "/workers.json"
 }
 
+/// Meta-learning worker output directory: .springdrift/meta_learning/outputs/
+/// Dated markdown reports from AgentDelegation workers (consolidation,
+/// goal review, skill decay, strategy review). Kept separate from
+/// .springdrift/scheduler/outputs/ so operator-initiated scheduler
+/// output and off-cog maintenance output don't mix.
+pub fn meta_learning_outputs_dir() -> String {
+  project_dir() <> "/meta_learning/outputs"
+}
+
 /// XStructor schema directory: .springdrift/schemas/
 pub fn schemas_dir() -> String {
   project_dir() <> "/schemas"

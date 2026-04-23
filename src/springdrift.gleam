@@ -55,7 +55,6 @@ import llm/adapters/vertex as vertex_adapter
 import llm/provider.{type Provider}
 import llm/retry
 import llm/types as llm_types
-import meta_learning/scheduler as meta_scheduler
 import meta_learning/workers as meta_workers
 import narrative/appraiser
 import narrative/curator
@@ -991,16 +990,10 @@ fn run(cfg: AppConfig) -> Nil {
     option.unwrap(cfg.max_autonomous_cycles_per_hour, 20)
   let token_budget_per_hour =
     option.unwrap(cfg.autonomous_token_budget_per_hour, 500_000)
-  let meta_tasks = meta_scheduler.build_tasks(cfg)
-  case meta_tasks {
-    [] -> Nil
-    _ ->
-      io.println(
-        "Scheduler: "
-        <> int.to_string(list.length(meta_tasks))
-        <> " meta-learning jobs registered",
-      )
-  }
+  // Meta-learning no longer goes through the agent scheduler — it runs
+  // as BEAM workers off-cog (see `src/meta_learning/workers.gleam`).
+  // Pass an empty task list here; the worker pool starts below.
+  let meta_tasks: List(scheduler_types.ScheduleTaskConfig) = []
   let meta_budget_pct = option.unwrap(cfg.meta_max_reflection_budget_pct, 25)
   // Idle-gate config. Defaults: 10 min idle window, 60 min hard defer
   // ceiling, 60 s retry interval. Set idle_window_minutes=0 in the
@@ -1113,7 +1106,8 @@ fn run(cfg: AppConfig) -> Nil {
       },
       max_promotions_per_day: option.unwrap(cfg.meta_max_promotions_per_day, 3),
     )
-  let _meta_worker_subjects = meta_workers.start_all(cfg, worker_ctx)
+  let _meta_worker_subjects =
+    meta_workers.start_all(cfg, worker_ctx, option.Some(sup))
 
   // Start Forecaster if enabled (needs cognitive_subj + librarian)
   case option.unwrap(cfg.forecaster_enabled, False) {
@@ -1702,7 +1696,7 @@ fn remembrancer_specs(
   delay: Int,
   redact: Bool,
 ) -> List(agent_types.AgentSpec) {
-  case option.unwrap(cfg.remembrancer_enabled, False) {
+  case option.unwrap(cfg.remembrancer_enabled, True) {
     False -> []
     True -> {
       let model = option.unwrap(cfg.remembrancer_model, task_model)

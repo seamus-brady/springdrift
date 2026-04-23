@@ -293,6 +293,16 @@ pub type SupervisorMessage {
   )
   StopChild(name: String)
   ShutdownAll
+  /// Resolve an agent's current task_subject by name. Returns None if
+  /// no agent is currently registered under that name (including the
+  /// window between a Transient restart and the new process coming up).
+  /// Used by off-cog callers — notably meta-learning BEAM workers —
+  /// that need a live handle without threading one through startup
+  /// and then getting wedged when the agent restarts.
+  LookupAgentSubject(
+    name: String,
+    reply_to: Subject(Option(Subject(AgentTask))),
+  )
 }
 
 // ---------------------------------------------------------------------------

@@ -288,12 +288,14 @@ pub type AppConfig {
     /// <strategies> block is omitted, and Archivist XSD emissions of
     /// <strategy_used> are ignored.
     strategy_registry_enabled: Option(Bool),
-    // ── Meta-Learning: Metacognitive Scheduler (Phase F) ──
-    /// Enable the Phase F metacognitive scheduler. When True, recurring
-    /// learning jobs (consolidation, goal review, skill decay check,
-    /// affect correlation, strategy review) are added to the scheduler
-    /// at startup. Default: False (operator opt-in).
-    meta_scheduler_enabled: Option(Bool),
+    // ── Meta-Learning: BEAM workers (post–Phase F) ──
+    /// Enable the meta-learning worker pool. When True, seven BEAM
+    /// workers run off-cog: three mechanical audits (affect correlation,
+    /// fabrication audit, voice drift) and four judgement jobs that
+    /// dispatch to the Remembrancer agent (consolidation, goal review,
+    /// skill decay, strategy review). None of them route through the
+    /// operator-visible scheduler. Default: True.
+    meta_learning_enabled: Option(Bool),
     /// Hours between weekly consolidation runs. Default: 168 (7 days).
     meta_consolidation_interval_hours: Option(Int),
     /// Hours between learning-goal review runs. Default: 24 (daily).
@@ -556,7 +558,7 @@ pub fn default() -> AppConfig {
     agentlair_endpoint_url: None,
     agentlair_trust_query: None,
     strategy_registry_enabled: None,
-    meta_scheduler_enabled: None,
+    meta_learning_enabled: None,
     meta_consolidation_interval_hours: None,
     meta_goal_review_interval_hours: None,
     meta_skill_decay_interval_hours: None,
@@ -1236,9 +1238,9 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       override_cfg.strategy_registry_enabled,
       base.strategy_registry_enabled,
     ),
-    meta_scheduler_enabled: option.or(
-      override_cfg.meta_scheduler_enabled,
-      base.meta_scheduler_enabled,
+    meta_learning_enabled: option.or(
+      override_cfg.meta_learning_enabled,
+      base.meta_learning_enabled,
     ),
     meta_consolidation_interval_hours: option.or(
       override_cfg.meta_consolidation_interval_hours,
@@ -2014,11 +2016,8 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
       "meta_learning",
       "strategy_registry_enabled",
     ]),
-    // ── [meta_learning] — Phase F, Metacognitive Scheduler ──
-    meta_scheduler_enabled: get_toml_bool(table, [
-      "meta_learning",
-      "scheduler_enabled",
-    ]),
+    // ── [meta_learning] — BEAM workers (post–Phase F) ──
+    meta_learning_enabled: get_toml_bool(table, ["meta_learning", "enabled"]),
     meta_consolidation_interval_hours: get_toml_int(table, [
       "meta_learning",
       "consolidation_interval_hours",
