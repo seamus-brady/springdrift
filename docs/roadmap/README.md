@@ -48,7 +48,7 @@ architecture; planned features include the design proposal and open questions.
 | [Communications agent](implemented/comms-agent.md) | Comms |
 | [Bug fixes (March 2026)](implemented/Bug%20fixes%2027-03-26.md) | Fixes |
 
-## Planned (25)
+## Planned (26)
 
 | Feature | Category |
 |---|---|
@@ -61,6 +61,7 @@ architecture; planned features include the design proposal and open questions.
 | [Knowledge management](planned/knowledge-management.md) | Memory |
 | [Learner ingestion](planned/learner-ingestion.md) | Memory |
 | [Extended housekeeper window](planned/housekeeper-extended-window.md) | Memory |
+| [CBR graph projection](planned/cbr-graph-projection.md) | Memory |
 | [Metacognition reporting](planned/metacognition-reporting.md) | Observability |
 | [Cycles spanning midnight](planned/cycles-spanning-midnight.md) | Observability |
 | [Empirical evaluation](planned/empirical-evaluation.md) | Evaluation |
