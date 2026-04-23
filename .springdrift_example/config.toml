@@ -133,6 +133,12 @@ summary_schedule = "weekly"
 # max_turns = 8
 # max_errors = 3
 # max_context_messages = 30
+# Auto-store threshold for web-fetching tool results. When a tool returns
+# more than this many characters, the executor stores the full content as
+# an artifact and returns a short preview + artifact_id in place of the
+# raw body. Keeps the researcher's context window from filling with 30KB
+# article bodies. Set to 0 to disable.
+# auto_store_threshold_bytes = 8192
 
 [agents.coder]
 # max_tokens = 4096
