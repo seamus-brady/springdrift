@@ -122,7 +122,7 @@ Top 3 recent deputies rendered; overflow collapsed to `<more count="N"/>`.
 
 ```toml
 [deputies]
-enabled = false               # default: false — opt in to measure
+enabled = true                # default: true — set false to disable
 model = "claude-haiku-4-5"    # default: same as task_model
 max_tokens = 800              # default: 800
 timeout_ms = 15000            # default: 15000

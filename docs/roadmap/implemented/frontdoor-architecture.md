@@ -1,5 +1,7 @@
 # Frontdoor — separating the cognitive loop from its communication channels
 
+**Status**: Shipped 2026-04-21 (PR #90) + adapter wire-up completed (PR #92)
+
 ## Problem
 
 The cognitive loop today is wired directly into whichever communication

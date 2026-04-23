@@ -103,6 +103,19 @@ src/
 │   ├── query.gleam            Pure filter/aggregate: search, trace, cluster, dormant, xref
 │   └── consolidation.gleam    ConsolidationRun JSONL log + markdown report writer
 │
+├── captures/                  Commitment tracker (MVP) — post-cycle scanner + JSONL log
+│   ├── types.gleam            Capture + CaptureSource + CaptureStatus + CaptureOp (Created/ClarifyToCalendar/Dismiss/Expire)
+│   ├── log.gleam              Daily-rotated JSONL (YYYY-MM-DD-captures.jsonl), op replay
+│   ├── scanner.gleam          Post-cycle Haiku call + XStructor + sanity filter, fire-and-forget
+│   └── expiry.gleam           Startup sweep marking aged pending captures Expired
+│
+├── deputy/                    Delegated attention — ephemeral restricted cog-loop variants
+│   ├── types.gleam            Deputy + DeputyMessage (GenerateBriefing/AskQuestion/Recall/Kill/Shutdown) + DeputyBriefing + DeputySnapshot
+│   ├── briefing.gleam         One-shot Haiku call via XStructor; renders <briefing> XML for agent instruction
+│   ├── ask.gleam              Ask-for-help reasoning (LLM call); Answered vs Unanswered
+│   ├── framework.gleam        OTP actor: spawn, long-lived loop (brief / ask / recall), kill, shutdown; sensory-event emission
+│   └── tool.gleam             ask_deputy tool declaration + executor (routed through framework)
+│
 ├── skills/                    Agent-led skill evolution (proposal → gate → Active)
 │   ├── metrics.gleam          Per-skill JSONL of read/inject/outcome events
 │   ├── versioning.gleam       Snapshot, history/ retention, archive.jsonl compaction, rollback
@@ -211,6 +224,7 @@ src/
 ├── tools/artifacts.gleam      Artifact tools: store_result, retrieve_result (researcher agent)
 ├── tools/comms.gleam          Comms tools: send_email, list_contacts, check_inbox, read_message + hard allowlist
 ├── tools/sandbox.gleam        Sandbox tools: run_code, serve, stop_serve, sandbox_status, workspace_ls, sandbox_exec
+├── tools/captures.gleam       Captures tools: list_captures, clarify_capture (calendar route), dismiss_capture
 │
 ├── sandbox/                   Local Podman sandbox
 │   ├── types.gleam            SandboxConfig, SandboxSlot, SandboxMessage, SandboxManager
@@ -468,6 +482,13 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `meta_affect_correlation_interval_hours` | — | 168 | Weekly affect-performance correlation (BEAM worker, off-cog) |
 | `meta_fabrication_audit_interval_hours` | — | 24 | Daily fabrication audit (BEAM worker, off-cog) |
 | `meta_voice_drift_interval_hours` | — | 24 | Daily voice-drift check (BEAM worker, off-cog) |
+| `captures_scanner_enabled` | — | True | Post-cycle commitment scanner (Haiku call per cycle) |
+| `captures_expiry_days` | — | 14 | Auto-dismiss pending captures older than N days |
+| `captures_max_per_cycle` | — | 10 | Per-cycle cap on captures after sanity filter |
+| `deputies_enabled` | — | True | Spawn a read-only deputy per root delegation; prepends `<briefing>` to the specialist's instruction, serves `ask_deputy` mid-task |
+| `deputies_model` | — | task_model | LLM for deputy briefings (typically Haiku) |
+| `deputies_max_tokens` | — | 800 | Max tokens per deputy briefing call |
+| `deputy_timeout_ms` | — | 15000 | Timeout awaiting briefing; agent proceeds without on expiry |
 
 ## Memory architecture
 

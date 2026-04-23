@@ -1,6 +1,6 @@
 # Deputy Agents — Delegated Attention per Hierarchy
 
-**Status**: Planned (design 2026-04-22, renamed + scope-cut 2026-04-23)
+**Status**: Shipped 2026-04-23 (PR #103) — full 4-phase MVP
 **Priority**: Architectural — addresses a real bottleneck (specialist agents lack access to cog's smarts)
 **Effort**: Medium (~1400 LOC across 4 phases; MVP at Phase 1, ~400 LOC)
 
@@ -373,7 +373,7 @@ Because a deputy can watch a hierarchy that spans domains (writer → researcher
 
 | Field | Default | Purpose |
 |---|---|---|
-| `deputies_enabled` | False (opt-in during MVP) | Master switch |
+| `deputies_enabled` | True | Master switch — set `false` to disable the briefing / ask-for-help / escalation surface entirely |
 | `deputies_mode` | "briefing" | "briefing" \| "briefing+ask" \| "full" |
 | `deputies_model` | task_model | LLM used by deputies (default cheapest) |
 | `deputies_max_turns` | 3 | Cap on deputy react-loop turns per invocation |

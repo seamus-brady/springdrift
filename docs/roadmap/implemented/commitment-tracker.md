@@ -1,6 +1,6 @@
 # Commitment Tracker — MVP
 
-**Status**: Planned (MVP scope 2026-04-22)
+**Status**: Shipped 2026-04-22 (PR #102) — MVP scope
 **Priority**: Medium
 **Effort**: ~740 LOC including tests
 
