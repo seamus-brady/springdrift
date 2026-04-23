@@ -35,11 +35,23 @@ simple — copy one directory and you have everything.
 │   ├── cbr/                 Case-Based Reasoning cases (auto-generated)
 │   ├── facts/               Key-value fact store (auto-generated)
 │   ├── artifacts/           Large content storage (auto-generated)
-│   └── schedule/            Scheduler state persistence (auto-generated)
+│   ├── planner/             Tasks and endeavours (auto-generated)
+│   ├── schedule/            Operator-visible scheduler state (auto-generated)
+│   ├── comms/               Sent and received emails (auto-generated)
+│   ├── captures/            Commitment-tracker items (auto-generated)
+│   ├── affect/              Functional emotion snapshots (auto-generated)
+│   ├── learning_goals/      Agent-set learning goals (auto-generated)
+│   ├── strategies/          Strategy Registry events (auto-generated)
+│   ├── consolidation/       Remembrancer run records (auto-generated)
+│   ├── skills/              Skill lifecycle log (auto-generated)
+│   └── meta_learning/       BEAM worker sidecar (auto-generated)
+├── knowledge/               Document library (auto-generated on first use)
 ├── schemas/                 XStructor XSD schemas (auto-generated, compiled at runtime)
 ├── scheduler/
-│   └── outputs/             Scheduler report delivery (auto-generated)
-└── dprime.example.json      Example D' safety gate configuration
+│   └── outputs/             Operator-initiated scheduler output (auto-generated)
+├── meta_learning/
+│   └── outputs/             Meta-learning worker output (auto-generated)
+└── dprime.json              D' safety gate configuration
 ```
 
 Add `.springdrift/` to your `.gitignore` — it contains runtime state, logs, and
@@ -81,8 +93,8 @@ patterns, and degradation paths. It lives in the skills directory and is served 
 `how_to` tool so the LLM can orient itself when unsure which tool to use.
 
 Included skills:
-- **`web-research/`** — decision tree for the 8 web tools (Brave tiers, Jina, fallbacks)
-- **`shell-sandbox/`** — Docker sandbox usage guide (environment, conventions)
+- **`web-research/`** — decision tree for the 10 web tools (Kagi, Brave tiers, Jina, fallbacks)
+- **`shell-sandbox/`** — Podman sandbox usage guide (environment, conventions)
 
 ## Scheduler configuration
 
@@ -105,8 +117,9 @@ This can be overridden per-job in a profile's schedule configuration.
 
 - **`identity/`** — default persona, session preamble template, and character spec.
 - **`skills/`** — HOW_TO.md operator guide + web-research and shell-sandbox skills.
-- **`dprime.example.json`** — example D' safety gate configuration with seven
-  features and tuned thresholds.
+- **`dprime.json`** — D' safety gate configuration (input + tool + output gates,
+  per-agent overrides, deterministic rules).
+- **`planner_features.json`** — Forecaster feature weights for plan-health scoring.
 - **`identity/character.json`** — example character spec with 5 virtues and 4 normative
   commitments for the output gate's normative calculus.
 
