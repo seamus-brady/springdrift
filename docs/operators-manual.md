@@ -200,6 +200,53 @@ weekly" all land at the right specialist. If a specialist isn't
 firing when you'd expect, check that the agent is enabled in config
 (some default to off — see [section 8](#8-config--the-knobs-you-actually-reach-for)).
 
+### Captures — the commitment tracker (MVP)
+
+A small post-cycle scanner reads the agent's responses for commitments
+and promises. "I'll check the scheduler logs later," "remind me about
+X tomorrow," and similar phrases get caught and written to
+`.springdrift/memory/captures/YYYY-MM-DD-captures.jsonl`. The
+sensorium shows a count (`<captures pending="N"/>`) every cycle; the
+agent can act on a capture by:
+
+- `clarify_capture(id, due_at, description)` — schedules a cycle at
+  `due_at` via the existing scheduler; the agent will see the
+  description as its input when the cycle fires
+- `dismiss_capture(id, reason)` — drops the capture (already done,
+  irrelevant, false detection)
+
+`list_captures()` shows pending; auto-expiry is 14 days. Enable via
+`[captures] scanner_enabled = true` (default true; opt out with false
+to skip the per-cycle Haiku call). Full design:
+[architecture/captures.md](../docs/roadmap/implemented/commitment-tracker.md).
+
+### Deputies — delegated attention (MVP)
+
+When the cognitive loop delegates to a specialist, a **deputy** spawns
+alongside — an ephemeral read-only cog-loop variant that briefs the
+specialist on relevant CBR cases, facts, and known pitfalls before its
+react loop starts. The deputy stays alive for the root delegation's
+lifetime, can answer `ask_deputy(question)` calls from the specialist
+mid-task, and dies when the hierarchy completes.
+
+Deputies are read-only by construction: they can't write memory,
+delegate, or produce output. They exist to close the gap between the
+cog loop (which has full CBR retrieval, facts, sensorium) and
+specialist agents (which historically got just an instruction string).
+
+Operator surface:
+
+- Sensorium shows `<deputies active="N" completed_recent="M"/>` with
+  signal tags (routine / high_novelty / anomaly / unanswered) when
+  deputies are running or recently ran
+- `kill_deputy(deputy_id, reason)` — terminate a stuck deputy;
+  hierarchy continues without briefing
+- `recall_deputy(deputy_id)` — non-destructive snapshot of deputy state
+
+Enabled by default. Disable via `[deputies] enabled = false` if you
+want to avoid the per-delegation Haiku call. Full design:
+[architecture/deputies.md](architecture/deputies.md).
+
 ### Setting up the Comms agent (email)
 
 Email is the most common operator-facing setup. Springdrift uses
@@ -611,7 +658,7 @@ These bound runaway costs. Hit either and the scheduler skips jobs
 until the rolling hour window rolls over. Set to 0 only if you have
 external cost controls.
 
-### Agent enables
+### Agent and subsystem enables
 
 | Config | Default | Notes |
 |---|---|---|
@@ -620,6 +667,8 @@ external cost controls.
 | `[forecaster] enabled` | `false` | Enable for autonomous plan-health monitoring |
 | `[meta_learning] scheduler_enabled` | `false` | Adds 5 recurring meta-learning jobs |
 | `[sandbox] enabled` | `true` | Disable if Podman isn't available |
+| `[captures] scanner_enabled` | `true` | Post-cycle commitment scanner (see §4) |
+| `[deputies] enabled` | `true` | Delegated-attention briefings per root delegation (see §4) |
 
 ### D' tightness
 

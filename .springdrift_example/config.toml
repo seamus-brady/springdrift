@@ -456,7 +456,7 @@ summary_schedule = "weekly"
 # docs/roadmap/planned/deputy-agents.md
 
 [deputies]
-# enabled = false               # Deputy briefings (default: false — opt in to measure)
+# enabled = true                # Deputy briefings (default: true — set false to disable)
 # model = "claude-haiku-4-5"    # LLM used for briefings (default: same as task_model)
 # max_tokens = 800              # Max tokens per briefing call (default: 800)
 # timeout_ms = 15000            # Timeout awaiting briefing (default: 15000 — agent proceeds without if exceeded)

@@ -1,6 +1,6 @@
 # Remembrancer — Follow-up Work
 
-**Status**: Planned
+**Status**: Shipped 2026-04-19 (follow-ups 1–5 complete; #6 tracked in meta-learning)
 **Parent**: `docs/roadmap/implemented/remembrancer.md` (Phases 1–10 shipped 2026-04-16)
 **Related**: `docs/roadmap/planned/meta-learning.md`, `docs/roadmap/implemented/skills-management.md`
 

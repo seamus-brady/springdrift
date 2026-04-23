@@ -696,7 +696,7 @@ can't respond on the agent's behalf. Cog can `kill_deputy` any in-flight
 deputy if it's stuck; the hierarchy continues without a briefing.
 
 See [architecture/deputies.md](docs/architecture/deputies.md) for the full
-design, phasing, and invariant analysis. Opt in via `[deputies] enabled = true`.
+design, phasing, and invariant analysis. Enabled by default; set `[deputies] enabled = false` to disable.
 
 ### The agent reviews its own work
 

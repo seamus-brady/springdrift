@@ -914,7 +914,7 @@ fn run(cfg: AppConfig) -> Nil {
       ),
       captures_dir: paths.captures_dir(),
       captures_max_per_cycle: option.unwrap(cfg.captures_max_per_cycle, 10),
-      deputies_enabled: option.unwrap(cfg.deputies_enabled, False),
+      deputies_enabled: option.unwrap(cfg.deputies_enabled, True),
       deputies_model: option.unwrap(
         cfg.deputies_model,
         option.unwrap(cfg.task_model, "claude-haiku-4-5-20251001"),
