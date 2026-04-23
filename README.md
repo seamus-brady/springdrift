@@ -387,7 +387,8 @@ learn from them, and communicate naturally.
 cognitive loop (OTP process)
 ├── query classifier (simple -> task model, complex -> reasoning model)
 ├── multi-agent supervisor (OTP supervision tree)
-│   ├── planner, researcher, coder, writer, comms, observer, scheduler
+│   ├── planner, project_manager, researcher, coder, writer,
+│   ├── observer, comms, scheduler, remembrancer
 │   └── restart strategies: Permanent, Transient, Temporary
 ├── D' safety gates
 │   ├── input gate (deterministic + canary + fast-accept)
@@ -399,8 +400,9 @@ cognitive loop (OTP process)
 │   ├── Librarian (ETS query layer over all stores)
 │   ├── Curator (system prompt assembly, sensorium, virtual context window)
 │   └── Archivist (post-cycle narrative + CBR generation)
-├── tools (~35 tools: memory, web, files, sandbox, planner, comms, diagnostics)
+├── tools (memory, web, files, sandbox, planner, comms, diagnostics)
 ├── scheduler (BEAM-native send_after tick loop, rate-limited)
+├── meta-learning workers (off-cog BEAM workers — audits + consolidation)
 └── XStructor (XML schema validation for all structured LLM output)
 ```
 
@@ -412,15 +414,16 @@ classification), and Layer 3 provides self-monitoring across three sub-layers:
 intra-gate meta (3a), cross-cycle pattern detection (3b), and ambient
 self-perception via the sensorium (3c).
 
-Eight specialist agents (planner, project manager, researcher, coder, writer,
-comms, observer, scheduler) run as supervised OTP processes with independent
-react loops. Multiple agents dispatch in parallel when requested in a single
-response. Agent teams coordinate groups with four strategies (ParallelMerge,
-Pipeline, DebateAndConsensus, LeadWithSpecialists).
+Nine specialist agents (planner, project manager, researcher, coder, writer,
+observer, comms, scheduler, remembrancer) run as supervised OTP processes with
+independent react loops. Multiple agents dispatch in parallel when requested in
+a single response. Agent teams coordinate groups with four strategies
+(ParallelMerge, Pipeline, DebateAndConsensus, LeadWithSpecialists).
 
-Ten memory stores (narrative, threads, facts, CBR cases, artifacts, tasks,
-endeavours, comms, affect, DAG) are backed by append-only JSONL and indexed
-in ETS by the Librarian actor. The Curator manages a virtual context window
+Twelve memory stores (narrative, threads, facts, CBR cases, artifacts, tasks,
+endeavours, comms, affect, DAG, strategies, learning goals) are backed by
+append-only JSONL and indexed in ETS by the Librarian actor. The Curator
+manages a virtual context window
 with prioritised slots that auto-truncate under a configurable budget. The
 Archivist generates narrative entries and CBR cases after each cycle via a
 two-phase pipeline (honest reflection, then structured curation).
@@ -620,8 +623,8 @@ and choice menu.
 
 ### Memory
 
-Ten memory stores, all backed by append-only JSONL and indexed in ETS by
-the Librarian actor:
+Twelve memory stores, all backed by append-only JSONL and indexed in ETS
+by the Librarian actor:
 
 ```
 Librarian (ETS query layer)
@@ -631,6 +634,8 @@ Librarian (ETS query layer)
 ├── CBR cases            problem -> solution -> outcome (utility-scored, outcome-weighted)
 ├── Artifacts            large content on disk (web pages, extractions, 50KB truncation)
 ├── Tasks + Endeavours   planned work with steps, risks, forecast scores
+├── Strategies           named approaches with tracked outcomes (success rate, last used)
+├── Learning goals       self-set goals with acceptance criteria and evidence
 ├── Comms log            sent and received emails (audit trail, JSONL)
 ├── Affect snapshots     functional emotion readings (5 dimensions per cycle)
 └── DAG nodes            operational telemetry (tokens, tools, gates, agent output)
@@ -662,7 +667,7 @@ process with its own react loop, tool set, and context window.
 | Writer | builtin | 6 | Draft and edit text |
 | Comms | email (AgentMail) | 6 | Send and receive email to allowed recipients |
 | Observer | diagnostic + CBR curation (18 tools) | 6 | Cycle forensics, pattern detection, CBR curation, D' feedback |
-| Scheduler | scheduler (6 tools) | 6 | Create and manage scheduled jobs, reminders, and todos |
+| Scheduler | scheduler (10 tools) | 4 | Create and manage scheduled jobs, reminders, and todos |
 | Remembrancer | deep memory + skill proposals (9 tools) | 8 | Cross-archive search, pattern mining, consolidation, agent-led skill proposals |
 
 The **sandbox** provides isolated Podman containers for code execution. The
@@ -684,37 +689,50 @@ no access to the CBR cases, facts, or recent patterns the cog loop had
 already retrieved. "A tribe of Einsteins who use Mr Bean as a valet," as one
 design session put it. Deputies close that gap.
 
-A **deputy** is an ephemeral restricted cog-loop variant spawned alongside
-each root delegation. Before the specialist's react loop starts, the deputy
-reads memory and produces a `<briefing>` block (relevant CBR cases with
-similarity scores, relevant facts, known pitfalls) that's prepended to the
-specialist's instruction. Then the deputy dies.
+A **deputy** is a restricted cog-loop variant spawned per delegation
+hierarchy. Before the specialist's react loop starts, the deputy reads memory
+and produces a `<briefing>` block (relevant CBR cases with similarity scores,
+relevant facts, known pitfalls) that's prepended to the specialist's
+instruction. The deputy then stays alive for the rest of the hierarchy and
+serves `ask_deputy` calls the specialist makes mid-task — "is there any
+precedent for this pitfall?", "did we try this URL before?", etc. It shuts
+down cleanly when the hierarchy completes.
 
 Deputies are read-only by construction — they get a dedicated tool subset
 with no write paths. They can't delegate, can't take external actions, and
-can't respond on the agent's behalf. Cog can `kill_deputy` any in-flight
-deputy if it's stuck; the hierarchy continues without a briefing.
+can't respond on the agent's behalf. Cog can kill any in-flight deputy if
+it's stuck; the hierarchy continues without a briefing.
 
 See [architecture/deputies.md](docs/architecture/deputies.md) for the full
 design, phasing, and invariant analysis. Enabled by default; set `[deputies] enabled = false` to disable.
 
 ### The agent reviews its own work
 
-Springdrift schedules its own self-review without you having to prompt it.
-By default the agent runs five recurring jobs:
+Springdrift runs its own self-review without you having to prompt it.
+A pool of seven BEAM workers ticks off-cog (outside the operator-visible
+scheduler, so it never competes with conversational turns):
 
-- **Daily** — review any open learning goals it has set itself.
-- **Weekly** — write a consolidation report on the past week's work,
-  re-check whether emotional state is correlating with bad outcomes,
-  and audit the skill instructions it follows (archiving any it has
+- **Daily** — review any open learning goals it has set itself. Check
+  for fabrication drift (prose claiming work that no tool call
+  performed). Check for voice drift (self-congratulatory narration
+  creeping in).
+- **Weekly** — consolidation report on the past week's work.
+  Correlation pass on affect dimensions against outcome success.
+  Audit the skill instructions it follows (archiving any it has
   stopped using).
 - **Fortnightly** — review the named approaches it has been using and
   judge whether each is still earning its keep.
 
+The three mechanical audits run pure compute with no LLM calls. The
+four judgement jobs (consolidation, goal review, skill decay, strategy
+review) dispatch to the Remembrancer agent off-cog — it does the
+reasoning, the worker just decides when to ask.
+
 Findings persist in `.springdrift/memory/` and surface in the agent's
 working context next cycle, so it acts on what it has learned rather
 than rediscovering it. The Web GUI's **Memory** tab shows the
-consolidation history for audit.
+consolidation history for audit. Outputs from the judgement jobs land
+in `.springdrift/meta_learning/outputs/` for human-readable review.
 
 #### Strategies — the named approaches the agent tracks
 
@@ -751,7 +769,7 @@ To turn it off, or change the cadences, edit `.springdrift/config.toml`:
 
 ```toml
 [meta_learning]
-scheduler_enabled = false             # Default: true
+enabled = false                       # Default: true (master gate)
 consolidation_interval_hours = 168    # Default: 168 (weekly)
 goal_review_interval_hours = 24       # Default: 24 (daily)
 # ... see .springdrift_example/config.toml for the full surface
@@ -819,13 +837,20 @@ Everything lives in `.springdrift/`:
 │   ├── facts/               Key-value facts (daily-rotated)
 │   ├── artifacts/           Large content (daily-rotated, 50KB truncation)
 │   ├── planner/             Tasks and endeavours
+│   ├── schedule/            Operator-visible scheduler state
 │   ├── comms/               Sent and received emails
-│   ├── consolidation/       Remembrancer run records (date-rotated JSONL)
+│   ├── captures/            Commitment-tracker items from post-cycle scan
+│   ├── affect/              Functional emotion snapshots
+│   ├── learning_goals/      Agent-set learning goals + evidence
+│   ├── strategies/          Strategy Registry events
+│   ├── consolidation/       Remembrancer run records
 │   ├── skills/              Skill lifecycle log (proposals, promotions, archivals)
-│   └── affect/              Functional emotion snapshots
+│   └── meta_learning/       BEAM worker sidecar (last_run_at per worker)
+├── knowledge/               Document library (sources, notes, drafts, exports)
 ├── schemas/                 XStructor XSD schemas (compiled at runtime)
 ├── skills/                  Skill definitions + HOW_TO.md operator guide
-└── scheduler/outputs/       Delivered reports
+├── scheduler/outputs/       Operator-initiated scheduled report delivery
+└── meta_learning/outputs/   Meta-learning worker report delivery
 ```
 
 All files are append-only JSONL or plain text -- no binary formats, no database,
