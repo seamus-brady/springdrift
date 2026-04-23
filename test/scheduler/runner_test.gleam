@@ -98,7 +98,7 @@ fn auto_reply_loop(
     |> process.select(subj)
   let msg = process.selector_receive_forever(selector)
   case msg {
-    agent_types.UserInput(source_id:, text: _, reply_to: _) -> {
+    agent_types.UserInput(source_id:, text: _) -> {
       mock_publish(fd, source_id, "mock result")
     }
     agent_types.SchedulerInput(source_id:, ..) -> {

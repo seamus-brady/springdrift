@@ -171,16 +171,13 @@ pub fn start(
       input_limit:,
       source_id:,
     )
-  // Send a startup greeting so the agent says hello. reply_to is a
-  // throwaway — replies route via Frontdoor delivery sink keyed on
-  // source_id.
-  let throwaway = process.new_subject()
+  // Send a startup greeting so the agent says hello. Replies route via
+  // the Frontdoor delivery sink keyed on source_id.
   process.send(
     cognitive,
     agent_types.UserInput(
       source_id:,
       text: "[Session started. Greet the operator briefly — one or two sentences. Mention anything notable from your sensorium.]",
-      reply_to: throwaway,
     ),
   )
   let state = TuiState(..state, status: WaitingForLlm)
@@ -612,13 +609,11 @@ fn handle_chat_enter(state: TuiState) -> Nil {
                   scroll_offset: 0,
                 )
               render(s1)
-              let throwaway = process.new_subject()
               process.send(
                 state.cognitive,
                 agent_types.UserInput(
                   source_id: state.source_id,
                   text: input_text,
-                  reply_to: throwaway,
                 ),
               )
               event_loop(s1)

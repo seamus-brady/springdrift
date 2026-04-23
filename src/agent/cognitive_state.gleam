@@ -9,9 +9,9 @@ import agent/cognitive/escalation.{type EscalationConfig}
 import agent/registry.{type Registry}
 import agent/team
 import agent/types.{
-  type AgentCompletionRecord, type CognitiveMessage, type CognitiveReply,
-  type CognitiveStatus, type DelegationInfo, type Notification, type PendingTask,
-  type QueuedInput, type SensoryEvent, type SupervisorMessage,
+  type AgentCompletionRecord, type CognitiveMessage, type CognitiveStatus,
+  type DelegationInfo, type Notification, type PendingTask, type QueuedInput,
+  type SensoryEvent, type SupervisorMessage,
 }
 import agentlair/types as agentlair_types
 import dag/types as dag_types
@@ -212,8 +212,8 @@ pub type CognitiveState {
     redact_secrets: Bool,
     // --- Layer 3b meta observer ---
     meta_state: Option(meta_types.MetaState),
-    // --- Output gate pending reply (cleared on delivery) ---
-    pending_output_reply: Option(#(Subject(CognitiveReply), String)),
+    // --- Output gate pending report text (cleared on delivery) ---
+    pending_output_reply: Option(String),
     // --- LLM usage from the think worker, stashed while output gate runs ---
     pending_output_usage: Option(llm_types.Usage),
     // --- CBR retrieval tracking (cleared each cycle) ---
