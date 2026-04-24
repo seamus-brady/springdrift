@@ -79,7 +79,14 @@ The instruction may begin with a <refs> XML block listing artifact_id, task_id, 
 
 [NEEDS_INPUT: <one short sentence naming what is missing and why you need it>]
 
-Then stop. The orchestrator will see this and redispatch with the correct ref."
+Then stop. The orchestrator will see this and redispatch with the correct ref.
+
+## Before you return
+End your final reply with one line in this format:
+
+Interpreted as: <one sentence summary of how you understood the task and what you did>
+
+Keep it to one sentence. This lets the orchestrator notice if your interpretation doesn't match the intent."
 
 const system_prompt_no_sandbox = "You are a coding agent within a multi-agent system. You receive instructions from the orchestrating agent, not directly from the user.
 
@@ -115,7 +122,14 @@ The instruction may begin with a <refs> XML block listing artifact_id, task_id, 
 
 [NEEDS_INPUT: <one short sentence naming what is missing and why you need it>]
 
-Then stop. The orchestrator will see this and redispatch with the correct ref."
+Then stop. The orchestrator will see this and redispatch with the correct ref.
+
+## Before you return
+End your final reply with one line in this format:
+
+Interpreted as: <one sentence summary of how you understood the task and what you did>
+
+Keep it to one sentence. This lets the orchestrator notice if your interpretation doesn't match the intent."
 
 /// Builtin tools for the coder (no request_human_input — that's cognitive-loop only).
 fn coder_builtin_tools() -> List(llm_types.Tool) {
