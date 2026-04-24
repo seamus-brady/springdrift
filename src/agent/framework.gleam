@@ -59,6 +59,9 @@ type ReactStats {
     tool_call_details: List(types.ToolCallDetail),
     input_tokens: Int,
     output_tokens: Int,
+    /// Sticky: once any LLM response in the react loop comes back with
+    /// stop_reason=MaxTokens, this stays True for the rest of the loop.
+    truncated: Bool,
   )
 }
 
@@ -239,6 +242,7 @@ fn do_react_loop(
       tool_call_details: [],
       input_tokens: 0,
       output_tokens: 0,
+      truncated: False,
     )
   let react_result =
     do_react(
@@ -283,11 +287,13 @@ fn do_react(
         Error(e) ->
           ReactResult(result: Error(response.error_message(e)), stats:)
         Ok(resp) -> {
+          let hit_max_tokens = resp.stop_reason == Some(llm_types.MaxTokens)
           let updated_stats =
             ReactStats(
               ..stats,
               input_tokens: stats.input_tokens + resp.usage.input_tokens,
               output_tokens: stats.output_tokens + resp.usage.output_tokens,
+              truncated: stats.truncated || hit_max_tokens,
             )
           case response.needs_tool_execution(resp) {
             False ->
@@ -546,6 +552,7 @@ fn outcome_from_result(
         tools_used: unique_tools,
         tool_call_details: stats.tool_call_details,
         tool_errors:,
+        truncated: stats.truncated,
         input_tokens: stats.input_tokens,
         output_tokens: stats.output_tokens,
         duration_ms:,

@@ -148,6 +148,9 @@ pub type AgentOutcome {
     /// agent's LLM chose to continue despite failures — the orchestrator
     /// should treat the result with suspicion.
     tool_errors: List(String),
+    /// True if any LLM response in the react loop had stop_reason=MaxTokens.
+    /// The agent's result may be incomplete.
+    truncated: Bool,
     input_tokens: Int,
     output_tokens: Int,
     duration_ms: Int,

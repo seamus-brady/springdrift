@@ -1082,6 +1082,21 @@ fn handle_think_complete(
               )
             }
             False -> {
+              // Detect length-capped stops on the cognitive loop's own
+              // response. When the LLM hit max_tokens AND produced no tool
+              // calls, the reply may be mid-sentence or have had a tool_use
+              // block sliced off before it could be emitted — the operator-
+              // visible "agent promises and doesn't deliver" pattern.
+              case resp.stop_reason == Some(llm_types.MaxTokens) {
+                True ->
+                  slog.warn(
+                    "cognitive",
+                    "handle_think_complete",
+                    "Response was length-capped at max_tokens with no tool calls — output may be truncated or a tool_use block may have been sliced off",
+                    state.cycle_id,
+                  )
+                False -> Nil
+              }
               // Prefix if this was a model fallback
               let text = case raw_text {
                 "" -> {
@@ -1230,6 +1245,21 @@ fn handle_think_complete(
         }
         True -> {
           let calls = response.tool_calls(resp)
+          // Detect length-capped stops on a tool-calling response: the
+          // tool_use arguments JSON may have been sliced off mid-construction.
+          // The model SDK would normally reject malformed tool_use, but when
+          // it doesn't, the tool call will fail in odd ways. Log for
+          // operator visibility.
+          case resp.stop_reason == Some(llm_types.MaxTokens) {
+            True ->
+              slog.warn(
+                "cognitive",
+                "handle_think_complete",
+                "Response was length-capped at max_tokens during tool_use construction — tool arguments may be malformed",
+                state.cycle_id,
+              )
+            False -> Nil
+          }
           // Accumulate cycle token counters from tool-calling response
           let state =
             CognitiveState(
