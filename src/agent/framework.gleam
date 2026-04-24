@@ -312,6 +312,7 @@ fn do_react(
                       cognitive,
                       deputy_subject,
                       default_ask_deputy_timeout_ms,
+                      cycle_id,
                     )
                   cycle_log.log_tool_result(
                     cycle_id,
@@ -443,6 +444,7 @@ fn execute_tool(
   cognitive: Subject(CognitiveMessage),
   deputy_subject: Option(Subject(deputy_types.DeputyMessage)),
   ask_deputy_timeout_ms: Int,
+  agent_cycle_id: String,
 ) -> llm_types.ToolResult {
   slog.debug(
     "framework",
@@ -463,7 +465,39 @@ fn execute_tool(
     }
     "ask_deputy" ->
       deputy_tool.execute(call, deputy_subject, ask_deputy_timeout_ms)
+    "read_hierarchy" -> {
+      let scope = parse_hierarchy_scope(call.input_json)
+      let reply_subj = process.new_subject()
+      process.send(
+        cognitive,
+        types.HierarchyQuery(
+          cycle_id: agent_cycle_id,
+          scope: scope,
+          reply_to: reply_subj,
+        ),
+      )
+      case process.receive(reply_subj, 5000) {
+        Ok(rendered) ->
+          llm_types.ToolSuccess(tool_use_id: call.id, content: rendered)
+        Error(_) ->
+          llm_types.ToolFailure(
+            tool_use_id: call.id,
+            error: "timeout waiting for hierarchy query",
+          )
+      }
+    }
     _ -> spec.tool_executor(call)
+  }
+}
+
+fn parse_hierarchy_scope(input_json: String) -> String {
+  let decoder = {
+    use scope <- decode.optional_field("scope", "siblings", decode.string)
+    decode.success(scope)
+  }
+  case json.parse(input_json, decoder) {
+    Ok(s) -> s
+    Error(_) -> "siblings"
   }
 }
 

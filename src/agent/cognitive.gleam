@@ -254,6 +254,7 @@ fn handle_message(
       ThinkWorkerDown(..) -> "ThinkWorkerDown"
       AgentComplete(..) -> "AgentComplete"
       types.AgentQuestion(..) -> "AgentQuestion"
+      types.HierarchyQuery(..) -> "HierarchyQuery"
       AgentEvent(..) -> "AgentEvent"
       SetModel(..) -> "SetModel"
       types.ClassifyComplete(..) -> "ClassifyComplete"
@@ -291,6 +292,8 @@ fn handle_message(
       cognitive_agents.handle_agent_progress(state, progress)
     types.AgentQuestion(question, agent, reply_to) ->
       cognitive_agents.handle_agent_question(state, question, agent, reply_to)
+    types.HierarchyQuery(cycle_id, scope, reply_to) ->
+      cognitive_agents.handle_hierarchy_query(state, cycle_id, scope, reply_to)
     AgentEvent(event) -> cognitive_agents.handle_agent_event(state, event)
     SetModel(model) -> CognitiveState(..state, model:)
     types.SetScheduler(scheduler) ->

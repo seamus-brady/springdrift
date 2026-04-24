@@ -29,6 +29,7 @@ import frontdoor/types as frontdoor_types
 import gleam/dict
 import gleam/dynamic/decode
 import gleam/erlang/process.{type Subject}
+import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -1430,6 +1431,187 @@ pub fn handle_agent_question(
     ..state,
     status: WaitingForUser(question:, context: AgentWaiting(reply_to:)),
   )
+}
+
+/// Handle a specialist's read_hierarchy tool call. Queries the librarian
+/// for the cycle's subtree / ancestors, renders compact text, and sends
+/// it back on reply_to. Synchronous from the specialist's perspective —
+/// the framework blocks waiting on reply_to.
+pub fn handle_hierarchy_query(
+  state: CognitiveState,
+  cycle_id: String,
+  scope: String,
+  reply_to: Subject(String),
+) -> CognitiveState {
+  let rendered = case state.memory.librarian {
+    None ->
+      "[read_hierarchy unavailable: no librarian attached to this instance]"
+    Some(lib) -> render_hierarchy(lib, cycle_id, scope)
+  }
+  process.send(reply_to, rendered)
+  state
+}
+
+fn render_hierarchy(
+  lib: Subject(librarian.LibrarianMessage),
+  cycle_id: String,
+  scope: String,
+) -> String {
+  case scope {
+    "ancestors" -> render_ancestors(lib, cycle_id)
+    "full" -> render_full_tree(lib, cycle_id)
+    // Default / "siblings"
+    _ -> render_siblings(lib, cycle_id)
+  }
+}
+
+fn render_siblings(
+  lib: Subject(librarian.LibrarianMessage),
+  cycle_id: String,
+) -> String {
+  // Find this cycle's parent, then get the parent's subtree and filter
+  // to peer children (exclude the caller itself).
+  case librarian.get_subtree(lib, cycle_id) {
+    Error(_) -> "[no subtree found for cycle " <> cycle_id <> "]"
+    Ok(self_tree) ->
+      case self_tree.root.parent_id {
+        None ->
+          "[cycle "
+          <> cycle_id
+          <> " has no parent — it is a root cycle with no peers]"
+        Some(parent_id) ->
+          case librarian.get_subtree(lib, parent_id) {
+            Error(_) -> "[parent cycle " <> parent_id <> " not indexed]"
+            Ok(parent_tree) -> {
+              let peers =
+                list.filter(parent_tree.children, fn(child) {
+                  child.root.cycle_id != cycle_id
+                })
+              case peers {
+                [] ->
+                  "<hierarchy scope=\"siblings\" of=\""
+                  <> cycle_id
+                  <> "\">\n  (no peer delegations under parent "
+                  <> parent_id
+                  <> ")\n</hierarchy>"
+                _ ->
+                  "<hierarchy scope=\"siblings\" of=\""
+                  <> cycle_id
+                  <> "\" parent=\""
+                  <> parent_id
+                  <> "\">\n"
+                  <> string.join(
+                    list.map(peers, render_subtree_line(_, 1)),
+                    "\n",
+                  )
+                  <> "\n</hierarchy>"
+              }
+            }
+          }
+      }
+  }
+}
+
+fn render_ancestors(
+  lib: Subject(librarian.LibrarianMessage),
+  cycle_id: String,
+) -> String {
+  let chain = collect_ancestors(lib, cycle_id, [])
+  case chain {
+    [] -> "[no ancestors found for cycle " <> cycle_id <> "]"
+    _ ->
+      "<hierarchy scope=\"ancestors\" of=\""
+      <> cycle_id
+      <> "\">\n"
+      <> string.join(list.map(chain, render_node_line(_, 1)), "\n")
+      <> "\n</hierarchy>"
+  }
+}
+
+fn collect_ancestors(
+  lib: Subject(librarian.LibrarianMessage),
+  cycle_id: String,
+  acc: List(dag_types.CycleNode),
+) -> List(dag_types.CycleNode) {
+  case librarian.get_subtree(lib, cycle_id) {
+    Error(_) -> list.reverse(acc)
+    Ok(subtree) ->
+      case subtree.root.parent_id {
+        None -> list.reverse([subtree.root, ..acc])
+        Some(parent_id) ->
+          collect_ancestors(lib, parent_id, [subtree.root, ..acc])
+      }
+  }
+}
+
+fn render_full_tree(
+  lib: Subject(librarian.LibrarianMessage),
+  cycle_id: String,
+) -> String {
+  // Walk up to the root, then return its subtree.
+  let root_id = find_root(lib, cycle_id)
+  case librarian.get_subtree(lib, root_id) {
+    Error(_) -> "[no subtree found for root " <> root_id <> "]"
+    Ok(tree) ->
+      "<hierarchy scope=\"full\" root=\""
+      <> root_id
+      <> "\">\n"
+      <> render_subtree_line(tree, 1)
+      <> "\n</hierarchy>"
+  }
+}
+
+fn find_root(
+  lib: Subject(librarian.LibrarianMessage),
+  cycle_id: String,
+) -> String {
+  case librarian.get_subtree(lib, cycle_id) {
+    Error(_) -> cycle_id
+    Ok(subtree) ->
+      case subtree.root.parent_id {
+        None -> cycle_id
+        Some(parent_id) -> find_root(lib, parent_id)
+      }
+  }
+}
+
+fn render_subtree_line(subtree: dag_types.DagSubtree, indent: Int) -> String {
+  let prefix = string.repeat("  ", indent)
+  let self_line = prefix <> render_node_summary(subtree.root)
+  let child_lines =
+    list.map(subtree.children, fn(c) { render_subtree_line(c, indent + 1) })
+  case child_lines {
+    [] -> self_line
+    _ -> self_line <> "\n" <> string.join(child_lines, "\n")
+  }
+}
+
+fn render_node_line(node: dag_types.CycleNode, indent: Int) -> String {
+  string.repeat("  ", indent) <> render_node_summary(node)
+}
+
+fn render_node_summary(node: dag_types.CycleNode) -> String {
+  let type_str = case node.node_type {
+    dag_types.CognitiveCycle -> "cognitive"
+    dag_types.AgentCycle -> "agent"
+    dag_types.SchedulerCycle -> "scheduler"
+    dag_types.DeputyCycle -> "deputy"
+  }
+  let outcome_str = case node.outcome {
+    dag_types.NodeSuccess -> "ok"
+    dag_types.NodePartial -> "partial"
+    dag_types.NodeFailure(_) -> "failed"
+    dag_types.NodePending -> "pending"
+  }
+  "<cycle id=\""
+  <> node.cycle_id
+  <> "\" type=\""
+  <> type_str
+  <> "\" outcome=\""
+  <> outcome_str
+  <> "\" tokens=\""
+  <> int.to_string(node.tokens_in + node.tokens_out)
+  <> "\"/>"
 }
 
 pub fn handle_user_answer(
