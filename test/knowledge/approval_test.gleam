@@ -49,6 +49,7 @@ fn make_cfg(root: String) -> knowledge_tools.KnowledgeConfig {
     drafts_dir: root <> "/drafts",
     exports_dir: root <> "/exports",
     embed_fn: None,
+    reason_fn: None,
   )
 }
 

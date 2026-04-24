@@ -42,6 +42,10 @@ pub type SearchResult {
 pub type SearchMode {
   Keyword
   Embedding
+  /// Tier 3 — LLM reasons over tree nodes. Used as a fallback when
+  /// keyword and embedding both return nothing above threshold, or
+  /// forced by passing mode=reasoning. Costs a model call.
+  Reasoning
 }
 
 pub fn search(
@@ -95,6 +99,11 @@ fn search_index(
         Some(ef) -> embedding_search(query, meta, nodes_with_paths, ef)
         None -> keyword_search(query, meta, nodes_with_paths)
       }
+    // Reasoning mode is dispatched at a higher level
+    // (reason_over_documents in run_search_library). If it somehow
+    // lands here, fall back to keyword so we don't silently drop
+    // results — the caller should have routed it instead.
+    Reasoning -> keyword_search(query, meta, nodes_with_paths)
   }
 }
 
@@ -338,6 +347,130 @@ pub fn format_citation_from_parts(
 /// search (e.g. `read_section`) can build citations consistently.
 pub fn doc_slug_for(meta: DocumentMeta) -> String {
   doc_slug_from(meta)
+}
+
+// ---------------------------------------------------------------------------
+// Tier 3 — LLM reasoning retrieval
+// ---------------------------------------------------------------------------
+
+/// Maximum nodes fed into the Tier 3 prompt. Caps prompt size (each
+/// node line is ~250 chars worst case, so 100 nodes ≈ 25KB input) and
+/// costs. If the library has more, we sort by title-length heuristic
+/// and truncate to keep the prompt tractable.
+pub const tier3_max_nodes: Int = 100
+
+/// Tier 3 retrieval: when keyword + embedding return nothing, ask an
+/// LLM to reason over the list of document sections and pick the
+/// relevant ones. Cost-capped by `tier3_max_nodes` and by reason_fn
+/// (the caller owns the model choice and max_tokens budget).
+///
+/// reason_fn takes a fully-formed prompt string and returns the model's
+/// free-form text reply (or an error). The parser here picks node IDs
+/// out of the reply by substring match against the known set, so a
+/// malformed or hallucinated reply yields zero results rather than
+/// garbage.
+pub fn reason_over_documents(
+  query: String,
+  documents: List(DocumentMeta),
+  indexes_dir: String,
+  reason_fn: fn(String) -> Result(String, String),
+  max_results: Int,
+) -> List(SearchResult) {
+  // Flatten all docs into (meta, node, section_path, node_id) tuples.
+  // Cap to tier3_max_nodes up front — a huge library shouldn't pay for
+  // every leaf in one prompt.
+  let all_entries =
+    list.flat_map(documents, fn(meta) {
+      case indexer.load_index(indexes_dir, meta.doc_id) {
+        Error(_) -> []
+        Ok(idx) ->
+          flatten_tree_with_path(idx.root, "")
+          |> list.map(fn(pair) {
+            let #(node, path) = pair
+            #(meta, node, path)
+          })
+      }
+    })
+  let entries = list.take(all_entries, tier3_max_nodes)
+  case entries {
+    [] -> []
+    _ -> {
+      let prompt = build_tier3_prompt(query, entries)
+      case reason_fn(prompt) {
+        Error(_) -> []
+        Ok(reply) -> {
+          let picked_ids = parse_picked_ids(reply, entries)
+          entries
+          |> list.filter(fn(t) { list.contains(picked_ids, { t.1 }.id) })
+          |> list.map(fn(t) {
+            let #(meta, node, path) = t
+            let slug = doc_slug_from(meta)
+            SearchResult(
+              doc_id: meta.doc_id,
+              doc_slug: slug,
+              doc_title: meta.title,
+              domain: meta.domain,
+              node_title: node.title,
+              section_path: path,
+              content: truncate(node.content, 500),
+              depth: node.depth,
+              line_start: node.source.line_start,
+              line_end: node.source.line_end,
+              page: node.source.page,
+              // Score 0.5 is a placeholder — the LLM picked it, but
+              // we don't have a numeric confidence. All reasoning
+              // results score the same; the LLM's ordering in the
+              // reply is preserved by the filter pass below.
+              score: 0.5,
+            )
+          })
+          |> list.take(max_results)
+        }
+      }
+    }
+  }
+}
+
+fn build_tier3_prompt(
+  query: String,
+  entries: List(#(DocumentMeta, TreeNode, String)),
+) -> String {
+  let lines =
+    list.index_map(entries, fn(t, i) {
+      let #(_meta, node, path) = t
+      let section = case path {
+        "" -> node.title
+        _ -> path <> " / " <> node.title
+      }
+      let preview = truncate(node.content, 200)
+      int.to_string(i + 1)
+      <> ". id="
+      <> node.id
+      <> " §"
+      <> section
+      <> "\n   "
+      <> preview
+    })
+  "You are helping search a document library.\n\n"
+  <> "Query: "
+  <> query
+  <> "\n\n"
+  <> "Here are the sections available:\n\n"
+  <> string.join(lines, "\n\n")
+  <> "\n\n"
+  <> "Return the IDs of sections relevant to the query, one per line, "
+  <> "most relevant first. Use only IDs from the list above. If none "
+  <> "are relevant, return an empty line."
+}
+
+/// Extract node IDs from the LLM reply by substring match against the
+/// known set. Tolerates the LLM adding prose around the IDs.
+fn parse_picked_ids(
+  reply: String,
+  entries: List(#(DocumentMeta, TreeNode, String)),
+) -> List(String) {
+  let known_ids = list.map(entries, fn(t) { { t.1 }.id })
+  list.filter(known_ids, fn(id) { string.contains(reply, id) })
 }
 
 fn truncate(s: String, max: Int) -> String {

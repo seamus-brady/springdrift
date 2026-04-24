@@ -116,6 +116,7 @@ fn writer_executor(
             drafts_dir: paths.knowledge_drafts_dir(),
             exports_dir: paths.knowledge_exports_dir(),
             embed_fn: None,
+            reason_fn: None,
           ),
         )
       _ ->

@@ -166,6 +166,7 @@ fn researcher_executor(
             drafts_dir: paths.knowledge_drafts_dir(),
             exports_dir: paths.knowledge_exports_dir(),
             embed_fn: option.None,
+            reason_fn: option.None,
           ),
         )
       "kagi_search" | "kagi_summarize" -> kagi.execute(call)

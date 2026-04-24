@@ -127,7 +127,12 @@ fn search_library_tool() -> llm_types.Tool {
   |> tool.add_string_param("query", "The search query", True)
   |> tool.add_string_param(
     "mode",
-    "Search mode: keyword or embedding (default: embedding)",
+    "Search mode. `keyword` (exact phrases), `embedding` (semantic, "
+      <> "default), or `reasoning` (LLM reasons over all sections — "
+      <> "slower and costs a model call, use only when embedding "
+      <> "misses). Modes `keyword` and `embedding` auto-escalate to "
+      <> "reasoning when they return no results, if the instance has "
+      <> "an LLM configured for tier-3 retrieval.",
     False,
   )
   |> tool.add_integer_param(
@@ -293,6 +298,10 @@ pub type KnowledgeConfig {
     drafts_dir: String,
     exports_dir: String,
     embed_fn: Option(fn(String) -> Result(List(Float), String)),
+    /// Tier 3 reasoning retrieval. When set, search_library falls back
+    /// to an LLM reason-over-tree pass when keyword + embedding return
+    /// nothing. None disables tier 3 (keyword + embedding only).
+    reason_fn: Option(fn(String) -> Result(String, String)),
   )
 }
 
@@ -472,6 +481,7 @@ fn run_search_library(
     Ok(#(query, mode_str, max_results, domain, include_pending)) -> {
       let mode = case mode_str {
         "keyword" -> search.Keyword
+        "reasoning" -> search.Reasoning
         _ -> search.Embedding
       }
       let domain_filter = case domain {
@@ -491,17 +501,62 @@ fn run_search_library(
             _, _ -> True
           }
         })
-      let results =
-        search.search(
-          query,
-          docs,
-          cfg.indexes_dir,
-          mode,
-          int.min(20, int.max(1, max_results)),
-          domain_filter,
-          None,
-          cfg.embed_fn,
-        )
+      let cap = int.min(20, int.max(1, max_results))
+      // Tier 3 logic:
+      //   mode=reasoning  → skip tiers 1/2, go straight to LLM
+      //   mode=keyword/embedding → run tier 1 or 2; if empty AND
+      //     reason_fn is available, auto-escalate to tier 3
+      //   (no reason_fn configured → behaves exactly as before)
+      let results = case mode, cfg.reason_fn {
+        search.Reasoning, Some(rf) ->
+          search.reason_over_documents(query, docs, cfg.indexes_dir, rf, cap)
+        search.Reasoning, None -> {
+          // Caller asked for reasoning but the instance doesn't have
+          // an LLM wired up — fall back to embedding/keyword rather
+          // than returning nothing unhelpful.
+          search.search(
+            query,
+            docs,
+            cfg.indexes_dir,
+            search.Embedding,
+            cap,
+            domain_filter,
+            None,
+            cfg.embed_fn,
+          )
+        }
+        _, _ -> {
+          let initial =
+            search.search(
+              query,
+              docs,
+              cfg.indexes_dir,
+              mode,
+              cap,
+              domain_filter,
+              None,
+              cfg.embed_fn,
+            )
+          case initial, cfg.reason_fn {
+            [], Some(rf) -> {
+              slog.info(
+                "knowledge",
+                "search_library",
+                "Tiers 1/2 returned no results — escalating to Tier 3 reasoning",
+                None,
+              )
+              search.reason_over_documents(
+                query,
+                docs,
+                cfg.indexes_dir,
+                rf,
+                cap,
+              )
+            }
+            _, _ -> initial
+          }
+        }
+      }
       let formatted = case results {
         [] -> "No results found."
         _ ->
