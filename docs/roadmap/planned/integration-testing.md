@@ -261,6 +261,38 @@ Good scenario candidates visible now:
 - D' gate reject → retry path
 - Frontdoor source_id isolation (two sinks, one source doesn't leak to the other)
 
+Queued from doc-library completion (2026-04-25) — both pinned to bugs
+already fixed, both within the current single-instance scenario
+runner's shape. Add as a focused PR after PRs 7-8 of doc-library
+land:
+
+- **`writer-truncation-warning.toml`** — operator asks writer for a
+  long report; writer hits `max_tokens`; `AgentSuccess.truncated`
+  flips True; cognitive surfaces the WARNING block on the next
+  turn. Catches the Nemo "agent lying" pattern (Phase 0 of
+  agent-comms-plumbing). Asserts `log_present` for the truncation
+  WARNING and `log_absent` for any "Empty response" line.
+- **`writer-revise-preserves-content.toml`** — operator asks for a
+  draft; second cycle asks for revision via `draft_slug`; draft
+  on disk retains unchanged sections. Catches the "writer
+  overwrites with create_draft instead of update_draft" failure
+  PR 4 fixed. Asserts file-presence + content-substring on the
+  drafts dir after the second cycle settles.
+
+Not queued (would need scenario runner extensions or external mock
+infra):
+
+- Approval flow (promote → search-empty → approve → search-returns)
+  needs multi-cycle operator drive — the runner currently models
+  one operator turn cleanly, multi-turn approval needs a `wait_for`
+  step that listens for an agent reply before injecting the next
+  user input.
+- Email attachment scenario needs a mock AgentMail HTTP layer.
+- Tier 3 reasoning scenario needs a scripted LLM that returns
+  specific tool-call shapes; the mock provider's
+  `provider_with_handler` could do it but the wiring through the
+  knowledge tools' `reason_fn` field needs threading.
+
 ### Phase 3 — live-LLM tier (deferred indefinitely)
 
 If Phase 1-2 prove insufficient, add a `--live-llm` flag that uses the
