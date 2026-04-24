@@ -61,6 +61,9 @@ pub type CaptureStatus {
   Dismissed(reason: String)
   /// Auto-expired by the daily sweep after exceeding captures_expiry_days.
   Expired
+  /// Commitment was delivered on. The reason records how the agent or an
+  /// auto-satisfy heuristic concluded the work was done.
+  Satisfied(reason: String)
 }
 
 // ---------------------------------------------------------------------------
@@ -78,4 +81,7 @@ pub type CaptureOp {
   Dismiss(id: String, reason: String)
   /// Auto-expired by the daily sweep.
   Expire(id: String)
+  /// Commitment delivered on. Reason may be agent-supplied or an auto
+  /// heuristic ("auto: matches task TASK-123").
+  Satisfy(id: String, reason: String)
 }
