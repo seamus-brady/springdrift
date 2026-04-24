@@ -2003,7 +2003,20 @@ fn maybe_spawn_deputy(
           // hierarchy's lifetime. Recent-deputy record is appended when
           // the hierarchy finishes (see shutdown_hierarchy_deputy).
           let xml = deputy_types.render_briefing(b)
-          #(xml <> "\n\n" <> instruction, Some(meta.subject))
+          // If the briefing is silent (no CBR cases, no facts, no
+          // narrative overlap — typical on fresh instances), the deputy
+          // has nothing to serve. Retire it and don't install ask_deputy
+          // on the specialist. The briefing XML still goes into the
+          // instruction for context, but the specialist won't burn turns
+          // asking a deputy that can only decline.
+          case b.signal == "silent" {
+            True -> {
+              process.send(meta.subject, deputy_types.Shutdown)
+              librarian.notify_remove_active_deputy(lib, meta.id)
+              #(xml <> "\n\n" <> instruction, None)
+            }
+            False -> #(xml <> "\n\n" <> instruction, Some(meta.subject))
+          }
         }
         Error(reason) -> {
           // Briefing failed. The deputy may or may not still be alive
