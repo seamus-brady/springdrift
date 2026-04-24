@@ -22,8 +22,14 @@ import gleam/dynamic/decode
 import gleam/int
 import gleam/json
 import gleam/option.{type Option, None, Some}
+import gleam/string
 import llm/types.{type Usage, Usage}
 import slog
+
+/// Monotonic positive integer — tagged onto every outbound ServerMessage
+/// JSON as a `seq` field so the client can detect reordering / gaps.
+@external(erlang, "springdrift_ffi", "monotonic_seq")
+fn monotonic_seq() -> Int
 
 // ---------------------------------------------------------------------------
 // Types
@@ -190,7 +196,24 @@ pub fn decode_client_message(json_string: String) -> Result(ClientMessage, Nil) 
 // Encode (server → client)
 // ---------------------------------------------------------------------------
 
+/// Encode a server message as JSON with a monotonic `seq` field injected
+/// as the first key. The seq is a per-node monotonic integer so a client
+/// can detect reordering or gaps in delivered frames.
 pub fn encode_server_message(msg: ServerMessage) -> String {
+  with_seq(encode_body(msg))
+}
+
+/// Inject a `"seq": N,` field at the start of the JSON object. All body
+/// encoders produce an object starting with `{` — we splice between the
+/// `{` and the first existing field so the resulting JSON stays valid.
+fn with_seq(body: String) -> String {
+  "{\"seq\":"
+  <> int.to_string(monotonic_seq())
+  <> ","
+  <> string.drop_start(body, 1)
+}
+
+fn encode_body(msg: ServerMessage) -> String {
   case msg {
     AssistantMessage(text:, model:, usage:) ->
       json.object([

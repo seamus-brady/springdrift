@@ -1271,7 +1271,12 @@ pub fn mobile_page(agent_name: String, agent_version: String) -> String {
   });
   input.addEventListener('input', autoGrow);
 
+  // Server tags every frame with a monotonic `seq`. Track the last one we
+  // saw so we can console.warn if frames arrive out of order — useful
+  // signal if the wire path ever does reorder things. Reset on reconnect.
+  var lastSeenSeq = 0;
   function connect() {
+    lastSeenSeq = 0;
     ws = new WebSocket(wsUrl());
     ws.onopen = function() {
       setStatus('connected');
@@ -1287,6 +1292,12 @@ pub fn mobile_page(agent_name: String, agent_version: String) -> String {
     ws.onmessage = function(evt) {
       var msg;
       try { msg = JSON.parse(evt.data); } catch (e) { return; }
+      if (typeof msg.seq === 'number') {
+        if (lastSeenSeq > 0 && msg.seq < lastSeenSeq) {
+          console.warn('ws frame arrived out of order: seq=' + msg.seq + ' after ' + lastSeenSeq + ' (type=' + msg.type + ')');
+        }
+        if (msg.seq > lastSeenSeq) lastSeenSeq = msg.seq;
+      }
       switch (msg.type) {
         case 'session_history':
           // Replay prior messages. Filtering matches the desktop /chat
@@ -3718,7 +3729,11 @@ fn sidebar_js() -> String {
 }
 
 fn ws_connect_js() -> String {
-  "function connect() {
+  "// Server tags every frame with a monotonic seq. Detect reordering in
+  // console for diagnostics. Reset on reconnect.
+  var lastSeenSeq = 0;
+  function connect() {
+    lastSeenSeq = 0;
     var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     var params = new URLSearchParams(location.search);
     var token = params.get('token');
@@ -3764,6 +3779,12 @@ fn ws_connect_js() -> String {
     ws.onmessage = function(evt) {
       var data;
       try { data = JSON.parse(evt.data); } catch(e) { console.error('WS parse error:', e.message, 'data length:', evt.data.length); return; }
+      if (typeof data.seq === 'number') {
+        if (lastSeenSeq > 0 && data.seq < lastSeenSeq) {
+          console.warn('ws frame arrived out of order: seq=' + data.seq + ' after ' + lastSeenSeq + ' (type=' + data.type + ')');
+        }
+        if (data.seq > lastSeenSeq) lastSeenSeq = data.seq;
+      }
       handleServerMessage(data);
     };
   }"
