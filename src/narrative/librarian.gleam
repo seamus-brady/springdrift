@@ -2410,6 +2410,28 @@ pub fn get_pending_capture_count(librarian: Subject(LibrarianMessage)) -> Int {
   }
 }
 
+/// Get a DAG subtree rooted at `cycle_id`. Blocks until reply. Returns
+/// Error(Nil) on timeout or if the cycle isn't indexed.
+pub fn get_subtree(
+  librarian: Subject(LibrarianMessage),
+  cycle_id: String,
+) -> Result(dag_types.DagSubtree, Nil) {
+  let reply_to = process.new_subject()
+  process.send(librarian, QueryNodeWithDescendants(cycle_id:, reply_to:))
+  case process.receive(reply_to, 5000) {
+    Ok(result) -> result
+    Error(_) -> {
+      slog.warn(
+        "librarian",
+        "get_subtree",
+        "Timeout waiting for subtree of " <> cycle_id,
+        None,
+      )
+      Error(Nil)
+    }
+  }
+}
+
 /// Full list of pending captures. Blocks until reply. Returns [] on timeout.
 pub fn get_pending_captures(
   librarian: Subject(LibrarianMessage),

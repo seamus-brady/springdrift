@@ -31,7 +31,34 @@ pub fn all() -> List(Tool) {
 /// reserved for the cognitive loop — sub-agents report back through
 /// their return value, not by hijacking the user interaction channel.
 pub fn agent_tools() -> List(Tool) {
-  [calculator_tool(), datetime_tool(), read_skill_tool()]
+  [
+    calculator_tool(),
+    datetime_tool(),
+    read_skill_tool(),
+    read_hierarchy_tool(),
+  ]
+}
+
+/// Read the delegation hierarchy around the specialist's current cycle.
+/// Takes an optional scope parameter; the cycle_id is injected by the
+/// framework so the LLM doesn't need to know it. Returns a compact text
+/// rendering of peer / ancestor / full-subtree cycles.
+pub fn read_hierarchy_tool() -> Tool {
+  tool.new("read_hierarchy")
+  |> tool.with_description(
+    "Read the delegation hierarchy around your current cycle. Use this "
+    <> "when you need to know what other agents the orchestrator is running "
+    <> "in parallel with you, or what results the orchestrator already has "
+    <> "in hand, instead of relying on paraphrased echoes in your "
+    <> "instruction. The framework injects your cycle_id automatically.",
+  )
+  |> tool.add_enum_param(
+    "scope",
+    "Which cycles to return. 'siblings' (default): peer delegations under the same orchestrator. 'ancestors': walk up the delegation chain. 'full': entire subtree from the root.",
+    ["siblings", "ancestors", "full"],
+    False,
+  )
+  |> tool.build()
 }
 
 pub fn human_input_tool() -> Tool {

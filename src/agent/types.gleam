@@ -345,6 +345,10 @@ pub type CognitiveMessage {
   AgentComplete(outcome: AgentOutcome)
   AgentProgress(progress: DelegationProgress)
   AgentQuestion(question: String, agent: String, reply_to: Subject(String))
+  /// Request from a specialist (via framework) for a compact rendering
+  /// of the delegation hierarchy around a cycle. Cognitive loop queries
+  /// the librarian and replies with formatted text.
+  HierarchyQuery(cycle_id: String, scope: String, reply_to: Subject(String))
   AgentEvent(event: AgentLifecycleEvent)
   SetModel(model: String)
   /// Post-startup wiring: hands cognitive a handle on the scheduler
