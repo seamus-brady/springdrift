@@ -41,6 +41,16 @@ fn http_get_with_headers(
   headers: List(#(String, String)),
 ) -> Result(#(Int, String), String)
 
+/// Same Erlang function as http_get_with_headers but typed to return
+/// the body as BitArray. Used for attachment downloads where the
+/// payload is binary (PDF, docx, image) and UTF-8 sanitisation would
+/// corrupt the bytes.
+@external(erlang, "springdrift_ffi", "http_get_bytes")
+fn http_get_bytes(
+  url: String,
+  headers: List(#(String, String)),
+) -> Result(#(Int, BitArray), String)
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -76,6 +86,19 @@ pub type FullMessage {
     text: String,
     html: String,
     timestamp: String,
+    attachments: List(Attachment),
+  )
+}
+
+/// Attachment metadata returned alongside a FullMessage. Content is
+/// fetched separately via download_attachment to avoid loading large
+/// binary blobs into memory unnecessarily.
+pub type Attachment {
+  Attachment(
+    attachment_id: String,
+    filename: String,
+    content_type: String,
+    size: Int,
   )
 }
 
@@ -275,6 +298,21 @@ pub fn get_message(
 }
 
 fn decode_full_message(body: String) -> Result(FullMessage, String) {
+  let attachment_decoder = {
+    use attachment_id <- decode.optional_field(
+      "attachment_id",
+      "",
+      decode.string,
+    )
+    use filename <- decode.optional_field("filename", "", decode.string)
+    use content_type <- decode.optional_field(
+      "content_type",
+      "application/octet-stream",
+      decode.string,
+    )
+    use size <- decode.optional_field("size", 0, decode.int)
+    decode.success(Attachment(attachment_id:, filename:, content_type:, size:))
+  }
   let decoder = {
     use message_id <- decode.optional_field("message_id", "", decode.string)
     use thread_id <- decode.optional_field("thread_id", "", decode.string)
@@ -285,6 +323,11 @@ fn decode_full_message(body: String) -> Result(FullMessage, String) {
     use text <- decode.optional_field("text", "", decode.string)
     use html <- decode.optional_field("html", "", decode.string)
     use timestamp <- decode.optional_field("timestamp", "", decode.string)
+    use attachments <- decode.optional_field(
+      "attachments",
+      [],
+      decode.list(attachment_decoder),
+    )
     decode.success(FullMessage(
       message_id:,
       thread_id:,
@@ -294,6 +337,7 @@ fn decode_full_message(body: String) -> Result(FullMessage, String) {
       text:,
       html:,
       timestamp:,
+      attachments:,
     ))
   }
   case json.parse(body, decoder) {
@@ -301,6 +345,56 @@ fn decode_full_message(body: String) -> Result(FullMessage, String) {
     Error(_) ->
       Error("Failed to decode message: " <> string.slice(body, 0, 200))
   }
+}
+
+// ---------------------------------------------------------------------------
+// Attachment download
+// ---------------------------------------------------------------------------
+
+/// Download a single attachment's raw bytes from AgentMail.
+/// `attachment_id` comes from the Attachment struct attached to a
+/// FullMessage. Returns the raw byte payload — caller writes it to
+/// disk under whatever filename it deems safe.
+pub fn download_attachment(
+  inbox_id: String,
+  api_key_env: String,
+  message_id: String,
+  attachment_id: String,
+) -> Result(BitArray, String) {
+  case get_env(api_key_env) {
+    Error(_) -> Error(api_key_env <> " not set")
+    Ok(api_key) -> {
+      let url =
+        api_base
+        <> "/inboxes/"
+        <> inbox_id
+        <> "/messages/"
+        <> uri_encode(message_id)
+        <> "/attachments/"
+        <> uri_encode(attachment_id)
+      let headers = auth_headers_for_download(api_key)
+      case http_get_bytes(url, headers) {
+        Error(reason) -> Error("HTTP error: " <> reason)
+        Ok(#(status, body)) ->
+          case status >= 200 && status < 300 {
+            True -> Ok(body)
+            False ->
+              Error(
+                "AgentMail API error "
+                <> int.to_string(status)
+                <> " fetching attachment "
+                <> attachment_id,
+              )
+          }
+      }
+    }
+  }
+}
+
+fn auth_headers_for_download(api_key: String) -> List(#(String, String)) {
+  // No Content-Type for GET — server picks the response content type
+  // based on the attachment's actual format.
+  [#("Authorization", "Bearer " <> api_key)]
 }
 
 // ---------------------------------------------------------------------------
