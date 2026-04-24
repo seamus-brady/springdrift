@@ -10,6 +10,7 @@
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
+import knowledge/converter
 import knowledge/indexer
 import knowledge/log as knowledge_log
 import knowledge/types
@@ -37,10 +38,10 @@ pub fn process_inbox(
   case simplifile.read_directory(inbox_dir) {
     Error(_) -> 0
     Ok(files) -> {
-      let processable =
-        list.filter(files, fn(f) {
-          string.ends_with(f, ".md") || string.ends_with(f, ".txt")
-        })
+      // Supported inputs: markdown, text, PDF, HTML, docx, epub.
+      // Everything else is skipped (operator can see it sitting in
+      // the inbox and remove it).
+      let processable = list.filter(files, fn(f) { converter.is_supported(f) })
       list.fold(processable, 0, fn(count, filename) {
         case
           process_file(
@@ -67,9 +68,22 @@ fn process_file(
   filename: String,
 ) -> Result(String, String) {
   let source_path = inbox_dir <> "/" <> filename
-  case simplifile.read(source_path) {
-    Error(reason) ->
-      Error("Failed to read " <> filename <> ": " <> string.inspect(reason))
+  // Route through the converter — markdown/txt read as-is, others shell
+  // out to pdftotext / pandoc. Errors leave the file in the inbox so
+  // the operator can see it and investigate.
+  case converter.convert(source_path) {
+    Error(converter.UnsupportedExtension(extension:)) ->
+      Error("Unsupported extension '" <> extension <> "' on " <> filename)
+    Error(converter.BinaryMissing(binary:)) ->
+      Error(
+        "Converter binary missing: "
+        <> binary
+        <> " (install it on the host to process "
+        <> filename
+        <> ")",
+      )
+    Error(converter.ConversionFailed(reason:)) ->
+      Error("Failed to convert " <> filename <> ": " <> reason)
     Ok(content) -> {
       let slug = derive_slug(filename)
       let domain = "inbox"
@@ -135,10 +149,21 @@ fn process_file(
   }
 }
 
-fn derive_slug(filename: String) -> String {
+fn strip_extension(filename: String) -> String {
   filename
+  |> string.replace(".markdown", "")
   |> string.replace(".md", "")
   |> string.replace(".txt", "")
+  |> string.replace(".pdf", "")
+  |> string.replace(".html", "")
+  |> string.replace(".htm", "")
+  |> string.replace(".docx", "")
+  |> string.replace(".epub", "")
+}
+
+fn derive_slug(filename: String) -> String {
+  filename
+  |> strip_extension
   |> string.lowercase
   |> string.replace(" ", "-")
   |> string.replace("_", "-")
@@ -151,15 +176,11 @@ fn derive_title(filename: String, content: String) -> String {
         True -> string.trim(string.drop_start(string.trim(first), 2))
         False ->
           filename
-          |> string.replace(".md", "")
-          |> string.replace(".txt", "")
+          |> strip_extension
           |> string.replace("-", " ")
           |> string.replace("_", " ")
       }
-    [] ->
-      filename
-      |> string.replace(".md", "")
-      |> string.replace(".txt", "")
+    [] -> strip_extension(filename)
   }
 }
 
