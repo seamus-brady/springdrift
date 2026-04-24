@@ -18,7 +18,7 @@
          resolve_symlinks/1,
          file_size/1, days_ago_date/1,
          uri_encode/1, extract_ddg_results/1,
-         http_get/1, http_get_with_headers/2,
+         http_get/1, http_get_with_headers/2, http_get_bytes/2,
          ensure_utf8/1, days_between/2,
          mailbox_size/0, add_days/2,
          ms_until_datetime/1, advance_datetime_ms/2,
@@ -519,6 +519,15 @@ http_get_with_headers(Url, Headers) ->
         {error, Reason} ->
             {error, list_to_binary(io_lib:format("~p", [Reason]))}
     end.
+
+%% http_get_bytes/2 — same semantics as http_get_with_headers/2 but the
+%% Gleam side types the body as BitArray rather than String. Used for
+%% binary content (PDFs, images, docx) where UTF-8 sanitisation would
+%% corrupt the bytes. The Erlang implementation is identical;
+%% body_format=binary already returns raw bytes — only the Gleam type
+%% binding differs.
+http_get_bytes(Url, Headers) ->
+    http_get_with_headers(Url, Headers).
 
 %% Clean DuckDuckGo redirect URLs to extract the actual URL.
 %% Convert either a charlist or a binary to a binary safely.

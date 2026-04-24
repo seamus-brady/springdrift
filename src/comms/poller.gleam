@@ -25,6 +25,7 @@ import gleam/set.{type Set}
 import gleam/string
 import paths
 import scheduler/types as scheduler_types
+import simplifile
 import slog
 
 // ---------------------------------------------------------------------------
@@ -210,14 +211,17 @@ fn handle_tick(state: PollerState) -> PollerState {
         // Fetch full message body first, then log with full text
         // Cap at 50KB to prevent memory/storage issues from huge emails
         let max_body_chars = 50_000
-        let body = case
+        let #(body, attachments) = case
           email.get_message(
             state.config.inbox_id,
             state.config.api_key_env,
             m.message_id,
           )
         {
-          Ok(full) -> string.slice(full.text, 0, max_body_chars)
+          Ok(full) -> #(
+            string.slice(full.text, 0, max_body_chars),
+            full.attachments,
+          )
           Error(reason) -> {
             slog.warn(
               "comms/poller",
@@ -229,9 +233,26 @@ fn handle_tick(state: PollerState) -> PollerState {
                 <> " — using preview",
               None,
             )
-            m.preview
+            #(m.preview, [])
           }
         }
+
+        // Attachments inherit the sender's allowlist status — the
+        // outer message-level filter has already ensured the sender
+        // passed the allowlist (m.from is on the list of permitted
+        // senders, otherwise the poller would have dropped the
+        // message before this point in the older spam-filter flow).
+        // Download each attachment and drop into the knowledge inbox
+        // for the existing converter pipeline (PR 1) to pick up.
+        list.each(attachments, fn(att) {
+          process_attachment(
+            state.config.inbox_id,
+            state.config.api_key_env,
+            m.message_id,
+            m.from,
+            att,
+          )
+        })
 
         // Log inbound message with full body
         comms_log.append(
@@ -302,6 +323,131 @@ fn handle_tick(state: PollerState) -> PollerState {
         consecutive_failures: 0,
       )
     }
+  }
+}
+
+/// Maximum attachment size to download. Attachments over this are
+/// skipped with a slog warning. Caps disk usage from rogue
+/// attachments. 25MB is generous for typical PDFs / docx; ratchet
+/// down via config if needed.
+const max_attachment_bytes: Int = 25_000_000
+
+/// Download a single attachment and write it into the knowledge
+/// inbox under a filename that includes the sender + message id, so
+/// two emails with the same filename don't collide and the operator
+/// can trace back where each came from. The existing inbox processor
+/// (PR 1) picks the file up on its next pass and runs it through
+/// the converter pipeline.
+fn process_attachment(
+  inbox_id: String,
+  api_key_env: String,
+  message_id: String,
+  from: String,
+  att: email.Attachment,
+) -> Nil {
+  case att.size > max_attachment_bytes {
+    True -> {
+      slog.warn(
+        "comms/poller",
+        "process_attachment",
+        "Skipping oversized attachment "
+          <> att.filename
+          <> " ("
+          <> int.to_string(att.size)
+          <> " bytes) from "
+          <> from,
+        None,
+      )
+      Nil
+    }
+    False -> {
+      case
+        email.download_attachment(
+          inbox_id,
+          api_key_env,
+          message_id,
+          att.attachment_id,
+        )
+      {
+        Error(reason) -> {
+          slog.warn(
+            "comms/poller",
+            "process_attachment",
+            "Failed to download " <> att.filename <> ": " <> reason,
+            None,
+          )
+          Nil
+        }
+        Ok(bytes) -> {
+          let inbox_dir = paths.knowledge_inbox_dir()
+          case
+            write_attachment_to_inbox(
+              inbox_dir,
+              message_id,
+              att.filename,
+              bytes,
+            )
+          {
+            Ok(saved_filename) ->
+              slog.info(
+                "comms/poller",
+                "process_attachment",
+                "Saved attachment '"
+                  <> att.filename
+                  <> "' from "
+                  <> from
+                  <> " to inbox as "
+                  <> saved_filename,
+                None,
+              )
+            Error(reason) ->
+              slog.warn(
+                "comms/poller",
+                "process_attachment",
+                "Failed to write attachment to inbox: " <> reason,
+                None,
+              )
+          }
+          Nil
+        }
+      }
+    }
+  }
+}
+
+/// Build a filename that's safe for the inbox dir AND traceable back
+/// to the source message. Format: `<short_msg_id>--<safe_original>`.
+/// `safe_original` strips path separators and shell-special chars to
+/// stop a malicious filename escaping the inbox dir. Public so the
+/// helper can be tested without spinning up the poller actor.
+pub fn build_inbox_filename(message_id: String, original: String) -> String {
+  let short = string.slice(message_id, 0, 12)
+  let safe =
+    original
+    |> string.replace("/", "_")
+    |> string.replace("\\", "_")
+    |> string.replace("..", "_")
+    |> string.replace(" ", "_")
+  short <> "--" <> safe
+}
+
+/// Write `bytes` into `inbox_dir` under a derived safe filename.
+/// Returns the final filename on success. Public so tests can drive
+/// it with a temp directory and known bytes — the poller calls it
+/// after a real download_attachment, but the file-system half is
+/// pure-ish (no HTTP) and worth covering.
+pub fn write_attachment_to_inbox(
+  inbox_dir: String,
+  message_id: String,
+  original_filename: String,
+  bytes: BitArray,
+) -> Result(String, String) {
+  let _ = simplifile.create_directory_all(inbox_dir)
+  let dest_filename = build_inbox_filename(message_id, original_filename)
+  let dest_path = inbox_dir <> "/" <> dest_filename
+  case simplifile.write_bits(dest_path, bytes) {
+    Ok(_) -> Ok(dest_filename)
+    Error(reason) -> Error(string.inspect(reason))
   }
 }
 
