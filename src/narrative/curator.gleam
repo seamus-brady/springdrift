@@ -1138,8 +1138,20 @@ fn build_sensorium(
   // Captures — MVP commitment tracker. Render compact details for the
   // top pending agent self-promises and operator asks so the agent sees
   // outstanding commitments every cycle without calling list_captures.
-  let captures_section =
-    render_sensorium_captures(librarian.get_pending_captures(state.librarian))
+  let pending_captures = librarian.get_pending_captures(state.librarian)
+  let captures_section = render_sensorium_captures(pending_captures)
+  // Phase 3c: if any self-commitment text overlaps the current user
+  // input, surface a targeted reminder. Narrow-scope — only fires on
+  // real overlap with what's being asked right now.
+  let self_reminder_text = case context {
+    Some(ctx) -> ctx.last_user_input
+    None -> ""
+  }
+  let self_reminder_section =
+    render_sensorium_self_commitment_reminder(
+      pending_captures,
+      self_reminder_text,
+    )
 
   // Deputies — Phase 1 MVP. Ambient awareness of recent briefings.
   let deputies_section =
@@ -1161,10 +1173,10 @@ fn build_sensorium(
   let sections =
     [
       clock, situation, schedule, vitals, sandbox_section, delegations, events,
-      tasks_section, captures_section, deputies_section, strategies_section,
-      goals_section, affect_warnings_section, integrity_section,
-      skill_procedures_section, meta_recommendations_section, knowledge_section,
-      memory_section,
+      tasks_section, self_reminder_section, captures_section, deputies_section,
+      strategies_section, goals_section, affect_warnings_section,
+      integrity_section, skill_procedures_section, meta_recommendations_section,
+      knowledge_section, memory_section,
     ]
     |> list.filter(fn(s) { s != "" })
     |> string.join("\n")
@@ -1740,6 +1752,93 @@ pub fn render_sensorium_captures(
       <> "\n  </commitments>"
     }
   }
+}
+
+/// Render a `<self_commitment_reminder>` block when any pending agent_self
+/// capture has keyword overlap with the current user input. Narrow-scope
+/// by design: fires only when there's genuine overlap with what's being
+/// asked, not just because self-commitments exist.
+///
+/// Phase 3c of the commitment-loop plumbing: the agent made promises it
+/// should be held to. This surfaces the most relevant one right when the
+/// operator circles back to the same topic.
+pub fn render_sensorium_self_commitment_reminder(
+  captures: List(captures_types.Capture),
+  current_text: String,
+) -> String {
+  let current_words = significant_words(current_text)
+  case current_words {
+    [] -> ""
+    _ -> {
+      let self_pending =
+        captures
+        |> list.filter(fn(c) {
+          c.status == captures_types.Pending
+          && c.source == captures_types.AgentSelf
+        })
+      let scored =
+        self_pending
+        |> list.map(fn(c) { #(c, word_overlap_count(current_words, c.text)) })
+        |> list.filter(fn(pair) { pair.1 >= 2 })
+        |> list.sort(fn(a, b) { int.compare(b.1, a.1) })
+      case scored {
+        [] -> ""
+        [#(top, _), ..] -> {
+          let age = format_elapsed_since(top.created_at)
+          "  <self_commitment_reminder age=\""
+          <> age
+          <> "\">\n    "
+          <> "You previously committed: "
+          <> skills.xml_escape(top.text)
+          <> " Consider satisfying, dismissing, or addressing "
+          <> "this before moving on."
+          <> "\n  </self_commitment_reminder>"
+        }
+      }
+    }
+  }
+}
+
+/// Count of shared significant words between a word-set and a free-text
+/// string. Used by the self-commitment reminder's overlap heuristic.
+fn word_overlap_count(words: List(String), text: String) -> Int {
+  let text_words = significant_words(text)
+  list.filter(words, fn(w) { list.contains(text_words, w) })
+  |> list.length
+}
+
+/// Extract significant words from free text: lowercase, strip punctuation,
+/// drop tokens shorter than 4 chars (usually function words like "the",
+/// "and", "you"), deduplicate. Cheap heuristic — good enough for overlap
+/// scoring without pulling in embeddings.
+fn significant_words(text: String) -> List(String) {
+  text
+  |> string.lowercase
+  |> string.to_graphemes
+  |> list.map(fn(c) {
+    case
+      c == " "
+      || c == "\n"
+      || c == "\t"
+      || c == ","
+      || c == "."
+      || c == ":"
+      || c == ";"
+      || c == "!"
+      || c == "?"
+      || c == "("
+      || c == ")"
+      || c == "\""
+      || c == "'"
+    {
+      True -> " "
+      False -> c
+    }
+  })
+  |> string.join("")
+  |> string.split(" ")
+  |> list.filter(fn(w) { string.length(w) >= 4 })
+  |> list.unique
 }
 
 fn render_capture_row(kind: String, c: captures_types.Capture) -> String {

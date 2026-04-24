@@ -470,3 +470,90 @@ pub fn captures_caps_self_items_at_three_test() {
   out |> string.contains("fourth") |> should.be_false
   out |> string.contains("fifth") |> should.be_false
 }
+
+// ---------------------------------------------------------------------------
+// render_sensorium_self_commitment_reminder — Phase 3c
+// ---------------------------------------------------------------------------
+
+pub fn reminder_empty_captures_returns_empty_test() {
+  curator.render_sensorium_self_commitment_reminder(
+    [],
+    "hello, can you check the logs",
+  )
+  |> should.equal("")
+}
+
+pub fn reminder_empty_current_text_returns_empty_test() {
+  let c =
+    make_pending_capture(
+      "a",
+      captures_types.AgentSelf,
+      "check logs and report back",
+    )
+  curator.render_sensorium_self_commitment_reminder([c], "")
+  |> should.equal("")
+}
+
+pub fn reminder_no_overlap_returns_empty_test() {
+  let c =
+    make_pending_capture(
+      "a",
+      captures_types.AgentSelf,
+      "investigate scheduler pollution",
+    )
+  // Current input is about an unrelated topic — no overlap, no reminder.
+  curator.render_sensorium_self_commitment_reminder(
+    [c],
+    "explain how quicksort works in simple terms",
+  )
+  |> should.equal("")
+}
+
+pub fn reminder_strong_overlap_fires_test() {
+  let c =
+    make_pending_capture(
+      "a",
+      captures_types.AgentSelf,
+      "check the scheduler pollution issue and report back",
+    )
+  let out =
+    curator.render_sensorium_self_commitment_reminder(
+      [c],
+      "can you look at the scheduler pollution again?",
+    )
+  out |> string.contains("<self_commitment_reminder") |> should.be_true
+  out |> string.contains("check the scheduler pollution") |> should.be_true
+}
+
+pub fn reminder_ignores_operator_ask_captures_test() {
+  // Only agent_self captures trigger reminders; operator_ask items show
+  // up in the regular commitments block.
+  let c =
+    make_pending_capture(
+      "a",
+      captures_types.OperatorAsk,
+      "check scheduler pollution issue",
+    )
+  curator.render_sensorium_self_commitment_reminder(
+    [c],
+    "scheduler pollution issue needs looking at",
+  )
+  |> should.equal("")
+}
+
+pub fn reminder_ignores_non_pending_captures_test() {
+  let c =
+    captures_types.Capture(
+      ..make_pending_capture(
+        "a",
+        captures_types.AgentSelf,
+        "check the scheduler pollution issue",
+      ),
+      status: captures_types.Satisfied(reason: "done in cycle X"),
+    )
+  curator.render_sensorium_self_commitment_reminder(
+    [c],
+    "scheduler pollution issue",
+  )
+  |> should.equal("")
+}
