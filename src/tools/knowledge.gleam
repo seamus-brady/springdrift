@@ -56,7 +56,12 @@ pub fn researcher_tools() -> List(llm_types.Tool) {
 }
 
 pub fn writer_tools() -> List(llm_types.Tool) {
-  [create_draft_tool(), update_draft_tool(), promote_draft_tool()]
+  [
+    create_draft_tool(),
+    read_draft_tool(),
+    update_draft_tool(),
+    promote_draft_tool(),
+  ]
 }
 
 fn list_documents_tool() -> llm_types.Tool {
@@ -183,6 +188,18 @@ fn create_draft_tool() -> llm_types.Tool {
   |> tool.build()
 }
 
+fn read_draft_tool() -> llm_types.Tool {
+  tool.new("read_draft")
+  |> tool.with_description(
+    "Read an existing draft by slug. Use this before `update_draft` "
+    <> "when you've been asked to revise a prior draft — you need to "
+    <> "see what's currently in it before producing the revised "
+    <> "version. The draft is returned as-is (full markdown).",
+  )
+  |> tool.add_string_param("slug", "Draft identifier to read", True)
+  |> tool.build()
+}
+
 fn update_draft_tool() -> llm_types.Tool {
   tool.new("update_draft")
   |> tool.with_description("Revise an existing draft report.")
@@ -255,6 +272,7 @@ pub fn is_knowledge_tool(name: String) -> Bool {
   || name == "read_section"
   || name == "save_to_library"
   || name == "create_draft"
+  || name == "read_draft"
   || name == "update_draft"
   || name == "promote_draft"
   || name == "approve_export"
@@ -292,6 +310,7 @@ pub fn execute(
     "read_section" -> run_read_section(call, cfg)
     "save_to_library" -> run_save_to_library(call, cfg)
     "create_draft" -> run_create_draft(call, cfg)
+    "read_draft" -> run_read_draft(call, cfg)
     "update_draft" -> run_update_draft(call, cfg)
     "promote_draft" -> run_promote_draft(call, cfg)
     "approve_export" -> run_approve_export(call, cfg)
@@ -662,6 +681,27 @@ fn run_create_draft(
             tool_use_id: call.id,
             content: "Draft '" <> slug <> "' created.",
           )
+        Error(reason) ->
+          llm_types.ToolFailure(tool_use_id: call.id, error: reason)
+      }
+  }
+}
+
+fn run_read_draft(
+  call: llm_types.ToolCall,
+  cfg: KnowledgeConfig,
+) -> llm_types.ToolResult {
+  let decoder = {
+    use slug <- decode.field("slug", decode.string)
+    decode.success(slug)
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) ->
+      llm_types.ToolFailure(tool_use_id: call.id, error: "Missing slug")
+    Ok(slug) ->
+      case workspace.read_draft(cfg.drafts_dir, slug) {
+        Ok(content) ->
+          llm_types.ToolSuccess(tool_use_id: call.id, content: content)
         Error(reason) ->
           llm_types.ToolFailure(tool_use_id: call.id, error: reason)
       }

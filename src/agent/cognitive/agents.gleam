@@ -1861,11 +1861,12 @@ fn parse_refs_prefix(input_json: String) -> String {
       "",
       decode.string,
     )
-    decode.success(#(artifact_id, task_id, prior_cycle_id))
+    use draft_slug <- decode.optional_field("draft_slug", "", decode.string)
+    decode.success(#(artifact_id, task_id, prior_cycle_id, draft_slug))
   }
   case json.parse(input_json, decoder) {
     Error(_) -> ""
-    Ok(#(a, t, c)) -> {
+    Ok(#(a, t, c, d)) -> {
       let parts = [
         case a {
           "" -> ""
@@ -1878,6 +1879,10 @@ fn parse_refs_prefix(input_json: String) -> String {
         case c {
           "" -> ""
           _ -> "  <prior_cycle_id>" <> c <> "</prior_cycle_id>"
+        },
+        case d {
+          "" -> ""
+          _ -> "  <draft_slug>" <> d <> "</draft_slug>"
         },
       ]
       let non_empty = list.filter(parts, fn(s) { s != "" })
