@@ -42,6 +42,8 @@ pub fn cognitive_tools() -> List(llm_types.Tool) {
     write_journal_tool(),
     write_note_tool(),
     read_note_tool(),
+    approve_export_tool(),
+    reject_export_tool(),
   ]
 }
 
@@ -108,7 +110,14 @@ fn read_note_tool() -> llm_types.Tool {
 fn search_library_tool() -> llm_types.Tool {
   tool.new("search_library")
   |> tool.with_description(
-    "Search the document library for relevant passages. Returns ranked results with provenance (document, section, line/page). Use embedding mode (default) for semantic search, keyword for exact phrases.",
+    "Search the document library for relevant passages. Returns "
+    <> "ranked results with provenance (document, section, line/page). "
+    <> "Use embedding mode (default) for semantic search, keyword for "
+    <> "exact phrases.\n\nBy default, results exclude Promoted exports "
+    <> "awaiting operator approval and Rejected exports (never "
+    <> "citeable). Set include_pending=true to see Promoted exports "
+    <> "in results — useful when deciding whether to continue revising "
+    <> "a draft, not useful for citation.",
   )
   |> tool.add_string_param("query", "The search query", True)
   |> tool.add_string_param(
@@ -122,6 +131,11 @@ fn search_library_tool() -> llm_types.Tool {
     False,
   )
   |> tool.add_string_param("domain", "Filter by domain (optional)", False)
+  |> tool.add_boolean_param(
+    "include_pending",
+    "Include Promoted-but-not-yet-Approved exports in results. Default false.",
+    False,
+  )
   |> tool.build()
 }
 
@@ -184,9 +198,47 @@ fn update_draft_tool() -> llm_types.Tool {
 fn promote_draft_tool() -> llm_types.Tool {
   tool.new("promote_draft")
   |> tool.with_description(
-    "Promote a draft to an export. The draft content is copied to exports and marked as Draft status pending operator approval.",
+    "Promote a draft to an export. The draft content is copied to "
+    <> "exports/ and marked with status=Promoted (pending operator "
+    <> "approval). Promoted exports are NOT cited by search_library by "
+    <> "default — they become canonical only after the operator runs "
+    <> "approve_export.",
   )
   |> tool.add_string_param("slug", "Draft identifier to promote", True)
+  |> tool.build()
+}
+
+fn approve_export_tool() -> llm_types.Tool {
+  tool.new("approve_export")
+  |> tool.with_description(
+    "Operator tool: approve a Promoted export so it becomes canonical "
+    <> "and citeable by search_library. Only call this when the "
+    <> "operator has explicitly asked you to approve the export. "
+    <> "Agents must not self-approve their own drafts.",
+  )
+  |> tool.add_string_param("slug", "Export slug (same as the draft)", True)
+  |> tool.add_string_param(
+    "note",
+    "Optional approval note (recorded in the audit log)",
+    False,
+  )
+  |> tool.build()
+}
+
+fn reject_export_tool() -> llm_types.Tool {
+  tool.new("reject_export")
+  |> tool.with_description(
+    "Operator tool: reject a Promoted export. Records the reason and "
+    <> "marks the export as Rejected (never citeable). The draft "
+    <> "itself is untouched and can be revised and re-promoted. Only "
+    <> "call when the operator has explicitly asked you to reject.",
+  )
+  |> tool.add_string_param("slug", "Export slug", True)
+  |> tool.add_string_param(
+    "reason",
+    "Short reason for rejection (required; appears in the audit log)",
+    True,
+  )
   |> tool.build()
 }
 
@@ -205,6 +257,8 @@ pub fn is_knowledge_tool(name: String) -> Bool {
   || name == "create_draft"
   || name == "update_draft"
   || name == "promote_draft"
+  || name == "approve_export"
+  || name == "reject_export"
 }
 
 // ---------------------------------------------------------------------------
@@ -240,6 +294,8 @@ pub fn execute(
     "create_draft" -> run_create_draft(call, cfg)
     "update_draft" -> run_update_draft(call, cfg)
     "promote_draft" -> run_promote_draft(call, cfg)
+    "approve_export" -> run_approve_export(call, cfg)
+    "reject_export" -> run_reject_export(call, cfg)
     _ ->
       llm_types.ToolFailure(
         tool_use_id: call.id,
@@ -384,12 +440,17 @@ fn run_search_library(
     use mode_str <- decode.optional_field("mode", "embedding", decode.string)
     use max <- decode.optional_field("max_results", 5, decode.int)
     use domain <- decode.optional_field("domain", "", decode.string)
-    decode.success(#(query, mode_str, max, domain))
+    use include_pending <- decode.optional_field(
+      "include_pending",
+      False,
+      decode.bool,
+    )
+    decode.success(#(query, mode_str, max, domain, include_pending))
   }
   case json.parse(call.input_json, decoder) {
     Error(_) ->
       llm_types.ToolFailure(tool_use_id: call.id, error: "Missing query")
-    Ok(#(query, mode_str, max_results, domain)) -> {
+    Ok(#(query, mode_str, max_results, domain, include_pending)) -> {
       let mode = case mode_str {
         "keyword" -> search.Keyword
         _ -> search.Embedding
@@ -398,7 +459,19 @@ fn run_search_library(
         "" -> None
         d -> Some(d)
       }
-      let docs = knowledge_log.resolve(cfg.knowledge_dir)
+      let all_docs = knowledge_log.resolve(cfg.knowledge_dir)
+      // Approval gate: Rejected exports are never citeable; Promoted
+      // exports (pending operator approval) are excluded unless the
+      // caller explicitly opts in with include_pending=true. Sources,
+      // drafts, notes, and other non-export types are unaffected.
+      let docs =
+        list.filter(all_docs, fn(m) {
+          case m.doc_type, m.status {
+            types.Export, types.Rejected -> False
+            types.Export, types.Promoted -> include_pending
+            _, _ -> True
+          }
+        })
       let results =
         search.search(
           query,
@@ -649,6 +722,11 @@ fn run_promote_draft(
               )
             Ok(_) -> {
               let doc_id = generate_uuid()
+              // Status: Promoted means the export exists but awaits
+              // operator approval. Search filters these out by
+              // default — the operator must explicitly approve before
+              // the content becomes a canonical source the agent
+              // will cite.
               let meta =
                 types.DocumentMeta(
                   op: types.Create,
@@ -657,7 +735,7 @@ fn run_promote_draft(
                   domain: "",
                   title: slug,
                   path: "exports/" <> slug <> ".md",
-                  status: types.Active,
+                  status: types.Promoted,
                   content_hash: sha256_hex(content),
                   node_count: 0,
                   created_at: get_datetime(),
@@ -670,10 +748,146 @@ fn run_promote_draft(
                 tool_use_id: call.id,
                 content: "Draft '"
                   <> slug
-                  <> "' promoted to export (pending operator approval).",
+                  <> "' promoted to export. Status: Promoted (pending "
+                  <> "operator approval). The operator can approve via "
+                  <> "`approve_export` or reject with `reject_export`.",
               )
             }
           }
+        }
+      }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// approve_export / reject_export — operator-driven approval workflow
+// ---------------------------------------------------------------------------
+
+fn run_approve_export(
+  call: llm_types.ToolCall,
+  cfg: KnowledgeConfig,
+) -> llm_types.ToolResult {
+  let decoder = {
+    use slug <- decode.field("slug", decode.string)
+    use note <- decode.optional_field("note", "", decode.string)
+    decode.success(#(slug, note))
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) ->
+      llm_types.ToolFailure(tool_use_id: call.id, error: "Missing slug")
+    Ok(#(slug, note)) ->
+      transition_export_status(
+        cfg,
+        call.id,
+        slug,
+        types.Approved,
+        "approved",
+        note,
+      )
+  }
+}
+
+fn run_reject_export(
+  call: llm_types.ToolCall,
+  cfg: KnowledgeConfig,
+) -> llm_types.ToolResult {
+  let decoder = {
+    use slug <- decode.field("slug", decode.string)
+    use reason <- decode.field("reason", decode.string)
+    decode.success(#(slug, reason))
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) ->
+      llm_types.ToolFailure(
+        tool_use_id: call.id,
+        error: "Missing slug or reason",
+      )
+    Ok(#(slug, reason)) ->
+      case string.trim(reason) {
+        "" ->
+          llm_types.ToolFailure(
+            tool_use_id: call.id,
+            error: "Rejection reason must not be empty",
+          )
+        trimmed ->
+          transition_export_status(
+            cfg,
+            call.id,
+            slug,
+            types.Rejected,
+            "rejected",
+            trimmed,
+          )
+      }
+  }
+}
+
+/// Shared transition logic. Finds the export by slug, verifies it's in
+/// an expected source state (Promoted), appends an UpdateStatus op,
+/// and writes a slog line recording the note/reason. Emits a clean
+/// error if the export doesn't exist or is already in a terminal
+/// state.
+fn transition_export_status(
+  cfg: KnowledgeConfig,
+  call_id: String,
+  slug: String,
+  new_status: types.DocStatus,
+  action: String,
+  note: String,
+) -> llm_types.ToolResult {
+  let docs = knowledge_log.resolve(cfg.knowledge_dir)
+  // Exports are identified by doc_type=Export and title=slug
+  // (promote_draft writes the slug into the title field).
+  let match =
+    list.find(docs, fn(m) { m.doc_type == types.Export && m.title == slug })
+  case match {
+    Error(_) ->
+      llm_types.ToolFailure(
+        tool_use_id: call_id,
+        error: "No export with slug '" <> slug <> "' found",
+      )
+    Ok(meta) ->
+      case meta.status {
+        types.Approved ->
+          llm_types.ToolFailure(
+            tool_use_id: call_id,
+            error: "Export '" <> slug <> "' is already Approved",
+          )
+        types.Rejected ->
+          llm_types.ToolFailure(
+            tool_use_id: call_id,
+            error: "Export '" <> slug <> "' is already Rejected",
+          )
+        _ -> {
+          let updated =
+            types.DocumentMeta(
+              ..meta,
+              op: types.UpdateStatus,
+              status: new_status,
+              updated_at: get_datetime(),
+              version: meta.version + 1,
+            )
+          knowledge_log.append(cfg.knowledge_dir, updated)
+          // Audit trail: the note/reason goes into slog so the
+          // operator (and future queries) can trace the decision
+          // even though DocStatus itself can't carry the text.
+          slog.info(
+            "knowledge",
+            "approval",
+            "Export '"
+              <> slug
+              <> "' "
+              <> action
+              <> case note {
+              "" -> ""
+              n -> ": " <> n
+            },
+            option.None,
+          )
+          llm_types.ToolSuccess(
+            tool_use_id: call_id,
+            content: "Export '" <> slug <> "' " <> action <> ".",
+          )
         }
       }
   }
