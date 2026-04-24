@@ -519,7 +519,11 @@ pub type SensoryEvent {
 // ---------------------------------------------------------------------------
 
 pub type QueuedInput {
-  QueuedInput(source_id: String, text: String)
+  /// A user-typed input buffered while the cognitive loop was busy.
+  /// `enqueued_at_ms` records when it arrived (monotonic clock) so the
+  /// drain path can drop stale inputs that have been superseded by
+  /// newer messages.
+  QueuedInput(source_id: String, text: String, enqueued_at_ms: Int)
   QueuedSchedulerInput(
     source_id: String,
     job_name: String,
