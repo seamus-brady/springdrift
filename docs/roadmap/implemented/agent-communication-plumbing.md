@@ -1,10 +1,13 @@
 # Agent Communication Plumbing — Typed Delegations, Truncation Signals, Commitment Loop
 
-**Status**: Planned (design 2026-04-24)
+**Status**: Shipped 2026-04-24 across PRs #121-#130. See *What actually
+shipped* below — two phases landed differently than specced, one was
+dropped with rationale.
 **Priority**: High — catches a class of silent-drop bug that looks to
 operators like the agent lying or forgetting.
-**Effort**: Phases are roughly 50 / 100 / 400 LOC. Phase 3 is the big
-one; Phases 0–2 are small wins that stand alone.
+**Original effort estimate**: 50 / 100 / 400 LOC across phases.
+**Actual landing**: 10 PRs, all small-to-medium. Build stayed green at
+1861 tests throughout.
 
 ## Problem
 
@@ -43,6 +46,52 @@ correctly decline, and specialists don't recognise `signal=silent`
 briefings as "stop asking" — but the shape of each bug is a leak in a
 prose-only channel. Raising `max_tokens` fixes (1) operationally; the
 structural fix is to make the channel typed.
+
+## What actually shipped
+
+All ten phase units landed; two deviated from the original spec, and
+one was explicitly dropped. Recording the divergence here because "the
+spec" and "the shipped code" are both true histories and future readers
+will want both.
+
+| Phase | PR | Landed as specced? | Notes |
+|---|---|---|---|
+| 0 — Truncation detection | #121 | Yes | `AgentSuccess.truncated: Bool`; warning prefixed for orchestrator; slog warning when cognitive loop's own response is length-capped. |
+| 1 — Deputy silent-signal | #122 | Yes | Silent briefings retire the deputy; specialist never gets `ask_deputy` in its tool list. |
+| 3a — Sensorium `<commitments>` | #123 | Yes | Top 3 self + 2 operator captures, age-sorted, rendered each cycle. |
+| 3b — `Satisfy` op + tool | #124 | Manual path only | Auto-satisfy heuristic dropped. See *Dropped* below. |
+| 6a — Stale-input drop | #125 | Yes | `QueuedInput.enqueued_at_ms`, 60s threshold, sensory event on drop. |
+| 3c — Self-commitment reminder | #126 | Yes | Keyword overlap ≥ 2 significant words with current user input triggers the reminder block. |
+| 2 — Specialist self-check | #127 | **Diverged** | Original spec proposed a typed delegation envelope + pre-flight validator on the orchestrator with intent enums or keyword-matched required refs. Operator pushed back — enums were brittle taxonomy, keyword matching even worse. Shipped design instead: the classification stays with the specialist (which knows its job), `delegate_to_<agent>` tools gained optional ref fields, each specialist's prompt instructs it to emit `[NEEDS_INPUT: ...]` when refs are missing, cognitive loop reformats NEEDS_INPUT for the orchestrator. Smaller than the original spec, pushes judgement to the right place. |
+| 4 — Handoff summary | #128 | Yes | "Before you return" paragraph added to every specialist prompt; they emit `Interpreted as: <one sentence>` at reply-end. |
+| 5 — `read_hierarchy` tool | #129 | Yes | Available to all specialists via `builtin.agent_tools()`; cognitive loop mediates access to the Librarian. |
+| 6b — WS writer refactor | #130 | **Scoped down** | Original spec claimed a socket-level race and proposed a single writer actor per connection. Tracing the code showed the race doesn't exist — the WS handler is a single BEAM process and writes are serialised. The real ordering concern is upstream (notification and delivery paths have different hop counts through the actor system) but that needs a bigger refactor. Shipped instead: monotonic `seq` field on every outbound ServerMessage + client-side console.warn on seq decrease. Observability, not a fix. If console never warns in production, the "hello? appears out of order" symptom was user-echo-before-reply behaviour, not server reordering. |
+
+### Dropped
+
+**Phase 3b auto-satisfy heuristic** — the original spec proposed a
+post-cycle fuzzy-match pass that would auto-close pending captures
+whose text overlapped with activated tasks or successful tool calls on
+the same cycle. Dropped before starting: the manual `satisfy_capture`
+tool from Phase 3b is sufficient for the agent to close its own
+commitments; auto-match risks false positives silently closing real
+commitments, and the agent already sees pending captures every cycle
+via the sensorium block from Phase 3a.
+
+### Design corrections captured from the build
+
+Two of my earlier architectural claims were wrong and the operator
+caught both:
+
+1. The Phase 2 "intent enum + required-refs table" approach was
+   brittle taxonomy dressed up as type safety. Real fix: push the
+   classification to the specialist, where the LLM has full context.
+2. The Phase 6b "single writer actor" was solving a race that didn't
+   exist. Real concern sits upstream; Phase 6b shipped as observability
+   so we can tell whether it's actually user-visible.
+
+Both caught before merge. Noting here so future me reads *this* before
+trusting a similar-shaped proposal.
 
 ## Non-goals
 
