@@ -2,8 +2,8 @@
 //// .springdrift/memory/captures/.
 ////
 //// Files are `YYYY-MM-DD-captures.jsonl`. State is derived by replaying
-//// the op log (`resolve_from_list`). Four op variants: Created,
-//// ClarifyToCalendar, Dismiss, Expire.
+//// the op log (`resolve_from_list`). Five op variants: Created,
+//// ClarifyToCalendar, Dismiss, Expire, Satisfy.
 
 // Copyright (C) 2026 Seamus Brady <seamus@corvideon.ie>
 //
@@ -15,7 +15,8 @@
 import captures/types.{
   type Capture, type CaptureOp, type CaptureSource, type CaptureStatus,
   AgentSelf, Capture, ClarifiedToCalendar, ClarifyToCalendar, Created, Dismiss,
-  Dismissed, Expire, Expired, InboundComms, OperatorAsk, Pending,
+  Dismissed, Expire, Expired, InboundComms, OperatorAsk, Pending, Satisfied,
+  Satisfy,
 }
 import gleam/dynamic/decode
 import gleam/json
@@ -62,6 +63,7 @@ fn op_tag(op: CaptureOp) -> String {
     ClarifyToCalendar(id, _, _) -> "ClarifyToCalendar " <> id
     Dismiss(id, _) -> "Dismiss " <> id
     Expire(id) -> "Expire " <> id
+    Satisfy(id, _) -> "Satisfy " <> id
   }
 }
 
@@ -132,6 +134,7 @@ fn apply_op(acc: List(Capture), op: CaptureOp) -> List(Capture) {
       update_status(acc, id, ClarifiedToCalendar(job_id))
     Dismiss(id, reason) -> update_status(acc, id, Dismissed(reason))
     Expire(id) -> update_status(acc, id, Expired)
+    Satisfy(id, reason) -> update_status(acc, id, Satisfied(reason))
   }
 }
 
@@ -209,6 +212,12 @@ pub fn encode_op(op: CaptureOp) -> json.Json {
       ])
     Expire(id) ->
       json.object([#("op", json.string("expire")), #("id", json.string(id))])
+    Satisfy(id, reason) ->
+      json.object([
+        #("op", json.string("satisfy")),
+        #("id", json.string(id)),
+        #("reason", json.string(reason)),
+      ])
   }
 }
 
@@ -250,6 +259,11 @@ fn encode_status(s: CaptureStatus) -> json.Json {
         #("reason", json.string(reason)),
       ])
     Expired -> json.object([#("kind", json.string("expired"))])
+    Satisfied(reason) ->
+      json.object([
+        #("kind", json.string("satisfied")),
+        #("reason", json.string(reason)),
+      ])
   }
 }
 
@@ -284,6 +298,14 @@ pub fn op_decoder() -> decode.Decoder(CaptureOp) {
     "expire" -> {
       use id <- decode.field("id", decode.string)
       decode.success(Expire(id))
+    }
+    "satisfy" -> {
+      use id <- decode.field("id", decode.string)
+      use reason <- decode.field(
+        "reason",
+        decode.optional(decode.string) |> decode.map(option.unwrap(_, "")),
+      )
+      decode.success(Satisfy(id, reason))
     }
     _ -> decode.failure(Expire(""), "unknown op tag: " <> op_tag)
   }
@@ -344,6 +366,13 @@ fn status_decoder() -> decode.Decoder(CaptureStatus) {
       decode.success(Dismissed(reason))
     }
     "expired" -> decode.success(Expired)
+    "satisfied" -> {
+      use reason <- decode.field(
+        "reason",
+        decode.optional(decode.string) |> decode.map(option.unwrap(_, "")),
+      )
+      decode.success(Satisfied(reason))
+    }
     _ -> decode.failure(Pending, "unknown status kind: " <> kind)
   }
 }

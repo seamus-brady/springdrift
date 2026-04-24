@@ -1,13 +1,14 @@
 //// Captures tools — MVP commitment tracker surface on the cognitive loop.
 ////
-//// Three tools:
+//// Four tools:
 ////   list_captures(status?)            — read pending (or filter)
 ////   clarify_capture(id, due, descr.)  — schedule a cycle for it (calendar route)
 ////   dismiss_capture(id, reason)       — drop with a reason
+////   satisfy_capture(id, reason)       — mark commitment as delivered on
 ////
-//// list_captures and dismiss_capture are local reads/writes — tool-gate
-//// exempt. clarify_capture delegates to the scheduler, which carries its
-//// own D' gate on the resulting scheduled cycle.
+//// list, dismiss, and satisfy are local reads/writes — tool-gate exempt.
+//// clarify_capture delegates to the scheduler, which carries its own D'
+//// gate on the resulting scheduled cycle.
 
 // Copyright (C) 2026 Seamus Brady <seamus@corvideon.ie>
 //
@@ -52,22 +53,28 @@ pub type CapturesContext {
 // ---------------------------------------------------------------------------
 
 pub fn all() -> List(llm_types.Tool) {
-  [list_captures_tool(), clarify_capture_tool(), dismiss_capture_tool()]
+  [
+    list_captures_tool(),
+    clarify_capture_tool(),
+    dismiss_capture_tool(),
+    satisfy_capture_tool(),
+  ]
 }
 
 pub fn is_captures_tool(name: String) -> Bool {
   case name {
-    "list_captures" | "clarify_capture" | "dismiss_capture" -> True
+    "list_captures" | "clarify_capture" | "dismiss_capture" | "satisfy_capture" ->
+      True
     _ -> False
   }
 }
 
 /// Captures tools are tool-gate exempt except for clarify_capture, which
-/// delegates to the scheduler (itself D'-gated). list and dismiss are
-/// local-only log writes.
+/// delegates to the scheduler (itself D'-gated). list, dismiss, and
+/// satisfy are local-only log writes.
 pub fn is_dprime_exempt(name: String) -> Bool {
   case name {
-    "list_captures" | "dismiss_capture" -> True
+    "list_captures" | "dismiss_capture" | "satisfy_capture" -> True
     _ -> False
   }
 }
@@ -127,6 +134,24 @@ fn dismiss_capture_tool() -> llm_types.Tool {
   |> tool.build()
 }
 
+fn satisfy_capture_tool() -> llm_types.Tool {
+  tool.new("satisfy_capture")
+  |> tool.with_description(
+    "Mark a pending capture as delivered on. Use when the commitment has "
+    <> "actually been fulfilled — the report was written, the email sent, the "
+    <> "task completed. Prefer this over dismiss_capture when the work was "
+    <> "done, so the audit trail reflects satisfaction rather than dismissal.",
+  )
+  |> tool.add_string_param("id", "The capture id (e.g. cap-ab12cd34)", True)
+  |> tool.add_string_param(
+    "reason",
+    "Short evidence of satisfaction — which task completed, which tool call, "
+      <> "which cycle produced the deliverable.",
+    True,
+  )
+  |> tool.build()
+}
+
 // ---------------------------------------------------------------------------
 // Dispatch
 // ---------------------------------------------------------------------------
@@ -139,6 +164,7 @@ pub fn execute(
     "list_captures" -> run_list_captures(call, ctx)
     "clarify_capture" -> run_clarify_capture(call, ctx)
     "dismiss_capture" -> run_dismiss_capture(call, ctx)
+    "satisfy_capture" -> run_satisfy_capture(call, ctx)
     _ ->
       llm_types.ToolFailure(
         tool_use_id: call.id,
@@ -211,6 +237,7 @@ fn render_capture_line(c: captures_types.Capture) -> String {
       " [clarified → " <> job_id <> "]"
     captures_types.Dismissed(reason) -> " [dismissed: " <> reason <> "]"
     captures_types.Expired -> " [expired]"
+    captures_types.Satisfied(reason) -> " [satisfied: " <> reason <> "]"
   }
   "  " <> c.id <> ": " <> c.text <> due_part <> status_part
 }
@@ -453,6 +480,80 @@ fn dismiss(
   }
 }
 
+// ---------------------------------------------------------------------------
+// satisfy_capture — record fulfillment with evidence
+// ---------------------------------------------------------------------------
+
+fn run_satisfy_capture(
+  call: llm_types.ToolCall,
+  ctx: CapturesContext,
+) -> llm_types.ToolResult {
+  let decoder = {
+    use id <- decode.field("id", decode.string)
+    use reason <- decode.field("reason", decode.string)
+    decode.success(#(id, reason))
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) ->
+      llm_types.ToolFailure(
+        tool_use_id: call.id,
+        error: "Invalid input: expected {id, reason}",
+      )
+    Ok(#(id, reason)) -> {
+      let id = string.trim(id)
+      let reason = string.trim(reason)
+      case id, reason {
+        "", _ ->
+          llm_types.ToolFailure(
+            tool_use_id: call.id,
+            error: "id must not be empty",
+          )
+        _, "" ->
+          llm_types.ToolFailure(
+            tool_use_id: call.id,
+            error: "reason must not be empty",
+          )
+        _, _ -> satisfy(call, ctx, id, reason)
+      }
+    }
+  }
+}
+
+fn satisfy(
+  call: llm_types.ToolCall,
+  ctx: CapturesContext,
+  id: String,
+  reason: String,
+) -> llm_types.ToolResult {
+  let pending = librarian.get_pending_captures(ctx.librarian)
+  case captures_log.find_by_id(pending, id) {
+    Error(_) ->
+      llm_types.ToolFailure(
+        tool_use_id: call.id,
+        error: "Capture " <> id <> " not found in pending list",
+      )
+    Ok(c) ->
+      case c.status {
+        captures_types.Pending -> {
+          captures_log.append(
+            ctx.captures_dir,
+            captures_types.Satisfy(id, reason),
+          )
+          librarian.notify_remove_capture(ctx.librarian, id)
+          llm_types.ToolSuccess(
+            tool_use_id: call.id,
+            content: "Capture " <> id <> " satisfied: " <> reason,
+          )
+        }
+        _ ->
+          llm_types.ToolFailure(
+            tool_use_id: call.id,
+            error: "Capture " <> id <> " is not pending",
+          )
+      }
+  }
+}
+
 /// Helper exported for the expiry sweep — mark a capture `status_kind` in
 /// current state. Currently unused by tools but useful for internal callers
 /// that want to surface the status string.
@@ -462,5 +563,6 @@ pub fn status_kind(s: captures_types.CaptureStatus) -> String {
     captures_types.ClarifiedToCalendar(_) -> "clarified_to_calendar"
     captures_types.Dismissed(_) -> "dismissed"
     captures_types.Expired -> "expired"
+    captures_types.Satisfied(_) -> "satisfied"
   }
 }

@@ -9,7 +9,7 @@ import captures/log as captures_log
 import captures/types.{
   type Capture, type CaptureStatus, AgentSelf, Capture, ClarifiedToCalendar,
   ClarifyToCalendar, Created, Dismiss, Dismissed, Expire, Expired, InboundComms,
-  OperatorAsk, Pending,
+  OperatorAsk, Pending, Satisfied, Satisfy,
 }
 import gleam/list
 import gleam/option.{None, Some}
@@ -258,4 +258,59 @@ pub fn decoded_statuses_roundtrip_through_disk_test() {
   let _ = simplifile.delete(dir3)
 
   Nil
+}
+
+// ---------------------------------------------------------------------------
+// Satisfy op — Phase 3b commitment closure
+// ---------------------------------------------------------------------------
+
+pub fn satisfy_op_transitions_to_satisfied_status_test() {
+  let c = make_capture("cap-sat", "email the operator", Pending)
+  let result =
+    captures_log.resolve_from_list([
+      Created(c),
+      Satisfy("cap-sat", "sent email at 14:02"),
+    ])
+  case result {
+    [only] ->
+      case only.status {
+        Satisfied(reason) -> reason |> should.equal("sent email at 14:02")
+        _ -> should.fail()
+      }
+    _ -> should.fail()
+  }
+}
+
+pub fn satisfy_op_round_trips_through_jsonl_test() {
+  let dir = test_dir("satisfy_roundtrip")
+  let c = make_capture("cap-round", "deliver the report", Pending)
+  captures_log.append(dir, Created(c))
+  captures_log.append(dir, Satisfy("cap-round", "report delivered in cycle X"))
+
+  case captures_log.resolve_current(dir) {
+    [only] ->
+      case only.status {
+        Satisfied(reason) ->
+          reason |> should.equal("report delivered in cycle X")
+        _ -> should.fail()
+      }
+    _ -> should.fail()
+  }
+  let _ = simplifile.delete(dir)
+  Nil
+}
+
+pub fn satisfy_for_unknown_id_is_no_op_test() {
+  // Satisfy for an id not in state should not create or corrupt anything.
+  let c = make_capture("cap-a", "existing", Pending)
+  let result =
+    captures_log.resolve_from_list([Created(c), Satisfy("cap-zzz", "nope")])
+  case result {
+    [only] ->
+      case only.status {
+        Pending -> Nil
+        _ -> should.fail()
+      }
+    _ -> should.fail()
+  }
 }
