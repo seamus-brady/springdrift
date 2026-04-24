@@ -323,6 +323,7 @@ fn handle_memory_tools(
                   drafts_dir: paths.knowledge_drafts_dir(),
                   exports_dir: paths.knowledge_exports_dir(),
                   embed_fn: None,
+                  reason_fn: None,
                 ),
               )
             False ->
