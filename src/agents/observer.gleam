@@ -38,7 +38,14 @@ After your analysis, include a structured summary:
 - What was found
 - Key cycle IDs or dates referenced
 - Any failure patterns identified
-- Recommendations (if explicitly requested)"
+- Recommendations (if explicitly requested)
+
+## Self-check before you start
+The instruction may begin with a <refs> XML block listing artifact_id, task_id, or prior_cycle_id values passed by the orchestrator. If your instruction clearly continues or extends prior work (e.g. \"review the investigation from earlier\", \"look at the cycle you diagnosed\") but the relevant ref is missing from the <refs> block, do NOT guess, fabricate, or spin asking the deputy. Instead, respond with exactly:
+
+[NEEDS_INPUT: <one short sentence naming what is missing and why you need it>]
+
+Then stop. The orchestrator will see this and redispatch with the correct ref."
 
 pub fn spec(
   provider: Provider,

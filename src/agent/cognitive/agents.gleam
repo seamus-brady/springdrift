@@ -1068,7 +1068,24 @@ pub fn handle_agent_complete(
           <> with_errors
         False -> with_errors
       }
-      #(task_id, prefixed)
+      // If the specialist returned a [NEEDS_INPUT: ...] self-check
+      // failure, prefix a clearer header so the orchestrator's LLM
+      // recognises the pattern as a structured "please redispatch with
+      // more context" signal, not a partial success.
+      let final_text = case is_needs_input(prefixed) {
+        True ->
+          "[AGENT REQUESTED MISSING INPUT — redispatch with the refs it needs]\n\n"
+          <> prefixed
+          <> "\n\n[NOTE: "
+          <> agent
+          <> " did not complete the task. Read the [NEEDS_INPUT: ...] line "
+          <> "above, supply the named ref in your next delegate_to_"
+          <> agent
+          <> " call (artifact_id, task_id, or prior_cycle_id as appropriate), "
+          <> "and try again.]"
+        False -> prefixed
+      }
+      #(task_id, final_text)
     }
     AgentFailure(task_id, error:, ..) -> #(
       task_id,
@@ -1623,15 +1640,70 @@ pub fn prepend_prior_failures(
 @external(erlang, "erlang", "integer_to_binary")
 fn int_to_string(n: Int) -> String
 
+/// True when a specialist's reply carries a [NEEDS_INPUT: ...] self-check
+/// refusal. Used to reformat the result for the orchestrator so the
+/// pattern is easy for the LLM to recognise and act on.
+pub fn is_needs_input(text: String) -> Bool {
+  string.contains(text, "[NEEDS_INPUT:")
+}
+
 pub fn parse_agent_params(input_json: String) -> #(String, String) {
   let decoder = {
     use instruction <- decode.field("instruction", decode.string)
     use ctx <- decode.optional_field("context", "", decode.string)
     decode.success(#(instruction, ctx))
   }
-  case json.parse(input_json, decoder) {
+  let base_instruction = case json.parse(input_json, decoder) {
     Ok(#(instruction, ctx)) -> #(instruction, ctx)
     Error(_) -> #(input_json, "")
+  }
+  let #(instruction, ctx) = base_instruction
+  // Prepend any ref IDs supplied by the orchestrator as an XML block so
+  // the specialist can see them without parsing JSON. Empty block if
+  // nothing was passed — the specialist's self-check step uses that to
+  // decide whether to return [NEEDS_INPUT: ...] when the instruction
+  // clearly references prior work.
+  let refs_prefix = parse_refs_prefix(input_json)
+  case refs_prefix {
+    "" -> #(instruction, ctx)
+    _ -> #(refs_prefix <> "\n\n" <> instruction, ctx)
+  }
+}
+
+fn parse_refs_prefix(input_json: String) -> String {
+  let decoder = {
+    use artifact_id <- decode.optional_field("artifact_id", "", decode.string)
+    use task_id <- decode.optional_field("task_id", "", decode.string)
+    use prior_cycle_id <- decode.optional_field(
+      "prior_cycle_id",
+      "",
+      decode.string,
+    )
+    decode.success(#(artifact_id, task_id, prior_cycle_id))
+  }
+  case json.parse(input_json, decoder) {
+    Error(_) -> ""
+    Ok(#(a, t, c)) -> {
+      let parts = [
+        case a {
+          "" -> ""
+          _ -> "  <artifact_id>" <> a <> "</artifact_id>"
+        },
+        case t {
+          "" -> ""
+          _ -> "  <task_id>" <> t <> "</task_id>"
+        },
+        case c {
+          "" -> ""
+          _ -> "  <prior_cycle_id>" <> c <> "</prior_cycle_id>"
+        },
+      ]
+      let non_empty = list.filter(parts, fn(s) { s != "" })
+      case non_empty {
+        [] -> ""
+        _ -> "<refs>\n" <> string.join(non_empty, "\n") <> "\n</refs>"
+      }
+    }
   }
 }
 

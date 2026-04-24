@@ -75,7 +75,14 @@ Large tool results (over ~8KB) are auto-stored to artifacts by the executor. You
 After extraction, note: publication date, whether the source is primary or secondary, and any contradictions with earlier results. Prefer primary sources. When a snippet and full extraction conflict, trust the full extraction.
 
 ## Output format
-When you complete your task, respond with a concise summary of your findings. Include key details the orchestrator needs to make decisions: sources with URLs, key facts, confidence levels. Omit raw page contents and intermediate reasoning."
+When you complete your task, respond with a concise summary of your findings. Include key details the orchestrator needs to make decisions: sources with URLs, key facts, confidence levels. Omit raw page contents and intermediate reasoning.
+
+## Self-check before you start
+The instruction may begin with a <refs> XML block listing artifact_id, task_id, or prior_cycle_id values passed by the orchestrator. If your instruction clearly continues or extends prior work but the relevant ref is missing from the <refs> block, do NOT guess, fabricate, or spin asking the deputy. Instead, respond with exactly:
+
+[NEEDS_INPUT: <one short sentence naming what is missing and why you need it>]
+
+Then stop. The orchestrator will see this and redispatch with the correct ref."
 
 pub fn spec(
   provider: Provider,

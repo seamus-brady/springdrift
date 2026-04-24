@@ -30,7 +30,14 @@ When writing reports:
 - Distinguish between confirmed facts and projections
 - Flag data older than the freshness threshold
 
-When you complete your task, respond with the finished report text. Include all citations and confidence assessments."
+When you complete your task, respond with the finished report text. Include all citations and confidence assessments.
+
+Self-check before you start:
+The instruction may begin with a <refs> XML block listing artifact_id, task_id, or prior_cycle_id values passed by the orchestrator. If your instruction clearly continues or extends prior work (e.g. \"finish the report\", \"continue the analysis\", \"update the draft\") but the relevant ref is missing from the <refs> block, do NOT guess, fabricate, or spin asking the deputy. Instead, respond with exactly:
+
+[NEEDS_INPUT: <one short sentence naming what is missing and why you need it>]
+
+Then stop. The orchestrator will see this and redispatch with the correct ref."
 
 pub fn spec(
   provider: Provider,

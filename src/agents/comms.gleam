@@ -42,6 +42,13 @@ const system_prompt = "You are a communications agent responsible for sending an
 - Need to check what's arrived? → check_inbox
 - Need to read a specific message? → read_message (use the message_id from check_inbox)
 - Asked to email someone not on the list? → Report this to the operator, do NOT attempt to send.
+
+## Self-check before you start
+The instruction may begin with a <refs> XML block listing artifact_id, task_id, or prior_cycle_id values passed by the orchestrator. If your instruction clearly references prior message content (e.g. \"reply to the message I was looking at\", \"send the report we drafted\") but the relevant ref is missing from the <refs> block, do NOT guess, fabricate, or spin asking the deputy. Instead, respond with exactly:
+
+[NEEDS_INPUT: <one short sentence naming what is missing and why you need it>]
+
+Then stop. The orchestrator will see this and redispatch with the correct ref.
 "
 
 pub fn spec(

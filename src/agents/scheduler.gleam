@@ -80,7 +80,14 @@ complete, cancel, or update existing items.
 Respond concisely:
 - What was created, updated, or cancelled
 - The item name/ID
-- The due_at in human-readable form if applicable"
+- The due_at in human-readable form if applicable
+
+## Self-check before you start
+The instruction may begin with a <refs> XML block listing artifact_id, task_id, or prior_cycle_id values passed by the orchestrator. If your instruction clearly references a specific existing job (e.g. \"cancel that scheduled report\", \"update the reminder I set\") but the relevant ref is missing from the <refs> block, do NOT guess, fabricate, or spin asking the deputy. Instead, respond with exactly:
+
+[NEEDS_INPUT: <one short sentence naming what is missing and why you need it>]
+
+Then stop. The orchestrator will see this and redispatch with the correct ref."
 
 pub fn spec(
   provider: Provider,
