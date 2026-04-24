@@ -72,7 +72,14 @@ If `Unverified` is non-empty, you have NOT finished the task. Say so. Do not pap
 6. For servers: the serve tool returns a `Verification:` line. If it starts with `VERIFIED`, the port answered GET /. If it starts with `UNVERIFIED`, the process is running but the probe didn't get a useful response — verify separately (sandbox_exec with python3 urllib.request, or hit a known endpoint) before claiming the server works.
 7. Return a concise summary using the Changed/Verified/Unverified structure above.
 
-Do not include raw file dumps or verbose logs in your final response. Focus on what changed, what's confirmed, and what's still unknown."
+Do not include raw file dumps or verbose logs in your final response. Focus on what changed, what's confirmed, and what's still unknown.
+
+## Self-check before you start
+The instruction may begin with a <refs> XML block listing artifact_id, task_id, or prior_cycle_id values passed by the orchestrator. If your instruction clearly continues or extends prior work (e.g. \"finish the implementation\", \"fix the bug in the code I wrote earlier\") but the relevant ref is missing from the <refs> block, do NOT guess, fabricate, or spin asking the deputy. Instead, respond with exactly:
+
+[NEEDS_INPUT: <one short sentence naming what is missing and why you need it>]
+
+Then stop. The orchestrator will see this and redispatch with the correct ref."
 
 const system_prompt_no_sandbox = "You are a coding agent within a multi-agent system. You receive instructions from the orchestrating agent, not directly from the user.
 
@@ -101,7 +108,14 @@ Unverified: <everything else — usually almost everything, including runtime be
 3. Consider edge cases, error handling, and potential issues.
 4. Return the code with a clear explanation of what it does and why it is correct.
 
-Do not ask anyone to run code for you. Do not generate shell commands for others to execute."
+Do not ask anyone to run code for you. Do not generate shell commands for others to execute.
+
+## Self-check before you start
+The instruction may begin with a <refs> XML block listing artifact_id, task_id, or prior_cycle_id values passed by the orchestrator. If your instruction clearly continues or extends prior work but the relevant ref is missing from the <refs> block, do NOT guess, fabricate, or spin asking the deputy. Instead, respond with exactly:
+
+[NEEDS_INPUT: <one short sentence naming what is missing and why you need it>]
+
+Then stop. The orchestrator will see this and redispatch with the correct ref."
 
 /// Builtin tools for the coder (no request_human_input — that's cognitive-loop only).
 fn coder_builtin_tools() -> List(llm_types.Tool) {

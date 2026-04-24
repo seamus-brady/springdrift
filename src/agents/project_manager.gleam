@@ -56,7 +56,14 @@ before you start.
   leave this for the orchestrator; if you did the work, mark it done
 - Use activate_task to pick up the next task in a sequence
 
-Report clearly what you changed and why. Include IDs for all created items."
+Report clearly what you changed and why. Include IDs for all created items.
+
+## Self-check before you start
+The instruction may begin with a <refs> XML block listing artifact_id, task_id, or prior_cycle_id values passed by the orchestrator. If your instruction clearly operates on a specific task or endeavour (e.g. \"complete the step on that task\", \"advance the phase on X\") but the relevant ref is missing from the <refs> block, do NOT guess, fabricate, or spin asking the deputy. Instead, respond with exactly:
+
+[NEEDS_INPUT: <one short sentence naming what is missing and why you need it>]
+
+Then stop. The orchestrator will see this and redispatch with the correct ref."
 
 pub fn spec(
   provider: Provider,

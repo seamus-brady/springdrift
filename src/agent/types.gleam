@@ -42,6 +42,21 @@ pub fn agent_to_tool(spec: AgentSpec) -> Tool {
     "Task ID of a concurrently dispatched agent that must succeed first (optional)",
     False,
   )
+  |> tool.add_string_param(
+    "artifact_id",
+    "If the instruction continues or refers to prior work, pass the artifact ID here so the specialist can read it. Required whenever the instruction references a previous draft, report, or extracted content.",
+    False,
+  )
+  |> tool.add_string_param(
+    "task_id",
+    "If the instruction targets an existing planner task, pass its ID here.",
+    False,
+  )
+  |> tool.add_string_param(
+    "prior_cycle_id",
+    "If the instruction references a specific earlier cycle, pass its ID here so the specialist can look it up.",
+    False,
+  )
   |> tool.build()
 }
 
