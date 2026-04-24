@@ -29,11 +29,20 @@ pub type DocStatus {
   Pending
   Normalised
   Studied
+  /// A draft that has been promoted to an export. Awaiting operator
+  /// review. Not yet citeable by default (search filters these out
+  /// unless include_pending=true is passed).
   Promoted
   Stale
   Active
   Final
   Delivered
+  /// Operator has reviewed and approved the export. Citeable, canonical.
+  Approved
+  /// Operator has rejected the export. Not citeable; reason is
+  /// recorded in the log entry's title/slog at rejection time and
+  /// can be retrieved via list_documents.
+  Rejected
 }
 
 pub fn doc_type_to_string(t: DocType) -> String {
@@ -69,6 +78,8 @@ pub fn doc_status_to_string(s: DocStatus) -> String {
     Active -> "active"
     Final -> "final"
     Delivered -> "delivered"
+    Approved -> "approved"
+    Rejected -> "rejected"
   }
 }
 
@@ -82,6 +93,8 @@ pub fn doc_status_from_string(s: String) -> Result(DocStatus, Nil) {
     "active" -> Ok(Active)
     "final" -> Ok(Final)
     "delivered" -> Ok(Delivered)
+    "approved" -> Ok(Approved)
+    "rejected" -> Ok(Rejected)
     _ -> Error(Nil)
   }
 }
