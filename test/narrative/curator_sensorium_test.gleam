@@ -10,6 +10,7 @@
 // (at your option) any later version.
 
 import agent/types as agent_types
+import captures/types as captures_types
 import gleam/option.{None, Some}
 import gleam/string
 import gleeunit/should
@@ -384,4 +385,88 @@ pub fn schedule_xml_includes_stale_attribute_test() {
   // No scheduler → empty string regardless. Verify staleness field path
   // rather than the rendered output (which requires an actor).
   curator.render_sensorium_schedule(None) |> should.equal("")
+}
+
+// ---------------------------------------------------------------------------
+// render_sensorium_captures — Phase 3a commitment loop
+// ---------------------------------------------------------------------------
+
+fn make_pending_capture(
+  id: String,
+  source: captures_types.CaptureSource,
+  text: String,
+) -> captures_types.Capture {
+  captures_types.Capture(
+    schema_version: 1,
+    id: id,
+    // Fixed timestamp so tests are reproducible regardless of clock.
+    created_at: "2026-04-23T10:00:00",
+    source_cycle_id: "cyc-test",
+    text: text,
+    source: source,
+    due_hint: None,
+    status: captures_types.Pending,
+  )
+}
+
+pub fn captures_empty_returns_empty_string_test() {
+  curator.render_sensorium_captures([])
+  |> should.equal("")
+}
+
+pub fn captures_all_non_pending_returns_empty_string_test() {
+  let c =
+    captures_types.Capture(
+      ..make_pending_capture("a", captures_types.AgentSelf, "old commitment"),
+      status: captures_types.Dismissed(reason: "done"),
+    )
+  curator.render_sensorium_captures([c])
+  |> should.equal("")
+}
+
+pub fn captures_renders_pending_count_test() {
+  let captures = [
+    make_pending_capture("a", captures_types.AgentSelf, "check tool results"),
+    make_pending_capture("b", captures_types.OperatorAsk, "save the report"),
+  ]
+  let out = curator.render_sensorium_captures(captures)
+  out |> string.contains("<commitments pending=\"2\">") |> should.be_true
+  out |> string.contains("check tool results") |> should.be_true
+  out |> string.contains("save the report") |> should.be_true
+  out |> string.contains("</commitments>") |> should.be_true
+}
+
+pub fn captures_renders_source_specific_tags_test() {
+  let captures = [
+    make_pending_capture("a", captures_types.AgentSelf, "agent promise"),
+    make_pending_capture("b", captures_types.OperatorAsk, "operator ask"),
+  ]
+  let out = curator.render_sensorium_captures(captures)
+  out |> string.contains("<self ") |> should.be_true
+  out |> string.contains("<operator ") |> should.be_true
+}
+
+pub fn captures_truncates_long_text_test() {
+  // 200-char text should be cut to 117 + ellipsis.
+  let long = string.repeat("x", 200)
+  let captures = [make_pending_capture("a", captures_types.AgentSelf, long)]
+  let out = curator.render_sensorium_captures(captures)
+  out |> string.contains("...") |> should.be_true
+}
+
+pub fn captures_caps_self_items_at_three_test() {
+  // Five agent_self items — only the first three render.
+  let captures = [
+    make_pending_capture("a", captures_types.AgentSelf, "first"),
+    make_pending_capture("b", captures_types.AgentSelf, "second"),
+    make_pending_capture("c", captures_types.AgentSelf, "third"),
+    make_pending_capture("d", captures_types.AgentSelf, "fourth"),
+    make_pending_capture("e", captures_types.AgentSelf, "fifth"),
+  ]
+  let out = curator.render_sensorium_captures(captures)
+  out |> string.contains("first") |> should.be_true
+  out |> string.contains("second") |> should.be_true
+  out |> string.contains("third") |> should.be_true
+  out |> string.contains("fourth") |> should.be_false
+  out |> string.contains("fifth") |> should.be_false
 }

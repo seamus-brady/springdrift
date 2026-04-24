@@ -22,6 +22,7 @@
 
 import affect/correlation as affect_correlation
 import agent/types as agent_types
+import captures/types as captures_types
 import facts/log as facts_log
 import facts/types as facts_types
 import gleam/dynamic/decode
@@ -1134,11 +1135,11 @@ fn build_sensorium(
   let endeavours = librarian.get_all_endeavours(state.librarian)
   let tasks_section = render_sensorium_tasks(active_tasks, endeavours)
 
-  // Captures — MVP commitment tracker count.
+  // Captures — MVP commitment tracker. Render compact details for the
+  // top pending agent self-promises and operator asks so the agent sees
+  // outstanding commitments every cycle without calling list_captures.
   let captures_section =
-    render_sensorium_captures(librarian.get_pending_capture_count(
-      state.librarian,
-    ))
+    render_sensorium_captures(librarian.get_pending_captures(state.librarian))
 
   // Deputies — Phase 1 MVP. Ambient awareness of recent briefings.
   let deputies_section =
@@ -1704,13 +1705,59 @@ fn find_last_failure(entries: List(narrative_types.NarrativeEntry)) -> String {
   }
 }
 
-/// Render the <captures> element — MVP commitment tracker count.
-/// Omitted when there are no pending captures.
-pub fn render_sensorium_captures(pending: Int) -> String {
-  case pending > 0 {
-    False -> ""
-    True -> "  <captures pending=\"" <> int.to_string(pending) <> "\"/>"
+/// Render the <commitments> element — pending items from the commitment
+/// tracker. Shows up to 3 oldest agent_self promises and 2 oldest
+/// operator_ask items. Omitted when no pending captures exist.
+///
+/// Phase 3a of the commitment-loop plumbing: without this, captures pile
+/// up in JSONL and the agent never sees them. Now every cycle surfaces a
+/// compact view so the agent can decide to satisfy, dismiss, or schedule.
+pub fn render_sensorium_captures(
+  captures: List(captures_types.Capture),
+) -> String {
+  let pending =
+    list.filter(captures, fn(c) { c.status == captures_types.Pending })
+  case pending {
+    [] -> ""
+    _ -> {
+      let total = list.length(pending)
+      let self_items =
+        pending
+        |> list.filter(fn(c) { c.source == captures_types.AgentSelf })
+        |> list.take(3)
+      let operator_items =
+        pending
+        |> list.filter(fn(c) { c.source == captures_types.OperatorAsk })
+        |> list.take(2)
+      let self_lines = list.map(self_items, render_capture_row("self", _))
+      let operator_lines =
+        list.map(operator_items, render_capture_row("operator", _))
+      let body = string.join(list.append(self_lines, operator_lines), "\n")
+      "  <commitments pending=\""
+      <> int.to_string(total)
+      <> "\">\n"
+      <> body
+      <> "\n  </commitments>"
+    }
   }
+}
+
+fn render_capture_row(kind: String, c: captures_types.Capture) -> String {
+  // Truncate long texts so one commitment can't blow up the sensorium.
+  let text = case string.length(c.text) > 120 {
+    True -> string.slice(c.text, 0, 117) <> "..."
+    False -> c.text
+  }
+  let age = format_elapsed_since(c.created_at)
+  "    <"
+  <> kind
+  <> " age=\""
+  <> age
+  <> "\">"
+  <> skills.xml_escape(text)
+  <> "</"
+  <> kind
+  <> ">"
 }
 
 /// Render the <deputies> element — MVP Phase 1 ambient awareness.
