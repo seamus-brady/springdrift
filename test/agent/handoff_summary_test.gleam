@@ -26,3 +26,19 @@ pub fn writer_prompt_has_handoff_summary_test() {
   |> string.contains("Interpreted as:")
   |> should.be_true
 }
+
+pub fn writer_prompt_defaults_to_draft_for_long_work_test() {
+  // Guard against prompt regressions that take the writer back to
+  // "inline-return everything" — that pattern blows past the output
+  // token cap on any multi-section report and silently loses work.
+  let provider = mock.provider_with_text("ignored")
+  let spec = writer.spec(provider, "test-model", "/tmp", None, 50_000)
+  // Must instruct to use create_draft for long output.
+  spec.system_prompt
+  |> string.contains("create_draft")
+  |> should.be_true
+  // Must warn about the token cap so the model doesn't just ignore it.
+  spec.system_prompt
+  |> string.contains("output token cap")
+  |> should.be_true
+}
