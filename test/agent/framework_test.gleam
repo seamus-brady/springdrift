@@ -85,6 +85,79 @@ pub fn agent_success_test() {
 }
 
 // ---------------------------------------------------------------------------
+// Truncation propagation — length-capped LLM response surfaces on AgentSuccess
+// ---------------------------------------------------------------------------
+
+pub fn agent_success_surfaces_truncation_test() {
+  // Provider returns a response with stop_reason=MaxTokens. The framework
+  // must mark the AgentSuccess with truncated: True so the orchestrator
+  // can warn the operator.
+  let provider = mock.provider_with_truncated_text("partial answer cut off")
+  let spec = make_spec(provider)
+  let assert Ok(#(_pid, task_subj)) = framework.start_agent(spec)
+
+  let cognitive_subj: process.Subject(CognitiveMessage) = process.new_subject()
+  let task =
+    AgentTask(
+      task_id: "task-trunc",
+      tool_use_id: "tool-trunc",
+      instruction: "Produce a long answer",
+      context: "",
+      parent_cycle_id: "cycle-trunc",
+      reply_to: cognitive_subj,
+      depth: 1,
+      max_turns_override: option.None,
+      deputy_subject: option.None,
+    )
+  process.send(task_subj, task)
+
+  let assert Ok(msg) = process.receive(cognitive_subj, 5000)
+  case msg {
+    AgentComplete(outcome:) ->
+      case outcome {
+        AgentSuccess(truncated:, result:, ..) -> {
+          truncated |> should.be_true
+          result |> should.equal("partial answer cut off")
+        }
+        AgentFailure(..) -> should.fail()
+      }
+    _ -> should.fail()
+  }
+}
+
+pub fn agent_success_marks_clean_stop_test() {
+  // Normal EndTurn responses leave truncated: False.
+  let provider = mock.provider_with_text("done cleanly")
+  let spec = make_spec(provider)
+  let assert Ok(#(_pid, task_subj)) = framework.start_agent(spec)
+
+  let cognitive_subj: process.Subject(CognitiveMessage) = process.new_subject()
+  let task =
+    AgentTask(
+      task_id: "task-clean",
+      tool_use_id: "tool-clean",
+      instruction: "Do something",
+      context: "",
+      parent_cycle_id: "cycle-clean",
+      reply_to: cognitive_subj,
+      depth: 1,
+      max_turns_override: option.None,
+      deputy_subject: option.None,
+    )
+  process.send(task_subj, task)
+
+  let assert Ok(msg) = process.receive(cognitive_subj, 5000)
+  case msg {
+    AgentComplete(outcome:) ->
+      case outcome {
+        AgentSuccess(truncated:, ..) -> truncated |> should.be_false
+        AgentFailure(..) -> should.fail()
+      }
+    _ -> should.fail()
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Agent returns AgentFailure on provider error
 // ---------------------------------------------------------------------------
 

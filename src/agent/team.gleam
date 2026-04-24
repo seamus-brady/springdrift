@@ -225,6 +225,7 @@ fn run_team(ctx: TeamContext) -> Nil {
         }),
         tool_call_details: [],
         tool_errors: [],
+        truncated: False,
         input_tokens: team_result.total_input_tokens,
         output_tokens: team_result.total_output_tokens,
         duration_ms:,

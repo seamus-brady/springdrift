@@ -1041,10 +1041,10 @@ pub fn handle_agent_complete(
     None -> Nil
   }
   let #(outcome_task_id, result_text) = case outcome {
-    AgentSuccess(task_id, agent:, result:, tool_errors:, ..) -> {
+    AgentSuccess(task_id, agent:, result:, tool_errors:, truncated:, ..) -> {
       // If the agent "succeeded" but had tool failures, prefix them so the
       // orchestrating LLM knows the result may be unreliable.
-      let prefixed = case tool_errors {
+      let with_errors = case tool_errors {
         [] -> result
         errors -> {
           let error_lines = string.join(errors, "\n  ")
@@ -1055,6 +1055,18 @@ pub fn handle_agent_complete(
           <> "\nThe following result may be unreliable.]\n\n"
           <> result
         }
+      }
+      // If any LLM response in the react loop was length-capped, flag the
+      // orchestrator: the output may be mid-sentence or missing sections.
+      let prefixed = case truncated {
+        True ->
+          "[WARNING: agent "
+          <> agent
+          <> " reply was length-capped at max_tokens. "
+          <> "Output may be incomplete — consider re-delegating with more tokens "
+          <> "or a narrower scope.]\n\n"
+          <> with_errors
+        False -> with_errors
       }
       #(task_id, prefixed)
     }
