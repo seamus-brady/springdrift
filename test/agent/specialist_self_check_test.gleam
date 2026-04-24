@@ -90,6 +90,19 @@ pub fn parse_agent_params_empty_ref_strings_are_dropped_test() {
   instruction |> string.contains("<task_id>task-x</task_id>") |> should.be_true
 }
 
+pub fn parse_agent_params_includes_draft_slug_test() {
+  // PR 4: writer can now be asked to revise an existing draft via
+  // the draft_slug ref field. The refs prefix should carry it the
+  // same way it carries artifact_id / task_id / prior_cycle_id.
+  let json =
+    "{\"instruction\": \"revise the draft\", \"draft_slug\": \"quarterly-q4\"}"
+  let #(instruction, _ctx) = agents.parse_agent_params(json)
+  instruction |> string.contains("<refs>") |> should.be_true
+  instruction
+  |> string.contains("<draft_slug>quarterly-q4</draft_slug>")
+  |> should.be_true
+}
+
 pub fn parse_agent_params_refs_prefix_appears_before_instruction_test() {
   let json = "{\"instruction\": \"finish\", \"artifact_id\": \"art-1\"}"
   let #(instruction, _ctx) = agents.parse_agent_params(json)

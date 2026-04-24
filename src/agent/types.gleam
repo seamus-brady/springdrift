@@ -44,7 +44,7 @@ pub fn agent_to_tool(spec: AgentSpec) -> Tool {
   )
   |> tool.add_string_param(
     "artifact_id",
-    "If the instruction continues or refers to prior work, pass the artifact ID here so the specialist can read it. Required whenever the instruction references a previous draft, report, or extracted content.",
+    "If the instruction continues or refers to prior work stored as an artifact (researcher's large fetched content), pass the artifact ID here so the specialist can read it.",
     False,
   )
   |> tool.add_string_param(
@@ -55,6 +55,11 @@ pub fn agent_to_tool(spec: AgentSpec) -> Tool {
   |> tool.add_string_param(
     "prior_cycle_id",
     "If the instruction references a specific earlier cycle, pass its ID here so the specialist can look it up.",
+    False,
+  )
+  |> tool.add_string_param(
+    "draft_slug",
+    "If the instruction asks the writer to revise an existing draft, pass the draft slug here. The writer will read the current draft, produce a revision, and save back via update_draft.",
     False,
   )
   |> tool.build()

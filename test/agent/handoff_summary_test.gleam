@@ -42,3 +42,22 @@ pub fn writer_prompt_defaults_to_draft_for_long_work_test() {
   |> string.contains("output token cap")
   |> should.be_true
 }
+
+pub fn writer_prompt_documents_revise_flow_test() {
+  // PR 4: writer prompt must teach the revise flow so draft_slug
+  // refs trigger read → update rather than create-over-top.
+  let provider = mock.provider_with_text("ignored")
+  let spec = writer.spec(provider, "test-model", "/tmp", None, 50_000)
+  // Mentions draft_slug as the trigger ref.
+  spec.system_prompt
+  |> string.contains("draft_slug")
+  |> should.be_true
+  // Mentions read_draft as the first step.
+  spec.system_prompt
+  |> string.contains("read_draft")
+  |> should.be_true
+  // Explicitly warns not to use create_draft when revising.
+  spec.system_prompt
+  |> string.contains("update_draft")
+  |> should.be_true
+}
