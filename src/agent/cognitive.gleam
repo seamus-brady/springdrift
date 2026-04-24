@@ -64,6 +64,11 @@ fn monotonic_now_ms() -> Int
 @external(erlang, "springdrift_ffi", "get_datetime")
 fn get_datetime() -> String
 
+/// Maximum age for a queued user input before it is considered stale.
+/// A queued input older than this, with newer user inputs behind it in the
+/// queue, is dropped on drain rather than firing against obsolete context.
+const stale_input_max_age_ms: Int = 60_000
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -482,20 +487,66 @@ fn claim_cycle_if_present(
 
 fn maybe_drain_queue(state: CognitiveState) -> CognitiveState {
   case state.status, state.input_queue {
-    Idle, [QueuedInput(source_id:, text:), ..rest] -> {
-      slog.info(
-        "cognitive",
-        "maybe_drain_queue",
-        "Draining queued input (remaining: "
-          <> int.to_string(list.length(rest))
-          <> ")",
-        state.cycle_id,
-      )
-      handle_user_input(
-        CognitiveState(..state, input_queue: rest),
-        source_id,
-        text,
-      )
+    Idle, [QueuedInput(source_id:, text:, enqueued_at_ms:), ..rest] -> {
+      // Stale-input drop: if this user input has been queued for longer
+      // than the configured threshold AND there are newer user inputs
+      // behind it, skip it. Protects against cycles firing against
+      // obsolete context (the "I'm here. Was my diagnostic report too
+      // long?" pattern from long cycles where the operator's first
+      // queued message is no longer relevant by the time we drain).
+      let age_ms = monotonic_now_ms() - enqueued_at_ms
+      let has_newer_user_input =
+        list.any(rest, fn(q) {
+          case q {
+            QueuedInput(..) -> True
+            _ -> False
+          }
+        })
+      case age_ms > stale_input_max_age_ms && has_newer_user_input {
+        True -> {
+          slog.warn(
+            "cognitive",
+            "maybe_drain_queue",
+            "Dropping stale queued input (age="
+              <> int.to_string(age_ms / 1000)
+              <> "s, newer inputs in queue)",
+            state.cycle_id,
+          )
+          // Emit a sensory event so the agent can acknowledge the drop
+          // on its next cycle if relevant to the current exchange.
+          let event =
+            types.SensoryEvent(
+              name: "stale_input_dropped",
+              title: "An earlier message was skipped",
+              body: "A user input from "
+                <> int.to_string(age_ms / 1000)
+                <> " seconds ago was dropped because newer messages arrived "
+                <> "while you were busy. Mention this if it might be relevant.",
+              fired_at: "",
+            )
+          let state_dropped =
+            CognitiveState(..state, input_queue: rest, pending_sensory_events: [
+              event,
+              ..state.pending_sensory_events
+            ])
+          maybe_drain_queue(state_dropped)
+        }
+        False -> {
+          slog.info(
+            "cognitive",
+            "maybe_drain_queue",
+            "Draining queued input (remaining: "
+              <> int.to_string(list.length(rest))
+              <> ")",
+            state.cycle_id,
+          )
+          handle_user_input(
+            CognitiveState(..state, input_queue: rest),
+            source_id,
+            text,
+          )
+        }
+      }
     }
     Idle,
       [
@@ -731,7 +782,9 @@ fn handle_user_input(
         False -> {
           let position = queue_len + 1
           let new_queue =
-            list.append(state.input_queue, [QueuedInput(source_id:, text:)])
+            list.append(state.input_queue, [
+              QueuedInput(source_id:, text:, enqueued_at_ms: monotonic_now_ms()),
+            ])
           slog.info(
             "cognitive",
             "handle_user_input",
