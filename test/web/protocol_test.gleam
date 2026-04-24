@@ -330,9 +330,52 @@ pub fn encode_scheduler_cycles_data_test() {
 }
 
 // ---------------------------------------------------------------------------
+// Seq field — Phase 6b observability
+// ---------------------------------------------------------------------------
+
+pub fn encode_includes_seq_field_test() {
+  let json_str = protocol.encode_server_message(protocol.Thinking)
+  json_str |> should_contain("\"seq\":")
+  // seq must appear BEFORE type so the JSON remains well-formed and the
+  // client can read it without parsing the full body.
+  case string.split_once(json_str, "\"seq\":") {
+    Ok(#(before, _)) -> before |> should.equal("{")
+    Error(_) -> should.fail()
+  }
+}
+
+pub fn seq_increments_between_calls_test() {
+  let a = protocol.encode_server_message(protocol.Thinking)
+  let b = protocol.encode_server_message(protocol.Thinking)
+  // Two back-to-back encodes must produce different seq values (monotonic).
+  // Extract the seq value from each and confirm b > a.
+  let seq_a = extract_seq(a)
+  let seq_b = extract_seq(b)
+  { seq_b > seq_a } |> should.be_true
+}
+
+fn extract_seq(json_str: String) -> Int {
+  // Parse "seq":N out of the JSON string. Assumes the format is
+  // {"seq":N,"type":...
+  case string.split_once(json_str, "\"seq\":") {
+    Ok(#(_, rest)) ->
+      case string.split_once(rest, ",") {
+        Ok(#(n_str, _)) ->
+          case int.parse(string.trim(n_str)) {
+            Ok(n) -> n
+            Error(_) -> -1
+          }
+        Error(_) -> -1
+      }
+    Error(_) -> -1
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
+import gleam/int
 import gleam/string
 
 fn should_contain(haystack: String, needle: String) -> Nil {

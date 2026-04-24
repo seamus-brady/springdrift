@@ -14,7 +14,7 @@
          is_binary_content_type_header/1,
          rescue/1, sha256_hex/1,
          log_init/1, log_stdout_enabled/0, log_stderr/1,
-         monotonic_now_ms/0, file_rename/2, sanitize_json/1,
+         monotonic_now_ms/0, monotonic_seq/0, file_rename/2, sanitize_json/1,
          resolve_symlinks/1,
          file_size/1, days_ago_date/1,
          uri_encode/1, extract_ddg_results/1,
@@ -291,6 +291,12 @@ log_stderr(Text) ->
 
 monotonic_now_ms() ->
     erlang:system_time(millisecond).
+
+%% Monotonic positive integer — unique across this BEAM node for the
+%% lifetime of the process. Used to tag outbound WebSocket frames with a
+%% sequence number so the client can detect reordering / gaps.
+monotonic_seq() ->
+    erlang:unique_integer([monotonic, positive]).
 
 file_rename(From, To) ->
     case file:rename(From, To) of
