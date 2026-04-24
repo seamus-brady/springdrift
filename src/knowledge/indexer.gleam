@@ -76,25 +76,47 @@ pub fn content_hash(content: String) -> String {
 
 /// Find a section by path (e.g. "3.2" or "introduction").
 pub fn find_section(node: TreeNode, section_path: String) -> Option(TreeNode) {
-  let target = string.lowercase(string.trim(section_path))
-  find_section_recursive(node, target)
+  case find_section_with_path(node, section_path) {
+    option.Some(#(n, _path)) -> option.Some(n)
+    option.None -> option.None
+  }
 }
 
-fn find_section_recursive(node: TreeNode, target: String) -> Option(TreeNode) {
+/// Like `find_section` but also returns the matched node's breadcrumb
+/// path (slash-joined ancestor titles, empty string at the root).
+/// Used by `read_section` to format a structured citation.
+pub fn find_section_with_path(
+  node: TreeNode,
+  section_path: String,
+) -> Option(#(TreeNode, String)) {
+  let target = string.lowercase(string.trim(section_path))
+  find_section_recursive(node, target, "")
+}
+
+fn find_section_recursive(
+  node: TreeNode,
+  target: String,
+  parent_path: String,
+) -> Option(#(TreeNode, String)) {
   let title_lower = string.lowercase(node.title)
   case
     string.contains(title_lower, target)
     || string.starts_with(title_lower, target)
   {
-    True -> option.Some(node)
-    False ->
+    True -> option.Some(#(node, parent_path))
+    False -> {
+      let child_path = case parent_path {
+        "" -> node.title
+        _ -> parent_path <> " / " <> node.title
+      }
       list.find_map(node.children, fn(child) {
-        case find_section_recursive(child, target) {
+        case find_section_recursive(child, target, child_path) {
           option.Some(found) -> Ok(found)
           None -> Error(Nil)
         }
       })
       |> option.from_result
+    }
   }
 }
 

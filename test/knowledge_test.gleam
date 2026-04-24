@@ -419,9 +419,11 @@ pub fn format_citation_test() {
   let result =
     search.SearchResult(
       doc_id: "abc",
+      doc_slug: "cbr/aamodt-plaza-1994",
       doc_title: "Aamodt & Plaza 1994",
       domain: "cbr",
       node_title: "Similarity Assessment",
+      section_path: "Introduction / Similarity Assessment",
       content: "Some content",
       depth: 2,
       line_start: 145,
@@ -430,9 +432,132 @@ pub fn format_citation_test() {
       score: 0.85,
     )
   let citation = search.format_citation(result)
-  string.contains(citation, "Aamodt & Plaza 1994") |> should.be_true
-  string.contains(citation, "Similarity Assessment") |> should.be_true
-  string.contains(citation, "145") |> should.be_true
+  // Structured form: doc:<slug> §<section-path> L<a>-<b>
+  string.contains(citation, "doc:cbr/aamodt-plaza-1994") |> should.be_true
+  string.contains(citation, "§Introduction / Similarity Assessment")
+  |> should.be_true
+  string.contains(citation, "L145-178") |> should.be_true
+}
+
+pub fn format_citation_uses_page_for_pdf_test() {
+  let result =
+    search.SearchResult(
+      doc_id: "abc",
+      doc_slug: "papers/eu-ai-act",
+      doc_title: "EU AI Act",
+      domain: "papers",
+      node_title: "Article 6",
+      section_path: "Title III / High-Risk Systems / Article 6",
+      content: "content",
+      depth: 3,
+      line_start: 1,
+      line_end: 1,
+      page: Some(42),
+      score: 0.9,
+    )
+  let citation = search.format_citation(result)
+  // When page is known, it replaces the line range.
+  string.contains(citation, "p.42") |> should.be_true
+  string.contains(citation, "L1") |> should.be_false
+}
+
+pub fn format_citation_falls_back_to_node_title_when_no_path_test() {
+  // Root-level sections have section_path = "" — citation should still
+  // carry a usable section label (the node's own title).
+  let result =
+    search.SearchResult(
+      doc_id: "abc",
+      doc_slug: "inbox/notes",
+      doc_title: "Notes",
+      domain: "inbox",
+      node_title: "Overview",
+      section_path: "",
+      content: "c",
+      depth: 0,
+      line_start: 1,
+      line_end: 10,
+      page: None,
+      score: 0.5,
+    )
+  let citation = search.format_citation(result)
+  string.contains(citation, "§Overview") |> should.be_true
+}
+
+pub fn format_citation_from_parts_matches_structured_form_test() {
+  let citation =
+    search.format_citation_from_parts(
+      "inbox/sample",
+      "Introduction / Key Findings",
+      10,
+      25,
+      None,
+    )
+  citation
+  |> should.equal("doc:inbox/sample §Introduction / Key Findings L10-25")
+}
+
+// End-to-end: index a nested-heading document, write its index to disk,
+// search it, and verify the returned SearchResult carries a well-formed
+// citation with the section breadcrumb.
+pub fn search_populates_citation_end_to_end_test() {
+  let dir = "/tmp/springdrift_test_citation_e2e"
+  let _ = simplifile.delete(dir)
+  let _ = simplifile.create_directory_all(dir)
+
+  let doc_id = "cite-test"
+  let content =
+    "# Project Plan\n"
+    <> "\n"
+    <> "## Phase One\n"
+    <> "### Scope\n"
+    <> "The phase one scope covers initial data collection.\n"
+    <> "### Timeline\n"
+    <> "Six weeks from kickoff.\n"
+    <> "## Phase Two\n"
+    <> "Expansion and validation.\n"
+
+  let idx = indexer.index_markdown(doc_id, content)
+  indexer.save_index(dir, idx)
+
+  let meta =
+    DocumentMeta(
+      op: Create,
+      doc_id: doc_id,
+      doc_type: Source,
+      domain: "inbox",
+      title: "Project Plan",
+      path: "sources/inbox/project-plan.md",
+      status: Normalised,
+      content_hash: "",
+      node_count: idx.node_count,
+      created_at: "2026-04-24",
+      updated_at: "2026-04-24",
+      source_url: None,
+      version: 1,
+    )
+
+  // Search for "scope" — should hit the "Scope" subsection under
+  // "Phase One", which has a breadcrumb of
+  // "Project Plan / Phase One / Scope".
+  let results =
+    search.search("scope", [meta], dir, search.Keyword, 5, None, None, None)
+
+  // At least one result should land on the Scope node.
+  case list.find(results, fn(r) { r.node_title == "Scope" }) {
+    Ok(r) -> {
+      r.doc_slug |> should.equal("inbox/project-plan")
+      // Breadcrumb from root: "Project Plan / Phase One"
+      // (node's own title gets appended by format_citation).
+      r.section_path |> string.contains("Phase One") |> should.be_true
+      let citation = search.format_citation(r)
+      citation |> string.contains("doc:inbox/project-plan") |> should.be_true
+      citation |> string.contains("§") |> should.be_true
+    }
+    Error(_) -> should.fail()
+  }
+
+  let _ = simplifile.delete(dir)
+  Nil
 }
 
 // ---------------------------------------------------------------------------

@@ -447,7 +447,7 @@ fn run_read_section(
         Error(reason) ->
           llm_types.ToolFailure(tool_use_id: call.id, error: reason)
         Ok(idx) ->
-          case indexer.find_section(idx.root, section) {
+          case indexer.find_section_with_path(idx.root, section) {
             None ->
               llm_types.ToolFailure(
                 tool_use_id: call.id,
@@ -456,15 +456,32 @@ fn run_read_section(
                   <> "' not found in document "
                   <> doc_id,
               )
-            Some(node) -> {
+            Some(#(node, parent_path)) -> {
+              // Look up the DocumentMeta so we can build a stable
+              // slug-based citation. If the lookup misses (shouldn't
+              // happen in practice but is safe), fall back to doc_id.
+              let docs = knowledge_log.resolve(cfg.knowledge_dir)
+              let slug = case list.find(docs, fn(m) { m.doc_id == doc_id }) {
+                Ok(meta) -> search.doc_slug_for(meta)
+                Error(_) -> doc_id
+              }
+              // Section path: breadcrumb from root, with the matched
+              // node's own title appended. Root-only matches yield
+              // just the node title (no " / " prefix).
+              let section_or_path = case parent_path {
+                "" -> node.title
+                _ -> parent_path <> " / " <> node.title
+              }
+              let citation =
+                search.format_citation_from_parts(
+                  slug,
+                  section_or_path,
+                  node.source.line_start,
+                  node.source.line_end,
+                  node.source.page,
+                )
               let header =
-                "## "
-                <> node.title
-                <> " (lines "
-                <> int.to_string(node.source.line_start)
-                <> "-"
-                <> int.to_string(node.source.line_end)
-                <> ")\n\n"
+                "## " <> node.title <> "\nCitation: " <> citation <> "\n\n"
               llm_types.ToolSuccess(
                 tool_use_id: call.id,
                 content: header <> node.content,

@@ -18,9 +18,18 @@ import knowledge/types.{type DocumentIndex, type DocumentMeta, type TreeNode}
 pub type SearchResult {
   SearchResult(
     doc_id: String,
+    /// Filename-based stable slug derived from the document's source
+    /// path (e.g. "inbox/sample" for sources/inbox/sample.md). More
+    /// stable across sessions than doc_title, which is a human string
+    /// that can change.
+    doc_slug: String,
     doc_title: String,
     domain: String,
     node_title: String,
+    /// Breadcrumb from the document root to this node, slash-separated
+    /// (e.g. "EU Compliance / Article 6 / Subpoint 2"). Empty string
+    /// for the document root itself.
+    section_path: String,
     content: String,
     depth: Int,
     line_start: Int,
@@ -74,19 +83,68 @@ fn search_index(
   mode: SearchMode,
   embed_fn: Option(fn(String) -> Result(List(Float), String)),
 ) -> List(SearchResult) {
-  let nodes = flatten_tree(idx.root)
+  // Walk the tree carrying a breadcrumb so each node knows its
+  // position under the document root. Root itself is given an empty
+  // path so citations for the whole-document case don't carry the
+  // title twice (doc_title is already on the result).
+  let nodes_with_paths = flatten_tree_with_path(idx.root, "")
   case mode {
-    Keyword -> keyword_search(query, meta, nodes)
+    Keyword -> keyword_search(query, meta, nodes_with_paths)
     Embedding ->
       case embed_fn {
-        Some(ef) -> embedding_search(query, meta, nodes, ef)
-        None -> keyword_search(query, meta, nodes)
+        Some(ef) -> embedding_search(query, meta, nodes_with_paths, ef)
+        None -> keyword_search(query, meta, nodes_with_paths)
       }
   }
 }
 
-fn flatten_tree(node: TreeNode) -> List(TreeNode) {
-  [node, ..list.flat_map(node.children, flatten_tree)]
+/// Walk a tree depth-first, emitting `(node, section_path)` pairs
+/// where section_path is the slash-joined breadcrumb of ancestor
+/// titles (empty string at the root). The root itself has an empty
+/// path; its direct children have path = root.title; deeper children
+/// extend it.
+fn flatten_tree_with_path(
+  node: TreeNode,
+  parent_path: String,
+) -> List(#(TreeNode, String)) {
+  // Child path: extend parent's breadcrumb with this node's title,
+  // but leave root's own path empty (parent_path == "" means we're
+  // at the root, so children should start with just this node's
+  // title rather than a leading " / ").
+  let child_path = case parent_path {
+    "" -> node.title
+    _ -> parent_path <> " / " <> node.title
+  }
+  let children_paths =
+    list.flat_map(node.children, fn(c) { flatten_tree_with_path(c, child_path) })
+  [#(node, parent_path), ..children_paths]
+}
+
+fn doc_slug_from(meta: DocumentMeta) -> String {
+  // path looks like "sources/<domain>/<slug>.md" or
+  // "workspace/drafts/<slug>.md". Strip the prefix segments and
+  // trailing .md so the slug is stable and human-readable.
+  case string.split(meta.path, "/") {
+    [] -> meta.doc_id
+    parts ->
+      case list.last(parts) {
+        Ok(last) ->
+          // Prefix with domain when present so two documents with the
+          // same filename in different domains are distinguishable.
+          case meta.domain {
+            "" -> strip_md(last)
+            domain -> domain <> "/" <> strip_md(last)
+          }
+        Error(_) -> meta.doc_id
+      }
+  }
+}
+
+fn strip_md(filename: String) -> String {
+  case string.ends_with(filename, ".md") {
+    True -> string.drop_end(filename, 3)
+    False -> filename
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -96,14 +154,16 @@ fn flatten_tree(node: TreeNode) -> List(TreeNode) {
 fn keyword_search(
   query: String,
   meta: DocumentMeta,
-  nodes: List(TreeNode),
+  nodes_with_paths: List(#(TreeNode, String)),
 ) -> List(SearchResult) {
   let terms =
     string.lowercase(query)
     |> string.split(" ")
     |> list.filter(fn(t) { string.length(t) > 2 })
+  let slug = doc_slug_from(meta)
 
-  list.filter_map(nodes, fn(node) {
+  list.filter_map(nodes_with_paths, fn(pair) {
+    let #(node, section_path) = pair
     let title_lower = string.lowercase(node.title)
     let content_lower = string.lowercase(node.content)
     let matches =
@@ -126,9 +186,11 @@ fn keyword_search(
           +. title_bonus
         Ok(SearchResult(
           doc_id: meta.doc_id,
+          doc_slug: slug,
           doc_title: meta.title,
           domain: meta.domain,
           node_title: node.title,
+          section_path: section_path,
           content: truncate(node.content, 500),
           depth: node.depth,
           line_start: node.source.line_start,
@@ -148,13 +210,15 @@ fn keyword_search(
 fn embedding_search(
   query: String,
   meta: DocumentMeta,
-  nodes: List(TreeNode),
+  nodes_with_paths: List(#(TreeNode, String)),
   embed_fn: fn(String) -> Result(List(Float), String),
 ) -> List(SearchResult) {
   case embed_fn(query) {
-    Error(_) -> keyword_search(query, meta, nodes)
-    Ok(query_vec) ->
-      list.filter_map(nodes, fn(node) {
+    Error(_) -> keyword_search(query, meta, nodes_with_paths)
+    Ok(query_vec) -> {
+      let slug = doc_slug_from(meta)
+      list.filter_map(nodes_with_paths, fn(pair) {
+        let #(node, section_path) = pair
         let text = node.title <> " " <> truncate(node.content, 200)
         case embed_fn(text) {
           Error(_) -> Error(Nil)
@@ -165,9 +229,11 @@ fn embedding_search(
               True ->
                 Ok(SearchResult(
                   doc_id: meta.doc_id,
+                  doc_slug: slug,
                   doc_title: meta.title,
                   domain: meta.domain,
                   node_title: node.title,
+                  section_path: section_path,
                   content: truncate(node.content, 500),
                   depth: node.depth,
                   line_start: node.source.line_start,
@@ -179,6 +245,7 @@ fn embedding_search(
           }
         }
       })
+    }
   }
 }
 
@@ -224,16 +291,53 @@ pub fn format_result(result: SearchResult) -> String {
   <> result.content
 }
 
+/// Structured, machine-parseable citation. Format:
+///
+///   doc:<slug> §<section-path> L<start>-<end>
+///
+/// When a page number is known (e.g. from a PDF) it replaces the line
+/// range: `doc:<slug> §<section-path> p.<N>`.
+///
+/// The slug is the stable identifier operators and agents should use
+/// when referring back to a document — it doesn't change if the
+/// human-readable title is edited, and it encodes the domain for
+/// disambiguation. The section path carries the full breadcrumb so
+/// deeply-nested sections remain findable.
 pub fn format_citation(result: SearchResult) -> String {
-  let location = case result.page {
-    Some(p) -> ", p." <> int.to_string(p)
-    None ->
-      ", lines "
-      <> int.to_string(result.line_start)
-      <> "-"
-      <> int.to_string(result.line_end)
+  let section = case result.section_path {
+    "" -> result.node_title
+    path -> path
   }
-  "[" <> result.doc_title <> ", §" <> result.node_title <> location <> "]"
+  format_citation_from_parts(
+    result.doc_slug,
+    section,
+    result.line_start,
+    result.line_end,
+    result.page,
+  )
+}
+
+/// Citation builder taking bare parts. Lets `read_section` produce
+/// the same format without constructing a SearchResult just to
+/// throw it away.
+pub fn format_citation_from_parts(
+  doc_slug: String,
+  section_or_path: String,
+  line_start: Int,
+  line_end: Int,
+  page: Option(Int),
+) -> String {
+  let location = case page {
+    Some(p) -> " p." <> int.to_string(p)
+    None -> " L" <> int.to_string(line_start) <> "-" <> int.to_string(line_end)
+  }
+  "doc:" <> doc_slug <> " §" <> section_or_path <> location
+}
+
+/// Compute the slug for a DocumentMeta — exposed so tools outside of
+/// search (e.g. `read_section`) can build citations consistently.
+pub fn doc_slug_for(meta: DocumentMeta) -> String {
+  doc_slug_from(meta)
 }
 
 fn truncate(s: String, max: Int) -> String {
