@@ -82,6 +82,7 @@ import tools/memory as tools_memory
 import tools/rate_limiter
 import tools/remembrancer as tools_remembrancer
 import tui
+import web/auth as web_auth
 import web/gui as web_gui
 
 /// Exit the process with the given status code.
@@ -90,6 +91,9 @@ fn do_halt(code: Int) -> Nil
 
 @external(erlang, "springdrift_ffi", "get_date")
 fn get_date_ffi() -> String
+
+@external(erlang, "springdrift_ffi", "get_env")
+fn get_env(name: String) -> Result(String, Nil)
 
 /// Read the package version from the OTP application metadata that
 /// Gleam derives from gleam.toml. Single source of truth — bumping
@@ -1259,25 +1263,70 @@ fn run(cfg: AppConfig) -> Nil {
   case gui {
     "web" -> {
       let port = option.unwrap(cfg.web_port, 12_001)
-      io.println("Web GUI  : http://localhost:" <> int.to_string(port))
-      web_gui.start(
-        cognitive_subj,
-        notify,
-        p.name,
-        task_model,
-        reasoning_model,
-        initial_messages,
-        port,
-        narrative_dir,
-        lib,
-        agent_name,
-        agent_version,
-        ws_max_bytes,
-        max_upload_bytes,
-        scheduler_subj,
-        frontdoor_subj,
-        option.Some(sup),
-      )
+      // Auth posture decision (single source of truth). If the
+      // operator hasn't set SPRINGDRIFT_WEB_TOKEN AND hasn't passed
+      // --web-no-auth, refuse to start the GUI silently. Better to
+      // halt with a clear message than to ship an unauthed surface.
+      let env_token = case get_env("SPRINGDRIFT_WEB_TOKEN") {
+        Ok(t) -> option.Some(t)
+        Error(_) -> option.None
+      }
+      let no_auth = option.unwrap(cfg.web_no_auth, False)
+      case web_auth.decide_startup(env_token, no_auth) {
+        web_auth.RefuseToStart(reason) -> {
+          io.println("Web GUI  : refusing to start.")
+          io.println(reason)
+          Nil
+        }
+        web_auth.NoAuthLocalhostOnly -> {
+          io.println(
+            "Web GUI  : http://127.0.0.1:"
+            <> int.to_string(port)
+            <> "  [no auth — localhost only]",
+          )
+          web_gui.start(
+            cognitive_subj,
+            notify,
+            p.name,
+            task_model,
+            reasoning_model,
+            initial_messages,
+            port,
+            narrative_dir,
+            lib,
+            agent_name,
+            agent_version,
+            ws_max_bytes,
+            max_upload_bytes,
+            web_auth.NoAuthLocalhostOnly,
+            scheduler_subj,
+            frontdoor_subj,
+            option.Some(sup),
+          )
+        }
+        web_auth.AuthRequired(token) -> {
+          io.println("Web GUI  : http://localhost:" <> int.to_string(port))
+          web_gui.start(
+            cognitive_subj,
+            notify,
+            p.name,
+            task_model,
+            reasoning_model,
+            initial_messages,
+            port,
+            narrative_dir,
+            lib,
+            agent_name,
+            agent_version,
+            ws_max_bytes,
+            max_upload_bytes,
+            web_auth.AuthRequired(token),
+            scheduler_subj,
+            frontdoor_subj,
+            option.Some(sup),
+          )
+        }
+      }
     }
     _ ->
       tui.start(

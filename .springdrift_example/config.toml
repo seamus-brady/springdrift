@@ -215,6 +215,10 @@ summary_schedule = "weekly"
 
 [web]
 # port = 12001
+# no_auth = false   # opt-out: localhost-only dev WITHOUT auth.
+                    # Default false (auth required, refuses to start
+                    # without SPRINGDRIFT_WEB_TOKEN). Setting this to
+                    # true also force-binds mist to 127.0.0.1.
 
 # ── External services ────────────────────────────────────────────────────────
 

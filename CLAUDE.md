@@ -1223,9 +1223,13 @@ legacy plain-array format. Corruption is detected and logged.
 **Symlink resolution** — `is_within_cwd` in `tools/files.gleam` resolves symlinks via
 `resolve_symlinks` FFI (walks path components, follows links) before CWD boundary check.
 
-**Web GUI auth** — when `SPRINGDRIFT_WEB_TOKEN` is set, all HTTP and WebSocket requests
-require authentication via `Authorization: Bearer <token>` header or `?token=` query
-parameter. No auth required when the env var is unset. The web admin page has four tabs:
+**Web GUI auth** — auth is required by default. `SPRINGDRIFT_WEB_TOKEN` must be set
+to a non-empty token; otherwise the GUI refuses to start with a clear error. All HTTP
+and WebSocket requests then require `Authorization: Bearer <token>` or `?token=` query
+parameter. The fail-closed policy is decided in `web/auth.decide_startup` (pure fn,
+testable). For localhost-only dev, pass `--web-no-auth` (or `[web] no_auth = true`)
+which bypasses the token check AND force-binds mist to `127.0.0.1`. The web admin
+page has four tabs:
 Narrative, Log, Scheduler (job list with status and next-run times), and Cycles
 (scheduler-triggered cycle history with token usage and agent output). WebSocket messages
 `RequestSchedulerData`/`SchedulerData` and `RequestSchedulerCycles`/`SchedulerCyclesData`
