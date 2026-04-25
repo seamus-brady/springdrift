@@ -157,6 +157,54 @@ else
   fi
 fi
 
+# ── Document converters (optional) ──────────────────────────────────────────
+# pandoc + poppler-utils for ingestion; pandoc + tectonic for export_pdf.
+# All optional — operations skip with a clear error message when missing.
+if command -v pandoc &>/dev/null; then
+  ok "pandoc (already installed)"
+else
+  if ask_yn "Install pandoc? (document ingestion + PDF export)"; then
+    sudo apt install -y pandoc
+    command -v pandoc &>/dev/null || warn "pandoc installation failed — ingest/export will skip"
+  fi
+fi
+
+if command -v pdftotext &>/dev/null; then
+  ok "poppler-utils (already installed — provides pdftotext)"
+else
+  if ask_yn "Install poppler-utils? (provides pdftotext for PDF ingestion)"; then
+    sudo apt install -y poppler-utils
+    command -v pdftotext &>/dev/null || warn "poppler-utils installation failed — PDF ingestion will skip"
+  fi
+fi
+
+if command -v tectonic &>/dev/null; then
+  ok "tectonic (already installed — markdown → PDF rendering)"
+else
+  if ask_yn "Install tectonic? (markdown → PDF rendering for export_pdf — single binary, ~50 MB)"; then
+    # No apt package on Debian/Ubuntu; pull from the project's
+    # GitHub releases. Pin a recent version; operators can upgrade
+    # by editing this script or running the curl manually.
+    TECTONIC_VERSION="0.15.0"
+    ARCH="$(uname -m)"
+    case "$ARCH" in
+      x86_64)
+        TECTONIC_ASSET="tectonic-${TECTONIC_VERSION}-x86_64-unknown-linux-musl.tar.gz" ;;
+      aarch64|arm64)
+        TECTONIC_ASSET="tectonic-${TECTONIC_VERSION}-aarch64-unknown-linux-musl.tar.gz" ;;
+      *)
+        warn "Unsupported arch $ARCH for tectonic auto-install — see https://tectonic-typesetting.github.io/ for manual install"
+        TECTONIC_ASSET="" ;;
+    esac
+    if [ -n "$TECTONIC_ASSET" ]; then
+      curl -fSL "https://github.com/tectonic-typesetting/tectonic/releases/download/tectonic%40${TECTONIC_VERSION}/${TECTONIC_ASSET}" \
+        | sudo tar xz -C /usr/local/bin tectonic
+      sudo chmod +x /usr/local/bin/tectonic
+      command -v tectonic &>/dev/null || warn "tectonic installation failed — export_pdf will return install hint"
+    fi
+  fi
+fi
+
 # ── Build ────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}2. Building Springdrift${NC}"

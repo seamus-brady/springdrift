@@ -22,6 +22,7 @@ import knowledge/workspace
 import llm/tool
 import llm/types as llm_types
 import paths
+import sandbox/podman_ffi
 import slog
 
 @external(erlang, "springdrift_ffi", "generate_uuid")
@@ -63,6 +64,7 @@ pub fn writer_tools() -> List(llm_types.Tool) {
     read_draft_tool(),
     update_draft_tool(),
     promote_draft_tool(),
+    export_pdf_tool(),
   ]
 }
 
@@ -245,6 +247,29 @@ fn promote_draft_tool() -> llm_types.Tool {
   |> tool.build()
 }
 
+fn export_pdf_tool() -> llm_types.Tool {
+  tool.new("export_pdf")
+  |> tool.with_description(
+    "Render a promoted export from markdown to PDF. The PDF lands "
+    <> "alongside the markdown in exports/<slug>.pdf. Requires the "
+    <> "host to have pandoc and tectonic installed; if either is "
+    <> "missing the tool returns a clear install hint. Only call "
+    <> "this on slugs that have already been promoted — drafts have "
+    <> "no exports/<slug>.md yet, so the call would fail with a "
+    <> "confusing 'no input' error. Generation runs synchronously "
+    <> "(typically 1-5s for a real document) so do not call it "
+    <> "speculatively. Re-running on the same slug overwrites the "
+    <> "PDF — useful after a re-promote.",
+  )
+  |> tool.add_string_param(
+    "slug",
+    "Promoted-export slug. The markdown at exports/<slug>.md is "
+      <> "the input; the output is exports/<slug>.pdf.",
+    True,
+  )
+  |> tool.build()
+}
+
 fn approve_export_tool() -> llm_types.Tool {
   tool.new("approve_export")
   |> tool.with_description(
@@ -298,6 +323,7 @@ pub fn is_knowledge_tool(name: String) -> Bool {
   || name == "promote_draft"
   || name == "approve_export"
   || name == "reject_export"
+  || name == "export_pdf"
 }
 
 // ---------------------------------------------------------------------------
@@ -341,6 +367,7 @@ pub fn execute(
     "promote_draft" -> run_promote_draft(call, cfg)
     "approve_export" -> run_approve_export(call, cfg)
     "reject_export" -> run_reject_export(call, cfg)
+    "export_pdf" -> run_export_pdf(call, cfg)
     _ ->
       llm_types.ToolFailure(
         tool_use_id: call.id,
@@ -931,6 +958,158 @@ fn run_promote_draft(
       }
   }
 }
+
+// ---------------------------------------------------------------------------
+// export_pdf — render a promoted export from markdown to PDF
+// ---------------------------------------------------------------------------
+
+/// Pandoc + tectonic invocation timeout. Most documents render in
+/// 1-5s; tectonic's first-run package fetches can push this longer
+/// on a cold install, so the timeout is generous. Configurable later
+/// if real workloads need it.
+const export_pdf_timeout_ms: Int = 60_000
+
+fn run_export_pdf(
+  call: llm_types.ToolCall,
+  cfg: KnowledgeConfig,
+) -> llm_types.ToolResult {
+  let decoder = {
+    use slug <- decode.field("slug", decode.string)
+    decode.success(slug)
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) ->
+      llm_types.ToolFailure(
+        tool_use_id: call.id,
+        error: "Invalid input — expected { \"slug\": \"<name>\" }",
+      )
+    Ok(slug) -> {
+      let safe_slug = sanitise_slug(slug)
+      case safe_slug {
+        "" ->
+          llm_types.ToolFailure(
+            tool_use_id: call.id,
+            error: "Invalid slug — empty after sanitisation",
+          )
+        s -> {
+          let md_path = cfg.exports_dir <> "/" <> s <> ".md"
+          case simplifile.is_file(md_path) {
+            Ok(False) | Error(_) ->
+              llm_types.ToolFailure(
+                tool_use_id: call.id,
+                error: "No promoted export at "
+                  <> md_path
+                  <> ". Promote the draft first via promote_draft, then "
+                  <> "call export_pdf on the same slug.",
+              )
+            Ok(True) -> do_export_pdf(call.id, cfg.exports_dir, s)
+          }
+        }
+      }
+    }
+  }
+}
+
+fn do_export_pdf(
+  call_id: String,
+  exports_dir: String,
+  slug: String,
+) -> llm_types.ToolResult {
+  let md_path = exports_dir <> "/" <> slug <> ".md"
+  let pdf_path = exports_dir <> "/" <> slug <> ".pdf"
+  // pandoc + tectonic. Args go through podman_ffi.run_cmd which now
+  // uses spawn_executable + argv (PR #144), so slug content is
+  // literal — no shell injection surface.
+  case
+    podman_ffi.run_cmd(
+      "pandoc",
+      [md_path, "-o", pdf_path, "--pdf-engine=tectonic"],
+      export_pdf_timeout_ms,
+    )
+  {
+    Error(reason) ->
+      llm_types.ToolFailure(
+        tool_use_id: call_id,
+        error: "PDF generation failed to start: "
+          <> reason
+          <> ". This usually means pandoc is not installed on the host. "
+          <> "See operators-manual §Install for setup steps.",
+      )
+    Ok(result) ->
+      case result.exit_code {
+        0 -> {
+          let size = file_size(pdf_path)
+          slog.info(
+            "tools/knowledge",
+            "export_pdf",
+            "Generated " <> pdf_path <> " (" <> int.to_string(size) <> " bytes)",
+            None,
+          )
+          llm_types.ToolSuccess(
+            tool_use_id: call_id,
+            content: "Exported '"
+              <> slug
+              <> ".pdf' ("
+              <> format_bytes(size)
+              <> "). Path: "
+              <> pdf_path,
+          )
+        }
+        _ -> {
+          // Non-zero exit. Distinguish the common case ("tectonic
+          // not installed" — pandoc reports it via stderr containing
+          // a specific phrase) from a genuine LaTeX compile error.
+          // The merged stdout/stderr (PR #144) lives in result.stdout.
+          let combined = result.stdout
+          case
+            string.contains(combined, "tectonic: not found")
+            || string.contains(combined, "tectonic not found")
+            || string.contains(combined, "could not find executable: tectonic")
+            || string.contains(combined, "pdf-engine \"tectonic\" not found")
+          {
+            True ->
+              llm_types.ToolFailure(
+                tool_use_id: call_id,
+                error: "Cannot generate PDF — `tectonic` is not installed "
+                  <> "on the host. Install it: `brew install tectonic` on "
+                  <> "macOS, or download the binary from "
+                  <> "https://tectonic-typesetting.github.io/ on Linux. "
+                  <> "After install, re-run export_pdf.",
+              )
+            False ->
+              llm_types.ToolFailure(
+                tool_use_id: call_id,
+                error: "PDF generation failed (exit "
+                  <> int.to_string(result.exit_code)
+                  <> "). pandoc/tectonic stderr:\n"
+                  <> string.slice(combined, 0, 500),
+              )
+          }
+        }
+      }
+  }
+}
+
+/// Strip a slug of anything that could escape exports_dir. The slug
+/// is operator-supplied via the LLM, so we don't trust it. Allow
+/// only filename-safe characters; replace everything else with `_`.
+/// Empty result means the slug is unusable.
+fn sanitise_slug(slug: String) -> String {
+  let trimmed = string.trim(slug)
+  let stripped =
+    trimmed
+    |> string.replace("/", "_")
+    |> string.replace("\\", "_")
+    |> string.replace("..", "_")
+    |> string.replace(" ", "_")
+  case stripped {
+    "" -> ""
+    s -> s
+  }
+}
+
+// (file_size FFI defined earlier in the module — used by both
+// list_intray and export_pdf for size reporting.)
 
 // ---------------------------------------------------------------------------
 // approve_export / reject_export — operator-driven approval workflow
