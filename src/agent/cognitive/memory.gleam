@@ -128,23 +128,10 @@ pub fn maybe_spawn_archivist(
           frustration: snapshot.frustration,
           pressure: snapshot.pressure,
           trend: affect_types.trend_to_string(snapshot.trend),
-          status: cognitive_status_string(state.status),
+          status: agent_types.cognitive_status_to_string(state.status),
         ),
       )
     }
     option.None -> Nil
-  }
-}
-
-fn cognitive_status_string(status: agent_types.CognitiveStatus) -> String {
-  case status {
-    agent_types.Idle -> "idle"
-    agent_types.Thinking(..) -> "thinking"
-    agent_types.Classifying(..) -> "classifying"
-    agent_types.WaitingForAgents(..) -> "waiting_for_agents"
-    agent_types.WaitingForUser(..) -> "waiting_for_user"
-    agent_types.EvaluatingSafety(..) -> "evaluating_safety"
-    agent_types.EvaluatingInputSafety(..) -> "evaluating_safety"
-    agent_types.EvaluatingPostExecution(..) -> "evaluating_safety"
   }
 }

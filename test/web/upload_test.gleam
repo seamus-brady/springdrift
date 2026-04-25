@@ -181,3 +181,30 @@ pub fn deposit_multiple_files_each_become_a_source_test() {
   let _ = simplifile.delete(root)
   Nil
 }
+
+pub fn deposit_returns_normalised_files_metadata_test() {
+  // Regression guard: the upload handler fans out one sensory event
+  // per normalised file so the cognitive loop's next sensorium tells
+  // the agent the upload exists. That fan-out depends on
+  // `normalised_files` being populated with filename / doc_id /
+  // title / slug. If this list ever silently drops back to empty,
+  // the agent goes back to "I don't have anything in an intray"
+  // when the operator asks about a freshly uploaded file.
+  let root = test_root("normalised_files_metadata")
+  let bytes = <<"# Quarterly Memo\n\nFigures.\n":utf8>>
+
+  let assert Ok(#(_saved, summary)) = deposit(root, bytes, "Q1.md")
+  summary.normalised |> should.equal(1)
+  list.length(summary.normalised_files) |> should.equal(1)
+
+  let assert [nf] = summary.normalised_files
+  nf.filename |> should.equal("Q1.md")
+  nf.title |> should.equal("Quarterly Memo")
+  nf.slug |> should.equal("q1")
+  // doc_id is a generated UUID — just check it's non-empty so the
+  // sensory event body has something to cite.
+  { nf.doc_id != "" } |> should.be_true
+
+  let _ = simplifile.delete(root)
+  Nil
+}

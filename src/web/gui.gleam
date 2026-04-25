@@ -323,7 +323,7 @@ fn handle_authenticated_request(
         // filename via X-Filename header. After the deposit lands,
         // intake.process drains the intray synchronously so the file
         // is normalised into sources/ before the response returns.
-        ["upload"] -> upload_response(req, max_upload_bytes)
+        ["upload"] -> upload_response(req, cognitive, max_upload_bytes)
 
         // /diagnostic — full system structural report. Authenticated
         // unlike /health; aggregates agent roster, memory counts,
@@ -1666,6 +1666,7 @@ fn export_thread_response(
 /// Auth is already enforced upstream by `handle_authenticated_request`.
 fn upload_response(
   req: Request(Connection),
+  cognitive: Subject(agent_types.CognitiveMessage),
   max_upload_bytes: Int,
 ) -> Response(ResponseData) {
   case req.method {
@@ -1695,7 +1696,34 @@ fn upload_response(
                 )
               {
                 Error(reason) -> upload_error(500, "Deposit failed: " <> reason)
-                Ok(#(saved, processed)) -> upload_success(saved, processed)
+                Ok(#(saved, processed)) -> {
+                  // Fan out one sensory event per normalised file so the
+                  // cognitive loop's next sensorium carries an `<event
+                  // name="document_uploaded">` breadcrumb. Without this,
+                  // a successfully converted file disappears from the
+                  // intray immediately and the agent honestly believes
+                  // the intray is empty when the operator asks about it.
+                  list.each(processed.normalised_files, fn(nf) {
+                    process.send(
+                      cognitive,
+                      agent_types.QueuedSensoryEvent(
+                        event: agent_types.SensoryEvent(
+                          name: "document_uploaded",
+                          title: nf.title,
+                          body: "Operator uploaded '"
+                            <> nf.filename
+                            <> "'. Normalised to sources/intray/"
+                            <> nf.slug
+                            <> ".md (doc_id: "
+                            <> nf.doc_id
+                            <> "). Use list_documents domain=intray or read_section to inspect.",
+                          fired_at: current_iso_timestamp(),
+                        ),
+                      ),
+                    )
+                  })
+                  upload_success(saved, processed)
+                }
               }
             }
           }

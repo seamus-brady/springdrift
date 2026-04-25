@@ -243,7 +243,27 @@ fn cognitive_loop(state: CognitiveState) -> Nil {
     |> process.select(state.self)
   let msg = process.selector_receive_forever(selector)
   let next = handle_message(state, msg)
+  maybe_notify_status_change(state, next)
   cognitive_loop(next)
+}
+
+/// Fan out a `StatusChange` notification whenever the cognitive loop
+/// transitions between distinct user-visible statuses. Hooking this at the
+/// loop boundary captures every transition in `handle_message` without
+/// instrumenting each call site individually. The web UI's status strip
+/// listens for this — without it the UI looked frozen during long
+/// delegations because `WaitingForAgents` was never announced.
+fn maybe_notify_status_change(prev: CognitiveState, next: CognitiveState) -> Nil {
+  let prev_str = types.cognitive_status_to_string(prev.status)
+  let next_str = types.cognitive_status_to_string(next.status)
+  case prev_str == next_str {
+    True -> Nil
+    False ->
+      process.send(
+        next.notify,
+        types.StatusChange(status: next_str, detail: None),
+      )
+  }
 }
 
 fn handle_message(

@@ -448,6 +448,23 @@ pub type CognitiveStatus {
   EvaluatingPostExecution(cycle_id: String, pre_score: Float)
 }
 
+/// Wire-format string for a cognitive status. Used by the affect notifier and
+/// the cognitive-loop status-transition notifier to drive the web UI status
+/// strip. Keep in sync with the JS humanizeStatus() and applyStatusRhythm()
+/// switches in src/web/html.gleam.
+pub fn cognitive_status_to_string(status: CognitiveStatus) -> String {
+  case status {
+    Idle -> "idle"
+    Thinking(..) -> "thinking"
+    Classifying(..) -> "classifying"
+    WaitingForAgents(..) -> "waiting_for_agents"
+    WaitingForUser(..) -> "waiting_for_user"
+    EvaluatingSafety(..) -> "evaluating_safety"
+    EvaluatingInputSafety(..) -> "evaluating_safety"
+    EvaluatingPostExecution(..) -> "evaluating_safety"
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Waiting context — what to do when the user answers
 // ---------------------------------------------------------------------------

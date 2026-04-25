@@ -128,12 +128,25 @@ pub type ProcessFailure {
   WriteFailed(filename: String, reason: String)
 }
 
+/// Identity of a single file that was successfully normalised on
+/// this drain pass. Carries enough to build a sensory event so the
+/// agent's next cycle sees a `<event name="document_uploaded">`
+/// breadcrumb without the operator having to name the file.
+pub type NormalisedFile {
+  NormalisedFile(filename: String, doc_id: String, title: String, slug: String)
+}
+
 /// Summary of an intray drain pass — what got normalised and what
 /// failed (with specific reasons). The web upload handler uses this
 /// to give the operator actionable feedback instead of a generic
-/// "no files normalised" message.
+/// "no files normalised" message, and to fan out a sensory event per
+/// normalised file so the cognitive loop notices the upload.
 pub type ProcessSummary {
-  ProcessSummary(normalised: Int, failures: List(ProcessFailure))
+  ProcessSummary(
+    normalised: Int,
+    normalised_files: List(NormalisedFile),
+    failures: List(ProcessFailure),
+  )
 }
 
 /// Process all pending files in the intray directory.
@@ -163,7 +176,8 @@ pub fn process_with_summary(
 ) -> ProcessSummary {
   let _ = simplifile.create_directory_all(intray_dir)
   case simplifile.read_directory(intray_dir) {
-    Error(_) -> ProcessSummary(normalised: 0, failures: [])
+    Error(_) ->
+      ProcessSummary(normalised: 0, normalised_files: [], failures: [])
     Ok(files) -> {
       // Supported inputs: markdown, text, PDF, HTML, docx, epub.
       // Anything else is skipped silently (the operator can see it
@@ -171,7 +185,7 @@ pub fn process_with_summary(
       let processable = list.filter(files, fn(f) { converter.is_supported(f) })
       list.fold(
         processable,
-        ProcessSummary(normalised: 0, failures: []),
+        ProcessSummary(normalised: 0, normalised_files: [], failures: []),
         fn(acc, filename) {
           case
             process_file_with_failure(
@@ -182,7 +196,12 @@ pub fn process_with_summary(
               filename,
             )
           {
-            Ok(_) -> ProcessSummary(..acc, normalised: acc.normalised + 1)
+            Ok(nf) ->
+              ProcessSummary(
+                ..acc,
+                normalised: acc.normalised + 1,
+                normalised_files: [nf, ..acc.normalised_files],
+              )
             Error(failure) ->
               ProcessSummary(..acc, failures: [failure, ..acc.failures])
           }
@@ -202,7 +221,7 @@ fn process_file_with_failure(
   sources_dir: String,
   indexes_dir: String,
   filename: String,
-) -> Result(String, ProcessFailure) {
+) -> Result(NormalisedFile, ProcessFailure) {
   let source_path = intray_dir <> "/" <> filename
   case converter.convert(source_path) {
     Error(converter.UnsupportedExtension(extension:)) ->
@@ -225,7 +244,7 @@ fn process_file_with_failure(
           filename,
         )
       {
-        Ok(doc_id) -> Ok(doc_id)
+        Ok(nf) -> Ok(nf)
         Error(reason) -> Error(WriteFailed(filename:, reason:))
       }
   }
@@ -262,7 +281,7 @@ fn process_file(
   sources_dir: String,
   indexes_dir: String,
   filename: String,
-) -> Result(String, String) {
+) -> Result(NormalisedFile, String) {
   let source_path = intray_dir <> "/" <> filename
   // Route through the converter — markdown/txt read as-is, others shell
   // out to pdftotext / pandoc. Errors leave the file in the intray so
@@ -338,7 +357,7 @@ fn process_file(
               <> " sections)",
             Some(doc_id),
           )
-          Ok(doc_id)
+          Ok(NormalisedFile(filename:, doc_id:, title:, slug:))
         }
       }
     }
