@@ -124,6 +124,10 @@ pub type AppConfig {
     max_fetch_chars: Option(Int),
     tui_input_limit: Option(Int),
     websocket_max_bytes: Option(Int),
+    /// Max bytes accepted by the POST /upload endpoint (web upload
+    /// → knowledge intray). Default 26214400 (25 MB) — fits typical
+    /// papers and reports without inviting denial-of-service.
+    max_upload_bytes: Option(Int),
     recall_max_entries: Option(Int),
     cbr_max_results: Option(Int),
     web_search_max_results: Option(Int),
@@ -444,6 +448,7 @@ pub fn default() -> AppConfig {
     max_fetch_chars: None,
     tui_input_limit: None,
     websocket_max_bytes: None,
+    max_upload_bytes: None,
     recall_max_entries: None,
     cbr_max_results: None,
     web_search_max_results: None,
@@ -788,6 +793,10 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     websocket_max_bytes: option.or(
       override_cfg.websocket_max_bytes,
       base.websocket_max_bytes,
+    ),
+    max_upload_bytes: option.or(
+      override_cfg.max_upload_bytes,
+      base.max_upload_bytes,
     ),
     recall_max_entries: option.or(
       override_cfg.recall_max_entries,
@@ -1787,6 +1796,7 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     max_fetch_chars: get_toml_int(table, ["limits", "max_fetch_chars"]),
     tui_input_limit: get_toml_int(table, ["limits", "tui_input_limit"]),
     websocket_max_bytes: get_toml_int(table, ["limits", "websocket_max_bytes"]),
+    max_upload_bytes: get_toml_int(table, ["limits", "max_upload_bytes"]),
     recall_max_entries: get_toml_int(table, ["limits", "recall_max_entries"]),
     cbr_max_results: get_toml_int(table, ["limits", "cbr_max_results"]),
     web_search_max_results: get_toml_int(table, [

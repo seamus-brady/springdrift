@@ -1254,6 +1254,7 @@ fn run(cfg: AppConfig) -> Nil {
   // Start GUI
   let tui_input_limit = option.unwrap(cfg.tui_input_limit, 102_400)
   let ws_max_bytes = option.unwrap(cfg.websocket_max_bytes, 1_048_576)
+  let max_upload_bytes = option.unwrap(cfg.max_upload_bytes, 26_214_400)
   let gui = option.unwrap(cfg.gui, "tui")
   case gui {
     "web" -> {
@@ -1272,6 +1273,7 @@ fn run(cfg: AppConfig) -> Nil {
         agent_name,
         agent_version,
         ws_max_bytes,
+        max_upload_bytes,
         scheduler_subj,
         frontdoor_subj,
         option.Some(sup),

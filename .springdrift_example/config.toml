@@ -254,6 +254,7 @@ summary_schedule = "weekly"
 # max_fetch_chars = 50000
 # tui_input_limit = 102400
 # websocket_max_bytes = 1048576
+# max_upload_bytes = 26214400        # POST /upload cap (default 25 MB)
 # recall_max_entries = 20
 # cbr_max_results = 4
 # web_search_max_results = 5

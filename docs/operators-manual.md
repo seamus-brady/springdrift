@@ -702,10 +702,24 @@ cache. The Remembrancer can reach beyond.
 gui = "web"                  # or "tui" for terminal UI
 [web]
 port = 12001
+
+[limits]
+max_upload_bytes = 26214400  # POST /upload cap (default 25 MB)
 ```
 
 Plus `SPRINGDRIFT_WEB_TOKEN` env var for auth (no auth if unset —
 fine for `localhost`, **not fine** for VPS).
+
+**Uploading documents from the chat tab.** The paperclip button
+next to the chat input opens a file picker. The file is sent
+directly to `POST /upload` as raw bytes (no multipart, no base64),
+auth via the same bearer token the WebSocket uses. The byte cap is
+`max_upload_bytes` (default 25 MB). Filenames are sanitised at the
+intake boundary (path components stripped, `..` rejected). After
+the upload lands the agent's intake processor runs synchronously,
+so a markdown / PDF / docx / epub / HTML document becomes citeable
+immediately. Unsupported file types stay in
+`.springdrift/knowledge/intray/` for the operator to remove.
 
 ### Sandbox
 
