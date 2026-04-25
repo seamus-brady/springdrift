@@ -162,9 +162,14 @@ pub fn knowledge_indexes_dir() -> String {
   knowledge_dir() <> "/indexes"
 }
 
-/// Knowledge inbox: .springdrift/knowledge/inbox/
-pub fn knowledge_inbox_dir() -> String {
-  knowledge_dir() <> "/inbox"
+/// Knowledge intray: .springdrift/knowledge/intray/
+///
+/// The staging directory where producers (comms attachment poller,
+/// web upload, operator `cp`) deposit raw files before the
+/// converter normalises them into `sources/`. Named "intray" to
+/// avoid collision with the email-inbox concept (`comms_inbox_id`).
+pub fn knowledge_intray_dir() -> String {
+  knowledge_dir() <> "/intray"
 }
 
 /// Agent workspace: .springdrift/knowledge/workspace/

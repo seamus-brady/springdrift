@@ -265,9 +265,9 @@ Operators can upload documents through the UI for the Learner Ingestion system (
 
 ### Upload Flow
 
-1. Operator drags file to inbox area (or clicks to browse)
+1. Operator drags file to intray area (or clicks to browse)
 2. File uploaded via HTTP POST to `/api/upload`
-3. Server writes to `.springdrift/knowledge/inbox/`
+3. Server writes to `.springdrift/knowledge/intray/`
 4. If Learner Ingestion is enabled: automatic normalisation + study cycle
 5. If not: file available as reference, operator can ask "read the uploaded report"
 
@@ -287,7 +287,7 @@ Operators can upload documents through the UI for the Learner Ingestion system (
 ### Implementation
 
 - New HTTP endpoints: `POST /api/upload`, `GET /api/documents`, `GET /api/documents/:id`, `DELETE /api/documents/:id`
-- File storage in `.springdrift/knowledge/inbox/` (for ingestion) or `.springdrift/uploads/` (for reference)
+- File storage in `.springdrift/knowledge/intray/` (for ingestion) or `.springdrift/uploads/` (for reference)
 - Document list served via WebSocket message: `RequestDocuments` / `DocumentsData`
 - Upload progress via WebSocket notification
 

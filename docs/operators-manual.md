@@ -837,7 +837,7 @@ apt install -y podman
 ```
 
 Install the document-library converters (for ingesting PDFs and
-Office documents into `.springdrift/knowledge/inbox/`):
+Office documents into `.springdrift/knowledge/intray/`):
 
 ```bash
 apt install -y poppler-utils pandoc
@@ -845,7 +845,7 @@ apt install -y poppler-utils pandoc
 
 `poppler-utils` provides `pdftotext`, used for PDF ingestion.
 `pandoc` handles HTML, docx, and epub. Both are optional — if absent,
-the inbox skips those file types with a clean error, but PDF is the
+the intake skips those file types with a clean error, but PDF is the
 dominant real-world document format so you'll want poppler at
 minimum.
 

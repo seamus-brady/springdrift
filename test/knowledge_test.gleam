@@ -603,21 +603,21 @@ pub fn note_not_found_test() {
 }
 
 // ---------------------------------------------------------------------------
-// Inbox tests
+// Intake tests
 // ---------------------------------------------------------------------------
 
-import knowledge/inbox
+import knowledge/intake
 
-pub fn inbox_process_markdown_test() {
-  let base = "/tmp/springdrift_test_inbox_" <> generate_uuid()
-  let inbox_dir = base <> "/inbox"
+pub fn intake_process_markdown_test() {
+  let base = "/tmp/springdrift_test_intake_" <> generate_uuid()
+  let intray_dir = base <> "/intray"
   let sources_dir = base <> "/sources"
   let indexes_dir = base <> "/indexes"
-  let _ = simplifile.create_directory_all(inbox_dir)
-  let _ = simplifile.write(inbox_dir <> "/test-doc.md", "# Test\n\nContent.")
-  let count = inbox.process_inbox(base, inbox_dir, sources_dir, indexes_dir)
+  let _ = simplifile.create_directory_all(intray_dir)
+  let _ = simplifile.write(intray_dir <> "/test-doc.md", "# Test\n\nContent.")
+  let count = intake.process(base, intray_dir, sources_dir, indexes_dir)
   count |> should.equal(1)
-  case simplifile.read_directory(inbox_dir) {
+  case simplifile.read_directory(intray_dir) {
     Ok(files) -> list.length(files) |> should.equal(0)
     Error(_) -> Nil
   }
@@ -627,24 +627,24 @@ pub fn inbox_process_markdown_test() {
   Nil
 }
 
-pub fn inbox_skip_non_markdown_test() {
-  let base = "/tmp/springdrift_test_inbox2_" <> generate_uuid()
-  let inbox_dir = base <> "/inbox"
-  let _ = simplifile.create_directory_all(inbox_dir)
-  let _ = simplifile.write(inbox_dir <> "/image.png", "binary data")
+pub fn intake_skip_non_markdown_test() {
+  let base = "/tmp/springdrift_test_intake2_" <> generate_uuid()
+  let intray_dir = base <> "/intray"
+  let _ = simplifile.create_directory_all(intray_dir)
+  let _ = simplifile.write(intray_dir <> "/image.png", "binary data")
   let count =
-    inbox.process_inbox(base, inbox_dir, base <> "/sources", base <> "/indexes")
+    intake.process(base, intray_dir, base <> "/sources", base <> "/indexes")
   count |> should.equal(0)
   let _ = simplifile.delete(base)
   Nil
 }
 
-pub fn inbox_empty_dir_test() {
-  let base = "/tmp/springdrift_test_inbox3_" <> generate_uuid()
+pub fn intake_empty_dir_test() {
+  let base = "/tmp/springdrift_test_intake3_" <> generate_uuid()
   let count =
-    inbox.process_inbox(
+    intake.process(
       base,
-      base <> "/inbox",
+      base <> "/intray",
       base <> "/sources",
       base <> "/indexes",
     )

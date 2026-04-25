@@ -48,7 +48,7 @@ The library has two halves:
 This design merges three planned specs into one implementation:
 - **document-library.md** — document store, tools, curator integration
 - **knowledge-management.md** — inbound/consolidation/export lifecycle, provenance
-- **learner-ingestion.md** — inbox → normalise → study → promote pipeline
+- **learner-ingestion.md** — intray → normalise → study → promote pipeline
 
 ---
 
@@ -60,7 +60,7 @@ This design merges three planned specs into one implementation:
 .springdrift/knowledge/
 ├── index.jsonl                    # Append-only document metadata log
 │
-├── inbox/                         # Drop zone — unprocessed uploads
+├── intray/                         # Drop zone — unprocessed uploads
 │   └── market-report.pdf
 │
 ├── sources/                       # Reference library (immutable once normalised)
@@ -316,7 +316,7 @@ Twelve tools across three agents:
 ### Key Tool Parameters
 
 `save_to_library`:
-- `url` (string) — URL to fetch, or path to file in inbox
+- `url` (string) — URL to fetch, or path to file in intray
 - `domain` (string) — classification domain (legal, research, etc.)
 - `title` (string, optional) — override auto-detected title
 - `doc_type` (string, optional) — "paper", "book", "article" (default: "article")
@@ -447,13 +447,13 @@ document and section.
 
 The document library has three actors: the **operator** (human using the web
 GUI or email), the **agent** (cognitive loop and specialist agents), and
-the **system** (automated pipelines like study cycles and inbox polling).
+the **system** (automated pipelines like study cycles and intray polling).
 
 ### Permission Model
 
 | Action | Operator | Agent | System |
 |---|---|---|---|
-| Upload to inbox | Yes | Yes (store_as_source) | Yes (email attachments) |
+| Upload to intray | Yes | Yes (store_as_source) | Yes (email attachments) |
 | Delete a source | Yes | No — must request_human_input | No |
 | Trigger re-study | Yes (UI button) | Yes (if source is stale) | Yes (auto on stale detect) |
 | Create export | No | Yes (writer/cognitive) | No |
@@ -470,7 +470,7 @@ Key constraints:
   operator is the quality gate. For autonomous cycles, D' output gate
   evaluates the export — but the operator must still click "Approve" to
   move it to Final status before delivery.
-- **System actions are always logged.** Automated study cycles, inbox
+- **System actions are always logged.** Automated study cycles, intray
   processing, and email attachment ingestion produce audit entries in the
   document metadata so the operator can see what happened and when.
 
@@ -491,7 +491,7 @@ In multi-tenant mode, documents are scoped to tenants:
 The `max_size_mb` config (default 500MB) caps the total size of
 `.springdrift/knowledge/`. Enforcement happens at three points:
 
-1. **Upload rejection** — when the inbox receives a new file and accepting
+1. **Upload rejection** — when the intray receives a new file and accepting
    it would exceed the quota, the upload is rejected with a clear error:
    "Knowledge library is full (487/500 MB). Remove unused documents or
    increase [knowledge] max_size_mb." The WebSocket sends a
@@ -529,8 +529,8 @@ The system can automatically clean up:
   removal after 30 days (configurable via `consolidation_retention_days`)
 - **Orphaned indexes** — tree indexes in `indexes/` with no matching
   source document are removed on startup
-- **Failed inbox items** — files in `inbox/` that failed normalisation
-  are moved to `inbox/failed/` with an error log, and cleaned up after
+- **Failed intray items** — files in `intray/` that failed normalisation
+  are moved to `intray/failed/` with an error log, and cleaned up after
   7 days
 
 The system never automatically deletes:
@@ -641,9 +641,9 @@ Metadata panel showing:
 
 ### Upload Flow
 
-1. Operator drags file to inbox area (or clicks "Upload" button)
+1. Operator drags file to intray area (or clicks "Upload" button)
 2. HTTP POST to `/api/documents/upload` with multipart form data
-3. Server writes to `.springdrift/knowledge/inbox/`
+3. Server writes to `.springdrift/knowledge/intray/`
 4. WebSocket notification: `DocumentUploaded { filename, status: "pending" }`
 5. If auto_study enabled: normalisation runs, then study cycle triggers
 6. Progress updates via WebSocket: `DocumentStatusChanged { doc_id, status }`
@@ -666,7 +666,7 @@ Metadata panel showing:
 
 | Method | Path | Purpose |
 |---|---|---|
-| POST | `/api/documents/upload` | Upload file to inbox |
+| POST | `/api/documents/upload` | Upload file to intray |
 | GET | `/api/documents` | List all documents (JSON) |
 | GET | `/api/documents/:id` | Get document content + metadata |
 | GET | `/api/documents/:id/tree` | Get tree index for section navigation |
@@ -698,7 +698,7 @@ See also: [mail-attachments.md](mail-attachments.md) for the full attachment spe
 Email with attachment arrives
   → Inbox poller detects attachment metadata
   → Attachment content fetched via AgentMail API
-  → Written to .springdrift/knowledge/inbox/{message-id}-{filename}
+  → Written to .springdrift/knowledge/intray/{message-id}-{filename}
   → Document metadata logged with provenance: source_type = "email",
     sender, message_id, received_at
   → If auto_study enabled: normalisation + study cycle runs
@@ -714,7 +714,7 @@ Email-sourced documents carry full provenance:
 - `received_at: "2026-04-16T10:00:00Z"`
 - `subject: "Q2 market data attached"`
 
-This traces all the way through: email → inbox → source → study → CBR case.
+This traces all the way through: email → intray → source → study → CBR case.
 
 ### Safety
 
@@ -726,7 +726,7 @@ This traces all the way through: email → inbox → source → study → CBR ca
 
 ### Supported Attachment Types
 
-- Text/Markdown — direct to inbox
+- Text/Markdown — direct to intray
 - PDF — text extracted, stored as markdown
 - Images — stored as artifacts (not indexed as knowledge)
 - Other — stored as artifacts with metadata, not auto-studied
@@ -738,8 +738,8 @@ This traces all the way through: email → inbox → source → study → CBR ca
 ### Uploading a Document
 
 1. Open web GUI → Documents tab
-2. Drag a PDF into the inbox zone (or click Upload)
-3. See "market-report.pdf — Pending" appear in inbox
+2. Drag a PDF into the intray zone (or click Upload)
+3. See "market-report.pdf — Pending" appear in intray
 4. Within seconds: status changes to "Normalised" — the markdown extraction ran
 5. If auto_study is on: status changes to "Studying..." with a progress note
 6. After study completes: document moves to Knowledge Base under its domain
@@ -758,9 +758,9 @@ This traces all the way through: email → inbox → source → study → CBR ca
 ### Receiving a Document via Email
 
 1. Someone emails an attachment to the agent's address
-2. The comms agent picks it up and routes the attachment to inbox
+2. The comms agent picks it up and routes the attachment to intray
 3. A toast notification appears: "New document from alice@example.com"
-4. The document appears in inbox, then flows through the normal pipeline
+4. The document appears in intray, then flows through the normal pipeline
 5. The operator can view it in the Documents panel or ask the agent about it
 
 ### Monitoring Study Progress
@@ -799,7 +799,7 @@ This traces all the way through: email → inbox → source → study → CBR ca
 | 10 | Citation formatting in retrieval results | Small | Phase 4 |
 | 11 | Export storage + approval workflow | Medium | Phase 5 |
 | 12 | Web GUI Documents panel (upload, browse, viewer, section nav) | Large | Phase 1-11, Web GUI v2 |
-| 13 | Email attachment inbound pipeline (comms → inbox) | Medium | Phase 8, mail-attachments |
+| 13 | Email attachment inbound pipeline (comms → intray) | Medium | Phase 8, mail-attachments |
 | 14 | Consolidation output (Remembrancer → consolidation/) | Medium | Phase 1, Remembrancer |
 | 15 | Writer agent draft awareness (revise existing drafts) | Small | Phase 5 |
 | 16 | LLM reasoning retrieval (Tier 3) | Medium | Phase 2 |
@@ -811,7 +811,7 @@ embedding search, researcher tools. The agent can save papers and search them.
 guidance, sensorium awareness. The agent uses the library as its own thinking
 space.
 
-**Phase 8-11 adds the knowledge pipeline**: inbox processing, study cycles
+**Phase 8-11 adds the knowledge pipeline**: intray processing, study cycles
 into CBR, citation support, export approval.
 
 **Phase 12-13 adds the operator experience**: web GUI with upload/browse/viewer,
@@ -843,7 +843,7 @@ files, and adds embedding search (Tier 2) which the prototype lacked.
 | Spec | Relationship |
 |---|---|
 | knowledge-management.md | **Subsumed** — this spec replaces it |
-| learner-ingestion.md | **Subsumed** — inbox → study → promote pipeline is Phase 5-6 |
+| learner-ingestion.md | **Subsumed** — intray → study → promote pipeline is Phase 5-6 |
 | remembrancer.md | Produces consolidation reports (Phase 9) |
 | skills-management.md | Pattern reports from consolidation feed skill proposals |
 | comms-agent.md | Delivers exports to stakeholders |
