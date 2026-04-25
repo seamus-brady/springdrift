@@ -861,17 +861,35 @@ apt install -y podman
 ```
 
 Install the document-library converters (for ingesting PDFs and
-Office documents into `.springdrift/knowledge/intray/`):
+Office documents into `.springdrift/knowledge/intray/`, and for
+generating PDFs from approved exports):
 
 ```bash
 apt install -y poppler-utils pandoc
 ```
 
 `poppler-utils` provides `pdftotext`, used for PDF ingestion.
-`pandoc` handles HTML, docx, and epub. Both are optional — if absent,
-the intake skips those file types with a clean error, but PDF is the
+`pandoc` handles HTML, docx, and epub on the way in, and markdown
+→ PDF on the way out. Both are optional — if absent, the relevant
+operations skip with a specific error message — but PDF is the
 dominant real-world document format so you'll want poppler at
 minimum.
+
+For PDF *generation* (the writer's `export_pdf` tool), install
+`tectonic` as well — pandoc by itself doesn't render PDFs, it
+shells out to a separate engine. Tectonic is a single Rust
+binary, so the install is a curl + chmod rather than `apt`:
+
+```bash
+curl -L \
+  https://github.com/tectonic-typesetting/tectonic/releases/download/tectonic%400.15.0/tectonic-0.15.0-x86_64-unknown-linux-musl.tar.gz \
+  | tar xz -C /usr/local/bin tectonic
+chmod +x /usr/local/bin/tectonic
+```
+
+Adjust the version + arch for your host. Tectonic downloads LaTeX
+packages on demand on first run, so the first export takes a few
+extra seconds; subsequent runs are fast.
 
 Install asdf and the Erlang/Gleam toolchain:
 

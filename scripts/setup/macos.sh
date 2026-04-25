@@ -134,6 +134,37 @@ else
   fi
 fi
 
+# ── Document converters (optional) ──────────────────────────────────────────
+# pandoc + poppler power document ingestion (PDFs / .docx / .epub / .html →
+# markdown). pandoc + tectonic power export_pdf (markdown → PDF on the way
+# out). All optional — operations skip with a clear error when missing.
+if command -v pandoc &>/dev/null; then
+  ok "pandoc (already installed)"
+else
+  if ask_yn "Install pandoc? (document ingestion + PDF export)"; then
+    brew install pandoc
+    command -v pandoc &>/dev/null || warn "pandoc installation failed — ingest/export will skip"
+  fi
+fi
+
+if command -v pdftotext &>/dev/null; then
+  ok "poppler-utils (already installed — provides pdftotext)"
+else
+  if ask_yn "Install poppler-utils? (provides pdftotext for PDF ingestion)"; then
+    brew install poppler
+    command -v pdftotext &>/dev/null || warn "poppler installation failed — PDF ingestion will skip"
+  fi
+fi
+
+if command -v tectonic &>/dev/null; then
+  ok "tectonic (already installed — markdown → PDF rendering)"
+else
+  if ask_yn "Install tectonic? (markdown → PDF rendering for export_pdf)"; then
+    brew install tectonic
+    command -v tectonic &>/dev/null || warn "tectonic installation failed — export_pdf will return install hint"
+  fi
+fi
+
 # ── Build ────────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}2. Building Springdrift${NC}"
