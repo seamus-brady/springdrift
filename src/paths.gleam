@@ -7,7 +7,6 @@
 //// Layout:
 ////   .springdrift/
 ////   ├── config.toml          Local project config
-////   ├── session.json          Session persistence
 ////   ├── logs/                 System logs (date-rotated JSON-L)
 ////   ├── identity/             Agent identity files
 ////   │   ├── persona.md        First-person character text ({{agent_name}} slot)
@@ -65,10 +64,6 @@ pub fn local_config() -> String {
 pub fn user_config() -> String {
   user_dir() <> "/config.toml"
 }
-
-// ---------------------------------------------------------------------------
-// Session
-// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // Logs

@@ -74,12 +74,6 @@ type WsMsg {
 type RelayMsg {
   Register(Subject(agent_types.Notification))
   Unregister(Subject(agent_types.Notification))
-  /// Request a one-shot startup greeting routed through Frontdoor for
-  /// the given source_id. The relay tracks whether a greeting has
-  /// already fired this session and drops duplicates — protects
-  /// against every WS reconnect (or a second browser tab) triggering
-  /// another "Good morning".
-  GreetOnce(source_id: String)
 }
 
 type ForwardMsg {
@@ -200,7 +194,7 @@ pub fn start(
 
   // Run forwarding loop — receives from `notify` and broadcasts to all
   // registered WebSocket connections
-  forward_loop(cognitive, notify, relay, [], False)
+  forward_loop(notify, relay, [])
 }
 
 // ---------------------------------------------------------------------------
@@ -452,10 +446,6 @@ fn ws_on_init(
       ws_max_bytes:,
       source_id:,
     )
-
-  // Ask the relay to fire a startup greeting addressed to this connection
-  // via Frontdoor. The relay enforces once-per-session semantics.
-  process.send(relay, GreetOnce(source_id))
 
   // Query live messages from the cognitive loop (not the static boot snapshot)
   process.spawn_unlinked(fn() {
@@ -1146,13 +1136,10 @@ fn ws_handler(
 
 /// Runs in the main process. Receives notifications from the cognitive loop
 /// (via `notify`) and broadcasts them to all registered WebSocket connections.
-/// Also gates the once-per-session startup greeting via the `greeted` flag.
 fn forward_loop(
-  cognitive: Subject(agent_types.CognitiveMessage),
   notify: Subject(agent_types.Notification),
   relay: Subject(RelayMsg),
   connections: List(Subject(agent_types.Notification)),
-  greeted: Bool,
 ) -> Nil {
   let selector =
     process.new_selector()
@@ -1166,55 +1153,13 @@ fn forward_loop(
       list.each(connections, fn(conn_subj) {
         process.send(conn_subj, notification)
       })
-      forward_loop(cognitive, notify, relay, connections, greeted)
+      forward_loop(notify, relay, connections)
     }
     FwdRelay(Register(subj)) -> {
-      forward_loop(cognitive, notify, relay, [subj, ..connections], greeted)
+      forward_loop(notify, relay, [subj, ..connections])
     }
     FwdRelay(Unregister(subj)) -> {
-      forward_loop(
-        cognitive,
-        notify,
-        relay,
-        list.filter(connections, fn(s) { s != subj }),
-        greeted,
-      )
-    }
-    FwdRelay(GreetOnce(source_id:)) -> {
-      case greeted {
-        True -> forward_loop(cognitive, notify, relay, connections, True)
-        False -> {
-          // Set greeted=True immediately to close the race window between
-          // two near-simultaneous GreetOnce messages from rapid reconnects.
-          // The actual cognitive query runs in a spawned task so the relay
-          // stays responsive to incoming notifications.
-          process.spawn_unlinked(fn() {
-            let msg_subject: Subject(List(Message)) = process.new_subject()
-            process.send(
-              cognitive,
-              agent_types.GetMessages(reply_to: msg_subject),
-            )
-            let inner_selector =
-              process.new_selector() |> process.select(msg_subject)
-            case process.selector_receive(inner_selector, 2000) {
-              Ok([]) | Error(_) -> {
-                // Dispatch the greeting UserInput via Frontdoor's
-                // source_id. The reply flows back through the delivery
-                // sink registered at connect time.
-                process.send(
-                  cognitive,
-                  agent_types.UserInput(
-                    source_id:,
-                    text: "[Session started. Greet the operator briefly — one or two sentences. Mention anything notable from your sensorium.]",
-                  ),
-                )
-              }
-              Ok(_) -> Nil
-            }
-          })
-          forward_loop(cognitive, notify, relay, connections, True)
-        }
-      }
+      forward_loop(notify, relay, list.filter(connections, fn(s) { s != subj }))
     }
   }
 }
