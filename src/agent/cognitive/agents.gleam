@@ -34,6 +34,7 @@ import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
+import knowledge/search as knowledge_search
 import llm/response
 import llm/types as llm_types
 import narrative/appraiser
@@ -323,7 +324,14 @@ fn handle_memory_tools(
                   drafts_dir: paths.knowledge_drafts_dir(),
                   exports_dir: paths.knowledge_exports_dir(),
                   embed_fn: None,
-                  reason_fn: None,
+                  // Tier 3 reasoning uses the cycle's current model.
+                  // For Complex queries that's reasoning_model; for
+                  // Simple it's task_model. Either works — the agent
+                  // is reasoning over its own library either way.
+                  reason_fn: Some(knowledge_search.make_reason_fn(
+                    state.provider,
+                    state.model,
+                  )),
                 ),
               )
             False ->

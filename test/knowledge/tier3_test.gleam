@@ -29,6 +29,7 @@ import knowledge/search
 import knowledge/types.{
   type DocumentMeta, type TreeNode, Create, DocumentMeta, Normalised, Source,
 }
+import llm/adapters/mock
 import llm/types as llm_types
 import simplifile
 import tools/knowledge as knowledge_tools
@@ -342,6 +343,60 @@ pub fn mode_reasoning_with_no_reason_fn_falls_back_cleanly_test() {
     _ -> should.fail()
   }
 
+  let _ = simplifile.delete(root)
+  Nil
+}
+
+// ---------------------------------------------------------------------------
+// make_reason_fn — provider/model → closure
+// ---------------------------------------------------------------------------
+
+pub fn make_reason_fn_returns_response_text_test() {
+  // Mock provider returns a fixed string. The closure should pass
+  // through the provider's reply text unchanged.
+  let provider = mock.provider_with_text("node-id-42 is the answer")
+  let rf = search.make_reason_fn(provider, "test-model")
+  case rf("any prompt") {
+    Ok(text) -> text |> should.equal("node-id-42 is the answer")
+    Error(_) -> should.fail()
+  }
+}
+
+pub fn make_reason_fn_propagates_provider_errors_test() {
+  // When the provider errors, the closure must return Error so
+  // reason_over_documents can degrade to zero results gracefully.
+  let provider = mock.provider_with_error("model unavailable")
+  let rf = search.make_reason_fn(provider, "test-model")
+  case rf("any prompt") {
+    Error(reason) ->
+      reason |> string.contains("model unavailable") |> should.be_true
+    Ok(_) -> should.fail()
+  }
+}
+
+pub fn make_reason_fn_integrates_with_reason_over_documents_test() {
+  // End-to-end: a real KnowledgeConfig wired through make_reason_fn
+  // and the mock provider should pick the leaf node whose ID the
+  // mock returns. This validates the whole closure pipeline that
+  // ships when an agent's executor builds the config.
+  let root = test_root("reason_fn_integration")
+  let _ =
+    index_sample_doc(root, "d1", "Manual", "# Manual\n\n## Setup\nDetails.\n")
+  let assert Ok(idx) = indexer.load_index(root <> "/indexes", "d1")
+  let target_id = first_leaf_id(idx.root)
+  let provider = mock.provider_with_text(target_id)
+  let rf = search.make_reason_fn(provider, "test-model")
+  let cfg = make_cfg(root, Some(rf))
+  let result =
+    knowledge_tools.execute(
+      make_tool_call("{\"query\":\"setup\",\"mode\":\"reasoning\"}"),
+      cfg,
+    )
+  case result {
+    llm_types.ToolSuccess(content:, ..) ->
+      content |> string.contains("Setup") |> should.be_true
+    _ -> should.fail()
+  }
   let _ = simplifile.delete(root)
   Nil
 }

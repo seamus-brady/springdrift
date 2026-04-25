@@ -14,6 +14,9 @@ import gleam/option.{type Option, None, Some}
 import gleam/string
 import knowledge/indexer
 import knowledge/types.{type DocumentIndex, type DocumentMeta, type TreeNode}
+import llm/provider as llm_provider
+import llm/request
+import llm/response
 
 pub type SearchResult {
   SearchResult(
@@ -427,6 +430,36 @@ pub fn reason_over_documents(
           |> list.take(max_results)
         }
       }
+    }
+  }
+}
+
+/// Default max_tokens for the Tier 3 reasoning reply. The reply is
+/// just a list of node IDs (one per line), so this is small. Bigger
+/// here just risks a chatty model padding with prose we'll discard.
+pub const tier3_default_reply_tokens: Int = 512
+
+/// Build a default `reason_fn` closure from a provider + model. Each
+/// agent that owns the search_library tool can pass its own provider
+/// and model in — the agent's working model is the natural choice for
+/// "reason over my own library".
+///
+/// The returned closure is single-shot: builds a request, calls the
+/// provider, returns the reply text or a stringified error. The
+/// caller (`reason_over_documents`) treats Error as "no picks", so a
+/// hung or failing provider degrades gracefully to zero results
+/// rather than crashing the search.
+pub fn make_reason_fn(
+  provider: llm_provider.Provider,
+  model: String,
+) -> fn(String) -> Result(String, String) {
+  fn(prompt: String) -> Result(String, String) {
+    let req =
+      request.new(model, tier3_default_reply_tokens)
+      |> request.with_user_message(prompt)
+    case provider.chat(req) {
+      Error(e) -> Error(response.error_message(e))
+      Ok(resp) -> Ok(response.text(resp))
     }
   }
 }
