@@ -23,9 +23,9 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/set.{type Set}
 import gleam/string
+import knowledge/intake as knowledge_intake
 import paths
 import scheduler/types as scheduler_types
-import simplifile
 import slog
 
 // ---------------------------------------------------------------------------
@@ -379,13 +379,16 @@ fn process_attachment(
           Nil
         }
         Ok(bytes) -> {
-          let inbox_dir = paths.knowledge_inbox_dir()
+          // Comms-side naming policy: prefix with the message id so
+          // an operator inspecting the intray can trace each file
+          // back to its source email. The intake boundary handles
+          // the actual write + safety pass.
+          let suggested = build_intray_filename(message_id, att.filename)
           case
-            write_attachment_to_inbox(
-              inbox_dir,
-              message_id,
-              att.filename,
+            knowledge_intake.deposit(
+              paths.knowledge_intray_dir(),
               bytes,
+              suggested,
             )
           {
             Ok(saved_filename) ->
@@ -396,7 +399,7 @@ fn process_attachment(
                   <> att.filename
                   <> "' from "
                   <> from
-                  <> " to inbox as "
+                  <> " to intray as "
                   <> saved_filename,
                 None,
               )
@@ -404,7 +407,7 @@ fn process_attachment(
               slog.warn(
                 "comms/poller",
                 "process_attachment",
-                "Failed to write attachment to inbox: " <> reason,
+                "Failed to deposit attachment in intray: " <> reason,
                 None,
               )
           }
@@ -415,12 +418,12 @@ fn process_attachment(
   }
 }
 
-/// Build a filename that's safe for the inbox dir AND traceable back
-/// to the source message. Format: `<short_msg_id>--<safe_original>`.
-/// `safe_original` strips path separators and shell-special chars to
-/// stop a malicious filename escaping the inbox dir. Public so the
-/// helper can be tested without spinning up the poller actor.
-pub fn build_inbox_filename(message_id: String, original: String) -> String {
+/// Build a filename suggestion that's traceable back to the source
+/// message. Format: `<short_msg_id>--<safe_original>`. The intake
+/// boundary applies its own safety pass on top, so this only needs
+/// to do enough to keep the message id intact and the original
+/// readable. Public so the helper stays unit-testable.
+pub fn build_intray_filename(message_id: String, original: String) -> String {
   let short = string.slice(message_id, 0, 12)
   let safe =
     original
@@ -429,26 +432,6 @@ pub fn build_inbox_filename(message_id: String, original: String) -> String {
     |> string.replace("..", "_")
     |> string.replace(" ", "_")
   short <> "--" <> safe
-}
-
-/// Write `bytes` into `inbox_dir` under a derived safe filename.
-/// Returns the final filename on success. Public so tests can drive
-/// it with a temp directory and known bytes — the poller calls it
-/// after a real download_attachment, but the file-system half is
-/// pure-ish (no HTTP) and worth covering.
-pub fn write_attachment_to_inbox(
-  inbox_dir: String,
-  message_id: String,
-  original_filename: String,
-  bytes: BitArray,
-) -> Result(String, String) {
-  let _ = simplifile.create_directory_all(inbox_dir)
-  let dest_filename = build_inbox_filename(message_id, original_filename)
-  let dest_path = inbox_dir <> "/" <> dest_filename
-  case simplifile.write_bits(dest_path, bytes) {
-    Ok(_) -> Ok(dest_filename)
-    Error(reason) -> Error(string.inspect(reason))
-  }
 }
 
 /// Simple 2^n for backoff (capped at reasonable values by caller).

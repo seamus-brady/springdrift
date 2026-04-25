@@ -3,13 +3,13 @@
 //// HTTP-bound parts (download_attachment) need a live AgentMail
 //// inbox to test, so they're not covered here. What IS testable:
 ////
-//// - Filename construction is collision-resistant and safe against
-////   path-traversal characters in the original filename.
-//// - write_attachment_to_inbox writes bytes to disk, creates the
-////   inbox dir if needed, returns the final filename.
-//// - The full PR 1 → PR 6 chain: an attachment lands in
-////   knowledge/inbox/, the existing inbox.process_inbox picks it
-////   up via PR 1's converter and turns it into a normalised source.
+//// - Filename suggestion is collision-resistant and traceable back
+////   to the source message.
+//// - The intake boundary (`knowledge_intake.deposit`) writes bytes
+////   to the intray directory and applies a safety pass.
+//// - The full PR 1 → PR 6 chain: an attachment lands in the intray
+////   via deposit, the intake processor picks it up via PR 1's
+////   converter and turns it into a normalised source.
 
 // Copyright (C) 2026 Seamus Brady <seamus@corvideon.ie>
 //
@@ -22,7 +22,7 @@ import comms/poller
 import gleam/list
 import gleam/string
 import gleeunit/should
-import knowledge/inbox
+import knowledge/intake as knowledge_intake
 import sandbox/podman_ffi as exec
 import simplifile
 
@@ -34,96 +34,69 @@ fn test_dir(suffix: String) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// build_inbox_filename
+// build_intray_filename — comms-side naming policy
 // ---------------------------------------------------------------------------
 
-pub fn build_inbox_filename_includes_message_prefix_test() {
-  poller.build_inbox_filename("msg-abcdef123456-rest-of-id", "report.pdf")
+pub fn build_intray_filename_includes_message_prefix_test() {
+  poller.build_intray_filename("msg-abcdef123456-rest-of-id", "report.pdf")
   |> should.equal("msg-abcdef12--report.pdf")
 }
 
-pub fn build_inbox_filename_two_messages_same_filename_dont_collide_test() {
-  let a = poller.build_inbox_filename("aaaaaaaaaaaa-rest", "report.pdf")
-  let b = poller.build_inbox_filename("bbbbbbbbbbbb-rest", "report.pdf")
+pub fn build_intray_filename_two_messages_same_filename_dont_collide_test() {
+  let a = poller.build_intray_filename("aaaaaaaaaaaa-rest", "report.pdf")
+  let b = poller.build_intray_filename("bbbbbbbbbbbb-rest", "report.pdf")
   a |> should.not_equal(b)
 }
 
-pub fn build_inbox_filename_strips_path_traversal_chars_test() {
-  // A malicious filename trying to escape the inbox dir should be
-  // sanitised — slashes, backslashes, "..", and spaces all replaced.
-  let result = poller.build_inbox_filename("msg-x", "../../../etc/passwd")
+pub fn build_intray_filename_strips_path_traversal_chars_test() {
+  // A malicious filename trying to escape the intray dir should be
+  // sanitised at this layer too — slashes, backslashes, "..", and
+  // spaces all replaced. The intake boundary applies its own pass
+  // on top, but defense-in-depth starts here.
+  let result = poller.build_intray_filename("msg-x", "../../../etc/passwd")
   result |> string.contains("/") |> should.be_false
   result |> string.contains("..") |> should.be_false
 }
 
-pub fn build_inbox_filename_preserves_extension_test() {
+pub fn build_intray_filename_preserves_extension_test() {
   // Critical: the converter dispatches by extension. If the
   // sanitiser ate the .pdf, conversion would silently fail.
-  poller.build_inbox_filename("msg-x", "research paper.pdf")
+  poller.build_intray_filename("msg-x", "research paper.pdf")
   |> string.ends_with(".pdf")
   |> should.be_true
 }
 
 // ---------------------------------------------------------------------------
-// write_attachment_to_inbox
-// ---------------------------------------------------------------------------
-
-pub fn write_attachment_creates_dir_and_writes_bytes_test() {
-  let dir = test_dir("write_basic")
-  // Delete the dir to verify auto-creation.
-  let _ = simplifile.delete(dir)
-
-  let bytes = <<"hello world":utf8>>
-  let result =
-    poller.write_attachment_to_inbox(dir, "msg-12345abcdef", "note.txt", bytes)
-  case result {
-    Ok(filename) -> {
-      // File exists at the expected path.
-      case simplifile.read_bits(dir <> "/" <> filename) {
-        Ok(read_back) -> read_back |> should.equal(bytes)
-        Error(_) -> should.fail()
-      }
-    }
-    Error(reason) -> {
-      echo reason
-      should.fail()
-    }
-  }
-
-  let _ = simplifile.delete(dir)
-  Nil
-}
-
-// ---------------------------------------------------------------------------
 // End-to-end: PR 6 + PR 1 chain
-// "Attachment lands in knowledge inbox → inbox.process_inbox normalises it"
+// "Attachment lands in intray via deposit → intake.process normalises it"
 // ---------------------------------------------------------------------------
 
-pub fn attachment_then_inbox_processing_round_trip_test() {
+pub fn attachment_then_intake_processing_round_trip_test() {
   let root = test_dir("e2e_chain")
-  let inbox_dir = root <> "/inbox"
+  let intray_dir = root <> "/intray"
 
-  // Step 1: simulate the poller writing an attachment to the inbox.
+  // Step 1: simulate the poller depositing an attachment in the intray.
   // We use a markdown attachment so PR 1's converter doesn't need
   // pdftotext / pandoc to be installed for this test to run on CI.
   let bytes = <<"# Attached\n\nFrom email.\n":utf8>>
+  let suggested = poller.build_intray_filename("msg-emailtest123", "memo.md")
   let assert Ok(saved_filename) =
-    poller.write_attachment_to_inbox(
-      inbox_dir,
-      "msg-emailtest123",
-      "memo.md",
-      bytes,
-    )
+    knowledge_intake.deposit(intray_dir, bytes, suggested)
   saved_filename |> string.ends_with(".md") |> should.be_true
 
-  // Step 2: run the existing inbox processor over that directory.
-  // It should pick up our written file and convert/normalise it.
+  // Step 2: run the intake processor over that directory.
+  // It should pick up our deposited file and convert/normalise it.
   let processed =
-    inbox.process_inbox(root, inbox_dir, root <> "/sources", root <> "/indexes")
+    knowledge_intake.process(
+      root,
+      intray_dir,
+      root <> "/sources",
+      root <> "/indexes",
+    )
   processed |> should.equal(1)
 
-  // Step 3: verify the file moved out of inbox into sources/.
-  case simplifile.read_directory(inbox_dir) {
+  // Step 3: verify the file moved out of the intray into sources/.
+  case simplifile.read_directory(intray_dir) {
     Ok(files) ->
       list.filter(files, fn(f) { string.ends_with(f, ".md") })
       |> list.length
@@ -131,8 +104,8 @@ pub fn attachment_then_inbox_processing_round_trip_test() {
     Error(_) -> should.fail()
   }
 
-  // Step 4: verify the normalised content is in sources/inbox/.
-  case simplifile.read_directory(root <> "/sources/inbox") {
+  // Step 4: verify the normalised content is in sources/intray/.
+  case simplifile.read_directory(root <> "/sources/intray") {
     Ok(files) -> {
       list.length(files) |> should.equal(1)
     }
@@ -151,26 +124,23 @@ pub fn attachment_pdf_round_trip_via_converter_test() {
     Error(_) -> Nil
     Ok(_) -> {
       let root = test_dir("e2e_pdf")
-      let inbox_dir = root <> "/inbox"
+      let intray_dir = root <> "/intray"
 
       // Read the fixture PDF that PR 1 ships and "treat it as an
       // attachment payload" — same flow as if it had arrived via
       // email.
       let assert Ok(pdf_bytes) =
         simplifile.read_bits("test/fixtures/sample.pdf")
+      let suggested =
+        poller.build_intray_filename("msg-pdf-from-email", "research.pdf")
       let assert Ok(_) =
-        poller.write_attachment_to_inbox(
-          inbox_dir,
-          "msg-pdf-from-email",
-          "research.pdf",
-          pdf_bytes,
-        )
+        knowledge_intake.deposit(intray_dir, pdf_bytes, suggested)
 
-      // Inbox processing converts the PDF to markdown.
+      // Intake processing converts the PDF to markdown.
       let processed =
-        inbox.process_inbox(
+        knowledge_intake.process(
           root,
-          inbox_dir,
+          intray_dir,
           root <> "/sources",
           root <> "/indexes",
         )
@@ -178,9 +148,9 @@ pub fn attachment_pdf_round_trip_via_converter_test() {
 
       // Verify converted content is in sources, with the
       // fixture's known marker text.
-      case simplifile.read_directory(root <> "/sources/inbox") {
+      case simplifile.read_directory(root <> "/sources/intray") {
         Ok([only]) ->
-          case simplifile.read(root <> "/sources/inbox/" <> only) {
+          case simplifile.read(root <> "/sources/intray/" <> only) {
             Ok(content) ->
               content
               |> string.contains("Hello from Springdrift test fixture.")
