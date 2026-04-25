@@ -639,7 +639,7 @@ agent. Heavy planner operations moved to the Planner agent.
 | `check_inbox` | Comms | List recent messages in inbox |
 | `read_message` | Comms | Read full message content by ID |
 
-**Remembrancer tools** (14 tools in `tools/remembrancer.gleam`, on Remembrancer agent):
+**Remembrancer tools** (18 tools in `tools/remembrancer.gleam`, on Remembrancer agent):
 
 | Tool | Store(s) | Purpose |
 |---|---|---|
@@ -658,6 +658,9 @@ agent. Heavy planner operations moved to the Planner agent.
 | `propose_strategies_from_patterns` | CBR + Strategies | Phase A follow-up. Mine CBR clusters and emit `StrategyCreated` events. Rate-limited 3/day. |
 | `propose_learning_goals_from_patterns` | CBR + Learning Goals | Phase C follow-up. Mine CBR struggle clusters (avg_confidence < 0.55) and emit `GoalCreated` events with source=PatternMined. Rate-limited 2/day. |
 | `import_legacy_strategy_facts` | Facts + Strategies | Strategy bootstrap. One-shot migration for facts named `strategy_pattern_*` left over from prior manual tracking. Idempotent; dry-run supported. |
+| `audit_fabrication` | Narrative + DAG | Cross-check synthesis-fact claims against tool-call logs to flag fabricated content. |
+| `audit_voice_drift` | Narrative | Track self-narration phrase density to detect drift in agent voice over time. |
+| `study_document` | Knowledge → Facts + CBR | Read a normalised document and extract two buckets: factual claims as Facts, and procedural / pattern knowledge as CBR `DomainKnowledge` cases. Each entry carries a `doc:<slug> §<section>` citation for traceability. |
 
 **Remembrancer** (`agents/remembrancer.gleam`) is a deep-memory specialist. Unlike
 Observer (recent-cycle diagnostics via Librarian), the Remembrancer reads raw JSONL
