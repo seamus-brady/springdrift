@@ -340,7 +340,25 @@ fn handle_authenticated_request(
           )
 
         // WebSocket upgrade
-        ["ws"] ->
+        ["ws"] -> {
+          // Stable client_id from the browser's localStorage flows in as
+          // ?client_id=<uuid>. We derive source_id from it so a refresh
+          // / reconnect / new tab from the same browser reuses the same
+          // routing key — replies and pending deliveries land back where
+          // they belong. Falling back to a per-socket UUID keeps legacy
+          // clients (no client_id) working with the old behaviour.
+          let client_id = case request.get_query(req) {
+            Ok(params) ->
+              case list.key_find(params, "client_id") {
+                Ok(id) ->
+                  case string.trim(id) {
+                    "" -> option.None
+                    trimmed -> option.Some(trimmed)
+                  }
+                Error(_) -> option.None
+              }
+            Error(_) -> option.None
+          }
           mist.websocket(
             request: req,
             on_init: fn(_conn) {
@@ -353,14 +371,19 @@ fn handle_authenticated_request(
                 ws_max_bytes,
                 scheduler,
                 frontdoor,
+                client_id,
               )
             },
             on_close: fn(state) {
               process.send(state.relay, Unregister(state.notify_subject))
-              process.send(state.frontdoor, Unsubscribe(state.source_id))
+              process.send(
+                state.frontdoor,
+                Unsubscribe(state.source_id, state.delivery_subject),
+              )
             },
             handler: ws_handler,
           )
+        }
 
         // 404 for everything else
         _ ->
@@ -383,13 +406,22 @@ fn ws_on_init(
   ws_max_bytes: Int,
   scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
   frontdoor: Subject(FrontdoorMessage),
+  client_id: option.Option(String),
 ) -> #(WsState, option.Option(Selector(WsMsg))) {
   // Per-connection subjects owned by this WebSocket handler process.
   let delivery_subject: Subject(Delivery) = process.new_subject()
   let notify_subject: Subject(agent_types.Notification) = process.new_subject()
   let history_subject: Subject(String) = process.new_subject()
 
-  let source_id = "ws:" <> generate_uuid()
+  // source_id derived from the browser's stable client_id when supplied,
+  // so a refresh / reconnect under the same browser reuses the same
+  // Frontdoor routing key. Without client_id we fall back to a fresh
+  // per-socket UUID for backward compat — legacy clients keep working
+  // but lose the cross-reconnect benefits.
+  let source_id = case client_id {
+    option.Some(id) -> "ws:" <> id
+    option.None -> "ws:" <> generate_uuid()
+  }
 
   // Subscribe this connection with Frontdoor. Every reply / question for
   // a cycle claimed by this source_id will arrive on `delivery_subject`.
@@ -469,7 +501,27 @@ fn ws_handler(
         True -> mist.continue(state)
         False ->
           case protocol.decode_client_message(json_str) {
-            Ok(protocol.UserMessage(text:)) -> {
+            Ok(protocol.UserMessage(text:, client_msg_id:)) -> {
+              // Acknowledge the message frame BEFORE we dispatch to
+              // cognitive. The server has now committed to processing
+              // it; the client can clear its "sending..." state on the
+              // corresponding bubble. If the WS dies between this ack
+              // and cognitive's actual handling, the operator still
+              // sees a pending reply (handled by the pending buffer in
+              // Frontdoor on reconnect).
+              case client_msg_id {
+                option.Some(id) -> {
+                  let _ =
+                    mist.send_text_frame(
+                      conn,
+                      protocol.encode_server_message(protocol.UserMessageAck(
+                        client_msg_id: id,
+                      )),
+                    )
+                  Nil
+                }
+                option.None -> Nil
+              }
               // Send thinking indicator
               let _ =
                 mist.send_text_frame(

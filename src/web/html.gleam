@@ -478,33 +478,59 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
 
   function renderSessionHistory(messages) {
     msgs.innerHTML = '';
-    if (!messages || messages.length === 0) return;
+    var hasMessages = messages && messages.length > 0;
     var inSchedulerCycle = false;
-    messages.forEach(function(item) {
-      if (item.role === 'user') {
-        var text = item.text || '';
-        // Skip the synthetic bootstrap prompt the server sends to trigger
-        // a session-opening greeting. It's a user-role message to the
-        // cognitive loop, not something the operator typed.
-        if (text.indexOf('[Session started.') === 0) {
-          return;
+    var serverUserTexts = [];
+    if (hasMessages) {
+      messages.forEach(function(item) {
+        if (item.role === 'user') {
+          var text = item.text || '';
+          // Skip the synthetic bootstrap prompt the server sends to trigger
+          // a session-opening greeting. It's a user-role message to the
+          // cognitive loop, not something the operator typed.
+          if (text.indexOf('[Session started.') === 0) {
+            return;
+          }
+          if (text.indexOf('<scheduler_context>') === 0) {
+            inSchedulerCycle = true;
+            renderSchedulerMessage(text);
+          } else if (text.trim()) {
+            inSchedulerCycle = false;
+            renderUserMessage(text);
+            serverUserTexts.push(text);
+          }
+        } else if (item.role === 'assistant') {
+          if (inSchedulerCycle) {
+            renderSchedulerResponse(item.text);
+            inSchedulerCycle = false;
+          } else {
+            renderAssistantMessage(item.text, null, null, false);
+          }
         }
-        if (text.indexOf('<scheduler_context>') === 0) {
-          inSchedulerCycle = true;
-          renderSchedulerMessage(text);
-        } else if (text.trim()) {
-          inSchedulerCycle = false;
-          renderUserMessage(text);
+      });
+    }
+    // Re-render any in-flight user messages whose text isn't in the
+    // server's view yet. This is the fix for the disappearing-bubble
+    // bug: the server's SessionHistory comes from cognitive's live
+    // message list, which doesn't include a message that was sent
+    // moments before the WS dropped. Without this, the operator's
+    // typed message vanishes silently. Comparison is exact-text — if
+    // the message reaches cognitive but is paraphrased on the way (it
+    // isn't, today), this would re-render a duplicate, which is a far
+    // less harmful failure mode than disappearance.
+    if (inFlightUserMessages.length > 0) {
+      inFlightUserMessages = inFlightUserMessages.filter(function(m) {
+        if (serverUserTexts.indexOf(m.text) >= 0) {
+          // Server confirms it has the message — drop from in-flight,
+          // don't re-render (the loop above already did).
+          return false;
         }
-      } else if (item.role === 'assistant') {
-        if (inSchedulerCycle) {
-          renderSchedulerResponse(item.text);
-          inSchedulerCycle = false;
-        } else {
-          renderAssistantMessage(item.text, null, null, false);
-        }
-      }
-    });
+        // Server hasn't seen this yet — keep tracking it AND re-render
+        // the bubble so the operator can see what they typed.
+        renderUserMessage(m.text);
+        return true;
+      });
+    }
     scrollBottom();
   }
 
@@ -540,6 +566,15 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
         break;
       case 'chat_history_day':
         renderChatHistoryDay(data.date, data.pairs);
+        break;
+      case 'user_message_ack':
+        // Server has accepted our message frame. Drop the in-flight
+        // entry so it won't be re-rendered if a SessionHistory rebuild
+        // comes through later. The bubble itself is already in the DOM
+        // from sendMessage; nothing more to do visually here.
+        inFlightUserMessages = inFlightUserMessages.filter(function(m) {
+          return m.id !== data.client_msg_id;
+        });
         break;
       case 'assistant_message':
         removeThinking();
@@ -832,16 +867,37 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
     msgs.scrollTop = msgs.scrollHeight;
   }
 
+  // Tracks user messages we've rendered locally but haven't yet seen
+  // an ack for. Each entry: { id, text }. On user_message_ack we drop
+  // the matching entry. On a SessionHistory rebuild (which wipes the
+  // DOM and replays the server's authoritative view), unacked entries
+  // get re-rendered locally so the operator's typed message doesn't
+  // silently disappear after a reconnect mid-cycle.
+  var inFlightUserMessages = [];
+
+  function makeClientMsgId() {
+    return (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : ('msg-' + Math.random().toString(36).slice(2) + Date.now().toString(36));
+  }
+
   function sendMessage() {
     var text = input.value.trim();
     if (!text || !ws || ws.readyState !== WebSocket.OPEN || isThinking) return;
     if (waitingForAnswer) {
       ws.send(JSON.stringify({ type: 'user_answer', text: text }));
       waitingForAnswer = false;
+      addUserMessage(text);
     } else {
-      ws.send(JSON.stringify({ type: 'user_message', text: text }));
+      var msgId = makeClientMsgId();
+      inFlightUserMessages.push({ id: msgId, text: text });
+      ws.send(JSON.stringify({
+        type: 'user_message',
+        text: text,
+        client_msg_id: msgId,
+      }));
+      addUserMessage(text);
     }
-    addUserMessage(text);
     input.value = '';
     input.style.height = 'auto';
   }
@@ -1292,6 +1348,16 @@ pub fn mobile_page(agent_name: String, agent_version: String) -> String {
     }
   }
 
+  // Mobile in-flight tracking — same shape as the desktop chat page.
+  // See ws_connect_js comments for the rationale.
+  var inFlightUserMessages = [];
+
+  function makeClientMsgIdMobile() {
+    return (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : ('msg-' + Math.random().toString(36).slice(2) + Date.now().toString(36));
+  }
+
   form.addEventListener('submit', function(e) {
     e.preventDefault();
     var text = input.value.trim();
@@ -1300,7 +1366,13 @@ pub fn mobile_page(agent_name: String, agent_version: String) -> String {
       ws.send(JSON.stringify({ type: 'user_answer', text: text }));
       waitingForAnswer = false;
     } else {
-      ws.send(JSON.stringify({ type: 'user_message', text: text }));
+      var msgId = makeClientMsgIdMobile();
+      inFlightUserMessages.push({ id: msgId, text: text });
+      ws.send(JSON.stringify({
+        type: 'user_message',
+        text: text,
+        client_msg_id: msgId,
+      }));
     }
     renderUser(text);
     input.value = '';
@@ -1358,25 +1430,40 @@ pub fn mobile_page(agent_name: String, agent_version: String) -> String {
           msgs.innerHTML = '';
           emptyState = null;
           var entries = msg.messages || [];
+          var serverUserTextsM = [];
           entries.forEach(function(m) {
             if (m.role === 'user') {
               var t = m.text || '';
-              // Synthetic bootstrap prompt that triggers the session
-              // greeting — operator never typed it, don't render it.
               if (t.indexOf('[Session started.') === 0) return;
-              // Scheduler-injected prompt — render as a compact divider
-              // instead of dumping the raw <scheduler_context> XML.
               if (t.indexOf('<scheduler_context>') === 0) {
                 renderSchedulerDivider(t);
                 return;
               }
-              // Skip empty/whitespace-only user messages so they don't
-              // produce blank bubbles after scheduler cycles.
               if (!t.trim()) return;
               renderUser(t);
+              serverUserTextsM.push(t);
             } else if (m.role === 'assistant') {
               if (m.text && m.text.trim()) renderAssistant(m.text);
             }
+          });
+          // Re-render unacked in-flight user messages — the operator
+          // typed something during a long-running query, the WS blipped
+          // and reconnected, and the server's view doesn't include it
+          // yet. Without this, the bubble vanishes silently.
+          if (inFlightUserMessages.length > 0) {
+            inFlightUserMessages = inFlightUserMessages.filter(function(im) {
+              if (serverUserTextsM.indexOf(im.text) >= 0) return false;
+              renderUser(im.text);
+              return true;
+            });
+          }
+          break;
+        case 'user_message_ack':
+          // Server confirmed the message frame. Drop the in-flight
+          // entry so it won't be re-rendered on the next history
+          // rebuild.
+          inFlightUserMessages = inFlightUserMessages.filter(function(im) {
+            return im.id !== msg.client_msg_id;
           });
           break;
         case 'thinking':
@@ -4165,7 +4252,31 @@ fn sidebar_js() -> String {
 }
 
 fn ws_connect_js() -> String {
-  "// Server tags every frame with a monotonic seq. Detect reordering in
+  "// Stable client id, persisted in localStorage. Survives refreshes,
+  // tabs, and reconnects so the server's source_id stays consistent
+  // for this browser conversation. Frontdoor's pending-reply buffer
+  // is keyed on this; without it, replies for in-flight cycles get
+  // dropped when the WS reconnects under a fresh source_id.
+  function getClientId() {
+    var key = 'springdrift_client_id';
+    try {
+      var id = localStorage.getItem(key);
+      if (!id) {
+        id = (typeof crypto !== 'undefined' && crypto.randomUUID)
+          ? crypto.randomUUID()
+          : ('cid-' + Math.random().toString(36).slice(2) + Date.now().toString(36));
+        localStorage.setItem(key, id);
+      }
+      return id;
+    } catch (e) {
+      // Private-mode browsers can throw on localStorage. Fall back to
+      // a per-page UUID — loses cross-reload survival, keeps the rest.
+      return 'cid-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    }
+  }
+  var clientId = getClientId();
+
+  // Server tags every frame with a monotonic seq. Detect reordering in
   // console for diagnostics. Reset on reconnect.
   var lastSeenSeq = 0;
   function connect() {
@@ -4173,8 +4284,11 @@ fn ws_connect_js() -> String {
     var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     var params = new URLSearchParams(location.search);
     var token = params.get('token');
-    var tokenParam = token ? '?token=' + encodeURIComponent(token) : '';
-    ws = new WebSocket(proto + '//' + location.host + '/ws' + tokenParam);
+    var qsParts = [];
+    if (token) qsParts.push('token=' + encodeURIComponent(token));
+    qsParts.push('client_id=' + encodeURIComponent(clientId));
+    var qs = qsParts.length ? '?' + qsParts.join('&') : '';
+    ws = new WebSocket(proto + '//' + location.host + '/ws' + qs);
 
     ws.onopen = function() {
       statusEl.textContent = 'connected';
