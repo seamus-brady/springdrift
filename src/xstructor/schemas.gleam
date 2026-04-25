@@ -923,6 +923,38 @@ pub const study_output_xsd = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
             </xs:sequence>
           </xs:complexType>
         </xs:element>
+        <xs:element name=\"cases\" minOccurs=\"0\">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name=\"case\" minOccurs=\"0\" maxOccurs=\"unbounded\">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name=\"intent\" type=\"xs:string\"/>
+                    <xs:element name=\"domain\" type=\"xs:string\" minOccurs=\"0\"/>
+                    <xs:element name=\"keywords\" minOccurs=\"0\">
+                      <xs:complexType>
+                        <xs:sequence>
+                          <xs:element name=\"keyword\" type=\"xs:string\" minOccurs=\"0\" maxOccurs=\"unbounded\"/>
+                        </xs:sequence>
+                      </xs:complexType>
+                    </xs:element>
+                    <xs:element name=\"approach\" type=\"xs:string\"/>
+                    <xs:element name=\"steps\" minOccurs=\"0\">
+                      <xs:complexType>
+                        <xs:sequence>
+                          <xs:element name=\"step\" type=\"xs:string\" minOccurs=\"0\" maxOccurs=\"unbounded\"/>
+                        </xs:sequence>
+                      </xs:complexType>
+                    </xs:element>
+                    <xs:element name=\"assessment\" type=\"xs:string\" minOccurs=\"0\"/>
+                    <xs:element name=\"section_path\" type=\"xs:string\"/>
+                    <xs:element name=\"confidence\" type=\"xs:decimal\"/>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
       </xs:sequence>
     </xs:complexType>
   </xs:element>
@@ -943,6 +975,26 @@ pub const study_output_example = "<study_output>
       <confidence>0.95</confidence>
     </fact>
   </facts>
+  <cases>
+    <case>
+      <intent>How do I assess whether an AI system is high-risk under the EU AI Act?</intent>
+      <domain>law</domain>
+      <keywords>
+        <keyword>eu-ai-act</keyword>
+        <keyword>high-risk</keyword>
+        <keyword>compliance</keyword>
+      </keywords>
+      <approach>Check whether the system falls under Annex III categories (e.g. employment, education, law enforcement); if so it is high-risk and must meet the obligations in Title III.</approach>
+      <steps>
+        <step>Identify the system's primary use case</step>
+        <step>Cross-reference Annex III's listed domains</step>
+        <step>If matched, apply Title III obligations (risk management, transparency, human oversight)</step>
+      </steps>
+      <assessment>Procedural framework for classifying an AI system; reusable whenever a new system is being assessed for compliance.</assessment>
+      <section_path>Title III / High-Risk Systems / Article 6</section_path>
+      <confidence>0.85</confidence>
+    </case>
+  </cases>
 </study_output>"
 
 // ---------------------------------------------------------------------------

@@ -12,6 +12,8 @@
 
 import affect/correlation as affect_correlation
 import affect/store as affect_store
+import cbr/log as cbr_log
+import cbr/types as cbr_types
 import dprime/decay
 import facts/log as facts_log
 import facts/types as facts_types
@@ -159,14 +161,23 @@ pub const study_default_max_facts: Int = 30
 /// noise in the facts store.
 pub const study_min_confidence: Float = 0.6
 
+/// Default cap on CBR cases persisted from a single study_document
+/// call. Cases are heavier than facts (problem/solution/outcome
+/// shape) so the cap is tighter — a paper rarely yields more than a
+/// handful of genuinely procedural patterns.
+pub const study_default_max_cases: Int = 10
+
 fn study_document_tool() -> Tool {
   tool.new("study_document")
   |> tool.with_description(
     "Read a normalised document in the knowledge library and extract "
-    <> "factual claims worth remembering. Each fact is persisted with "
-    <> "provenance back to the source section so the operator can "
-    <> "verify and so the agent can cite later. Use after a paper, "
-    <> "report, or reference doc lands in the library — turns it from "
+    <> "knowledge worth remembering. Two outputs land on disk: standalone "
+    <> "factual claims go to the facts store, and procedural patterns "
+    <> "(\"how to do X\", heuristics, decision frameworks, reusable "
+    <> "approaches) become CBR cases tagged DomainKnowledge so they "
+    <> "surface when similar problems come up later. Each entry is "
+    <> "persisted with a citation back to the source section. Use after "
+    <> "a paper, report, or reference doc lands in the library — turns "
     <> "passive storage into queryable knowledge.",
   )
   |> tool.add_string_param("doc_id", "Document UUID from the index", True)
@@ -174,6 +185,12 @@ fn study_document_tool() -> Tool {
     "max_facts",
     "Cap on facts to persist (default: 30). Higher values cost more "
       <> "tokens for the LLM extraction call.",
+    False,
+  )
+  |> tool.add_integer_param(
+    "max_cases",
+    "Cap on CBR cases to persist (default: 10). Cases are heavier than "
+      <> "facts; raise only for procedure-rich documents.",
     False,
   )
   |> tool.build()
@@ -2513,11 +2530,16 @@ fn run_study_document(call: ToolCall, ctx: RemembrancerContext) -> ToolResult {
       study_default_max_facts,
       decode.int,
     )
-    decode.success(#(doc_id, max_facts))
+    use max_cases <- decode.optional_field(
+      "max_cases",
+      study_default_max_cases,
+      decode.int,
+    )
+    decode.success(#(doc_id, max_facts, max_cases))
   }
   case json.parse(call.input_json, decoder) {
     Error(_) -> ToolFailure(tool_use_id: call.id, error: "Missing doc_id")
-    Ok(#(doc_id, max_facts)) -> {
+    Ok(#(doc_id, max_facts, max_cases)) -> {
       // Provider must be wired — study cycles need an LLM. Fall back
       // to a clear error rather than silently returning no facts.
       case ctx.gate_provider {
@@ -2560,6 +2582,7 @@ fn run_study_document(call: ToolCall, ctx: RemembrancerContext) -> ToolResult {
                     meta,
                     idx,
                     max_facts,
+                    max_cases,
                     p,
                     ctx.gate_model,
                   )
@@ -2577,6 +2600,7 @@ fn do_study_document(
   meta: knowledge_types.DocumentMeta,
   idx: knowledge_types.DocumentIndex,
   max_facts: Int,
+  max_cases: Int,
   provider: provider.Provider,
   model: String,
 ) -> ToolResult {
@@ -2591,15 +2615,23 @@ fn do_study_document(
     Error(e) ->
       ToolFailure(tool_use_id: call.id, error: "Schema compile failed: " <> e)
     Ok(schema) -> {
-      let prompt = build_study_prompt(meta, idx, max_facts)
+      let prompt = build_study_prompt(meta, idx, max_facts, max_cases)
       let system =
         schemas.build_system_prompt(
           "You are studying a document for the agent's long-term memory. "
-            <> "Extract concrete factual claims worth remembering — facts "
-            <> "the agent might cite later. Each fact has a stable key, a "
-            <> "self-contained value, the section it came from, and a "
-            <> "confidence score. Skip vague generalities; prefer specific "
-            <> "claims tied to particular sections.",
+            <> "Two output buckets:\n"
+            <> "1) <facts> — concrete, self-contained claims (definitions, "
+            <> "dates, thresholds, named relationships). Each has a stable "
+            <> "key, a value, source section, confidence.\n"
+            <> "2) <cases> — procedural / pattern knowledge: how to assess "
+            <> "X, when to apply Y, decision frameworks, heuristics, "
+            <> "step-by-step approaches the agent could reuse on a similar "
+            <> "problem. Each has an intent (the question it answers), a "
+            <> "domain, keywords, the approach, optional steps, an "
+            <> "assessment of why it's reusable, source section, confidence.\n"
+            <> "Choose bucket by shape: \"X is Y\" / \"deadline is N\" → fact; "
+            <> "\"to handle Z, do A then B\" / \"if X then Y\" → case. "
+            <> "Skip vague generalities. Tie everything to a specific section.",
           schemas.study_output_xsd,
           schemas.study_output_example,
         )
@@ -2609,7 +2641,9 @@ fn do_study_document(
           system_prompt: system,
           xml_example: schemas.study_output_example,
           max_retries: 2,
-          max_tokens: 2000,
+          // Cases push token budget up — give the model headroom so
+          // it doesn't truncate mid-case and produce invalid XML.
+          max_tokens: 3000,
         )
       case xstructor.generate(config, prompt, provider, model) {
         Error(e) ->
@@ -2618,22 +2652,28 @@ fn do_study_document(
             error: "Study extraction failed: " <> string.slice(e, 0, 300),
           )
         Ok(result) -> {
-          let extracted = parse_extracted_facts(result.elements)
-          let written = persist_study_facts(extracted, ctx, meta, max_facts)
+          let extracted_facts = parse_extracted_facts(result.elements)
+          let extracted_cases = parse_extracted_cases(result.elements)
+          let written_facts =
+            persist_study_facts(extracted_facts, ctx, meta, max_facts)
+          let written_cases =
+            persist_study_cases(extracted_cases, ctx, meta, max_cases)
           let summary =
             "Studied "
             <> meta.title
             <> " (doc:"
             <> knowledge_search.doc_slug_for(meta)
             <> "). "
-            <> "Extracted "
-            <> int.to_string(list.length(extracted))
-            <> " facts, persisted "
-            <> int.to_string(written)
-            <> " (after confidence ≥ "
+            <> "Facts: extracted "
+            <> int.to_string(list.length(extracted_facts))
+            <> ", persisted "
+            <> int.to_string(written_facts)
+            <> ". Cases: extracted "
+            <> int.to_string(list.length(extracted_cases))
+            <> ", persisted "
+            <> int.to_string(written_cases)
+            <> " (confidence ≥ "
             <> float.to_string(study_min_confidence)
-            <> " filter and cap of "
-            <> int.to_string(max_facts)
             <> ")."
           slog.info(
             "tools/remembrancer",
@@ -2656,6 +2696,7 @@ fn build_study_prompt(
   meta: knowledge_types.DocumentMeta,
   idx: knowledge_types.DocumentIndex,
   max_facts: Int,
+  max_cases: Int,
 ) -> String {
   let entries = flatten_tree_for_study(idx.root, "")
   let lines =
@@ -2683,9 +2724,12 @@ fn build_study_prompt(
   <> "\n\n"
   <> "Extract up to "
   <> int.to_string(max_facts)
-  <> " factual claims worth persisting to the agent's memory. Use "
-  <> "exact section paths from the headings above so each fact is "
-  <> "traceable. Skip claims with confidence < 0.6."
+  <> " factual claims (<facts>) and up to "
+  <> int.to_string(max_cases)
+  <> " procedural / pattern cases (<cases>). It is fine to emit zero "
+  <> "of either bucket if the document doesn't yield that shape of "
+  <> "knowledge. Use exact section paths from the headings above so "
+  <> "everything is traceable. Skip entries with confidence < 0.6."
 }
 
 fn flatten_tree_for_study(
@@ -2751,6 +2795,152 @@ fn parse_float_default(s: String, default: Float) -> Float {
         Error(_) -> default
       }
   }
+}
+
+/// A single case parsed out of XStructor's flat element dict.
+/// Mirrors ExtractedFact but carries the CBR problem/solution shape
+/// — used when the document describes a procedure, heuristic, or
+/// pattern rather than a standalone factual claim.
+pub type ExtractedCase {
+  ExtractedCase(
+    intent: String,
+    domain: String,
+    keywords: List(String),
+    approach: String,
+    steps: List(String),
+    assessment: String,
+    section_path: String,
+    confidence: Float,
+  )
+}
+
+/// Walk the flat XStructor result dict, extracting case records by
+/// indexed path until missing. Same shape as parse_extracted_facts.
+pub fn parse_extracted_cases(
+  elements: dict.Dict(String, String),
+) -> List(ExtractedCase) {
+  parse_extracted_cases_indexed(elements, 0, [])
+}
+
+fn parse_extracted_cases_indexed(
+  elements: dict.Dict(String, String),
+  idx: Int,
+  acc: List(ExtractedCase),
+) -> List(ExtractedCase) {
+  let base = "study_output.cases.case." <> int.to_string(idx)
+  case dict.get(elements, base <> ".intent") {
+    Error(_) -> list.reverse(acc)
+    Ok(intent) -> {
+      let domain = case dict.get(elements, base <> ".domain") {
+        Ok(d) -> d
+        Error(_) -> ""
+      }
+      let approach = case dict.get(elements, base <> ".approach") {
+        Ok(a) -> a
+        Error(_) -> ""
+      }
+      let assessment = case dict.get(elements, base <> ".assessment") {
+        Ok(a) -> a
+        Error(_) -> ""
+      }
+      let section_path = case dict.get(elements, base <> ".section_path") {
+        Ok(s) -> s
+        Error(_) -> ""
+      }
+      let confidence = case dict.get(elements, base <> ".confidence") {
+        Ok(c) -> parse_float_default(c, 0.5)
+        Error(_) -> 0.5
+      }
+      let keywords =
+        xstructor.extract_list(elements, base <> ".keywords.keyword")
+        |> list.map(string.trim)
+        |> list.filter(fn(k) { k != "" })
+      let steps =
+        xstructor.extract_list(elements, base <> ".steps.step")
+        |> list.map(string.trim)
+        |> list.filter(fn(s) { s != "" })
+      let extracted =
+        ExtractedCase(
+          intent: string.trim(intent),
+          domain: string.trim(domain),
+          keywords: keywords,
+          approach: string.trim(approach),
+          steps: steps,
+          assessment: string.trim(assessment),
+          section_path: string.trim(section_path),
+          confidence: confidence,
+        )
+      parse_extracted_cases_indexed(elements, idx + 1, [extracted, ..acc])
+    }
+  }
+}
+
+/// Persist a list of extracted cases to the CBR log as DomainKnowledge
+/// cases. Filters by confidence floor (study_min_confidence, same as
+/// facts) and caps total writes. Returns the number actually persisted.
+///
+/// Pure-ish: takes the cases list directly so tests can drive the
+/// persistence layer without needing an XStructor / LLM round-trip.
+pub fn persist_study_cases(
+  cases: List(ExtractedCase),
+  ctx: RemembrancerContext,
+  meta: knowledge_types.DocumentMeta,
+  max_cases: Int,
+) -> Int {
+  let slug = knowledge_search.doc_slug_for(meta)
+  let kept =
+    cases
+    |> list.filter(fn(c) { c.confidence >=. study_min_confidence })
+    |> list.take(max_cases)
+  list.each(kept, fn(c) {
+    let citation = "doc:" <> slug <> " §" <> c.section_path
+    // Cases inherit the doc's domain when the LLM didn't supply one.
+    let domain = case c.domain {
+      "" -> meta.domain
+      d -> d
+    }
+    let cbr_case =
+      cbr_types.CbrCase(
+        case_id: "case-" <> uuid_v4(),
+        timestamp: get_datetime(),
+        schema_version: 1,
+        problem: cbr_types.CbrProblem(
+          user_input: c.intent,
+          intent: c.intent,
+          domain: domain,
+          entities: [],
+          keywords: c.keywords,
+          query_complexity: "complex",
+        ),
+        solution: cbr_types.CbrSolution(
+          approach: c.approach,
+          agents_used: [],
+          tools_used: ["study_document"],
+          steps: c.steps,
+        ),
+        outcome: cbr_types.CbrOutcome(
+          status: "success",
+          confidence: c.confidence,
+          assessment: c.assessment,
+          pitfalls: [],
+        ),
+        // No narrative entry backs a paper-derived case — the source
+        // is the document section. Use the citation as the
+        // source_narrative_id so it remains traceable in queries.
+        source_narrative_id: citation,
+        profile: None,
+        redacted: False,
+        category: Some(cbr_types.DomainKnowledge),
+        usage_stats: Some(cbr_types.empty_usage_stats()),
+        strategy_id: None,
+      )
+    cbr_log.append(ctx.cbr_dir, cbr_case)
+    case ctx.librarian {
+      Some(l) -> librarian.notify_new_case(l, cbr_case)
+      None -> Nil
+    }
+  })
+  list.length(kept)
 }
 
 /// Persist a list of extracted facts to the facts log with provenance
