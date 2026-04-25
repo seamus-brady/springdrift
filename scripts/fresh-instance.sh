@@ -26,7 +26,11 @@
 #                   Triggers a one-time Gleam cache rebuild. Off by
 #                   default.
 #   --web           Launch the web GUI instead of the TUI (passes
-#                   `--gui web` through to gleam run).
+#                   `--gui web` through to gleam run). When
+#                   SPRINGDRIFT_WEB_TOKEN is not set in .env, also
+#                   passes --web-no-auth so the localhost-dev
+#                   instance starts; setting the env var exercises
+#                   the auth path instead.
 #   --diagnostic    Launch in web mode, wait for /health, fetch
 #                   /diagnostic, pretty-print, then shut the instance
 #                   down. Exit 0 if status=ok, 1 if degraded, 2 on
@@ -150,8 +154,19 @@ fi
 # ---------------------------------------------------------------------------
 
 GLEAM_ARGS=()
+WEB_AUTH_NOTE=""
 if [[ "$WEB_GUI" -eq 1 ]]; then
   GLEAM_ARGS+=("--gui" "web")
+  # Fresh instances run from /tmp on localhost — the GUI refuses to
+  # start without auth by default, so when no token is in .env we
+  # opt out and bind to 127.0.0.1. Set SPRINGDRIFT_WEB_TOKEN in .env
+  # to exercise the auth path instead.
+  if [[ -z "${SPRINGDRIFT_WEB_TOKEN:-}" ]]; then
+    GLEAM_ARGS+=("--web-no-auth")
+    WEB_AUTH_NOTE="auth: off (no SPRINGDRIFT_WEB_TOKEN; bound to 127.0.0.1)"
+  else
+    WEB_AUTH_NOTE="auth: on (SPRINGDRIFT_WEB_TOKEN from .env)"
+  fi
 fi
 GLEAM_ARGS+=("${EXTRA_ARGS[@]:-}")
 
@@ -160,7 +175,8 @@ Fresh Springdrift instance
   data dir  : $SPRINGDRIFT_DATA_DIR
   HOME      : $HOME
   provider  : $PROVIDER
-  gleam args: ${GLEAM_ARGS[*]:-<none>}
+  gleam args: ${GLEAM_ARGS[*]:-<none>}${WEB_AUTH_NOTE:+
+  web       : $WEB_AUTH_NOTE}
 
 Nothing under $PROJECT_ROOT/.springdrift or $PROJECT_ROOT/.springdrift_example
 has been modified. Delete $FRESH_ROOT when you're done with it.
