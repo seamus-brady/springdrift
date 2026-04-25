@@ -1118,7 +1118,10 @@ fn spawn_job(
     }
 
     // Clean up the per-job subscription so the routing table doesn't grow.
-    process.send(frontdoor, frontdoor_types.Unsubscribe(source_id))
+    process.send(
+      frontdoor,
+      frontdoor_types.Unsubscribe(source_id, delivery_subj),
+    )
   })
   Nil
 }

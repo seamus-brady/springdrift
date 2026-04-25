@@ -96,7 +96,13 @@ pub type FrontdoorMessage {
 
   // -- destination lifecycle --
   Subscribe(source_id: SourceId, kind: SourceKind, sink: Subject(Delivery))
-  Unsubscribe(source_id: SourceId)
+  /// Unsubscribe carries the sink so Frontdoor can verify the close
+  /// is from the currently-registered subscriber. A late close from a
+  /// previous socket (after a reconnect re-subscribed under the same
+  /// source_id) MUST NOT remove the new subscription. Without this,
+  /// stable client_ids actively make connections worse — the old
+  /// socket's close races with the new socket's subscribe.
+  Unsubscribe(source_id: SourceId, sink: Subject(Delivery))
 
   // -- inbound from external channels --
   InboundUserMessage(source_id: SourceId, text: String)

@@ -28,6 +28,7 @@ import frontdoor/types.{
 }
 import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Subject}
+import gleam/list
 import gleam/option.{None, Some}
 import slog
 
@@ -50,6 +51,17 @@ type State {
     /// questions are logged and dropped; with it, Frontdoor replies
     /// synthetically so the autonomous cycle does not hang.
     cognitive_inbox: option.Option(Subject(agent_types.CognitiveMessage)),
+    /// Replies and questions whose target source_id has no currently
+    /// registered destination. Held until a Subscribe arrives for the
+    /// same source_id, then flushed in chronological order.
+    ///
+    /// The natural workflow that fills this queue: operator opens a
+    /// long-running query; their websocket disconnects mid-cycle (idle
+    /// proxy timeout, sleep, blip); the cycle completes and tries to
+    /// route to a source_id with no destination. Without this buffer
+    /// the reply was dropped silently. With it, the operator's next
+    /// reconnect drains it.
+    pending: Dict(SourceId, List(Delivery)),
   )
 }
 
@@ -58,6 +70,7 @@ fn initial_state() -> State {
     destinations: dict.new(),
     cycle_owners: dict.new(),
     cognitive_inbox: None,
+    pending: dict.new(),
   )
 }
 
@@ -105,23 +118,66 @@ fn handle(msg: FrontdoorMessage, state: State) -> State {
 
     Subscribe(source_id:, kind:, sink:) -> {
       slog.debug("frontdoor", "subscribe", source_id, None)
-      State(
-        ..state,
-        destinations: dict.insert(
-          state.destinations,
-          source_id,
-          Destination(kind:, sink:),
-        ),
-      )
+      let with_dest =
+        State(
+          ..state,
+          destinations: dict.insert(
+            state.destinations,
+            source_id,
+            Destination(kind:, sink:),
+          ),
+        )
+      // Flush any pending deliveries that arrived while no destination
+      // was registered. Order preserved (we prepend on buffer-write so
+      // we reverse here for chronological delivery). After flushing,
+      // remove the per-source_id pending bucket so the routing table
+      // reflects "all delivered".
+      case dict.get(with_dest.pending, source_id) {
+        Error(_) -> with_dest
+        Ok(deliveries) -> {
+          slog.debug(
+            "frontdoor",
+            "subscribe",
+            "flushing pending deliveries for " <> source_id,
+            None,
+          )
+          deliveries
+          |> list.reverse
+          |> list.each(fn(d) { process.send(sink, d) })
+          State(..with_dest, pending: dict.delete(with_dest.pending, source_id))
+        }
+      }
     }
 
-    Unsubscribe(source_id:) -> {
+    Unsubscribe(source_id:, sink:) -> {
       slog.debug("frontdoor", "unsubscribe", source_id, None)
       case dict.get(state.destinations, source_id) {
-        Ok(dest) -> process.send(dest.sink, DeliverClosed)
-        Error(_) -> Nil
+        Ok(dest) ->
+          case dest.sink == sink {
+            True -> {
+              // Real close from the currently-registered subscriber.
+              process.send(dest.sink, DeliverClosed)
+              State(
+                ..state,
+                destinations: dict.delete(state.destinations, source_id),
+              )
+            }
+            False -> {
+              // Stale unsubscribe from a previous sink that's already
+              // been replaced by a reconnect. Ignoring it is critical
+              // — deleting here would silently disconnect the new
+              // websocket. Logged at debug for traceability.
+              slog.debug(
+                "frontdoor",
+                "unsubscribe",
+                "ignoring stale unsubscribe (sink mismatch) for " <> source_id,
+                None,
+              )
+              state
+            }
+          }
+        Error(_) -> state
       }
-      State(..state, destinations: dict.delete(state.destinations, source_id))
     }
 
     ClaimCycle(cycle_id:, source_id:) -> {
@@ -131,10 +187,7 @@ fn handle(msg: FrontdoorMessage, state: State) -> State {
       )
     }
 
-    Publish(output:) -> {
-      route_output(output, state)
-      state
-    }
+    Publish(output:) -> route_output(output, state)
 
     // Inbound request handling is wired in Phase 2 once cognitive accepts
     // the source_id-carrying variants. Until then these paths are inert;
@@ -158,7 +211,7 @@ fn handle(msg: FrontdoorMessage, state: State) -> State {
 // Output routing
 // ---------------------------------------------------------------------------
 
-fn route_output(output: CognitiveOutput, state: State) -> Nil {
+fn route_output(output: CognitiveOutput, state: State) -> State {
   let cycle_id = case output {
     CognitiveReplyOutput(cycle_id:, ..) -> cycle_id
     HumanQuestionOutput(cycle_id:, ..) -> cycle_id
@@ -166,28 +219,66 @@ fn route_output(output: CognitiveOutput, state: State) -> Nil {
 
   case dict.get(state.cycle_owners, cycle_id) {
     Error(_) -> {
+      // No source ever claimed this cycle. Genuinely orphaned —
+      // nothing useful to do; logging is the only signal.
       slog.debug(
         "frontdoor",
         "route_output",
         "no owner for cycle " <> cycle_id <> " — dropping",
         Some(cycle_id),
       )
-      Nil
+      state
     }
     Ok(source_id) -> {
       case dict.get(state.destinations, source_id) {
+        Ok(dest) -> {
+          deliver(state, dest, output)
+          state
+        }
         Error(_) -> {
+          // The source is known (cycle was claimed) but the
+          // destination isn't currently registered — typically the
+          // websocket disconnected mid-cycle. Buffer the delivery so
+          // the operator gets it when they reconnect under the same
+          // source_id. With stable client_ids, "same source_id"
+          // means "same browser conversation."
+          let delivery = output_to_delivery(output)
+          let existing = dict.get(state.pending, source_id) |> result_or_empty
           slog.debug(
             "frontdoor",
             "route_output",
-            "no destination registered for " <> source_id,
+            "no destination for " <> source_id <> " — buffering",
             Some(cycle_id),
           )
-          Nil
+          State(
+            ..state,
+            pending: dict.insert(state.pending, source_id, [
+              delivery,
+              ..existing
+            ]),
+          )
         }
-        Ok(dest) -> deliver(state, dest, output)
       }
     }
+  }
+}
+
+fn result_or_empty(r: Result(List(Delivery), Nil)) -> List(Delivery) {
+  case r {
+    Ok(v) -> v
+    Error(_) -> []
+  }
+}
+
+/// Convert a CognitiveOutput into the Delivery shape the sinks expect.
+/// Same shape `deliver` constructs and sends, but as a value we can
+/// hold in the pending buffer until a sink registers.
+fn output_to_delivery(output: CognitiveOutput) -> Delivery {
+  case output {
+    CognitiveReplyOutput(cycle_id:, response:, model:, usage:, tools_fired:) ->
+      DeliverReply(cycle_id:, response:, model:, usage:, tools_fired:)
+    HumanQuestionOutput(cycle_id:, question_id:, question:, origin:) ->
+      DeliverQuestion(cycle_id:, question_id:, question:, origin:)
   }
 }
 

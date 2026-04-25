@@ -466,7 +466,7 @@ fn subscribe_and_drain(
     )
     // 10 min (slightly longer than the scheduler-side timeout)
     let _ = process.receive(sink, 600_000)
-    process.send(frontdoor, frontdoor_types.Unsubscribe(source_id))
+    process.send(frontdoor, frontdoor_types.Unsubscribe(source_id, sink))
   })
   Nil
 }

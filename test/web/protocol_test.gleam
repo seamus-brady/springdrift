@@ -24,8 +24,20 @@ pub fn decode_user_message_test() {
   let json = "{\"type\": \"user_message\", \"text\": \"hello\"}"
   let result = protocol.decode_client_message(json)
   result |> should.be_ok
-  let assert Ok(protocol.UserMessage(text:)) = result
+  let assert Ok(protocol.UserMessage(text:, client_msg_id:)) = result
   text |> should.equal("hello")
+  // Legacy-shape message — no client_msg_id supplied.
+  client_msg_id |> should.equal(None)
+}
+
+pub fn decode_user_message_with_client_msg_id_test() {
+  let json =
+    "{\"type\": \"user_message\", \"text\": \"hi\", \"client_msg_id\": \"abc-123\"}"
+  let result = protocol.decode_client_message(json)
+  result |> should.be_ok
+  let assert Ok(protocol.UserMessage(text:, client_msg_id:)) = result
+  text |> should.equal("hi")
+  client_msg_id |> should.equal(Some("abc-123"))
 }
 
 pub fn decode_user_answer_test() {

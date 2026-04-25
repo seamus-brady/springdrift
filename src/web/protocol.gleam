@@ -36,7 +36,12 @@ fn monotonic_seq() -> Int
 // ---------------------------------------------------------------------------
 
 pub type ClientMessage {
-  UserMessage(text: String)
+  /// `client_msg_id` is an optional client-assigned id used for
+  /// per-message acknowledgement. The server echoes it back in
+  /// `UserMessageAck` once the WS handler has accepted the frame, so
+  /// the client knows to clear that bubble's "sending..." state.
+  /// Legacy clients omit it; in that case no ack is emitted.
+  UserMessage(text: String, client_msg_id: Option(String))
   UserAnswer(text: String)
   RequestLogData
   RequestRewind(index: Int)
@@ -82,6 +87,12 @@ pub type ServerMessage {
   AssistantMessage(text: String, model: String, usage: Option(Usage))
   Thinking
   Question(text: String, source: String)
+  /// Echoes the `client_msg_id` of a `UserMessage` once the WS handler
+  /// has accepted the frame. The client uses this to clear the
+  /// "sending..." state on the corresponding bubble. Without it (server
+  /// receives the frame but the WS dies before sending), the bubble
+  /// remains marked unacked and the operator is prompted to retry.
+  UserMessageAck(client_msg_id: String)
   ToolNotification(name: String)
   SaveNotification(message: String)
   SafetyNotification(decision: String, score: Float, explanation: String)
@@ -174,7 +185,15 @@ pub fn decode_client_message(json_string: String) -> Result(ClientMessage, Nil) 
     case type_str {
       "user_message" -> {
         use text <- decode.field("text", decode.string)
-        decode.success(UserMessage(text:))
+        // client_msg_id is optional for backward compat with clients
+        // that don't ship per-message acks yet. None means no ack
+        // will be emitted for this message.
+        use client_msg_id <- decode.optional_field(
+          "client_msg_id",
+          None,
+          decode.optional(decode.string),
+        )
+        decode.success(UserMessage(text:, client_msg_id:))
       }
       "user_answer" -> {
         use text <- decode.field("text", decode.string)
@@ -229,7 +248,7 @@ pub fn decode_client_message(json_string: String) -> Result(ClientMessage, Nil) 
         use reason <- decode.field("reason", decode.string)
         decode.success(RequestRejectExport(slug:, reason:))
       }
-      _ -> decode.failure(UserMessage(""), "Unknown client message type")
+      _ -> decode.failure(UserMessage("", None), "Unknown client message type")
     }
   }
   case json.parse(json_string, decoder) {
@@ -279,6 +298,13 @@ fn encode_body(msg: ServerMessage) -> String {
         #("type", json.string("question")),
         #("text", json.string(text)),
         #("source", json.string(source)),
+      ])
+      |> json.to_string
+
+    UserMessageAck(client_msg_id:) ->
+      json.object([
+        #("type", json.string("user_message_ack")),
+        #("client_msg_id", json.string(client_msg_id)),
       ])
       |> json.to_string
 
