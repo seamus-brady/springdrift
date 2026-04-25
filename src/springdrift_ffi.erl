@@ -641,49 +641,98 @@ set_env(Name, Value) when is_binary(Name), is_binary(Value) ->
 
 %% Run a command with arguments and a timeout.
 %% Returns {ok, {ExitCode, Stdout, Stderr}} or {error, Reason}.
-%% Uses /bin/sh -c to get proper stderr separation via redirect.
+%%
+%% Spawns the executable directly with an argv list — NEVER through a
+%% shell. Each element of Args is passed verbatim as one argv entry,
+%% so shell metacharacters (`;`, `&&`, `$()`, redirects, spaces) are
+%% literal data, never interpreted. Replaces the previous
+%% `{spawn, "cmd arg1 arg2 ..."}` path which was vulnerable to
+%% command injection on every untrusted input.
+%%
+%% Stderr handling: Erlang's open_port has no native split-stream
+%% capture without going through a shell. We use `stderr_to_stdout`
+%% to merge both streams into one, then return the merged buffer in
+%% both `Stdout` and `Stderr` fields of the response. Success-path
+%% callers (which only care about stdout content) and error-path
+%% callers (which concat stderr into operator-facing error messages)
+%% both keep working. The cost is a duplicated buffer; the security
+%% benefit is no shell anywhere in the pipeline.
 run_cmd(Cmd, Args, TimeoutMs) when is_binary(Cmd), is_list(Args), is_integer(TimeoutMs) ->
     CmdStr = binary_to_list(Cmd),
-    ArgsStr = [binary_to_list(A) || A <- Args],
-    %% Build a shell command that captures stderr separately
-    FullCmd = string:join([CmdStr | ArgsStr], " "),
-    StderrFile = "/tmp/springdrift_stderr_" ++ integer_to_list(erlang:unique_integer([positive])),
-    ShellCmd = FullCmd ++ " 2>" ++ StderrFile,
-    try
-        Port = open_port({spawn, ShellCmd},
-                         [binary, exit_status, use_stdio, stderr_to_stdout, {line, 65536}]),
-        Result = collect_port_output(Port, <<>>, TimeoutMs),
-        Stderr = case file:read_file(StderrFile) of
-            {ok, SE} -> SE;
-            {error, _} -> <<>>
-        end,
-        file:delete(StderrFile),
-        case Result of
-            {ok, {ExitCode, Stdout}} ->
-                {ok, {ExitCode, Stdout, Stderr}};
-            {error, timeout} ->
-                {error, <<"Command timed out after ", (integer_to_binary(TimeoutMs))/binary, "ms">>}
-        end
-    catch
-        _:Reason ->
-            file:delete(StderrFile),
-            {error, iolist_to_binary(io_lib:format("Command failed: ~p", [Reason]))}
+    ArgsBin = [iolist_to_binary([A]) || A <- Args],
+    case os:find_executable(CmdStr) of
+        false ->
+            {error, iolist_to_binary([<<"Executable not found on PATH: ">>, Cmd])};
+        Path ->
+            try
+                Port = open_port(
+                    {spawn_executable, Path},
+                    [binary, exit_status, use_stdio, stderr_to_stdout,
+                     {args, ArgsBin}]
+                ),
+                case collect_port_output(Port, <<>>, TimeoutMs) of
+                    {ok, {ExitCode, Output}} ->
+                        {ok, {ExitCode, Output, Output}};
+                    {error, timeout} ->
+                        {error, <<"Command timed out after ",
+                                  (integer_to_binary(TimeoutMs))/binary, "ms">>}
+                end
+            catch
+                _:Reason ->
+                    {error, iolist_to_binary(io_lib:format("Command failed: ~p", [Reason]))}
+            end
     end.
 
+%% Collect raw binary data from the port until exit_status or timeout.
+%% Uses no `{line, _}` framing — line mode swallows trailing output
+%% that has no terminating newline (e.g. `printf %s "hello"`). After
+%% exit_status, drain any remaining buffered data so we don't lose
+%% the tail.
 collect_port_output(Port, Acc, TimeoutMs) ->
     receive
-        {Port, {data, {eol, Line}}} ->
-            collect_port_output(Port, <<Acc/binary, Line/binary, "\n">>, TimeoutMs);
-        {Port, {data, {noeol, Line}}} ->
-            collect_port_output(Port, <<Acc/binary, Line/binary>>, TimeoutMs);
+        {Port, {data, Bin}} when is_binary(Bin) ->
+            collect_port_output(Port, <<Acc/binary, Bin/binary>>, TimeoutMs);
         {Port, {exit_status, ExitCode}} ->
-            {ok, {ExitCode, Acc}}
+            {ok, {ExitCode, drain_pending_data(Port, Acc)}}
     after TimeoutMs ->
-        catch port_close(Port),
-        %% Try to kill the OS process
-        catch os:cmd("kill -9 $(lsof -ti :" ++ integer_to_list(erlang:port_info(Port, id)) ++ ") 2>/dev/null"),
+        kill_port_process(Port),
         {error, timeout}
     end.
+
+%% Drain any data messages that arrived after (or alongside) the
+%% exit_status. Erlang's port driver does not order these
+%% deterministically — for short-lived processes the exit_status can
+%% reach the mailbox before the final data chunk has been delivered.
+drain_pending_data(Port, Acc) ->
+    receive
+        {Port, {data, Bin}} when is_binary(Bin) ->
+            drain_pending_data(Port, <<Acc/binary, Bin/binary>>)
+    after 0 ->
+        Acc
+    end.
+
+%% Best-effort termination of a child process whose port has timed out.
+%%
+%% Erlang's `port_info(Port, os_pid)` returns the actual OS PID of the
+%% spawned process (or undefined if the port is already gone). We kill
+%% the process via `kill -9 <pid>` then close the port to drain any
+%% leftover messages. This replaces the previous broken implementation
+%% that used `lsof -ti :<erlang_port_id>` — Erlang port ids are not
+%% TCP port numbers, so the kill never targeted the right process and
+%% timed-out children leaked.
+kill_port_process(Port) ->
+    case erlang:port_info(Port, os_pid) of
+        {os_pid, OsPid} when is_integer(OsPid) ->
+            %% Argv-safe: integer_to_list of a known integer cannot
+            %% inject anything. Suppress shell errors so a missing
+            %% process (already exited) doesn't pollute logs.
+            catch os:cmd("kill -9 " ++ integer_to_list(OsPid) ++ " 2>/dev/null"),
+            ok;
+        _ ->
+            ok
+    end,
+    catch port_close(Port),
+    ok.
 
 %% Check if a binary exists on PATH. Returns {ok, Path} or {error, nil}.
 which(Name) when is_binary(Name) ->
