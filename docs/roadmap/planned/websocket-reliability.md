@@ -64,17 +64,53 @@ When the cycle finishes and finds no destination (because the socket
 disconnected during the long run), the reply is logged at debug level and
 discarded. No buffering, no retry, no surfacing to the operator.
 
-### 4. Conversation ownership is coupled to socket liveness
+### 4. User messages disappear from the chat on reconnect (outbound leg)
 
-These three together produce the same fundamental error: the WebSocket
+`renderSessionHistory` in `src/web/html.gleam:480` does:
+
+```javascript
+function renderSessionHistory(messages) {
+  msgs.innerHTML = '';
+  // ...rebuild from server state...
+}
+```
+
+`SessionHistory` is sent on every WebSocket connect (`gui.gleam:1074`),
+populated from cognitive's live message list via `GetMessages`. So:
+
+1. Operator types a message during a long-running query. Bubble
+   renders locally, message is sent over WS.
+2. Network blip mid-query — WS drops and reconnects.
+3. On reconnect, server sends `SessionHistory` from cognitive's live
+   messages.
+4. Client wipes the DOM (`innerHTML = ''`) and rebuilds.
+5. *If* the typed message reached cognitive before the drop, it's in
+   the history and the bubble survives.
+6. *If* it was in flight when the drop happened (or cognitive hadn't
+   added it to `state.messages` yet), it's NOT in the history — the
+   bubble is gone with no record it was ever sent.
+
+Long-running queries make this likely because idle proxy timeouts,
+network blips, and laptop suspends all hit the WS during the query
+window. The longer the query, the bigger the window for a drop to
+coincide with a not-yet-acknowledged user message.
+
+This is the *outbound* (client → server) version of bugs 1–3, which
+covered the *inbound* (server → client) leg. Same root cause, different
+direction.
+
+### 5. Conversation ownership is coupled to socket liveness
+
+These four bugs all express the same fundamental error: the WebSocket
 is treated as the *owner* of the conversation. It should be treated as
 a *transport* — one of potentially many delivery sinks for a conversation
 that outlives any individual connection.
 
 ## Fix Plan
 
-Three fixes are needed for the symptom to stop. The fourth is the
-conceptual cleanup that makes the first three coherent.
+Four code fixes plus the conceptual cleanup. Fixes 1–3 address the
+inbound leg (replies dropped); Fix 4 addresses the outbound leg (user
+messages disappearing).
 
 ### Fix 1 — Stable `client_id`
 
@@ -202,7 +238,50 @@ This is what makes long-running replies actually survive a disconnect.
 without buffering the reply still gets lost the moment the socket is gone
 when the cycle finishes.
 
-### Fix 4 — Decouple Conversation from WebSocket (conceptual cleanup)
+### Fix 4 — Preserve in-flight user messages on reconnect
+
+Two layers:
+
+**Client-side (minimum viable).** Track locally-rendered user messages
+that haven't yet been confirmed in a `SessionHistory`. When
+`renderSessionHistory` runs, after rebuilding from the server view,
+re-append any local user bubbles whose text isn't present in the
+incoming history. Keyed by a client-side message id assigned at submit
+time so duplicate-detection is exact, not text-matching.
+
+```javascript
+// On submit:
+var clientMsgId = crypto.randomUUID();
+inFlightUserMessages.push({ id: clientMsgId, text: text, ts: Date.now() });
+ws.send(JSON.stringify({ type: 'user_message', text: text,
+                         client_msg_id: clientMsgId }));
+addUserMessage(text, clientMsgId);
+
+// On SessionHistory:
+renderSessionHistory(messages);  // existing wipe + rebuild
+inFlightUserMessages = inFlightUserMessages.filter(function(m) {
+  // Drop entries the server now confirms it has
+  var seen = messages.some(function(s) {
+    return s.role === 'user' && s.text === m.text;
+  });
+  if (seen) return false;
+  // Re-render the local bubble that the wipe just removed
+  addUserMessage(m.text, m.id);
+  return true;  // keep until we see it in a future history
+});
+```
+
+**Server-side (proper fix).** Echo a `user_message_ack` back to the
+sender as soon as cognitive has accepted the message into
+`state.messages`. Client clears `inFlightUserMessages` entries on ack.
+A submission with no ack within ~5s is shown as "sending — retry?"
+rather than vanishing silently.
+
+The minimum-viable client-side fix alone stops the disappearance
+symptom. The server-side ack is what makes it *correct* (the operator
+knows whether their message was received).
+
+### Fix 5 — Decouple Conversation from WebSocket (conceptual cleanup)
 
 The mental model the above fixes converge on:
 
@@ -257,28 +336,45 @@ mid-question doesn't cross-thread answers between concurrent queries.
 
 | Priority | Fix | Why |
 |---|---|---|
+| 🔴 Critical | Fix 4 (client-side) — Preserve in-flight user messages | Stops user-typed messages vanishing during long queries |
 | 🔴 Critical | Fix 2 — Conditional `Unsubscribe` | Without this, Fix 1 makes things worse |
-| 🔴 Critical | Fix 3 — Pending buffer | Stops drops on socket disconnect mid-cycle |
+| 🔴 Critical | Fix 3 — Pending buffer | Stops reply drops on socket disconnect mid-cycle |
 | 🟠 High | Fix 1 — Stable `client_id` | Necessary for Fix 2/3 to identify the right buffer |
+| 🟠 High | Fix 4 (server-side) — `user_message_ack` | Makes outbound delivery actually correct, not just preserved-on-screen |
 | 🟡 Medium | Question correlation | Avoids cross-threading on tab/reconnect |
-| 🟡 Medium | Message ACKs | Catches the rare lost-after-deliver case |
+| 🟡 Medium | Message ACKs | Catches the rare lost-after-deliver case (inbound) |
 | 🟡 Medium | Pending buffer expiry | Prevents unbounded growth from dead browsers |
 
 ## Suggested Implementation Order
 
-One PR, three commits, in this order so each commit leaves the system
-working:
+Two PRs. First PR addresses the most-visible operator symptom (user
+messages vanishing) with a small client-side change that's safe to ship
+ahead of the server-side rework. Second PR is the server-side
+reliability work.
 
-1. **Fix 2 first** — conditional `Unsubscribe`. Standalone, no behaviour
-   change with current per-socket UUIDs (always-fresh source_ids never
-   match across closes anyway). Establishes the sink-equality discipline.
-2. **Fix 3 second** — pending buffer. Standalone improvement: late
-   replies on a still-disconnected socket now survive until next
-   subscribe instead of vanishing.
-3. **Fix 1 last** — stable `client_id`. Now safe to land because Fix 2
-   prevents stale-unsubscribe footguns and Fix 3 handles the post-refresh
-   buffering. End result: refreshes / reconnects / long runs all reliably
-   deliver.
+**PR 1 — Stop user messages disappearing on screen** (~30 LOC + tests)
+
+Just Fix 4 (client-side). One file (`html.gleam`). No protocol or
+server change. Operator stops seeing their typed messages vanish
+during long queries. The message may still actually be lost in flight
+without the operator's knowledge — the proper outbound-ack is in PR 2.
+
+**PR 2 — Reply reliability + outbound ack** (~200-300 LOC + tests)
+
+Three commits, each leaving the system in a working state:
+
+1. **Fix 2** — conditional `Unsubscribe`. Standalone, no behaviour
+   change with current per-socket UUIDs (always-fresh source_ids
+   never match across closes anyway). Establishes sink-equality
+   discipline.
+2. **Fix 3** — pending buffer. Standalone improvement: late replies
+   on a still-disconnected socket now survive until next subscribe
+   instead of vanishing.
+3. **Fix 1 + Fix 4 (server-side)** — stable `client_id` and
+   `user_message_ack`. Now safe to land because Fix 2 prevents
+   stale-unsubscribe footguns and Fix 3 handles post-refresh
+   buffering. End result: refreshes / reconnects / long runs all
+   reliably deliver in both directions.
 
 Tests:
 
@@ -286,3 +382,5 @@ Tests:
 - Frontdoor unit test: reply with no registered destination lands in `pending`.
 - Frontdoor unit test: subscribe drains `pending` for the matching `source_id`.
 - Integration: simulate disconnect-mid-cycle, confirm reply delivers on reconnect.
+- Client unit test (or scenario): in-flight user message survives a
+  `SessionHistory` rebuild that doesn't include it.
