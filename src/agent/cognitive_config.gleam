@@ -117,6 +117,10 @@ pub type CognitiveConfig {
     /// Timeout for the deputy briefing call. On expiry the agent
     /// proceeds without a briefing.
     deputy_timeout_ms: Int,
+    /// Skills directories the cog loop's `read_skill` tool is
+    /// allowed to read from. Same list passed to specialist agents.
+    /// Used by `is_safe_skill_path` for canonical-path containment.
+    skills_dirs: List(String),
   )
 }
 
@@ -194,5 +198,6 @@ pub fn default_test_config(
     deputies_model: "mock-model",
     deputies_max_tokens: 800,
     deputy_timeout_ms: 15_000,
+    skills_dirs: [],
   )
 }

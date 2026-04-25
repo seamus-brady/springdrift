@@ -21,6 +21,7 @@ import knowledge/types
 import knowledge/workspace
 import llm/tool
 import llm/types as llm_types
+import paths
 import slog
 
 @external(erlang, "springdrift_ffi", "generate_uuid")
@@ -39,6 +40,7 @@ fn sha256_hex(input: String) -> String
 pub fn cognitive_tools() -> List(llm_types.Tool) {
   [
     list_documents_tool(),
+    list_intray_tool(),
     write_journal_tool(),
     write_note_tool(),
     read_note_tool(),
@@ -75,6 +77,19 @@ fn list_documents_tool() -> llm_types.Tool {
     False,
   )
   |> tool.add_string_param("domain", "Filter by domain (optional)", False)
+  |> tool.build()
+}
+
+fn list_intray_tool() -> llm_types.Tool {
+  tool.new("list_intray")
+  |> tool.with_description(
+    "List files currently in the knowledge intray — uploads or "
+    <> "email attachments waiting to be normalised into sources/. "
+    <> "Returns each file with its size, deposit time, and whether "
+    <> "intake.process has converted it. Use when the operator "
+    <> "mentions an upload that hasn't shown up in the library, or "
+    <> "when the sensorium reports pending intray entries.",
+  )
   |> tool.build()
 }
 
@@ -270,6 +285,7 @@ fn reject_export_tool() -> llm_types.Tool {
 
 pub fn is_knowledge_tool(name: String) -> Bool {
   name == "list_documents"
+  || name == "list_intray"
   || name == "write_journal"
   || name == "write_note"
   || name == "read_note"
@@ -312,6 +328,7 @@ pub fn execute(
   slog.debug("knowledge", "execute", "tool=" <> call.name, None)
   case call.name {
     "list_documents" -> run_list_documents(call, cfg)
+    "list_intray" -> run_list_intray(call, cfg)
     "write_journal" -> run_write_journal(call, cfg)
     "write_note" -> run_write_note(call, cfg)
     "read_note" -> run_read_note(call, cfg)
@@ -386,6 +403,67 @@ fn run_list_documents(
     }
   }
 }
+
+/// Discoverability tool for files waiting in the intray. The
+/// presence of a file there means it has not yet been normalised
+/// (intake.process removes files on success). So this list answers
+/// the operator's "I uploaded X — where is it?" without needing a
+/// new normalisation-status field.
+fn run_list_intray(
+  call: llm_types.ToolCall,
+  _cfg: KnowledgeConfig,
+) -> llm_types.ToolResult {
+  let intray = paths.knowledge_intray_dir()
+  case simplifile.read_directory(intray) {
+    Error(_) ->
+      // Dir doesn't exist (yet) — treat as empty rather than failing.
+      llm_types.ToolSuccess(
+        tool_use_id: call.id,
+        content: "Intray is empty (no pending files).",
+      )
+    Ok(files) ->
+      case files {
+        [] ->
+          llm_types.ToolSuccess(
+            tool_use_id: call.id,
+            content: "Intray is empty (no pending files).",
+          )
+        _ -> {
+          let lines =
+            list.map(files, fn(filename) {
+              let size = file_size(intray <> "/" <> filename)
+              filename <> " (" <> format_bytes(size) <> ")"
+            })
+          let header =
+            int.to_string(list.length(files)) <> " file(s) pending in intray:\n"
+          let footer =
+            "\n\nFiles sit here until intake.process normalises them. "
+            <> "If a file is stuck, the binary needed to convert it "
+            <> "may not be installed on the host (e.g. pdftotext for "
+            <> ".pdf via poppler-utils, pandoc for .docx/.epub/.html). "
+            <> "The deposit handler logs a specific failure reason; "
+            <> "check the operator chat for the upload result."
+          llm_types.ToolSuccess(
+            tool_use_id: call.id,
+            content: header <> string.join(lines, "\n") <> footer,
+          )
+        }
+      }
+  }
+}
+
+/// Format byte counts as human-friendly. Used by list_intray and
+/// nowhere else for now — kept local so it doesn't proliferate.
+fn format_bytes(n: Int) -> String {
+  case n {
+    n if n < 1024 -> int.to_string(n) <> " B"
+    n if n < 1_048_576 -> int.to_string(n / 1024) <> " KB"
+    n -> int.to_string(n / 1_048_576) <> " MB"
+  }
+}
+
+@external(erlang, "springdrift_ffi", "file_size")
+fn file_size(path: String) -> Int
 
 fn run_write_journal(
   call: llm_types.ToolCall,

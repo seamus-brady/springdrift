@@ -51,9 +51,10 @@ pub fn deposit_markdown_lands_and_processes_test() {
   let root = test_root("markdown_happy")
   let bytes = <<"# Hello\n\nFrom upload.\n":utf8>>
 
-  let assert Ok(#(saved, processed)) = deposit(root, bytes, "memo.md")
+  let assert Ok(#(saved, summary)) = deposit(root, bytes, "memo.md")
   saved |> should.equal("memo.md")
-  processed |> should.equal(1)
+  summary.normalised |> should.equal(1)
+  summary.failures |> should.equal([])
 
   // File no longer in the intray (it was processed).
   case simplifile.read(root <> "/intray/memo.md") {
@@ -81,10 +82,10 @@ pub fn deposit_pdf_lands_and_processes_test() {
       let assert Ok(pdf_bytes) =
         simplifile.read_bits("test/fixtures/sample.pdf")
 
-      let assert Ok(#(saved, processed)) =
+      let assert Ok(#(saved, summary)) =
         deposit(root, pdf_bytes, "research.pdf")
       saved |> should.equal("research.pdf")
-      processed |> should.equal(1)
+      summary.normalised |> should.equal(1)
 
       // Normalised markdown is in sources/intray/research.md (slug
       // strips the .pdf extension).
@@ -116,9 +117,13 @@ pub fn deposit_unsupported_extension_lands_but_does_not_process_test() {
   let root = test_root("unsupported")
   let bytes = <<"binary png pretender":utf8>>
 
-  let assert Ok(#(saved, processed)) = deposit(root, bytes, "image.png")
+  let assert Ok(#(saved, summary)) = deposit(root, bytes, "image.png")
   saved |> should.equal("image.png")
-  processed |> should.equal(0)
+  summary.normalised |> should.equal(0)
+  // PNG isn't in the supported list; converter.is_supported filter
+  // skips it BEFORE the per-file failure path runs, so failures stays
+  // empty (no actionable error to surface — the file just sits there).
+  summary.failures |> should.equal([])
   // File still sits in the intray.
   case simplifile.read(root <> "/intray/image.png") {
     Ok(_) -> Nil

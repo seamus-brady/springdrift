@@ -85,7 +85,14 @@ pub fn start(
   }
   let tools =
     list.flatten([
-      [builtin.human_input_tool()],
+      // The cog loop needs read_skill on itself, not just on
+      // sub-agents. Skills ARE the cog loop's procedures; routing
+      // reads via a sub-agent (the previous shape) introduced extra
+      // failure modes — researcher's read_skill has its own bugs,
+      // coder's sandbox can't see host files — and produced
+      // fabricate-then-claim patterns when the agent stitched
+      // partial retrievals together.
+      [builtin.human_input_tool(), builtin.read_skill_tool()],
       memory.all(),
       planner_tools.all(),
       learning_goal_tools.all(),
@@ -179,6 +186,7 @@ pub fn start(
           deputies_model: cfg.deputies_model,
           deputies_max_tokens: cfg.deputies_max_tokens,
           deputy_timeout_ms: cfg.deputy_timeout_ms,
+          skills_dirs: cfg.skills_dirs,
         ),
         redact_secrets: cfg.redact_secrets,
         pending_sensory_events: [],

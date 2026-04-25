@@ -1719,46 +1719,75 @@ pub fn deposit_and_process(
   indexes_dir: String,
   bytes: BitArray,
   filename: String,
-) -> Result(#(String, Int), String) {
+) -> Result(#(String, knowledge_intake.ProcessSummary), String) {
   case knowledge_intake.deposit(intray_dir, bytes, filename) {
     Error(reason) -> Error(reason)
     Ok(saved) -> {
-      let processed =
-        knowledge_intake.process(
+      let summary =
+        knowledge_intake.process_with_summary(
           knowledge_dir,
           intray_dir,
           sources_dir,
           indexes_dir,
         )
-      Ok(#(saved, processed))
+      Ok(#(saved, summary))
     }
   }
 }
 
 fn upload_success(
   saved_filename: String,
-  processed_count: Int,
+  summary: knowledge_intake.ProcessSummary,
 ) -> Response(ResponseData) {
+  let processed_count = summary.normalised
   let body =
     json.object([
       #("ok", json.bool(True)),
       #("filename", json.string(saved_filename)),
       #("processed", json.int(processed_count)),
-      #("message", case processed_count {
-        0 ->
-          json.string(
-            "Deposited '"
-            <> saved_filename
-            <> "' in intray. No files normalised "
-            <> "(unsupported extension or converter missing).",
-          )
-        n ->
+      #("message", case processed_count, summary.failures {
+        // Happy path — at least one file normalised, no failures.
+        n, [] if n > 0 ->
           json.string(
             "Deposited '"
             <> saved_filename
             <> "' in intray. Normalised "
             <> int.to_string(n)
             <> " file(s) into sources/.",
+          )
+        // Mixed result — some normalised, some failed. Lead with
+        // the success, then list failures so the operator can act.
+        n, [_, ..] if n > 0 ->
+          json.string(
+            "Deposited '"
+            <> saved_filename
+            <> "' in intray. Normalised "
+            <> int.to_string(n)
+            <> " file(s); some failed:\n"
+            <> string.join(
+              list.map(summary.failures, knowledge_intake.format_failure),
+              "\n",
+            ),
+          )
+        // Nothing normalised, but a specific failure to report.
+        _, [_, ..] ->
+          json.string(
+            "Deposited '"
+            <> saved_filename
+            <> "' in intray. Normalisation failed:\n"
+            <> string.join(
+              list.map(summary.failures, knowledge_intake.format_failure),
+              "\n",
+            ),
+          )
+        // No failures and no successes — intray was empty / nothing
+        // processable / file types entirely outside our supported set.
+        _, [] ->
+          json.string(
+            "Deposited '"
+            <> saved_filename
+            <> "' in intray. No files normalised "
+            <> "(no processable files in intray).",
           )
       }),
     ])

@@ -136,6 +136,70 @@ pub fn deposit_rejects_path_only_filename_test() {
 }
 
 // ---------------------------------------------------------------------------
+// process_with_summary — structured per-failure reporting
+// ---------------------------------------------------------------------------
+
+pub fn process_summary_empty_intray_test() {
+  let root = test_root("summary_empty")
+  let summary =
+    intake.process_with_summary(
+      root,
+      root <> "/intray",
+      root <> "/sources",
+      root <> "/indexes",
+    )
+  summary.normalised |> should.equal(0)
+  summary.failures |> should.equal([])
+  let _ = simplifile.delete(root)
+  Nil
+}
+
+pub fn process_summary_markdown_success_test() {
+  let root = test_root("summary_md")
+  let intray_dir = root <> "/intray"
+  let _ = simplifile.write(intray_dir <> "/x.md", "# X\n\nContent.\n")
+
+  let summary =
+    intake.process_with_summary(
+      root,
+      intray_dir,
+      root <> "/sources",
+      root <> "/indexes",
+    )
+  summary.normalised |> should.equal(1)
+  summary.failures |> should.equal([])
+
+  let _ = simplifile.delete(root)
+  Nil
+}
+
+pub fn format_failure_binary_missing_includes_install_hint_test() {
+  // The whole point of splitting this variant out: the operator
+  // gets an ACTIONABLE message ("install poppler-utils") rather than
+  // a generic "couldn't process." Pin the contract — if someone
+  // edits format_failure to drop the install hint, the test catches
+  // it.
+  let msg =
+    intake.format_failure(intake.BinaryMissing(
+      filename: "report.pdf",
+      binary: "pdftotext",
+    ))
+  msg |> string.contains("pdftotext") |> should.be_true
+  msg |> string.contains("not installed") |> should.be_true
+  msg |> string.contains("apt install") |> should.be_true
+}
+
+pub fn format_failure_unsupported_extension_includes_action_test() {
+  let msg =
+    intake.format_failure(intake.UnsupportedExtension(
+      filename: "data.xyz",
+      extension: ".xyz",
+    ))
+  msg |> string.contains(".xyz") |> should.be_true
+  msg |> string.contains("Convert to") |> should.be_true
+}
+
+// ---------------------------------------------------------------------------
 // process — consumer that drains the intray into sources/
 // ---------------------------------------------------------------------------
 

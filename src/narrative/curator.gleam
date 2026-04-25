@@ -50,6 +50,7 @@ import paths
 import planner/types as planner_types
 import remembrancer/consolidation
 import scheduler/types as scheduler_types
+import simplifile
 import skills.{type SkillMeta}
 import skills/metrics as skills_metrics
 import slog
@@ -164,6 +165,12 @@ pub type CuratorMessage {
   SetHousekeeper(housekeeper: Subject(housekeeper.HousekeeperMessage))
   /// Update the affect reading slot (called after each cycle).
   UpdateAffectSnapshot(reading: String)
+  /// Override the bootstrap-skills list. Called once at startup if
+  /// the operator has set `[bootstrap] critical_skills` in config; if
+  /// unset, the Curator uses its sensible default
+  /// (delegation-strategy, memory-management, system-map). Empty list
+  /// disables bootstrap entirely.
+  SetBootstrapSkills(skill_ids: List(String))
   /// Set the discovered skills list. Called once at startup; the Curator
   /// filters by `for_agent("cognitive")` and `for_context(query_domains)`
   /// each cycle when assembling the system prompt.
@@ -197,6 +204,15 @@ type CuratorState {
     /// and `for_context(query_domains)` when building the system prompt.
     /// Empty list = no skills available (legacy behaviour).
     skills: List(SkillMeta),
+    /// Skill IDs whose full body is inlined into the system prompt on
+    /// the first cycle of a fresh session (recent_entries empty). Stops
+    /// the cold-start fumbling pattern where a fresh agent sees the
+    /// available_skills list but hasn't read any of them — caught
+    /// fabricating skill coverage when asked to summarise. Empty list
+    /// = no bootstrap (operator opt-out). Subsequent cycles do not
+    /// re-inline; once narrative has any entries, the agent uses
+    /// `read_skill` on demand.
+    bootstrap_skill_ids: List(String),
   )
 }
 
@@ -257,6 +273,14 @@ pub fn start_with_identity(
         housekeeper: None,
         affect_reading: "",
         skills: [],
+        // Sensible defaults: the three skills that govern the
+        // highest-frequency decisions (delegation, memory, system
+        // structure). Override via SetBootstrapSkills.
+        bootstrap_skill_ids: [
+          "delegation-strategy",
+          "memory-management",
+          "system-map",
+        ],
       )
 
     slog.info("narrative/curator", "start", "Curator ready", None)
@@ -459,6 +483,9 @@ fn loop(state: CuratorState) -> Nil {
 
         SetPreambleBudget(chars:) ->
           loop(CuratorState(..state, preamble_budget_chars: chars))
+
+        SetBootstrapSkills(skill_ids:) ->
+          loop(CuratorState(..state, bootstrap_skill_ids: skill_ids))
 
         SetHousekeeper(housekeeper:) ->
           loop(CuratorState(..state, housekeeper: Some(housekeeper)))
@@ -770,6 +797,10 @@ fn do_build_system_prompt(
       Some(identity.render_persona(p, state.agent_name, state.agent_version))
   }
   let template = identity.load_preamble_template(state.identity_dirs)
+  // Pulled up here so the bootstrap-skills check at the end of this
+  // function can see them. Other consumers below this point can also
+  // use this single fetch instead of hitting the librarian again.
+  let recent_entries = librarian.get_recent(state.librarian, 5)
 
   let query_domains = derive_query_domains(state, context)
   let scoped_skills = case state.skills {
@@ -827,7 +858,18 @@ fn do_build_system_prompt(
         "" -> assembled
         xml -> assembled <> "\n\n" <> xml
       }
-      #(prompt, truncated)
+      // Bootstrap: on the very first cycle of a fresh session,
+      // inline the bodies of a small set of critical skills so the
+      // agent doesn't have to call read_skill before doing the most
+      // common things. Subsequent cycles skip this — the agent is
+      // expected to use read_skill on demand once it has any narrative
+      // to lean on.
+      let bootstrap = render_bootstrap_skills(state, recent_entries)
+      let prompt_with_bootstrap = case bootstrap {
+        "" -> prompt
+        text -> prompt <> "\n\n" <> text
+      }
+      #(prompt_with_bootstrap, truncated)
     }
   }
 }
@@ -1084,6 +1126,7 @@ fn build_sensorium(
       active_thread_name,
     )
   let schedule = render_sensorium_schedule(state.scheduler)
+  let intray_section = render_sensorium_intray()
   // Compute novelty from input and recent narrative keywords
   let novelty = case context {
     Some(ctx) -> {
@@ -1176,11 +1219,11 @@ fn build_sensorium(
 
   let sections =
     [
-      clock, situation, schedule, vitals, sandbox_section, delegations, events,
-      tasks_section, self_reminder_section, captures_section, deputies_section,
-      strategies_section, goals_section, affect_warnings_section,
-      integrity_section, skill_procedures_section, meta_recommendations_section,
-      knowledge_section, memory_section,
+      clock, situation, schedule, intray_section, vitals, sandbox_section,
+      delegations, events, tasks_section, self_reminder_section,
+      captures_section, deputies_section, strategies_section, goals_section,
+      affect_warnings_section, integrity_section, skill_procedures_section,
+      meta_recommendations_section, knowledge_section, memory_section,
     ]
     |> list.filter(fn(s) { s != "" })
     |> string.join("\n")
@@ -1242,6 +1285,85 @@ pub fn render_sensorium_situation(
 
 /// Render the <schedule> element with per-job detail.
 /// Returns "" when no scheduler or no active jobs.
+/// Build the bootstrap-skills block injected into the system prompt
+/// on the first cycle of a fresh session. Returns "" when:
+///
+/// - `recent_entries` is non-empty (not a fresh session — agent has
+///   narrative continuity, can use `read_skill` on demand).
+/// - `bootstrap_skill_ids` is empty (operator opt-out).
+/// - None of the configured ids match an actual discovered skill.
+///
+/// Otherwise: read each matching skill's body from disk and wrap in
+/// a `<bootstrap_skills>` block with a brief preamble explaining
+/// why the content is here. Skills whose path can't be read are
+/// silently skipped — the bootstrap is a best-effort starter, not a
+/// hard requirement.
+fn render_bootstrap_skills(
+  state: CuratorState,
+  recent_entries: List(narrative_types.NarrativeEntry),
+) -> String {
+  case recent_entries, state.bootstrap_skill_ids {
+    [_, ..], _ -> ""
+    _, [] -> ""
+    [], ids -> {
+      let bodies =
+        list.filter_map(ids, fn(id) {
+          case list.find(state.skills, fn(s) { s.id == id }) {
+            Error(_) -> Error(Nil)
+            Ok(meta) ->
+              case simplifile.read(meta.path) {
+                Ok(content) -> Ok(#(meta.id, meta.name, content))
+                Error(_) -> Error(Nil)
+              }
+          }
+        })
+      case bodies {
+        [] -> ""
+        _ -> {
+          let blocks =
+            list.map(bodies, fn(t) {
+              let #(id, name, body) = t
+              "  <skill id=\""
+              <> id
+              <> "\" name=\""
+              <> name
+              <> "\">\n"
+              <> body
+              <> "\n  </skill>"
+            })
+          "<!-- Bootstrap: the bodies of a few critical skills, "
+          <> "inlined on this fresh-session first cycle so you can "
+          <> "act before having to call read_skill. After this cycle "
+          <> "use read_skill on demand. -->\n<bootstrap_skills>\n"
+          <> string.join(blocks, "\n")
+          <> "\n</bootstrap_skills>"
+        }
+      }
+    }
+  }
+}
+
+/// Render the `<intray>` block when there are files pending in the
+/// knowledge intray waiting to be normalised. Empty string when the
+/// intray is empty or unreadable, so the sections filter omits it.
+///
+/// This is the agent-side counterpart to the operator's chat
+/// notification on upload. Without it, an operator who uploads a
+/// file mid-session has no way to surface "there's a file waiting"
+/// to the agent on the next cycle — the agent only finds out when
+/// the operator explicitly says "look in your intray."
+pub fn render_sensorium_intray() -> String {
+  let intray = paths.knowledge_intray_dir()
+  case simplifile.read_directory(intray) {
+    Error(_) -> ""
+    Ok(files) ->
+      case list.length(files) {
+        0 -> ""
+        n -> "  <intray pending=\"" <> int.to_string(n) <> "\"/>"
+      }
+  }
+}
+
 pub fn render_sensorium_schedule(
   scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
 ) -> String {

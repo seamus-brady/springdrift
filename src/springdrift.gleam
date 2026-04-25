@@ -928,6 +928,7 @@ fn run(cfg: AppConfig) -> Nil {
       ),
       deputies_max_tokens: option.unwrap(cfg.deputies_max_tokens, 800),
       deputy_timeout_ms: option.unwrap(cfg.deputy_timeout_ms, 15_000),
+      skills_dirs: skill_dirs,
     ))
   {
     Ok(subj) -> subj
