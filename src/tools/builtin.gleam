@@ -17,6 +17,7 @@ import llm/types.{
   type Tool, type ToolCall, type ToolResult, ToolFailure, ToolSuccess,
 }
 import simplifile
+import skills
 import skills/metrics as skills_metrics
 import slog
 
@@ -98,9 +99,17 @@ pub fn datetime_tool() -> Tool {
 pub fn read_skill_tool() -> Tool {
   tool.new("read_skill")
   |> tool.with_description(
-    "Load the full instructions for an agent skill. Use the path shown in <available_skills> in your context.",
+    "Load the full instructions for an agent skill. Accepts the path shown "
+    <> "in <available_skills> (e.g. /Users/.../skills/captures/SKILL.md), "
+    <> "a tilde path (~/.config/springdrift/skills/captures/SKILL.md), "
+    <> "or a bare skill id (captures). The id form scans the configured "
+    <> "skills directories for a matching <id>/SKILL.md.",
   )
-  |> tool.add_string_param("path", "Absolute path to a SKILL.md file", True)
+  |> tool.add_string_param(
+    "path",
+    "Path to a SKILL.md file, or a bare skill id.",
+    True,
+  )
   |> tool.build()
 }
 
@@ -179,29 +188,100 @@ fn run_read_skill(call: ToolCall, skills_dirs: List(String)) -> ToolResult {
         tool_use_id: call.id,
         error: "Invalid read_skill input: missing path",
       )
-    Ok(path) ->
-      case is_safe_skill_path(path, skills_dirs) {
+    Ok(raw) ->
+      case normalise_skill_path(raw, skills_dirs) {
         Error(reason) ->
           ToolFailure(tool_use_id: call.id, error: "read_skill: " <> reason)
-        Ok(resolved) ->
-          case simplifile.read(resolved) {
-            Error(e) ->
-              ToolFailure(
-                tool_use_id: call.id,
-                error: "read_skill: could not read file: "
-                  <> simplifile.describe_error(e),
-              )
-            Ok(content) -> {
-              // Record an intentional read for the audit panel. cycle_id
-              // and agent name aren't available at the executor level
-              // today; later phases can plumb cycle context through
-              // ToolCall to enable per-cycle attribution.
-              let skill_dir = string.replace(resolved, "/SKILL.md", "")
-              skills_metrics.append_read(skill_dir, "", "unknown")
-              ToolSuccess(tool_use_id: call.id, content:)
-            }
+        Ok(path) ->
+          case is_safe_skill_path(path, skills_dirs) {
+            Error(reason) ->
+              ToolFailure(tool_use_id: call.id, error: "read_skill: " <> reason)
+            Ok(resolved) ->
+              case simplifile.read(resolved) {
+                Error(e) ->
+                  ToolFailure(
+                    tool_use_id: call.id,
+                    error: "read_skill: could not read file: "
+                      <> simplifile.describe_error(e),
+                  )
+                Ok(content) -> {
+                  // Record an intentional read for the audit panel.
+                  // cycle_id and agent name aren't available at the
+                  // executor level today; later phases can plumb cycle
+                  // context through ToolCall to enable per-cycle
+                  // attribution.
+                  let skill_dir = string.replace(resolved, "/SKILL.md", "")
+                  skills_metrics.append_read(skill_dir, "", "unknown")
+                  ToolSuccess(tool_use_id: call.id, content:)
+                }
+              }
           }
       }
+  }
+}
+
+/// Coerce whatever the agent passed into a candidate `<dir>/SKILL.md` path.
+///
+/// LLMs reach for several variants: the absolute path from
+/// `<available_skills>`, a tilde path (`~/.config/...`), the skill id alone
+/// (`captures`), or the directory without the file (`.../skills/captures`).
+/// Reject only when nothing plausible can be constructed; the existing
+/// `is_safe_skill_path` still enforces containment.
+///
+/// Public so tests can drive the normalisation cases directly.
+pub fn normalise_skill_path(
+  raw: String,
+  skills_dirs: List(String),
+) -> Result(String, String) {
+  let trimmed = string.trim(raw)
+  case trimmed {
+    "" -> Error("empty path")
+    _ -> {
+      let expanded = skills.expand_tilde(trimmed)
+      case string.ends_with(expanded, "/SKILL.md") || expanded == "SKILL.md" {
+        True -> Ok(expanded)
+        False ->
+          case string.contains(expanded, "/") {
+            // Looks like a directory rather than a SKILL.md file.
+            True -> Ok(strip_trailing_slash(expanded) <> "/SKILL.md")
+            // Bare token — treat as a skill id and scan the
+            // configured skills directories for a matching folder.
+            False -> resolve_skill_id(expanded, skills_dirs)
+          }
+      }
+    }
+  }
+}
+
+fn strip_trailing_slash(path: String) -> String {
+  case string.ends_with(path, "/") {
+    True -> string.drop_end(path, 1)
+    False -> path
+  }
+}
+
+fn resolve_skill_id(
+  id: String,
+  skills_dirs: List(String),
+) -> Result(String, String) {
+  let candidates =
+    list.filter_map(skills_dirs, fn(dir) {
+      let expanded = skills.expand_tilde(dir)
+      let candidate = expanded <> "/" <> id <> "/SKILL.md"
+      case simplifile.is_file(candidate) {
+        Ok(True) -> Ok(candidate)
+        _ -> Error(Nil)
+      }
+    })
+  case candidates {
+    [first, ..] -> Ok(first)
+    [] ->
+      Error(
+        "no skill named '"
+        <> id
+        <> "' found in any configured skills directory; "
+        <> "supply the absolute path from <available_skills>",
+      )
   }
 }
 
@@ -230,8 +310,12 @@ pub fn is_safe_skill_path(
 ) -> Result(String, String) {
   case has_dotdot_segment(path) {
     True -> Error("path contains '..' segments")
-    False ->
-      case string.ends_with(path, "/SKILL.md") || path == "SKILL.md" {
+    False -> {
+      let expanded_path = skills.expand_tilde(path)
+      case
+        string.ends_with(expanded_path, "/SKILL.md")
+        || expanded_path == "SKILL.md"
+      {
         False -> Error("path must end with /SKILL.md")
         True -> {
           case skills_dirs {
@@ -241,8 +325,18 @@ pub fn is_safe_skill_path(
                 <> "read_skill calls (this is a misconfiguration)",
               )
             _ -> {
-              let resolved = resolve_symlinks(path)
-              let resolved_dirs = list.map(skills_dirs, resolve_symlinks)
+              let resolved = resolve_symlinks(expanded_path)
+              // Tilde-expand each configured root before symlink
+              // resolution so a config like `~/.config/...` lines up
+              // with an agent-supplied absolute path. Without this,
+              // the prefix-containment check fails purely on
+              // `~` vs `/Users/...` string mismatch — the bug that
+              // made read_skill appear "consistently broken" even
+              // when the file existed and was readable.
+              let resolved_dirs =
+                list.map(skills_dirs, fn(d) {
+                  resolve_symlinks(skills.expand_tilde(d))
+                })
               case path_under_any(resolved, resolved_dirs) {
                 True -> Ok(resolved)
                 False ->
@@ -255,6 +349,7 @@ pub fn is_safe_skill_path(
           }
         }
       }
+    }
   }
 }
 

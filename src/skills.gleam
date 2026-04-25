@@ -239,7 +239,7 @@ pub fn estimate_token_cost(body: String) -> Int {
 // Internal — discovery + sidecar merge
 // ---------------------------------------------------------------------------
 
-fn expand_tilde(path: String) -> String {
+pub fn expand_tilde(path: String) -> String {
   case string.starts_with(path, "~/") {
     True ->
       case get_env("HOME") {

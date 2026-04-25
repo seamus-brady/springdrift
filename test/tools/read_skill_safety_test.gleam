@@ -232,3 +232,81 @@ pub fn prefix_match_does_not_admit_sibling_directories_test() {
   let _ = simplifile.delete(parent)
   Nil
 }
+
+// ---------------------------------------------------------------------------
+// Normalisation — accept bare ids, partial dirs, and tilde paths
+// ---------------------------------------------------------------------------
+
+pub fn normalise_resolves_bare_skill_id_test() {
+  // The agent often refers to a skill by its id alone (the form it
+  // sees in the sensorium <skill_procedures> block). The executor
+  // should locate <id>/SKILL.md inside any configured skills dir.
+  let root = test_root("normalise_id")
+  let _ = write_skill(root, "delegation-strategy", "# d\n")
+
+  case builtin.normalise_skill_path("delegation-strategy", [root]) {
+    Ok(path) ->
+      path
+      |> string.ends_with("/delegation-strategy/SKILL.md")
+      |> should.be_true
+    Error(reason) -> {
+      echo reason
+      should.fail()
+    }
+  }
+
+  let _ = simplifile.delete(root)
+  Nil
+}
+
+pub fn normalise_appends_skill_md_to_directory_path_test() {
+  // The agent sometimes drops the /SKILL.md suffix and just supplies
+  // the skill directory path. Treat that as a partial path and
+  // tack the canonical filename on.
+  let root = test_root("normalise_dir")
+  let _ = write_skill(root, "captures", "# c\n")
+
+  let candidate = root <> "/captures"
+  case builtin.normalise_skill_path(candidate, [root]) {
+    Ok(path) -> path |> should.equal(candidate <> "/SKILL.md")
+    Error(reason) -> {
+      echo reason
+      should.fail()
+    }
+  }
+
+  let _ = simplifile.delete(root)
+  Nil
+}
+
+pub fn normalise_passes_through_full_path_test() {
+  // The default form — full /path/to/SKILL.md — comes through
+  // unchanged so the safety check that follows can verify it.
+  let root = test_root("normalise_passthrough")
+  let path = write_skill(root, "noop", "x")
+
+  case builtin.normalise_skill_path(path, [root]) {
+    Ok(p) -> p |> should.equal(path)
+    Error(_) -> should.fail()
+  }
+
+  let _ = simplifile.delete(root)
+  Nil
+}
+
+pub fn normalise_unknown_id_returns_helpful_error_test() {
+  // If the id doesn't match any directory the operator gets a
+  // pointer back to the right input form rather than a vague
+  // "path must end with /SKILL.md" message.
+  let root = test_root("normalise_unknown")
+  case builtin.normalise_skill_path("does-not-exist", [root]) {
+    Error(reason) -> {
+      reason |> string.contains("does-not-exist") |> should.be_true
+      reason |> string.contains("available_skills") |> should.be_true
+    }
+    Ok(_) -> should.fail()
+  }
+
+  let _ = simplifile.delete(root)
+  Nil
+}

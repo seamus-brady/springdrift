@@ -959,7 +959,7 @@ fn ws_handler(
                   m.doc_id == doc_id
                 })
               {
-                Error(_) -> "{\"error\":\"document not found\"}"
+                Error(_) -> document_view_error_json("document not found")
                 Ok(meta) ->
                   case
                     knowledge_indexer.load_index(
@@ -968,7 +968,7 @@ fn ws_handler(
                     )
                   {
                     Error(reason) ->
-                      "{\"error\":\"index load failed: " <> reason <> "\"}"
+                      document_view_error_json("index load failed: " <> reason)
                     Ok(idx) -> encode_document_view(meta, idx)
                   }
               }
@@ -2164,6 +2164,16 @@ fn encode_document_view(
       #("node_count", json.int(idx.node_count)),
     ]),
   )
+}
+
+/// Build a properly-escaped JSON error envelope for the document-view
+/// channel. Previously the error path concatenated the reason string into
+/// a JSON literal, which broke the JSON whenever the reason contained a
+/// quote, backslash, or control char (e.g. some path strings) and the JS
+/// front-end then showed an opaque "Failed to parse document" instead of
+/// the actual error.
+fn document_view_error_json(message: String) -> String {
+  json.to_string(json.object([#("error", json.string(message))]))
 }
 
 fn encode_tree_node(node: knowledge_types.TreeNode) -> json.Json {
