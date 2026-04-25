@@ -899,6 +899,53 @@ pub const deputy_briefing_example = "<deputy_briefing>
 </deputy_briefing>"
 
 // ---------------------------------------------------------------------------
+// 12. Study output (tools/remembrancer.gleam — study_document)
+// ---------------------------------------------------------------------------
+
+pub const study_output_xsd = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+<xs:schema xmlns:xs=\"http://www.w3.org/2001/XMLSchema\">
+  <xs:element name=\"study_output\">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name=\"facts\">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name=\"fact\" minOccurs=\"0\" maxOccurs=\"unbounded\">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name=\"key\" type=\"xs:string\"/>
+                    <xs:element name=\"value\" type=\"xs:string\"/>
+                    <xs:element name=\"section_path\" type=\"xs:string\"/>
+                    <xs:element name=\"confidence\" type=\"xs:decimal\"/>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>"
+
+pub const study_output_example = "<study_output>
+  <facts>
+    <fact>
+      <key>eu_ai_act_high_risk_definition</key>
+      <value>Article 6 of the EU AI Act defines high-risk AI systems by reference to Annex III, covering domains like critical infrastructure, education, employment, and law enforcement.</value>
+      <section_path>Title III / High-Risk Systems / Article 6</section_path>
+      <confidence>0.9</confidence>
+    </fact>
+    <fact>
+      <key>eu_ai_act_enforcement_date</key>
+      <value>The EU AI Act entered into force on 1 August 2024 with phased applicability over 6-36 months depending on provision.</value>
+      <section_path>Introduction / Timeline</section_path>
+      <confidence>0.95</confidence>
+    </fact>
+  </facts>
+</study_output>"
+
+// ---------------------------------------------------------------------------
 // System prompt fragments
 // ---------------------------------------------------------------------------
 
