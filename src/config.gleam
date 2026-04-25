@@ -200,6 +200,8 @@ pub type AppConfig {
     brave_rate_limit_rps: Option(Int),
     brave_answers_rate_limit_rps: Option(Int),
     brave_cache_ttl_ms: Option(Int),
+    // ── Kagi (optional alternative search; off by default) ──
+    kagi_enabled: Option(Bool),
     // ── Input queue ──
     input_queue_cap: Option(Int),
     // ── Scheduler stuck timeout ──
@@ -507,6 +509,7 @@ pub fn default() -> AppConfig {
     brave_rate_limit_rps: None,
     brave_answers_rate_limit_rps: None,
     brave_cache_ttl_ms: None,
+    kagi_enabled: None,
     input_queue_cap: None,
     scheduler_stuck_timeout_ms: None,
     scheduler_tool_timeout_ms: None,
@@ -998,6 +1001,7 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       override_cfg.brave_cache_ttl_ms,
       base.brave_cache_ttl_ms,
     ),
+    kagi_enabled: option.or(override_cfg.kagi_enabled, base.kagi_enabled),
     input_queue_cap: option.or(
       override_cfg.input_queue_cap,
       base.input_queue_cap,
@@ -1907,6 +1911,8 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
       "limits", "brave_answers_rate_limit_rps",
     ]),
     brave_cache_ttl_ms: get_toml_int(table, ["limits", "brave_cache_ttl_ms"]),
+    // ── [services] kagi ──
+    kagi_enabled: get_toml_bool(table, ["services", "kagi_enabled"]),
     // ── [limits] input queue ──
     input_queue_cap: get_toml_int(table, ["limits", "input_queue_cap"]),
     // ── [timeouts] scheduler stuck ──
