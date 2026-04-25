@@ -764,7 +764,11 @@ fn do_build_system_prompt(
   fallback: String,
   context: Option(CycleContext),
 ) -> #(String, Bool) {
-  let persona = identity.load_persona(state.identity_dirs)
+  let persona = case identity.load_persona(state.identity_dirs) {
+    None -> None
+    Some(p) ->
+      Some(identity.render_persona(p, state.agent_name, state.agent_version))
+  }
   let template = identity.load_preamble_template(state.identity_dirs)
 
   let query_domains = derive_query_domains(state, context)

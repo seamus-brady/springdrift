@@ -55,6 +55,36 @@ pub fn substitute_repeated_slot_test() {
 }
 
 // ---------------------------------------------------------------------------
+// Persona rendering
+// ---------------------------------------------------------------------------
+
+pub fn render_persona_substitutes_agent_name_test() {
+  let persona = "I am {{agent_name}}. That is my name."
+  identity.render_persona(persona, "Springdrift", "1.0.0")
+  |> should.equal("I am Springdrift. That is my name.")
+}
+
+pub fn render_persona_substitutes_agent_version_test() {
+  let persona = "Version {{agent_version}} of {{agent_name}}."
+  identity.render_persona(persona, "Drift", "2.3.4")
+  |> should.equal("Version 2.3.4 of Drift.")
+}
+
+pub fn render_persona_leaves_other_slots_alone_test() {
+  // Persona is intentionally narrow — non-identity slots are not exposed
+  // and should remain as literal {{...}} tokens.
+  let persona = "I am {{agent_name}}, mood is {{affect_reading}}."
+  identity.render_persona(persona, "Drift", "1.0")
+  |> should.equal("I am Drift, mood is {{affect_reading}}.")
+}
+
+pub fn render_persona_no_slots_present_test() {
+  let persona = "I am Drift, plain prose only."
+  identity.render_persona(persona, "Springdrift", "1.0")
+  |> should.equal("I am Drift, plain prose only.")
+}
+
+// ---------------------------------------------------------------------------
 // Preamble rendering
 // ---------------------------------------------------------------------------
 
