@@ -92,10 +92,14 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
     </div>
     <div id=\"input-area\">
       <form id=\"chat-form\">
+        <input type=\"file\" id=\"upload-input\" style=\"display:none\">
+        <button type=\"button\" id=\"upload-btn\" aria-label=\"Upload to library\" title=\"Upload a document to the library\">
+          <svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48\"/></svg>
+        </button>
         <textarea id=\"chat-input\" rows=\"1\" placeholder=\"" <> placeholder <> "\" autofocus></textarea>
         <button type=\"submit\" aria-label=\"Send\"><svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><line x1=\"22\" y1=\"2\" x2=\"11\" y2=\"13\"/><polygon points=\"22 2 15 22 11 13 2 9 22 2\"/></svg></button>
       </form>
-      <div id=\"input-hint\">Enter to send, Shift+Enter for new line</div>
+      <div id=\"input-hint\">Enter to send, Shift+Enter for new line, paperclip to upload</div>
     </div>
   </div>
   <div id=\"activity-tab\" class=\"tab-content\">
@@ -859,6 +863,49 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
     e.preventDefault();
     sendMessage();
   });
+
+  // Upload button → file picker → POST /upload (raw bytes + X-Filename header).
+  // Auth: same ?token= the WebSocket uses, but sent as Authorization: Bearer
+  // because /upload is plain HTTP, not a WebSocket upgrade.
+  var uploadBtn = document.getElementById('upload-btn');
+  var uploadInput = document.getElementById('upload-input');
+  if (uploadBtn && uploadInput) {
+    uploadBtn.addEventListener('click', function() { uploadInput.click(); });
+    uploadInput.addEventListener('change', function() {
+      var file = uploadInput.files && uploadInput.files[0];
+      if (!file) return;
+      uploadFile(file);
+      uploadInput.value = '';   // allow re-selecting the same file later
+    });
+  }
+
+  function uploadFile(file) {
+    addNotification('Uploading ' + file.name + ' (' + formatBytes(file.size) + ')\\u2026');
+    var params = new URLSearchParams(location.search);
+    var token = params.get('token');
+    var headers = { 'X-Filename': file.name };
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    fetch('/upload', { method: 'POST', headers: headers, body: file })
+      .then(function(resp) {
+        return resp.json().then(function(json) { return { status: resp.status, json: json }; });
+      })
+      .then(function(result) {
+        if (result.status === 200 && result.json.ok) {
+          addNotification(result.json.message || ('Uploaded ' + file.name));
+        } else {
+          addNotification('Upload failed: ' + (result.json.message || ('HTTP ' + result.status)));
+        }
+      })
+      .catch(function(err) {
+        addNotification('Upload failed: ' + (err && err.message ? err.message : 'network error'));
+      });
+  }
+
+  function formatBytes(n) {
+    if (n < 1024) return n + ' B';
+    if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+    return (n / (1024 * 1024)).toFixed(1) + ' MB';
+  }
 
   // When the tab regains visibility, re-fetch the history index. Handles
   // two midnight-rollover cases: (a) the server now considers a different
@@ -3408,6 +3455,16 @@ fn shared_css() -> String {
   #input-area button:hover { background: #c46f2e; }
   #input-area button:disabled { opacity: 0.35; cursor: not-allowed; }
   #input-area button svg { width: 18px; height: 18px; }
+  /* Upload (paperclip) button is secondary — quieter than the send button */
+  #input-area #upload-btn {
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px solid var(--input-border);
+  }
+  #input-area #upload-btn:hover {
+    background: var(--input-bg);
+    color: var(--text);
+  }
   #input-hint {
     text-align: center;
     font-size: 13px;

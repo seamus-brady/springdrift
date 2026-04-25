@@ -21,6 +21,7 @@ import frontdoor/types.{
 } as _frontdoor_types
 import gleam/bytes_tree
 import gleam/erlang/process.{type Selector, type Subject}
+import gleam/http
 import gleam/http/request.{type Request}
 import gleam/http/response.{type Response}
 import gleam/int
@@ -30,6 +31,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/set
 import gleam/string
 import knowledge/indexer as knowledge_indexer
+import knowledge/intake as knowledge_intake
 import knowledge/log as knowledge_log
 import knowledge/search as knowledge_search
 import knowledge/types as knowledge_types
@@ -146,6 +148,7 @@ pub fn start(
   agent_name: String,
   agent_version: String,
   ws_max_bytes: Int,
+  max_upload_bytes: Int,
   scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
   frontdoor: Subject(FrontdoorMessage),
   supervisor: Option(Subject(agent_types.SupervisorMessage)),
@@ -171,6 +174,7 @@ pub fn start(
         agent_name,
         agent_version,
         ws_max_bytes,
+        max_upload_bytes,
         scheduler,
         frontdoor,
         supervisor,
@@ -201,6 +205,7 @@ fn handle_request(
   agent_name: String,
   agent_version: String,
   ws_max_bytes: Int,
+  max_upload_bytes: Int,
   scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
   frontdoor: Subject(FrontdoorMessage),
   supervisor: Option(Subject(agent_types.SupervisorMessage)),
@@ -224,6 +229,7 @@ fn handle_request(
         agent_name,
         agent_version,
         ws_max_bytes,
+        max_upload_bytes,
         scheduler,
         frontdoor,
         supervisor,
@@ -243,6 +249,7 @@ fn handle_authenticated_request(
   agent_name: String,
   agent_version: String,
   ws_max_bytes: Int,
+  max_upload_bytes: Int,
   scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
   frontdoor: Subject(FrontdoorMessage),
   supervisor: Option(Subject(agent_types.SupervisorMessage)),
@@ -297,6 +304,13 @@ fn handle_authenticated_request(
         // Thread export as markdown — /export/thread/<thread_id>.md
         ["export", "thread", filename] ->
           export_thread_response(filename, narrative_dir)
+
+        // POST /upload — operator deposits a file in the knowledge
+        // intray. Bearer-auth (already checked above), size-capped,
+        // filename via X-Filename header. After the deposit lands,
+        // intake.process drains the intray synchronously so the file
+        // is normalised into sources/ before the response returns.
+        ["upload"] -> upload_response(req, max_upload_bytes)
 
         // /diagnostic — full system structural report. Authenticated
         // unlike /health; aggregates agent roster, memory counts,
@@ -1562,6 +1576,142 @@ fn export_thread_response(
     "content-disposition",
     "inline; filename=\"" <> thread_id <> ".md\"",
   )
+  |> response.set_body(mist.Bytes(bytes_tree.from_string(body)))
+}
+
+// ---------------------------------------------------------------------------
+// POST /upload — operator deposits a file in the knowledge intray
+// ---------------------------------------------------------------------------
+
+/// Handle a POST /upload request.
+///
+/// The browser sends raw bytes as the body and the suggested filename
+/// in an `X-Filename` header (no multipart parsing needed, no
+/// base64 overhead). This handler:
+///
+/// 1. Confirms POST (405 otherwise).
+/// 2. Reads the X-Filename header (400 if missing).
+/// 3. Reads the body up to `max_upload_bytes` (413 on overflow).
+/// 4. Calls `intake.deposit` to land bytes in the intray. The
+///    boundary applies its own filename safety pass.
+/// 5. Drains the intray via `intake.process` so the file becomes
+///    citeable in `sources/` before the response returns.
+/// 6. Returns JSON with the deposited filename and processed count.
+///
+/// Auth is already enforced upstream by `handle_authenticated_request`.
+fn upload_response(
+  req: Request(Connection),
+  max_upload_bytes: Int,
+) -> Response(ResponseData) {
+  case req.method {
+    http.Post -> {
+      case request.get_header(req, "x-filename") {
+        Error(_) -> upload_error(400, "Missing X-Filename header")
+        Ok(filename) ->
+          case mist.read_body(req, max_upload_bytes) {
+            Error(mist.ExcessBody) ->
+              upload_error(
+                413,
+                "Upload exceeds limit of "
+                  <> int.to_string(max_upload_bytes)
+                  <> " bytes",
+              )
+            Error(_) -> upload_error(400, "Failed to read upload body")
+            Ok(body_req) -> {
+              let bytes = body_req.body
+              case
+                deposit_and_process(
+                  paths.knowledge_dir(),
+                  paths.knowledge_intray_dir(),
+                  paths.knowledge_sources_dir(),
+                  paths.knowledge_indexes_dir(),
+                  bytes,
+                  filename,
+                )
+              {
+                Error(reason) -> upload_error(500, "Deposit failed: " <> reason)
+                Ok(#(saved, processed)) -> upload_success(saved, processed)
+              }
+            }
+          }
+      }
+    }
+    _ -> upload_error(405, "Method not allowed — use POST")
+  }
+}
+
+/// Deposit bytes in the intray and synchronously drain the intray
+/// into sources/. Returns (saved_filename, processed_count) on
+/// success or a string error on deposit failure.
+///
+/// `pub` so tests can drive the operator-upload flow without
+/// spinning up an HTTP server. The HTTP handler is a thin adapter
+/// over this function.
+pub fn deposit_and_process(
+  knowledge_dir: String,
+  intray_dir: String,
+  sources_dir: String,
+  indexes_dir: String,
+  bytes: BitArray,
+  filename: String,
+) -> Result(#(String, Int), String) {
+  case knowledge_intake.deposit(intray_dir, bytes, filename) {
+    Error(reason) -> Error(reason)
+    Ok(saved) -> {
+      let processed =
+        knowledge_intake.process(
+          knowledge_dir,
+          intray_dir,
+          sources_dir,
+          indexes_dir,
+        )
+      Ok(#(saved, processed))
+    }
+  }
+}
+
+fn upload_success(
+  saved_filename: String,
+  processed_count: Int,
+) -> Response(ResponseData) {
+  let body =
+    json.object([
+      #("ok", json.bool(True)),
+      #("filename", json.string(saved_filename)),
+      #("processed", json.int(processed_count)),
+      #("message", case processed_count {
+        0 ->
+          json.string(
+            "Deposited '"
+            <> saved_filename
+            <> "' in intray. No files normalised "
+            <> "(unsupported extension or converter missing).",
+          )
+        n ->
+          json.string(
+            "Deposited '"
+            <> saved_filename
+            <> "' in intray. Normalised "
+            <> int.to_string(n)
+            <> " file(s) into sources/.",
+          )
+      }),
+    ])
+    |> json.to_string
+  response.new(200)
+  |> response.set_header("content-type", "application/json")
+  |> response.set_body(mist.Bytes(bytes_tree.from_string(body)))
+}
+
+fn upload_error(status: Int, message: String) -> Response(ResponseData) {
+  let body =
+    json.object([
+      #("ok", json.bool(False)),
+      #("message", json.string(message)),
+    ])
+    |> json.to_string
+  response.new(status)
+  |> response.set_header("content-type", "application/json")
   |> response.set_body(mist.Bytes(bytes_tree.from_string(body)))
 }
 
