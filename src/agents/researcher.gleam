@@ -103,6 +103,7 @@ pub fn spec(
   brave_answers_limiter: Option(Subject(rate_limiter.RateLimiterMessage)),
   brave_cache_ttl_ms: Int,
   auto_store_threshold_bytes: Int,
+  skills_dirs: List(String),
 ) -> AgentSpec {
   let tools =
     list.flatten([
@@ -139,6 +140,7 @@ pub fn spec(
       brave_answers_limiter,
       brave_cache_ttl_ms,
       auto_store_threshold_bytes,
+      skills_dirs,
     ),
     inter_turn_delay_ms: 200,
     redact_secrets: True,
@@ -156,6 +158,7 @@ fn researcher_executor(
   brave_answers_limiter: Option(Subject(rate_limiter.RateLimiterMessage)),
   brave_cache_ttl_ms: Int,
   auto_store_threshold_bytes: Int,
+  skills_dirs: List(String),
 ) -> fn(llm_types.ToolCall) -> llm_types.ToolResult {
   fn(call: llm_types.ToolCall) -> llm_types.ToolResult {
     let raw = case call.name {
@@ -205,7 +208,7 @@ fn researcher_executor(
           lib,
           max_artifact_chars,
         )
-      _ -> builtin.execute(call)
+      _ -> builtin.execute(call, skills_dirs)
     }
     case should_auto_store(call.name), auto_store_threshold_bytes {
       _, t if t <= 0 -> raw
