@@ -1414,6 +1414,7 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
   <button class=\"tab-btn\" data-tab=\"affect\">Affect</button>
   <button class=\"tab-btn\" data-tab=\"skills\">Skills</button>
   <button class=\"tab-btn\" data-tab=\"memory\">Memory</button>
+  <button class=\"tab-btn\" data-tab=\"documents\">Documents</button>
 </div>
 <div id=\"content-area\">
   <div id=\"narrative-tab\" class=\"tab-content active\">
@@ -1551,6 +1552,47 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
       </div>
     </div>
   </div>
+  <div id=\"documents-tab\" class=\"tab-content\">
+    <div class=\"filter-bar\">
+      <button class=\"refresh-btn\" id=\"documents-refresh\">Refresh</button>
+      <input class=\"filter-input\" id=\"documents-search\" type=\"text\" placeholder=\"Search the library (semantic)...\">
+      <select class=\"filter-select\" id=\"documents-type-filter\">
+        <option value=\"\">All types</option>
+        <option value=\"source\">Sources</option>
+        <option value=\"draft\">Drafts</option>
+        <option value=\"export\">Exports</option>
+        <option value=\"note\">Notes</option>
+        <option value=\"journal\">Journal</option>
+      </select>
+      <label style=\"font-size:12px;display:flex;align-items:center;gap:6px;opacity:.7\">
+        <input type=\"checkbox\" id=\"documents-include-pending\"> include pending exports
+      </label>
+      <span class=\"filter-count\" id=\"documents-count\"></span>
+    </div>
+    <div style=\"display:flex;gap:16px;height:calc(100vh - 180px)\">
+      <div id=\"documents-list-pane\" style=\"flex:0 0 360px;overflow-y:auto;border-right:1px solid var(--border);padding-right:12px\">
+        <div id=\"documents-list\"><div style=\"padding:12px;opacity:.5\">Loading...</div></div>
+      </div>
+      <div id=\"documents-detail-pane\" style=\"flex:1;overflow-y:auto;padding-left:12px\">
+        <div id=\"documents-empty\" style=\"padding:24px;opacity:.5\">Select a document on the left, or type a query to search the library.</div>
+        <div id=\"documents-search-results\" style=\"display:none\"></div>
+        <div id=\"documents-detail\" style=\"display:none\">
+          <div style=\"display:flex;gap:12px;align-items:start;margin-bottom:12px\">
+            <div style=\"flex:1\">
+              <h2 id=\"doc-title\" style=\"margin:0 0 4px\"></h2>
+              <div id=\"doc-meta\" style=\"font-size:12px;opacity:.6\"></div>
+            </div>
+            <div id=\"doc-actions\"></div>
+          </div>
+          <div style=\"display:flex;gap:12px\">
+            <div id=\"doc-tree\" style=\"flex:0 0 240px;font-size:13px;border-right:1px solid var(--border);padding-right:12px\"></div>
+            <div id=\"doc-content\" style=\"flex:1;font-family:ui-monospace,monospace;white-space:pre-wrap;font-size:13px;line-height:1.6\"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id=\"documents-toast\" style=\"position:fixed;bottom:20px;right:20px;padding:12px 16px;background:var(--card-bg);border:1px solid var(--border);border-radius:6px;display:none;z-index:1000;max-width:400px\"></div>
+  </div>
 </div>
 </div>
 </div>
@@ -1595,6 +1637,7 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
       else if (tab === 'affect') requestAffectData();
       else if (tab === 'skills') requestSkillsData();
       else if (tab === 'memory') requestMemoryData();
+      else if (tab === 'documents') requestDocumentList();
     });
   });
 
@@ -1609,6 +1652,7 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
   document.getElementById('affect-refresh').addEventListener('click', requestAffectData);
   document.getElementById('skills-refresh').addEventListener('click', requestSkillsData);
   document.getElementById('memory-refresh').addEventListener('click', requestMemoryData);
+  document.getElementById('documents-refresh').addEventListener('click', requestDocumentList);
 
   // Filter event listeners
   ['change'].forEach(function(ev) {
@@ -1635,6 +1679,35 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
     document.getElementById('skills-search').addEventListener(ev, applySkillsFilter);
     document.getElementById('memory-search').addEventListener(ev, applyMemoryFilter);
   });
+
+  // Documents tab — search-on-Enter + filter changes
+  (function() {
+    var searchInput = document.getElementById('documents-search');
+    var typeFilter = document.getElementById('documents-type-filter');
+    var includePending = document.getElementById('documents-include-pending');
+    if (searchInput) {
+      searchInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          var q = (searchInput.value || '').trim();
+          if (!q) {
+            // Empty query — return to default empty state
+            document.getElementById('documents-search-results').style.display = 'none';
+            document.getElementById('documents-empty').style.display = 'block';
+            return;
+          }
+          requestSearchLibrary(q, 'embedding', includePending && includePending.checked);
+        }
+      });
+    }
+    if (typeFilter) typeFilter.addEventListener('change', applyDocumentsListFilter);
+    if (includePending) includePending.addEventListener('change', function() {
+      applyDocumentsListFilter();
+      // Re-run last search if any so promoted results toggle on/off
+      var q = (searchInput && searchInput.value || '').trim();
+      if (q) requestSearchLibrary(q, 'embedding', includePending.checked);
+    });
+  })();
 
   function filterCount(id, shown, total) {
     var el = document.getElementById(id);
@@ -1704,6 +1777,49 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
   function requestMemoryData() {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'request_memory_data' }));
+    }
+  }
+
+  function requestDocumentList() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'request_document_list' }));
+    }
+  }
+
+  function requestDocumentView(docId) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'request_document_view', doc_id: docId }));
+    }
+  }
+
+  function requestSearchLibrary(query, mode, includePending) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'request_search_library',
+        query: query,
+        mode: mode || 'embedding',
+        include_pending: !!includePending
+      }));
+    }
+  }
+
+  function requestApproveExport(slug, note) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'request_approve_export',
+        slug: slug,
+        note: note || ''
+      }));
+    }
+  }
+
+  function requestRejectExport(slug, reason) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'request_reject_export',
+        slug: slug,
+        reason: reason
+      }));
     }
   }
 
@@ -1952,6 +2068,253 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
         box.style.display = 'block';
       });
     });
+  }
+
+  // -- Documents tab ---------------------------------------------------
+
+  var documentsListRaw = [];
+  var documentsCurrentDoc = null;
+  var documentsLastSearchQuery = '';
+
+  function applyDocumentsListFilter() {
+    var typeVal = (document.getElementById('documents-type-filter') || {}).value || '';
+    var includePending = !!(document.getElementById('documents-include-pending') || {}).checked;
+    var filtered = documentsListRaw.filter(function(d) {
+      if (typeVal && d.doc_type !== typeVal) return false;
+      // Hide rejected always; hide promoted unless include_pending
+      if (d.status === 'rejected') return false;
+      if (d.doc_type === 'export' && d.status === 'promoted' && !includePending) return false;
+      return true;
+    });
+    // Newest first by updated_at
+    filtered.sort(function(a, b) { return (b.updated_at || '').localeCompare(a.updated_at || ''); });
+    filterCount('documents-count', filtered.length, documentsListRaw.length);
+    var listEl = document.getElementById('documents-list');
+    if (!listEl) return;
+    if (filtered.length === 0) {
+      listEl.innerHTML = '<div style=\"padding:12px;opacity:.5\">' + (documentsListRaw.length === 0 ? 'No documents indexed yet' : 'No documents match filter') + '</div>';
+      return;
+    }
+    listEl.innerHTML = filtered.map(function(d) {
+      var badge = docStatusBadge(d.status);
+      var typeBadge = docTypeBadge(d.doc_type);
+      var updated = (d.updated_at || '').substring(0, 10);
+      var activeCls = (documentsCurrentDoc && documentsCurrentDoc === d.doc_id) ? ' style=\"background:rgba(218,126,55,0.08)\"' : '';
+      return '<div class=\"doc-list-item\" data-doc-id=\"' + escapeHtml(d.doc_id) + '\"' + activeCls +
+        ' style=\"padding:8px 10px;border-bottom:1px solid var(--border);cursor:pointer\">' +
+        '<div style=\"display:flex;gap:6px;align-items:center;margin-bottom:2px\">' + typeBadge + badge + '</div>' +
+        '<div style=\"font-weight:600;font-size:13px;line-height:1.3;margin-bottom:2px\">' + escapeHtml(d.title || '(untitled)') + '</div>' +
+        '<div style=\"font-size:11px;color:var(--text-dim);font-family:monospace\">' + escapeHtml(d.domain || '') + ' \\u00b7 ' + (d.node_count || 0) + ' nodes \\u00b7 ' + escapeHtml(updated) + '</div>' +
+        '</div>';
+    }).join('');
+    Array.prototype.forEach.call(listEl.querySelectorAll('.doc-list-item'), function(row) {
+      row.addEventListener('click', function() {
+        var docId = row.getAttribute('data-doc-id');
+        documentsCurrentDoc = docId;
+        requestDocumentView(docId);
+      });
+    });
+  }
+
+  function renderDocumentList(documents) {
+    documentsListRaw = documents || [];
+    applyDocumentsListFilter();
+  }
+
+  function docTypeBadge(t) {
+    var color;
+    switch (t) {
+      case 'source': color = '#3b6ea5'; break;
+      case 'draft': color = '#8a6dba'; break;
+      case 'export': color = '#c77c00'; break;
+      case 'note': color = '#5a5a5a'; break;
+      case 'journal': color = '#248a3d'; break;
+      case 'consolidation': color = '#a13a98'; break;
+      default: color = 'var(--text-dim)';
+    }
+    return '<span style=\"font-size:10px;text-transform:uppercase;letter-spacing:.05em;padding:1px 5px;border-radius:3px;background:' + color + ';color:#fff\">' + escapeHtml(t || '?') + '</span>';
+  }
+
+  function docStatusBadge(s) {
+    var color, label = s;
+    switch (s) {
+      case 'approved': color = '#248a3d'; break;
+      case 'promoted': color = '#c77c00'; break;
+      case 'rejected': color = '#d70015'; break;
+      case 'studied': color = '#3b6ea5'; break;
+      case 'normalised': color = '#5a5a5a'; break;
+      case 'pending': color = '#8a6dba'; break;
+      case 'final': color = '#248a3d'; break;
+      case 'delivered': color = '#248a3d'; break;
+      case 'active': color = '#3b6ea5'; break;
+      case 'stale': color = '#a13a98'; break;
+      default: color = 'var(--text-dim)';
+    }
+    return '<span style=\"font-size:10px;text-transform:uppercase;letter-spacing:.05em;padding:1px 5px;border-radius:3px;border:1px solid ' + color + ';color:' + color + '\">' + escapeHtml(label || '?') + '</span>';
+  }
+
+  function renderDocumentView(docId, documentJson) {
+    var doc;
+    try { doc = JSON.parse(documentJson); }
+    catch (e) {
+      showDocumentToast('error', 'Failed to parse document: ' + e.message);
+      return;
+    }
+    if (doc.error) {
+      showDocumentToast('error', doc.error);
+      return;
+    }
+    documentsCurrentDoc = docId;
+    var meta = doc.meta || {};
+    var tree = doc.tree;
+    document.getElementById('documents-empty').style.display = 'none';
+    document.getElementById('documents-search-results').style.display = 'none';
+    var detail = document.getElementById('documents-detail');
+    detail.style.display = 'block';
+    document.getElementById('doc-title').textContent = meta.title || '(untitled)';
+    var metaLine = [
+      docTypeBadge(meta.doc_type),
+      docStatusBadge(meta.status),
+      escapeHtml(meta.domain || ''),
+      escapeHtml(meta.path || ''),
+      (doc.node_count || 0) + ' nodes',
+      'updated ' + escapeHtml((meta.updated_at || '').substring(0, 19).replace('T', ' '))
+    ].filter(function(s){return s;}).join(' \\u00b7 ');
+    document.getElementById('doc-meta').innerHTML = metaLine;
+    // Approve/reject buttons only for promoted exports
+    var actions = document.getElementById('doc-actions');
+    if (meta.doc_type === 'export' && meta.status === 'promoted') {
+      var slug = extractSlug(meta.path);
+      actions.innerHTML =
+        '<button class=\"refresh-btn\" data-action=\"approve\" data-slug=\"' + escapeHtml(slug) + '\" style=\"background:#248a3d;color:#fff;border-color:#248a3d\">Approve</button> ' +
+        '<button class=\"refresh-btn\" data-action=\"reject\" data-slug=\"' + escapeHtml(slug) + '\" style=\"background:#d70015;color:#fff;border-color:#d70015\">Reject</button>';
+      Array.prototype.forEach.call(actions.querySelectorAll('button[data-action]'), function(btn) {
+        btn.addEventListener('click', function() {
+          var action = btn.getAttribute('data-action');
+          var s = btn.getAttribute('data-slug');
+          if (action === 'approve') {
+            var note = prompt('Approval note (optional):', '');
+            if (note === null) return;
+            requestApproveExport(s, note);
+          } else if (action === 'reject') {
+            var reason = prompt('Rejection reason (required):', '');
+            if (reason === null) return;
+            if (!reason.trim()) {
+              showDocumentToast('error', 'Rejection reason cannot be empty');
+              return;
+            }
+            requestRejectExport(s, reason.trim());
+          }
+        });
+      });
+    } else {
+      actions.innerHTML = '';
+    }
+    // Render tree (left) and content (right)
+    var treeEl = document.getElementById('doc-tree');
+    var contentEl = document.getElementById('doc-content');
+    if (!tree) {
+      treeEl.innerHTML = '<div style=\"opacity:.5\">No tree</div>';
+      contentEl.textContent = '';
+      return;
+    }
+    treeEl.innerHTML = renderTreeNode(tree, 0);
+    contentEl.textContent = collectAllContent(tree).join('\\n\\n');
+    Array.prototype.forEach.call(treeEl.querySelectorAll('.doc-tree-link'), function(a) {
+      a.addEventListener('click', function(ev) {
+        ev.preventDefault();
+        var nid = a.getAttribute('data-node-id');
+        var node = findNodeById(tree, nid);
+        if (node) {
+          contentEl.textContent = node.content || '(no content at this section)';
+        }
+      });
+    });
+  }
+
+  function renderTreeNode(node, depth) {
+    var pad = depth * 12;
+    var children = (node.children || []).map(function(c) { return renderTreeNode(c, depth + 1); }).join('');
+    var label = node.title || '(untitled)';
+    var line = node.line_start ? (' L' + node.line_start) : '';
+    return '<div style=\"padding:2px 0 2px ' + pad + 'px\">' +
+      '<a href=\"#\" class=\"doc-tree-link\" data-node-id=\"' + escapeHtml(node.id) + '\" style=\"color:var(--accent);text-decoration:none\">' + escapeHtml(label) + '</a>' +
+      '<span style=\"font-size:10px;color:var(--text-dim);margin-left:4px\">' + escapeHtml(line) + '</span>' +
+      '</div>' + children;
+  }
+
+  function collectAllContent(node) {
+    var out = [];
+    if (node.content) {
+      var heading = (node.title ? ('## ' + node.title + '\\n') : '');
+      out.push(heading + node.content);
+    }
+    (node.children || []).forEach(function(c) {
+      out = out.concat(collectAllContent(c));
+    });
+    return out;
+  }
+
+  function findNodeById(node, id) {
+    if (!node) return null;
+    if (node.id === id) return node;
+    var kids = node.children || [];
+    for (var i = 0; i < kids.length; i++) {
+      var hit = findNodeById(kids[i], id);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  function extractSlug(path) {
+    if (!path) return '';
+    var parts = path.split('/');
+    var last = parts[parts.length - 1] || '';
+    return last.replace(/\\.md$/, '');
+  }
+
+  function renderSearchResults(query, results) {
+    documentsLastSearchQuery = query;
+    document.getElementById('documents-empty').style.display = 'none';
+    document.getElementById('documents-detail').style.display = 'none';
+    var box = document.getElementById('documents-search-results');
+    box.style.display = 'block';
+    if (!results || results.length === 0) {
+      box.innerHTML = '<div style=\"padding:12px;opacity:.6\">No matches for <strong>' + escapeHtml(query) + '</strong></div>';
+      return;
+    }
+    box.innerHTML = '<div style=\"padding:8px 0;font-size:12px;color:var(--text-dim)\">' + results.length + ' result(s) for <strong>' + escapeHtml(query) + '</strong></div>' +
+      results.map(function(r) {
+        var snippet = (r.content || '').substring(0, 320);
+        if ((r.content || '').length > 320) snippet += '\\u2026';
+        return '<div class=\"doc-search-hit\" data-doc-id=\"' + escapeHtml(r.doc_id) + '\" style=\"padding:10px;border-bottom:1px solid var(--border);cursor:pointer\">' +
+          '<div style=\"display:flex;gap:8px;align-items:center;margin-bottom:4px\"><strong>' + escapeHtml(r.doc_title || '(untitled)') + '</strong>' +
+          '<span style=\"font-size:11px;color:var(--text-dim);font-family:monospace\">' + escapeHtml(r.section_path || '') + '</span>' +
+          '<span style=\"margin-left:auto;font-size:11px;color:var(--text-dim)\">score ' + (r.score || 0).toFixed(3) + '</span></div>' +
+          '<div style=\"font-size:11px;font-family:monospace;color:var(--accent);margin-bottom:4px\">' + escapeHtml(r.citation || '') + '</div>' +
+          '<div style=\"font-size:13px;line-height:1.5;color:var(--text-secondary);white-space:pre-wrap\">' + escapeHtml(snippet) + '</div>' +
+          '</div>';
+      }).join('');
+    Array.prototype.forEach.call(box.querySelectorAll('.doc-search-hit'), function(hit) {
+      hit.addEventListener('click', function() {
+        var docId = hit.getAttribute('data-doc-id');
+        documentsCurrentDoc = docId;
+        requestDocumentView(docId);
+      });
+    });
+  }
+
+  function showDocumentToast(status, message) {
+    var t = document.getElementById('documents-toast');
+    if (!t) return;
+    t.style.borderColor = status === 'ok' ? '#248a3d' : '#d70015';
+    t.style.color = status === 'ok' ? '#248a3d' : '#d70015';
+    t.textContent = message;
+    t.style.display = 'block';
+    if (showDocumentToast._timer) clearTimeout(showDocumentToast._timer);
+    showDocumentToast._timer = setTimeout(function() {
+      t.style.display = 'none';
+    }, 4000);
   }
 
   function affectColor(v) {
@@ -2380,6 +2743,22 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
         break;
       case 'memory_data':
         renderMemoryData(data.runs);
+        break;
+      case 'document_list_data':
+        renderDocumentList(data.documents);
+        break;
+      case 'document_view_data':
+        renderDocumentView(data.doc_id, data.document);
+        break;
+      case 'search_results_data':
+        renderSearchResults(data.query, data.results);
+        break;
+      case 'approval_result':
+        showDocumentToast(data.status, data.message);
+        if (data.status === 'ok') {
+          // Refresh list so the export's status visibly changed
+          requestDocumentList();
+        }
         break;
       case 'notification':
         if (data.kind === 'safety') {
