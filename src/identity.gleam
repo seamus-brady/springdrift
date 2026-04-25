@@ -1,8 +1,12 @@
 //// Identity system — persona loading and session preamble templating.
 ////
 //// The identity system provides two files:
-////   1. persona.md — fixed first-person character text
-////   2. session_preamble.md — template with {{slot}} syntax and OMIT IF rules
+////   1. persona.md — first-person character text. May reference identity
+////      slots {{agent_name}} and {{agent_version}}, which are substituted
+////      by `render_persona`. Other slots are not exposed here — keep
+////      persona narrowly about WHO the agent is, not live state.
+////   2. session_preamble.md — template with full {{slot}} syntax and
+////      OMIT IF rules for live working context.
 ////
 //// File lookup order (first found wins per file):
 ////   1. .springdrift/identity/ (local project override)
@@ -138,6 +142,21 @@ pub fn substitute_slots(text: String, slots: List(SlotValue)) -> String {
       substitute_slots(replaced, rest)
     }
   }
+}
+
+/// Render persona text by substituting only the identity slots
+/// ({{agent_name}}, {{agent_version}}). Persona is fixed character text —
+/// it should not reference live working state, so the full preamble slot
+/// set is intentionally not exposed here.
+pub fn render_persona(
+  persona: String,
+  agent_name: String,
+  agent_version: String,
+) -> String {
+  substitute_slots(persona, [
+    SlotValue(key: "agent_name", value: agent_name),
+    SlotValue(key: "agent_version", value: agent_version),
+  ])
 }
 
 /// Collapse runs of 3+ blank lines into 2.
