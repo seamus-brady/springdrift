@@ -120,6 +120,10 @@ pub type RuntimeConfig {
     deputies_max_tokens: Int,
     /// Timeout for awaiting the deputy briefing.
     deputy_timeout_ms: Int,
+    /// Skills directories — used by the cog loop's `read_skill` tool
+    /// for canonical-path containment (PR 15). Same list threaded
+    /// into specialist agents.
+    skills_dirs: List(String),
   )
 }
 

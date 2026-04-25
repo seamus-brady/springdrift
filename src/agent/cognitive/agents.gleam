@@ -45,6 +45,7 @@ import paths
 import planner/log as planner_log
 import planner/types as planner_types
 import slog
+import tools/builtin
 import tools/captures as captures_tools
 import tools/knowledge as knowledge_tools
 import tools/learning_goals as learning_goal_tools
@@ -286,100 +287,106 @@ fn handle_memory_tools(
             )
           }),
         ))
-      let result = case planner_tools.is_planner_tool(call.name) {
-        True ->
-          case state.memory.librarian {
-            Some(lib) -> {
-              let actx =
-                option.Some(appraiser.AppraiserContext(
-                  provider: state.provider,
-                  model: state.appraiser_model,
-                  max_tokens: state.appraiser_max_tokens,
-                  planner_dir: state.planner_dir,
-                  cbr_dir: state.memory.cbr_dir,
-                  librarian: lib,
-                  cognitive: option.Some(state.self),
-                  min_complexity: state.appraisal_min_complexity,
-                  min_steps: state.appraisal_min_steps,
-                ))
-              planner_tools.execute(call, state.planner_dir, lib, actx)
-            }
-            None ->
-              llm_types.ToolFailure(
-                tool_use_id: call.id,
-                error: "Planner tools unavailable (no librarian)",
-              )
-          }
+      let result = case call.name == "read_skill" {
+        True -> builtin.execute(call, state.config.skills_dirs)
         False ->
-          case knowledge_tools.is_knowledge_tool(call.name) {
+          case planner_tools.is_planner_tool(call.name) {
             True ->
-              knowledge_tools.execute(
-                call,
-                knowledge_tools.KnowledgeConfig(
-                  knowledge_dir: paths.knowledge_dir(),
-                  indexes_dir: paths.knowledge_indexes_dir(),
-                  sources_dir: paths.knowledge_sources_dir(),
-                  journal_dir: paths.knowledge_journal_dir(),
-                  notes_dir: paths.knowledge_notes_dir(),
-                  drafts_dir: paths.knowledge_drafts_dir(),
-                  exports_dir: paths.knowledge_exports_dir(),
-                  embed_fn: None,
-                  // Tier 3 reasoning uses the cycle's current model.
-                  // For Complex queries that's reasoning_model; for
-                  // Simple it's task_model. Either works — the agent
-                  // is reasoning over its own library either way.
-                  reason_fn: Some(knowledge_search.make_reason_fn(
-                    state.provider,
-                    state.model,
-                  )),
-                ),
-              )
+              case state.memory.librarian {
+                Some(lib) -> {
+                  let actx =
+                    option.Some(appraiser.AppraiserContext(
+                      provider: state.provider,
+                      model: state.appraiser_model,
+                      max_tokens: state.appraiser_max_tokens,
+                      planner_dir: state.planner_dir,
+                      cbr_dir: state.memory.cbr_dir,
+                      librarian: lib,
+                      cognitive: option.Some(state.self),
+                      min_complexity: state.appraisal_min_complexity,
+                      min_steps: state.appraisal_min_steps,
+                    ))
+                  planner_tools.execute(call, state.planner_dir, lib, actx)
+                }
+                None ->
+                  llm_types.ToolFailure(
+                    tool_use_id: call.id,
+                    error: "Planner tools unavailable (no librarian)",
+                  )
+              }
             False ->
-              case learning_goal_tools.is_learning_goal_tool(call.name) {
+              case knowledge_tools.is_knowledge_tool(call.name) {
                 True ->
-                  learning_goal_tools.execute(
+                  knowledge_tools.execute(
                     call,
-                    learning_goal_tools.LearningGoalContext(cycle_id: cycle_id),
+                    knowledge_tools.KnowledgeConfig(
+                      knowledge_dir: paths.knowledge_dir(),
+                      indexes_dir: paths.knowledge_indexes_dir(),
+                      sources_dir: paths.knowledge_sources_dir(),
+                      journal_dir: paths.knowledge_journal_dir(),
+                      notes_dir: paths.knowledge_notes_dir(),
+                      drafts_dir: paths.knowledge_drafts_dir(),
+                      exports_dir: paths.knowledge_exports_dir(),
+                      embed_fn: None,
+                      // Tier 3 reasoning uses the cycle's current model.
+                      // For Complex queries that's reasoning_model; for
+                      // Simple it's task_model. Either works — the agent
+                      // is reasoning over its own library either way.
+                      reason_fn: Some(knowledge_search.make_reason_fn(
+                        state.provider,
+                        state.model,
+                      )),
+                    ),
                   )
                 False ->
-                  case strategy_tools.is_strategy_tool(call.name) {
+                  case learning_goal_tools.is_learning_goal_tool(call.name) {
                     True ->
-                      strategy_tools.execute(
+                      learning_goal_tools.execute(
                         call,
-                        strategy_tools.StrategyContext(cycle_id: cycle_id),
+                        learning_goal_tools.LearningGoalContext(
+                          cycle_id: cycle_id,
+                        ),
                       )
                     False ->
-                      case captures_tools.is_captures_tool(call.name) {
+                      case strategy_tools.is_strategy_tool(call.name) {
                         True ->
-                          case state.memory.librarian {
-                            Some(lib) ->
-                              captures_tools.execute(
+                          strategy_tools.execute(
+                            call,
+                            strategy_tools.StrategyContext(cycle_id: cycle_id),
+                          )
+                        False ->
+                          case captures_tools.is_captures_tool(call.name) {
+                            True ->
+                              case state.memory.librarian {
+                                Some(lib) ->
+                                  captures_tools.execute(
+                                    call,
+                                    captures_tools.CapturesContext(
+                                      captures_dir: state.config.captures_dir,
+                                      librarian: lib,
+                                      scheduler: state.scheduler,
+                                    ),
+                                  )
+                                None ->
+                                  llm_types.ToolFailure(
+                                    tool_use_id: call.id,
+                                    error: "Captures unavailable (no librarian)",
+                                  )
+                              }
+                            False ->
+                              memory.execute_with_how_to(
                                 call,
-                                captures_tools.CapturesContext(
-                                  captures_dir: state.config.captures_dir,
-                                  librarian: lib,
-                                  scheduler: state.scheduler,
-                                ),
-                              )
-                            None ->
-                              llm_types.ToolFailure(
-                                tool_use_id: call.id,
-                                error: "Captures unavailable (no librarian)",
+                                state.memory.narrative_dir,
+                                state.memory.librarian,
+                                facts_ctx,
+                                introspect_ctx,
+                                state.config.memory_limits,
+                                state.config.how_to_content,
+                                option.Some(memory.AgentManagementContext(
+                                  supervisor: state.supervisor,
+                                )),
                               )
                           }
-                        False ->
-                          memory.execute_with_how_to(
-                            call,
-                            state.memory.narrative_dir,
-                            state.memory.librarian,
-                            facts_ctx,
-                            introspect_ctx,
-                            state.config.memory_limits,
-                            state.config.how_to_content,
-                            option.Some(memory.AgentManagementContext(
-                              supervisor: state.supervisor,
-                            )),
-                          )
                       }
                   }
               }

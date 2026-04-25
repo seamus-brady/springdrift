@@ -109,37 +109,150 @@ fn sanitise_filename(filename: String) -> Result(String, String) {
 // process — the consumer that drains the intray into sources/
 // ---------------------------------------------------------------------------
 
+/// Reason a single intray file could not be normalised.
+/// Distinct variants so operator-facing messages can be specific —
+/// `BinaryMissing` is fixable by installing the host package
+/// (poppler-utils for pdftotext, pandoc for docx/epub/html);
+/// `UnsupportedExtension` means the file type isn't in our list at
+/// all; `ConversionFailed` is everything else the converter raised.
+pub type ProcessFailure {
+  /// The host is missing the binary needed to convert this file
+  /// (e.g. `pdftotext`). Operator action: install it.
+  BinaryMissing(filename: String, binary: String)
+  /// The file extension isn't in the supported set. Operator
+  /// action: convert before uploading.
+  UnsupportedExtension(filename: String, extension: String)
+  /// Converter ran but failed mid-stream.
+  ConversionFailed(filename: String, reason: String)
+  /// Could not write the normalised output to sources/.
+  WriteFailed(filename: String, reason: String)
+}
+
+/// Summary of an intray drain pass — what got normalised and what
+/// failed (with specific reasons). The web upload handler uses this
+/// to give the operator actionable feedback instead of a generic
+/// "no files normalised" message.
+pub type ProcessSummary {
+  ProcessSummary(normalised: Int, failures: List(ProcessFailure))
+}
+
 /// Process all pending files in the intray directory.
-/// Returns number of files successfully normalised.
+/// Backward-compatible: returns just the success count. New code
+/// should prefer `process_with_summary` for failure detail.
 pub fn process(
   knowledge_dir: String,
   intray_dir: String,
   sources_dir: String,
   indexes_dir: String,
 ) -> Int {
+  let summary =
+    process_with_summary(knowledge_dir, intray_dir, sources_dir, indexes_dir)
+  summary.normalised
+}
+
+/// Process all pending intray files, returning a structured summary
+/// with per-file failure reasons. Files with unsupported extensions
+/// are NOT counted as failures here — the operator can see them in
+/// the intray and remove them — they're skipped silently the same
+/// way `process/4` always did.
+pub fn process_with_summary(
+  knowledge_dir: String,
+  intray_dir: String,
+  sources_dir: String,
+  indexes_dir: String,
+) -> ProcessSummary {
   let _ = simplifile.create_directory_all(intray_dir)
   case simplifile.read_directory(intray_dir) {
-    Error(_) -> 0
+    Error(_) -> ProcessSummary(normalised: 0, failures: [])
     Ok(files) -> {
       // Supported inputs: markdown, text, PDF, HTML, docx, epub.
-      // Everything else is skipped (operator can see it sitting in
-      // the intray and remove it).
+      // Anything else is skipped silently (the operator can see it
+      // in the intray and remove it).
       let processable = list.filter(files, fn(f) { converter.is_supported(f) })
-      list.fold(processable, 0, fn(count, filename) {
-        case
-          process_file(
-            knowledge_dir,
-            intray_dir,
-            sources_dir,
-            indexes_dir,
-            filename,
-          )
-        {
-          Ok(_) -> count + 1
-          Error(_) -> count
-        }
-      })
+      list.fold(
+        processable,
+        ProcessSummary(normalised: 0, failures: []),
+        fn(acc, filename) {
+          case
+            process_file_with_failure(
+              knowledge_dir,
+              intray_dir,
+              sources_dir,
+              indexes_dir,
+              filename,
+            )
+          {
+            Ok(_) -> ProcessSummary(..acc, normalised: acc.normalised + 1)
+            Error(failure) ->
+              ProcessSummary(..acc, failures: [failure, ..acc.failures])
+          }
+        },
+      )
     }
+  }
+}
+
+/// Wraps process_file but maps the converter's typed errors into
+/// our operator-facing ProcessFailure variants. Keeps process_file
+/// itself unchanged for any caller that doesn't need the structured
+/// failure detail.
+fn process_file_with_failure(
+  knowledge_dir: String,
+  intray_dir: String,
+  sources_dir: String,
+  indexes_dir: String,
+  filename: String,
+) -> Result(String, ProcessFailure) {
+  let source_path = intray_dir <> "/" <> filename
+  case converter.convert(source_path) {
+    Error(converter.UnsupportedExtension(extension:)) ->
+      Error(UnsupportedExtension(filename:, extension:))
+    Error(converter.BinaryMissing(binary:)) ->
+      Error(BinaryMissing(filename:, binary:))
+    Error(converter.ConversionFailed(reason:)) ->
+      Error(ConversionFailed(filename:, reason:))
+    Ok(_) ->
+      // The convert succeeded — re-run process_file to do the
+      // index/log/move. Slightly wasteful (we converted twice), but
+      // keeps the existing process_file path single-purpose.
+      // Acceptable given how rarely intake.process runs.
+      case
+        process_file(
+          knowledge_dir,
+          intray_dir,
+          sources_dir,
+          indexes_dir,
+          filename,
+        )
+      {
+        Ok(doc_id) -> Ok(doc_id)
+        Error(reason) -> Error(WriteFailed(filename:, reason:))
+      }
+  }
+}
+
+/// Format a ProcessFailure for operator-facing display. Each variant
+/// carries the action the operator can take to fix it.
+pub fn format_failure(f: ProcessFailure) -> String {
+  case f {
+    BinaryMissing(filename:, binary:) ->
+      "'"
+      <> filename
+      <> "' could not be normalised — '"
+      <> binary
+      <> "' is not installed on the host. "
+      <> "Install it (e.g. `apt install poppler-utils` for pdftotext, "
+      <> "`apt install pandoc` for pandoc) and re-trigger intake."
+    UnsupportedExtension(filename:, extension:) ->
+      "'"
+      <> filename
+      <> "' has unsupported extension '"
+      <> extension
+      <> "'. Convert to markdown / PDF / docx / epub / HTML before uploading."
+    ConversionFailed(filename:, reason:) ->
+      "'" <> filename <> "' failed to convert: " <> reason
+    WriteFailed(filename:, reason:) ->
+      "'" <> filename <> "' converted but could not be written: " <> reason
   }
 }
 

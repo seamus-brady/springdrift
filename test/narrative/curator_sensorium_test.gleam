@@ -388,6 +388,26 @@ pub fn schedule_xml_includes_stale_attribute_test() {
 }
 
 // ---------------------------------------------------------------------------
+// render_sensorium_intray — agent-side discovery for upload arrivals
+// ---------------------------------------------------------------------------
+
+pub fn intray_section_empty_when_no_files_test() {
+  // Whatever's currently on the production intray dir, the contract
+  // is: empty render means no files. We can't easily seed a
+  // controlled intray here without faking paths.knowledge_intray_dir,
+  // but we can pin the empty-output property: the result is either
+  // "" or starts with "  <intray ".
+  let result = curator.render_sensorium_intray()
+  case result {
+    "" -> Nil
+    s -> {
+      string.starts_with(s, "  <intray pending=") |> should.be_true
+      string.ends_with(s, "/>") |> should.be_true
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // render_sensorium_captures — Phase 3a commitment loop
 // ---------------------------------------------------------------------------
 
