@@ -9,6 +9,7 @@ import agent/types.{type AgentSpec, AgentSpec, Permanent}
 import gleam/erlang/process.{type Subject}
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import knowledge/search as knowledge_search
 import llm/provider.{type Provider}
 import llm/types as llm_types
 import narrative/librarian.{type LibrarianMessage}
@@ -91,13 +92,21 @@ pub fn spec(
     max_context_messages: None,
     tools:,
     restart: Permanent,
-    tool_executor: writer_executor(artifacts_dir, lib, max_artifact_chars),
+    tool_executor: writer_executor(
+      provider,
+      model,
+      artifacts_dir,
+      lib,
+      max_artifact_chars,
+    ),
     inter_turn_delay_ms: 200,
     redact_secrets: True,
   )
 }
 
 fn writer_executor(
+  provider: Provider,
+  model: String,
   artifacts_dir: String,
   lib: Option(Subject(LibrarianMessage)),
   max_artifact_chars: Int,
@@ -116,7 +125,7 @@ fn writer_executor(
             drafts_dir: paths.knowledge_drafts_dir(),
             exports_dir: paths.knowledge_exports_dir(),
             embed_fn: None,
-            reason_fn: None,
+            reason_fn: Some(knowledge_search.make_reason_fn(provider, model)),
           ),
         )
       _ ->

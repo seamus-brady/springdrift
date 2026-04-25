@@ -13,6 +13,7 @@ import gleam/int
 import gleam/list
 import gleam/option.{type Option, Some}
 import gleam/string
+import knowledge/search as knowledge_search
 import llm/provider.{type Provider}
 import llm/types as llm_types
 import narrative/librarian.{type LibrarianMessage}
@@ -128,6 +129,8 @@ pub fn spec(
     tools:,
     restart: Permanent,
     tool_executor: researcher_executor(
+      provider,
+      model,
       artifacts_dir,
       lib,
       max_artifact_chars,
@@ -143,6 +146,8 @@ pub fn spec(
 }
 
 fn researcher_executor(
+  provider: Provider,
+  model: String,
   artifacts_dir: String,
   lib: Subject(LibrarianMessage),
   max_artifact_chars: Int,
@@ -166,7 +171,10 @@ fn researcher_executor(
             drafts_dir: paths.knowledge_drafts_dir(),
             exports_dir: paths.knowledge_exports_dir(),
             embed_fn: option.None,
-            reason_fn: option.None,
+            reason_fn: option.Some(knowledge_search.make_reason_fn(
+              provider,
+              model,
+            )),
           ),
         )
       "kagi_search" | "kagi_summarize" -> kagi.execute(call)
