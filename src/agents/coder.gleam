@@ -143,6 +143,7 @@ pub fn spec(
   artifacts_dir: String,
   lib: Option(Subject(LibrarianMessage)),
   max_artifact_chars: Int,
+  skills_dirs: List(String),
 ) -> AgentSpec {
   let #(tools, system_prompt, description) = case sandbox_manager {
     Some(_manager) -> {
@@ -185,6 +186,7 @@ pub fn spec(
       artifacts_dir,
       lib,
       max_artifact_chars,
+      skills_dirs,
     ),
     inter_turn_delay_ms: 200,
     redact_secrets: True,
@@ -196,6 +198,7 @@ fn coder_executor(
   artifacts_dir: String,
   lib: Option(Subject(LibrarianMessage)),
   max_artifact_chars: Int,
+  skills_dirs: List(String),
 ) -> fn(llm_types.ToolCall) -> llm_types.ToolResult {
   fn(call: llm_types.ToolCall) -> llm_types.ToolResult {
     case call.name, lib {
@@ -211,9 +214,9 @@ fn coder_executor(
           Some(manager) ->
             case sandbox.is_sandbox_tool(call.name) {
               True -> sandbox.execute(call, manager)
-              False -> builtin.execute(call)
+              False -> builtin.execute(call, skills_dirs)
             }
-          None -> builtin.execute(call)
+          None -> builtin.execute(call, skills_dirs)
         }
     }
   }

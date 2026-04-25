@@ -9,6 +9,7 @@ import gleam/dynamic/decode
 import gleam/float
 import gleam/int
 import gleam/json
+import gleam/list
 import gleam/option
 import gleam/string
 import llm/tool
@@ -107,13 +108,13 @@ pub fn read_skill_tool() -> Tool {
 // Executor
 // ---------------------------------------------------------------------------
 
-pub fn execute(call: ToolCall) -> ToolResult {
+pub fn execute(call: ToolCall, skills_dirs: List(String)) -> ToolResult {
   slog.debug("builtin", "execute", "tool=" <> call.name, option.None)
   case call.name {
     "calculator" -> run_calculator(call)
     "get_current_datetime" ->
       ToolSuccess(tool_use_id: call.id, content: get_datetime())
-    "read_skill" -> run_read_skill(call)
+    "read_skill" -> run_read_skill(call, skills_dirs)
     _ -> ToolFailure(tool_use_id: call.id, error: "Unknown tool: " <> call.name)
   }
 }
@@ -167,7 +168,7 @@ fn get_datetime() -> String
 // Read skill
 // ---------------------------------------------------------------------------
 
-fn run_read_skill(call: ToolCall) -> ToolResult {
+fn run_read_skill(call: ToolCall, skills_dirs: List(String)) -> ToolResult {
   let decoder = {
     use path <- decode.field("path", decode.string)
     decode.success(path)
@@ -179,14 +180,11 @@ fn run_read_skill(call: ToolCall) -> ToolResult {
         error: "Invalid read_skill input: missing path",
       )
     Ok(path) ->
-      case string.ends_with(path, "SKILL.md") && !string.contains(path, "..") {
-        False ->
-          ToolFailure(
-            tool_use_id: call.id,
-            error: "read_skill: path must end with SKILL.md and contain no '..' segments",
-          )
-        True ->
-          case simplifile.read(path) {
+      case is_safe_skill_path(path, skills_dirs) {
+        Error(reason) ->
+          ToolFailure(tool_use_id: call.id, error: "read_skill: " <> reason)
+        Ok(resolved) ->
+          case simplifile.read(resolved) {
             Error(e) ->
               ToolFailure(
                 tool_use_id: call.id,
@@ -198,7 +196,7 @@ fn run_read_skill(call: ToolCall) -> ToolResult {
               // and agent name aren't available at the executor level
               // today; later phases can plumb cycle context through
               // ToolCall to enable per-cycle attribution.
-              let skill_dir = string.replace(path, "/SKILL.md", "")
+              let skill_dir = string.replace(resolved, "/SKILL.md", "")
               skills_metrics.append_read(skill_dir, "", "unknown")
               ToolSuccess(tool_use_id: call.id, content:)
             }
@@ -206,3 +204,84 @@ fn run_read_skill(call: ToolCall) -> ToolResult {
       }
   }
 }
+
+/// Validate that `path` is a safe target for read_skill. Returns the
+/// canonical (symlink-resolved) path on success, or an error describing
+/// the rejection reason.
+///
+/// Rules (applied in order — early reject wins):
+/// 1. Must not contain any `..` path segment. The `resolve_symlinks`
+///    FFI resolves symlinks but does NOT collapse `..` segments, so a
+///    string like `<root>/foo/../../etc/SKILL.md` would pass the
+///    string-prefix containment check below despite obviously
+///    escaping the root. Reject these up front.
+/// 2. Must end with `/SKILL.md` (the skills convention).
+/// 3. If no skills directories are configured, reject everything —
+///    fail-closed when the agent has no defined skill scope.
+/// 4. After resolving symlinks, the canonical path must be under
+///    one of the configured skills directories (also resolved).
+///    This blocks symlink escape (a SKILL.md inside the skills dir
+///    that's actually a symlink pointing to `/etc/passwd`).
+///
+/// Public so security tests can drive this directly.
+pub fn is_safe_skill_path(
+  path: String,
+  skills_dirs: List(String),
+) -> Result(String, String) {
+  case has_dotdot_segment(path) {
+    True -> Error("path contains '..' segments")
+    False ->
+      case string.ends_with(path, "/SKILL.md") || path == "SKILL.md" {
+        False -> Error("path must end with /SKILL.md")
+        True -> {
+          case skills_dirs {
+            [] ->
+              Error(
+                "no skills directories are configured — refusing all "
+                <> "read_skill calls (this is a misconfiguration)",
+              )
+            _ -> {
+              let resolved = resolve_symlinks(path)
+              let resolved_dirs = list.map(skills_dirs, resolve_symlinks)
+              case path_under_any(resolved, resolved_dirs) {
+                True -> Ok(resolved)
+                False ->
+                  Error(
+                    "resolved path is outside the configured skills "
+                    <> "directories (canonical-path check failed)",
+                  )
+              }
+            }
+          }
+        }
+      }
+  }
+}
+
+/// Check whether `path` contains a `..` path segment — `/../` in
+/// the middle, `../` at the start, or `/..` at the end. Catches
+/// the relative-traversal escape case before it can short-circuit
+/// the prefix containment check.
+fn has_dotdot_segment(path: String) -> Bool {
+  string.contains(path, "/../")
+  || string.starts_with(path, "../")
+  || string.ends_with(path, "/..")
+  || path == ".."
+}
+
+/// Returns True when `path` (resolved) is inside any of the
+/// (resolved) directory roots. Compared as string prefix with a
+/// trailing-slash guard so `/foo/skills` does not match
+/// `/foo/skills-other`.
+fn path_under_any(path: String, roots: List(String)) -> Bool {
+  list.any(roots, fn(root) {
+    let root_with_slash = case string.ends_with(root, "/") {
+      True -> root
+      False -> root <> "/"
+    }
+    string.starts_with(path, root_with_slash) || path == root
+  })
+}
+
+@external(erlang, "springdrift_ffi", "resolve_symlinks")
+fn resolve_symlinks(path: String) -> String

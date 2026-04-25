@@ -18,7 +18,7 @@ import llm/adapters/mock
 
 pub fn writer_prompt_has_handoff_summary_test() {
   let provider = mock.provider_with_text("ignored")
-  let spec = writer.spec(provider, "test-model", "/tmp", None, 50_000)
+  let spec = writer.spec(provider, "test-model", "/tmp", None, 50_000, [])
   spec.system_prompt
   |> string.contains("Before you return")
   |> should.be_true
@@ -32,7 +32,7 @@ pub fn writer_prompt_defaults_to_draft_for_long_work_test() {
   // "inline-return everything" — that pattern blows past the output
   // token cap on any multi-section report and silently loses work.
   let provider = mock.provider_with_text("ignored")
-  let spec = writer.spec(provider, "test-model", "/tmp", None, 50_000)
+  let spec = writer.spec(provider, "test-model", "/tmp", None, 50_000, [])
   // Must instruct to use create_draft for long output.
   spec.system_prompt
   |> string.contains("create_draft")
@@ -47,7 +47,7 @@ pub fn writer_prompt_documents_revise_flow_test() {
   // PR 4: writer prompt must teach the revise flow so draft_slug
   // refs trigger read → update rather than create-over-top.
   let provider = mock.provider_with_text("ignored")
-  let spec = writer.spec(provider, "test-model", "/tmp", None, 50_000)
+  let spec = writer.spec(provider, "test-model", "/tmp", None, 50_000, [])
   // Mentions draft_slug as the trigger ref.
   spec.system_prompt
   |> string.contains("draft_slug")

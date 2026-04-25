@@ -89,6 +89,7 @@ pub fn spec(
   max_tokens: Int,
   max_turns: Int,
   max_errors: Int,
+  skills_dirs: List(String),
 ) -> AgentSpec {
   let tools = list.flatten([remembrancer_tools.all(), builtin.agent_tools()])
 
@@ -105,7 +106,7 @@ pub fn spec(
     max_context_messages: Some(30),
     tools:,
     restart: Transient,
-    tool_executor: remembrancer_executor(ctx),
+    tool_executor: remembrancer_executor(ctx, skills_dirs),
     inter_turn_delay_ms: 0,
     redact_secrets: True,
   )
@@ -113,11 +114,12 @@ pub fn spec(
 
 fn remembrancer_executor(
   ctx: remembrancer_tools.RemembrancerContext,
+  skills_dirs: List(String),
 ) -> fn(llm_types.ToolCall) -> llm_types.ToolResult {
   fn(call: llm_types.ToolCall) -> llm_types.ToolResult {
     case remembrancer_tools.is_remembrancer_tool(call.name) {
       True -> remembrancer_tools.execute(call, ctx)
-      False -> builtin.execute(call)
+      False -> builtin.execute(call, skills_dirs)
     }
   }
 }

@@ -66,6 +66,7 @@ pub fn spec(
   max_tokens: Int,
   max_turns: Int,
   max_errors: Int,
+  skills_dirs: List(String),
 ) -> AgentSpec {
   let tools = list.flatten([comms.all(), builtin.agent_tools()])
 
@@ -82,7 +83,7 @@ pub fn spec(
     max_context_messages: Some(20),
     tools:,
     restart: Permanent,
-    tool_executor: comms_executor(config, comms_dir),
+    tool_executor: comms_executor(config, comms_dir, skills_dirs),
     inter_turn_delay_ms: 200,
     redact_secrets: True,
   )
@@ -91,11 +92,12 @@ pub fn spec(
 fn comms_executor(
   config: comms_types.CommsConfig,
   comms_dir: String,
+  skills_dirs: List(String),
 ) -> fn(llm_types.ToolCall) -> llm_types.ToolResult {
   fn(call: llm_types.ToolCall) -> llm_types.ToolResult {
     case comms.is_comms_tool(call.name) {
       True -> comms.execute(call, config, comms_dir, None)
-      False -> builtin.execute(call)
+      False -> builtin.execute(call, skills_dirs)
     }
   }
 }

@@ -673,6 +673,7 @@ fn run(cfg: AppConfig) -> Nil {
       brave_answers_limiter,
       brave_cache_ttl_ms,
       sandbox_mgr,
+      skill_dirs,
     )
     |> list.map(fn(spec) { append_skills_to_spec(spec, discovered) })
 
@@ -1534,6 +1535,7 @@ fn default_agent_specs(
   ),
   brave_cache_ttl_ms: Int,
   sandbox_manager: option.Option(sandbox_types.SandboxManager),
+  skill_dirs: List(String),
 ) -> List(agent_types.AgentSpec) {
   let delay = option.unwrap(cfg.inter_turn_delay_ms, 200)
   let p_spec = planner.spec(provider, task_model)
@@ -1572,6 +1574,7 @@ fn default_agent_specs(
       brave_answers_limiter,
       brave_cache_ttl_ms,
       researcher_auto_store_threshold,
+      skill_dirs,
     )
   let c_spec =
     coder.spec(
@@ -1581,6 +1584,7 @@ fn default_agent_specs(
       paths.artifacts_dir(),
       option.Some(librarian_subj),
       max_artifact_chars,
+      skill_dirs,
     )
   let w_spec =
     writer.spec(
@@ -1589,6 +1593,7 @@ fn default_agent_specs(
       paths.artifacts_dir(),
       option.Some(librarian_subj),
       max_artifact_chars,
+      skill_dirs,
     )
   let recall_max_entries = option.unwrap(cfg.recall_max_entries, 50)
   let cbr_max_results = option.unwrap(cfg.cbr_max_results, 20)
@@ -1668,7 +1673,7 @@ fn default_agent_specs(
     ),
     agent_types.AgentSpec(..o_spec, redact_secrets: redact),
     ..list.append(
-      comms_specs(cfg, provider, task_model, delay, redact),
+      comms_specs(cfg, provider, task_model, delay, redact, skill_dirs),
       remembrancer_specs(
         cfg,
         provider,
@@ -1676,6 +1681,7 @@ fn default_agent_specs(
         librarian_subj,
         delay,
         redact,
+        skill_dirs,
       ),
     )
   ]
@@ -1687,6 +1693,7 @@ fn comms_specs(
   task_model: String,
   delay: Int,
   redact: Bool,
+  skill_dirs: List(String),
 ) -> List(agent_types.AgentSpec) {
   case option.unwrap(cfg.comms_enabled, True) {
     False -> []
@@ -1749,6 +1756,7 @@ fn comms_specs(
               option.unwrap(cfg.max_tokens, 2048),
               option.unwrap(cfg.max_turns, 6),
               option.unwrap(cfg.max_consecutive_errors, 2),
+              skill_dirs,
             ),
             inter_turn_delay_ms: delay,
             redact_secrets: redact,
@@ -1766,6 +1774,7 @@ fn remembrancer_specs(
   librarian_subj: process.Subject(librarian.LibrarianMessage),
   delay: Int,
   redact: Bool,
+  skill_dirs: List(String),
 ) -> List(agent_types.AgentSpec) {
   case option.unwrap(cfg.remembrancer_enabled, True) {
     False -> []
@@ -1818,6 +1827,7 @@ fn remembrancer_specs(
             option.unwrap(cfg.max_tokens, 4096),
             option.unwrap(cfg.remembrancer_max_turns, 8),
             option.unwrap(cfg.max_consecutive_errors, 3),
+            skill_dirs,
           ),
           inter_turn_delay_ms: delay,
           redact_secrets: redact,

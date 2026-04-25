@@ -71,6 +71,7 @@ pub fn spec(
   artifacts_dir: String,
   lib: Option(Subject(LibrarianMessage)),
   max_artifact_chars: Int,
+  skills_dirs: List(String),
 ) -> AgentSpec {
   let tools =
     list.flatten([
@@ -98,6 +99,7 @@ pub fn spec(
       artifacts_dir,
       lib,
       max_artifact_chars,
+      skills_dirs,
     ),
     inter_turn_delay_ms: 200,
     redact_secrets: True,
@@ -110,6 +112,7 @@ fn writer_executor(
   artifacts_dir: String,
   lib: Option(Subject(LibrarianMessage)),
   max_artifact_chars: Int,
+  skills_dirs: List(String),
 ) -> fn(llm_types.ToolCall) -> llm_types.ToolResult {
   fn(call: llm_types.ToolCall) -> llm_types.ToolResult {
     case call.name {
@@ -143,7 +146,7 @@ fn writer_executor(
               tool_use_id: call.id,
               error: "Artifact tools unavailable (no librarian)",
             )
-          _, _ -> builtin.execute(call)
+          _, _ -> builtin.execute(call, skills_dirs)
         }
     }
   }
