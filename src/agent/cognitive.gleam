@@ -152,7 +152,6 @@ pub fn start(
           agent_uuid: cfg.agent_uuid,
           agent_name: cfg.agent_name,
           session_since: cfg.session_since,
-          write_anywhere: cfg.write_anywhere,
         ),
         config: RuntimeConfig(
           retry_config: cfg.retry_config,

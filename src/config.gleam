@@ -61,7 +61,6 @@ pub type AppConfig {
     max_context_messages: Option(Int),
     // ── Logging and filesystem ──
     log_verbose: Option(Bool),
-    write_anywhere: Option(Bool),
     skills_dirs: Option(List(String)),
     log_retention_days: Option(Int),
     log_max_file_bytes: Option(Int),
@@ -404,7 +403,6 @@ pub fn default() -> AppConfig {
     max_consecutive_errors: None,
     max_context_messages: None,
     log_verbose: None,
-    write_anywhere: None,
     skills_dirs: None,
     log_retention_days: None,
     log_max_file_bytes: None,
@@ -628,7 +626,6 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
       base.max_context_messages,
     ),
     log_verbose: option.or(override_cfg.log_verbose, base.log_verbose),
-    write_anywhere: option.or(override_cfg.write_anywhere, base.write_anywhere),
     skills_dirs: option.or(override_cfg.skills_dirs, base.skills_dirs),
     log_retention_days: option.or(
       override_cfg.log_retention_days,
@@ -1421,7 +1418,6 @@ pub fn to_string(cfg: AppConfig) -> String {
     }),
     // Logging and filesystem
     option.map(cfg.log_verbose, fn(v) { "log_verbose: " <> bool_str(v) }),
-    option.map(cfg.write_anywhere, fn(v) { "write_anywhere: " <> bool_str(v) }),
     option.map(cfg.skills_dirs, fn(dirs) {
       "skills_dirs: " <> string.join(dirs, ", ")
     }),
@@ -1605,8 +1601,6 @@ fn do_parse_args(args: List(String), acc: AppConfig) -> AppConfig {
     // Logging and filesystem
     ["--verbose", ..rest] ->
       do_parse_args(rest, AppConfig(..acc, log_verbose: Some(True)))
-    ["--allow-write-anywhere", ..rest] ->
-      do_parse_args(rest, AppConfig(..acc, write_anywhere: Some(True)))
     ["--skills-dir", path, ..rest] ->
       case acc.skills_dirs {
         None -> do_parse_args(rest, AppConfig(..acc, skills_dirs: Some([path])))
@@ -1729,7 +1723,6 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     max_consecutive_errors: get_int("max_consecutive_errors"),
     max_context_messages: get_int("max_context_messages"),
     log_verbose: get_bool("log_verbose"),
-    write_anywhere: get_bool("write_anywhere"),
     skills_dirs: get_toml_str_array(table, ["skills_dirs"]),
     log_retention_days: get_int("log_retention_days"),
     log_max_file_bytes: get_int("log_max_file_bytes"),
@@ -2223,8 +2216,8 @@ fn load_from_path(path: String) -> AppConfig {
 const known_keys = [
   "provider", "task_model", "reasoning_model", "max_tokens",
   "thinking_budget_tokens", "max_turns", "max_consecutive_errors",
-  "max_context_messages", "log_verbose", "write_anywhere", "skills_dirs", "gui",
-  "dprime_enabled", "dprime_config", "narrative", "agent", "log_retention_days",
+  "max_context_messages", "log_verbose", "skills_dirs", "gui", "dprime_enabled",
+  "dprime_config", "narrative", "agent", "log_retention_days",
   "log_max_file_bytes", "timeouts", "retry", "limits", "scoring", "housekeeping",
   "housekeeper", "cbr", "agents", "web", "services", "scheduler", "xstructor",
   "forecaster", "sandbox", "delegation", "escalation", "dprime", "vertex",

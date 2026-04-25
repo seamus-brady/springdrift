@@ -421,7 +421,6 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `config_path` | `--config` | None | Extra config file path |
 | `log_verbose` | `--verbose` | False | Enable stderr log output + full LLM payloads to cycle log |
 | `skills_dirs` | `--skills-dir` (repeatable) | `[~/.config/springdrift/skills, .springdrift/skills]` | Skill directories |
-| `write_anywhere` | `--allow-write-anywhere` | False | Allow `write_file` outside CWD |
 | `gui` | `--gui` | tui | GUI mode: `tui` (terminal) or `web` (browser on port 12001) |
 | `dprime_enabled` | `--dprime` / `--no-dprime` | True | Enable D' safety evaluation before tool dispatch |
 | `dprime_config` | `--dprime-config` | built-in defaults | Path to D' config JSON file |
@@ -1220,8 +1219,10 @@ legacy plain-array format. Corruption is detected and logged.
 **Input size limits** — TUI input buffer capped at 100KB. `read_file` checks file size
 (10MB max) before reading via `file_size` FFI. WebSocket messages capped at 1MB.
 
-**Symlink resolution** — `is_within_cwd` in `tools/files.gleam` resolves symlinks via
-`resolve_symlinks` FFI (walks path components, follows links) before CWD boundary check.
+**Symlink resolution** — the `resolve_symlinks` FFI walks path components and follows
+links to canonicalise a path. Used by `tools/builtin.is_safe_skill_path` to enforce
+canonical-path containment for `read_skill` (a SKILL.md inside the skills_dirs that's
+actually a symlink to `/etc/passwd` is rejected by the resolved-prefix check).
 
 **Web GUI auth** — auth is required by default. `SPRINGDRIFT_WEB_TOKEN` must be set
 to a non-empty token; otherwise the GUI refuses to start with a clear error. All HTTP

@@ -70,12 +70,7 @@ pub type MemoryContext {
 
 /// Identity and profile context — set at startup, rarely mutated.
 pub type IdentityContext {
-  IdentityContext(
-    agent_uuid: String,
-    agent_name: String,
-    session_since: String,
-    write_anywhere: Bool,
-  )
+  IdentityContext(agent_uuid: String, agent_name: String, session_since: String)
 }
 
 /// Runtime configuration — set at startup, never mutated.

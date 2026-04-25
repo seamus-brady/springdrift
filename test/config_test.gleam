@@ -34,7 +34,6 @@ pub fn default_has_all_none_test() {
   cfg.config_path |> should.equal(None)
   cfg.log_verbose |> should.equal(None)
   cfg.skills_dirs |> should.equal(None)
-  cfg.write_anywhere |> should.equal(None)
   cfg.gui |> should.equal(None)
   cfg.dprime_enabled |> should.equal(None)
   cfg.dprime_config |> should.equal(None)
@@ -375,29 +374,6 @@ pub fn parse_config_toml_skills_dirs_test() {
   result |> should.be_ok
   let assert Ok(cfg) = result
   cfg.skills_dirs |> should.equal(Some(["/path/a", "/path/b"]))
-}
-
-// ---------------------------------------------------------------------------
-// write_anywhere config field
-// ---------------------------------------------------------------------------
-
-pub fn from_args_allow_write_anywhere_test() {
-  let cfg = config.from_args(["--allow-write-anywhere"])
-  cfg.write_anywhere |> should.equal(Some(True))
-}
-
-pub fn parse_config_toml_write_anywhere_false_test() {
-  let result = config.parse_config_toml("write_anywhere = false")
-  result |> should.be_ok
-  let assert Ok(cfg) = result
-  cfg.write_anywhere |> should.equal(Some(False))
-}
-
-pub fn parse_config_toml_write_anywhere_true_test() {
-  let result = config.parse_config_toml("write_anywhere = true")
-  result |> should.be_ok
-  let assert Ok(cfg) = result
-  cfg.write_anywhere |> should.equal(Some(True))
 }
 
 // ---------------------------------------------------------------------------

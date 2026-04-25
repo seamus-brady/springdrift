@@ -295,7 +295,6 @@ fn print_help() -> Nil {
   io.println("")
   io.println("  # Logging and filesystem")
   io.println("  log_verbose    = false")
-  io.println("  write_anywhere = false")
   io.println("  skills_dirs    = [\"/path/to/skills\"]")
 }
 
@@ -380,17 +379,6 @@ fn run(cfg: AppConfig) -> Nil {
   let agent_name = option.unwrap(cfg.agent_name, "Springdrift")
   let agent_version = option.unwrap(cfg.agent_version, package_version())
   let max_tokens = option.unwrap(cfg.max_tokens, 2048)
-  let write_anywhere = option.unwrap(cfg.write_anywhere, False)
-  case write_anywhere {
-    True ->
-      slog.warn(
-        "springdrift",
-        "run",
-        "write_anywhere is ENABLED — file writes are not restricted to CWD",
-        option.None,
-      )
-    False -> Nil
-  }
 
   let llm_timeout_ms = option.unwrap(cfg.llm_request_timeout_ms, 300_000)
   let #(p, default_task_model, default_reasoning_model) =
@@ -872,7 +860,6 @@ fn run(cfg: AppConfig) -> Nil {
       appraisal_min_complexity:,
       appraisal_min_steps:,
       librarian: lib,
-      write_anywhere:,
       curator: option.Some(curator_subj),
       agent_uuid: stable_identity.agent_uuid,
       agent_name:,
