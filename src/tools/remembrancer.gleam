@@ -15,6 +15,7 @@ import affect/store as affect_store
 import dprime/decay
 import facts/log as facts_log
 import facts/types as facts_types
+import gleam/dict
 import gleam/dynamic/decode
 import gleam/erlang/process.{type Subject}
 import gleam/float
@@ -23,6 +24,10 @@ import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
+import knowledge/indexer as knowledge_indexer
+import knowledge/log as knowledge_log
+import knowledge/search as knowledge_search
+import knowledge/types as knowledge_types
 import learning_goal/log as goal_log
 import learning_goal/types as goal_types
 import llm/provider
@@ -118,6 +123,7 @@ pub fn all() -> List(Tool) {
     write_consolidation_report_tool(),
     audit_fabrication_tool(),
     audit_voice_drift_tool(),
+    study_document_tool(),
   ]
 }
 
@@ -139,6 +145,38 @@ pub fn is_remembrancer_tool(name: String) -> Bool {
   || name == "write_consolidation_report"
   || name == "audit_fabrication"
   || name == "audit_voice_drift"
+  || name == "study_document"
+}
+
+/// Default cap on facts persisted from a single study_document call.
+/// Bounds disk + memory usage if a paper yields lots of extractable
+/// claims and prevents a single call dominating the facts store.
+pub const study_default_max_facts: Int = 30
+
+/// Confidence floor for facts extracted by study_document. Facts the
+/// LLM emits with lower confidence are filtered before persisting.
+/// Below 0.6 means "the model itself wasn't sure" — not worth the
+/// noise in the facts store.
+pub const study_min_confidence: Float = 0.6
+
+fn study_document_tool() -> Tool {
+  tool.new("study_document")
+  |> tool.with_description(
+    "Read a normalised document in the knowledge library and extract "
+    <> "factual claims worth remembering. Each fact is persisted with "
+    <> "provenance back to the source section so the operator can "
+    <> "verify and so the agent can cite later. Use after a paper, "
+    <> "report, or reference doc lands in the library — turns it from "
+    <> "passive storage into queryable knowledge.",
+  )
+  |> tool.add_string_param("doc_id", "Document UUID from the index", True)
+  |> tool.add_integer_param(
+    "max_facts",
+    "Cap on facts to persist (default: 30). Higher values cost more "
+      <> "tokens for the LLM extraction call.",
+    False,
+  )
+  |> tool.build()
 }
 
 fn deep_search_tool() -> Tool {
@@ -504,6 +542,7 @@ pub fn execute(call: ToolCall, ctx: RemembrancerContext) -> ToolResult {
     "write_consolidation_report" -> run_write_report(call, ctx)
     "audit_fabrication" -> run_audit_fabrication(call, ctx)
     "audit_voice_drift" -> run_audit_voice_drift(call, ctx)
+    "study_document" -> run_study_document(call, ctx)
     _ ->
       ToolFailure(
         tool_use_id: call.id,
@@ -2447,4 +2486,318 @@ fn render_voice_drift_report(result: voice_drift.VoiceDriftResult) -> String {
         False -> " (no change)"
       }
   }
+}
+
+// ---------------------------------------------------------------------------
+// study_document — extract facts from a normalised document via XStructor
+// and persist them with provenance back to the source section.
+// ---------------------------------------------------------------------------
+
+/// A single fact parsed out of XStructor's flat element dict. Pure
+/// data — separated from the FactWrite step so the persistence layer
+/// can be tested without an XStructor / LLM round-trip.
+pub type ExtractedFact {
+  ExtractedFact(
+    key: String,
+    value: String,
+    section_path: String,
+    confidence: Float,
+  )
+}
+
+fn run_study_document(call: ToolCall, ctx: RemembrancerContext) -> ToolResult {
+  let decoder = {
+    use doc_id <- decode.field("doc_id", decode.string)
+    use max_facts <- decode.optional_field(
+      "max_facts",
+      study_default_max_facts,
+      decode.int,
+    )
+    decode.success(#(doc_id, max_facts))
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) -> ToolFailure(tool_use_id: call.id, error: "Missing doc_id")
+    Ok(#(doc_id, max_facts)) -> {
+      // Provider must be wired — study cycles need an LLM. Fall back
+      // to a clear error rather than silently returning no facts.
+      case ctx.gate_provider {
+        None ->
+          ToolFailure(
+            tool_use_id: call.id,
+            error: "No LLM provider available for study cycles. "
+              <> "Configure the gate provider on RemembrancerContext to enable.",
+          )
+        Some(p) -> {
+          // Resolve the document — need both metadata (for slug,
+          // domain, title) and the tree index (for content).
+          let knowledge_dir = paths.knowledge_dir()
+          let docs = knowledge_log.resolve(knowledge_dir)
+          case list.find(docs, fn(m) { m.doc_id == doc_id }) {
+            Error(_) ->
+              ToolFailure(
+                tool_use_id: call.id,
+                error: "No document with id '" <> doc_id <> "' in library",
+              )
+            Ok(meta) ->
+              case
+                knowledge_indexer.load_index(
+                  paths.knowledge_indexes_dir(),
+                  doc_id,
+                )
+              {
+                Error(reason) ->
+                  ToolFailure(
+                    tool_use_id: call.id,
+                    error: "Could not load index for "
+                      <> doc_id
+                      <> ": "
+                      <> reason,
+                  )
+                Ok(idx) ->
+                  do_study_document(
+                    call,
+                    ctx,
+                    meta,
+                    idx,
+                    max_facts,
+                    p,
+                    ctx.gate_model,
+                  )
+              }
+          }
+        }
+      }
+    }
+  }
+}
+
+fn do_study_document(
+  call: ToolCall,
+  ctx: RemembrancerContext,
+  meta: knowledge_types.DocumentMeta,
+  idx: knowledge_types.DocumentIndex,
+  max_facts: Int,
+  provider: provider.Provider,
+  model: String,
+) -> ToolResult {
+  let schema_dir = paths.schemas_dir()
+  case
+    xstructor.compile_schema(
+      schema_dir,
+      "study_output.xsd",
+      schemas.study_output_xsd,
+    )
+  {
+    Error(e) ->
+      ToolFailure(tool_use_id: call.id, error: "Schema compile failed: " <> e)
+    Ok(schema) -> {
+      let prompt = build_study_prompt(meta, idx, max_facts)
+      let system =
+        schemas.build_system_prompt(
+          "You are studying a document for the agent's long-term memory. "
+            <> "Extract concrete factual claims worth remembering — facts "
+            <> "the agent might cite later. Each fact has a stable key, a "
+            <> "self-contained value, the section it came from, and a "
+            <> "confidence score. Skip vague generalities; prefer specific "
+            <> "claims tied to particular sections.",
+          schemas.study_output_xsd,
+          schemas.study_output_example,
+        )
+      let config =
+        xstructor.XStructorConfig(
+          schema:,
+          system_prompt: system,
+          xml_example: schemas.study_output_example,
+          max_retries: 2,
+          max_tokens: 2000,
+        )
+      case xstructor.generate(config, prompt, provider, model) {
+        Error(e) ->
+          ToolFailure(
+            tool_use_id: call.id,
+            error: "Study extraction failed: " <> string.slice(e, 0, 300),
+          )
+        Ok(result) -> {
+          let extracted = parse_extracted_facts(result.elements)
+          let written = persist_study_facts(extracted, ctx, meta, max_facts)
+          let summary =
+            "Studied "
+            <> meta.title
+            <> " (doc:"
+            <> knowledge_search.doc_slug_for(meta)
+            <> "). "
+            <> "Extracted "
+            <> int.to_string(list.length(extracted))
+            <> " facts, persisted "
+            <> int.to_string(written)
+            <> " (after confidence ≥ "
+            <> float.to_string(study_min_confidence)
+            <> " filter and cap of "
+            <> int.to_string(max_facts)
+            <> ")."
+          slog.info(
+            "tools/remembrancer",
+            "study_document",
+            summary,
+            Some(ctx.cycle_id),
+          )
+          ToolSuccess(tool_use_id: call.id, content: summary)
+        }
+      }
+    }
+  }
+}
+
+/// Build the prompt fed to the LLM. Lists each section with its
+/// breadcrumb path and content. The model sees the whole document at
+/// once — for very long docs this can blow the context window, but
+/// the per-section structure helps it pin facts to specific sections.
+fn build_study_prompt(
+  meta: knowledge_types.DocumentMeta,
+  idx: knowledge_types.DocumentIndex,
+  max_facts: Int,
+) -> String {
+  let entries = flatten_tree_for_study(idx.root, "")
+  let lines =
+    list.index_map(entries, fn(t, i) {
+      let #(node, path) = t
+      let section = case path {
+        "" -> node.title
+        _ -> path
+      }
+      int.to_string(i + 1)
+      <> ". §"
+      <> section
+      <> "\n"
+      <> string.slice(node.content, 0, 800)
+    })
+  "Document: "
+  <> meta.title
+  <> " (slug: "
+  <> knowledge_search.doc_slug_for(meta)
+  <> ", domain: "
+  <> meta.domain
+  <> ")\n\n"
+  <> "Sections:\n\n"
+  <> string.join(lines, "\n\n")
+  <> "\n\n"
+  <> "Extract up to "
+  <> int.to_string(max_facts)
+  <> " factual claims worth persisting to the agent's memory. Use "
+  <> "exact section paths from the headings above so each fact is "
+  <> "traceable. Skip claims with confidence < 0.6."
+}
+
+fn flatten_tree_for_study(
+  node: knowledge_types.TreeNode,
+  parent_path: String,
+) -> List(#(knowledge_types.TreeNode, String)) {
+  let child_path = case parent_path {
+    "" -> node.title
+    _ -> parent_path <> " / " <> node.title
+  }
+  let children =
+    list.flat_map(node.children, fn(c) { flatten_tree_for_study(c, child_path) })
+  [#(node, parent_path), ..children]
+}
+
+/// Walk the flat XStructor result dict, extracting fact records by
+/// indexed path until missing. Mirrors the captures scanner pattern.
+pub fn parse_extracted_facts(
+  elements: dict.Dict(String, String),
+) -> List(ExtractedFact) {
+  parse_extracted_facts_indexed(elements, 0, [])
+}
+
+fn parse_extracted_facts_indexed(
+  elements: dict.Dict(String, String),
+  idx: Int,
+  acc: List(ExtractedFact),
+) -> List(ExtractedFact) {
+  let base = "study_output.facts.fact." <> int.to_string(idx)
+  case dict.get(elements, base <> ".key") {
+    Error(_) -> list.reverse(acc)
+    Ok(key) -> {
+      let value = case dict.get(elements, base <> ".value") {
+        Ok(v) -> v
+        Error(_) -> ""
+      }
+      let section_path = case dict.get(elements, base <> ".section_path") {
+        Ok(s) -> s
+        Error(_) -> ""
+      }
+      let confidence = case dict.get(elements, base <> ".confidence") {
+        Ok(c) -> parse_float_default(c, 0.5)
+        Error(_) -> 0.5
+      }
+      let fact =
+        ExtractedFact(
+          key: string.trim(key),
+          value: string.trim(value),
+          section_path: string.trim(section_path),
+          confidence: confidence,
+        )
+      parse_extracted_facts_indexed(elements, idx + 1, [fact, ..acc])
+    }
+  }
+}
+
+fn parse_float_default(s: String, default: Float) -> Float {
+  case float.parse(string.trim(s)) {
+    Ok(f) -> f
+    Error(_) ->
+      case int.parse(string.trim(s)) {
+        Ok(i) -> int.to_float(i)
+        Error(_) -> default
+      }
+  }
+}
+
+/// Persist a list of extracted facts to the facts log with provenance
+/// pointing back to the source section. Filters by confidence floor
+/// and caps total writes. Returns the number actually persisted.
+///
+/// Pure-ish: takes the facts list directly so tests can drive the
+/// persistence layer without needing an XStructor / LLM round-trip.
+pub fn persist_study_facts(
+  facts: List(ExtractedFact),
+  ctx: RemembrancerContext,
+  meta: knowledge_types.DocumentMeta,
+  max_facts: Int,
+) -> Int {
+  let slug = knowledge_search.doc_slug_for(meta)
+  let kept =
+    facts
+    |> list.filter(fn(f) { f.confidence >=. study_min_confidence })
+    |> list.take(max_facts)
+  list.each(kept, fn(f) {
+    let citation = "doc:" <> slug <> " §" <> f.section_path
+    let fact =
+      facts_types.MemoryFact(
+        schema_version: 1,
+        fact_id: "fact-" <> uuid_v4(),
+        timestamp: get_datetime(),
+        cycle_id: ctx.cycle_id,
+        agent_id: Some(ctx.agent_id),
+        key: f.key,
+        value: f.value,
+        scope: facts_types.Persistent,
+        operation: facts_types.Write,
+        supersedes: None,
+        confidence: f.confidence,
+        source: citation,
+        provenance: Some(facts_types.FactProvenance(
+          source_cycle_id: ctx.cycle_id,
+          source_tool: "study_document",
+          source_agent: "remembrancer",
+          derivation: facts_types.Synthesis,
+        )),
+      )
+    facts_log.append(ctx.facts_dir, fact)
+    case ctx.librarian {
+      Some(l) -> librarian.notify_new_fact(l, fact)
+      None -> Nil
+    }
+  })
+  list.length(kept)
 }
