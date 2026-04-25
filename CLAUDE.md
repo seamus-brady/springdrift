@@ -59,8 +59,6 @@ src/
 ├── paths.gleam                Centralised path definitions for .springdrift/ directory
 ├── slog.gleam                 System logger — date-rotated JSON-L + stderr + log retention
 ├── config.gleam               Three-layer config with key validation + range checking
-├── storage.gleam              Versioned session persistence with staleness detection
-├── session_handoff.gleam      Structured session summary (written on save, read on resume)
 ├── cycle_log.gleam            Per-cycle JSON-L logging + log reading + rewind helpers
 ├── context.gleam              Context window trim helper (sliding window)
 ├── query_complexity.gleam     LLM-based + heuristic query classifier (Simple | Complex)
@@ -68,7 +66,6 @@ src/
 ├── xstructor.gleam            XStructor — XML-schema-validated structured LLM output
 ├── xstructor_ffi.erl          Erlang FFI for xmerl: compile_schema, validate_xml, extract_elements
 ├── embedding.gleam            Ollama embedding — HTTP client for /api/embeddings, startup probe
-├── session_handoff.gleam      Structured session summary (written on save, read on resume)
 │
 ├── affect/                    Functional emotion monitoring
 │   ├── types.gleam            AffectSnapshot (5 dimensions + pressure + trend), encode/decode
@@ -260,7 +257,6 @@ src/
 
 ```sh
 gleam run             # Run the application
-gleam run -- --resume # Resume previous session
 gleam test            # Run the test suite
 gleam format          # Format all source files
 gleam build           # Compile only
@@ -752,15 +748,15 @@ sensorium).
 an SDK directly from outside an adapter module.
 
 **`use x <- decode.field(name, decoder)` decoders** — the standard pattern for all
-JSON decoding. See `storage.gleam` and `cycle_log.gleam` for examples. Each field
-accessor in a `case` arm extracts from the same root dynamic value.
+JSON decoding. See `cycle_log.gleam` for examples. Each field accessor in a `case`
+arm extracts from the same root dynamic value.
 
 **Pipe-friendly builders** — `llm/request.gleam` exports `new/2` plus `with_*`
 functions. Build requests by piping: `request.new(model, max_tokens) |> request.with_system(...) |> ...`.
 
 **Actor messages as the API surface** — public API of the cognitive loop is the
-`CognitiveMessage` type (`UserInput`, `SchedulerInput`, `SetModel`, `RestoreMessages`,
-etc.). Add new capabilities by adding variants, not by exposing internal functions.
+`CognitiveMessage` type (`UserInput`, `SchedulerInput`, `SetModel`, etc.). Add new
+capabilities by adding variants, not by exposing internal functions.
 `QueuedInput` has corresponding `QueuedUserInput` and `QueuedSchedulerInput` variants.
 `PendingThink` carries a `node_type: CycleNodeType` field so the cognitive loop can
 tag DAG nodes with the correct type (`UserCycle` vs `SchedulerCycle`).
@@ -1018,12 +1014,10 @@ fix ONLY the flagged issues while preserving all other content, structure, and t
 The prompt explicitly forbids removing unflagged information or adding unnecessary
 hedging.
 
-**Output gate session hygiene** — gate injection messages (MODIFY corrections, REJECT
-notices) are filtered from `session.json` before saving. These are transient control
-signals that, if persisted, create a feedback loop where the agent learns to
-self-censor on session resume. The filter is applied in `cognitive/memory.gleam`'s
-`request_save`. Rejection notices in the agent's live message history are kept terse
-(decision + score + triggers only) — full explanations go to the cycle log.
+**Output gate live history hygiene** — rejection notices kept in the agent's live
+message history are terse (decision + score + triggers only). Full explanations go
+to the cycle log so the running message stack stays compact and the agent doesn't
+learn to self-censor from re-reading verbose gate verdicts in its own context.
 
 **Gate timeout (BF-12)** — all gate evaluations have a configurable timeout
 (`gate_timeout_ms`, default 60000). If the scorer LLM hangs, a `GateTimeout`
