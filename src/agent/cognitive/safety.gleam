@@ -178,11 +178,21 @@ pub fn spawn_safety_gate(
 
   let det_config = state.config.deterministic_config
   let redact_secrets = state.redact_secrets
+  let gate_timeout_ms = state.config.gate_timeout_ms
 
-  // TODO(BF-12): Gate processes have no timeout. If the LLM call inside
-  // gate.evaluate hangs, the cognitive loop waits forever. A timeout
-  // mechanism (e.g. process.send_after with a new message type) should be
-  // added to cancel stalled gate evaluations.
+  // BF-12 (was TODO): tool gate timeout. Mirrors the input and output
+  // gates — if the scorer LLM hangs, we send a synthetic GateTimeout
+  // after gate_timeout_ms so the cognitive loop never blocks
+  // indefinitely. The gate process may still complete later; by then
+  // the cognitive status has moved past Thinking(task_id) and the
+  // late SafetyGateComplete message is ignored.
+  let _ =
+    process.send_after(
+      self,
+      gate_timeout_ms,
+      types.GateTimeout(task_id:, gate: "tool"),
+    )
+
   process.spawn_unlinked(fn() {
     // Deterministic pre-filter for tool calls
     let det_result = case det_config {

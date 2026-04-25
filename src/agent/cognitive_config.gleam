@@ -170,7 +170,10 @@ pub fn default_test_config(
     memory_limits: memory.default_limits(),
     input_queue_cap: 10,
     how_to_content: None,
-    redact_secrets: False,
+    // Default True — matches the production default applied via
+    // option.unwrap in springdrift.gleam. Tests run safer-by-default;
+    // any test that needs raw payloads can opt out explicitly.
+    redact_secrets: True,
     planner_dir: base <> "/planner",
     max_delegation_depth: 3,
     sandbox_enabled: False,
