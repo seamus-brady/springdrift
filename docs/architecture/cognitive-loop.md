@@ -47,7 +47,7 @@ the loop needs, organised into logical groups:
 | D' safety | `input_dprime_state`, `tool_dprime_state`, `output_dprime_state`, `dprime_decisions` | Isolated per gate type |
 | Input queue | `input_queue`, `input_queue_cap` | Queue grows when busy |
 | Sensory events | `pending_sensory_events` | Accumulated between cycles |
-| Identity | `agent_uuid`, `agent_name`, `session_since`, `write_anywhere` | Read-only after init |
+| Identity | `agent_uuid`, `agent_name`, `session_since` | Read-only after init |
 | Runtime config | `retry_config`, `classify_timeout_ms`, `threading_config`, ... | Read-only after init |
 | Meta observer | `meta_state` | Updated post-cycle |
 | Drift tracking | `drift_state` | Updated post-output-gate |

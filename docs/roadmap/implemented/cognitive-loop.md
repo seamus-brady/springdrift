@@ -117,7 +117,7 @@ Single record holding all mutable state:
 | D' safety | input_dprime_state, tool_dprime_state, output_dprime_state, dprime_decisions |
 | Input queue | input_queue, input_queue_cap |
 | Sensory events | pending_sensory_events, active_task_id |
-| Identity | identity (IdentityContext: agent_uuid, agent_name, session_since, write_anywhere) |
+| Identity | identity (IdentityContext: agent_uuid, agent_name, session_since) |
 | Runtime config | config (RuntimeConfig: retry, threading, memory_limits, escalation, deterministic, etc.) |
 | Session counters | session_tool_calls, session_tool_failures, session_dprime_modifications, session_dprime_rejections, session_cycles, session_cbr_hits |
 | CBR tracking | retrieved_case_ids |
