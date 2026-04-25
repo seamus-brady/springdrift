@@ -1,9 +1,43 @@
 # WebSocket Reliability — Stable Conversation Identity + Pending Buffer
 
-**Status**: Planned
-**Priority**: High — observed real loss of in-flight chat replies during
-long-running operations and connection blips
-**Effort**: Medium (~150-250 lines + tests)
+**Status**: Implemented (PR #153, merged 2026-04-25)
+**Priority (was)**: High — observed real loss of in-flight chat replies
+during long-running operations and connection blips
+**Effort (actual)**: ~560 LOC across protocol, frontdoor, gui, html, tests
+
+This doc is preserved as the implementation record. The diagnosis,
+fix shape, priority ordering, and trigger conditions captured here
+were what guided the actual change. Kept verbatim so future readers
+can trace the reasoning rather than re-derive it from a diff.
+
+## What shipped
+
+All four code fixes plus the conceptual cleanup:
+
+1. **Conditional `Unsubscribe`** — sink-equality check in
+   `frontdoor.gleam` rejects stale closes from previously-replaced
+   sockets. Frontdoor message variant updated in
+   `frontdoor/types.gleam`. All call sites (web/gui, comms poller,
+   scheduler runner) updated to pass the sink.
+2. **Pending reply buffer** — `State.pending: Dict(SourceId,
+   List(Delivery))` in Frontdoor. Replies for known cycles whose
+   destination has gone away buffer; Subscribe flushes them
+   chronologically.
+3. **Stable `client_id`** — browser persists UUID in localStorage,
+   sends as `?client_id=`. Server derives `source_id` from it.
+   Legacy clients (no `client_id`) fall back to per-socket UUID.
+4. **`user_message_ack` + in-flight tracking** — `UserMessage` gains
+   optional `client_msg_id`; server echoes as `UserMessageAck` on
+   accept. Client tracks unacked entries and re-renders them after
+   `SessionHistory` rebuild.
+
+Tests: 4 new Frontdoor behavioural tests + 1 protocol round-trip
+test for the new `UserMessage` shape. Total at PR-merge time: 1991
+passed, no failures.
+
+---
+
+The original planning content follows.
 
 ## The Symptom
 
