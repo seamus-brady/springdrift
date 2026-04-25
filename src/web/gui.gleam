@@ -121,17 +121,6 @@ fn get_env(name: String) -> Result(String, Nil)
 fn generate_uuid() -> String
 
 // ---------------------------------------------------------------------------
-// Auth helpers
-// ---------------------------------------------------------------------------
-
-fn get_auth_token() -> Option(String) {
-  case get_env("SPRINGDRIFT_WEB_TOKEN") {
-    Ok(token) -> Some(token)
-    Error(_) -> None
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -149,19 +138,39 @@ pub fn start(
   agent_version: String,
   ws_max_bytes: Int,
   max_upload_bytes: Int,
+  posture: auth.StartupPosture,
   scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
   frontdoor: Subject(FrontdoorMessage),
   supervisor: Option(Subject(agent_types.SupervisorMessage)),
 ) -> Nil {
-  let auth_token = get_auth_token()
+  // Auth posture is decided up-front by springdrift.gleam (which can
+  // refuse to start the GUI entirely if no token + no opt-out). What
+  // arrives here is one of two safe states:
+  //   - AuthRequired(token) → bind anywhere; check bearer on every req
+  //   - NoAuthLocalhostOnly → bind to 127.0.0.1 only; skip auth checks
+  // The `posture` argument carries the decision so this fn never
+  // reads SPRINGDRIFT_WEB_TOKEN itself (single point of policy).
+  let #(auth_token, bind_localhost_only) = case posture {
+    auth.AuthRequired(token) -> #(Some(token), False)
+    auth.NoAuthLocalhostOnly -> #(None, True)
+    // RefuseToStart should never reach here — the springdrift.gleam
+    // caller halts before invoking start. Kept exhaustive so a future
+    // refactor that loses the upstream check fails loudly rather than
+    // silently shipping an unauthed GUI.
+    auth.RefuseToStart(_) -> #(None, True)
+  }
   let relay: Subject(RelayMsg) = process.new_subject()
+  let auth_label = case auth_token {
+    Some(_) -> "with bearer auth"
+    None -> "WITHOUT auth (localhost-only opt-out)"
+  }
   slog.info(
     "gui",
     "start",
-    "Starting web GUI on port " <> int.to_string(port),
+    "Starting web GUI on port " <> int.to_string(port) <> " " <> auth_label,
     None,
   )
-  let assert Ok(_) =
+  let builder =
     fn(req: Request(Connection)) -> Response(ResponseData) {
       handle_request(
         req,
@@ -183,7 +192,11 @@ pub fn start(
     }
     |> mist.new
     |> mist.port(port)
-    |> mist.start
+  let bound = case bind_localhost_only {
+    True -> mist.bind(builder, "127.0.0.1")
+    False -> builder
+  }
+  let assert Ok(_) = mist.start(bound)
 
   // Run forwarding loop — receives from `notify` and broadcasts to all
   // registered WebSocket connections

@@ -69,6 +69,14 @@ pub type AppConfig {
     config_path: Option(String),
     // ── GUI ──
     gui: Option(String),
+    /// Explicit opt-out of web-GUI auth. By default the GUI refuses to
+    /// start without `SPRINGDRIFT_WEB_TOKEN` set, because an
+    /// unauthenticated GUI on a public interface is a worst-case
+    /// footgun (operator chat + file upload + admin panels fully open).
+    /// Setting this to True bypasses the check AND force-binds mist to
+    /// 127.0.0.1 — the operator is opting in to localhost-only dev.
+    /// Default False (auth required).
+    web_no_auth: Option(Bool),
     // ── D' safety system ──
     dprime_enabled: Option(Bool),
     dprime_config: Option(String),
@@ -402,6 +410,7 @@ pub fn default() -> AppConfig {
     log_max_file_bytes: None,
     config_path: None,
     gui: None,
+    web_no_auth: None,
     dprime_enabled: None,
     dprime_config: None,
     narrative_dir: None,
@@ -631,6 +640,7 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     ),
     config_path: option.or(override_cfg.config_path, base.config_path),
     gui: option.or(override_cfg.gui, base.gui),
+    web_no_auth: option.or(override_cfg.web_no_auth, base.web_no_auth),
     dprime_enabled: option.or(override_cfg.dprime_enabled, base.dprime_enabled),
     dprime_config: option.or(override_cfg.dprime_config, base.dprime_config),
     narrative_dir: option.or(override_cfg.narrative_dir, base.narrative_dir),
@@ -1612,6 +1622,10 @@ fn do_parse_args(args: List(String), acc: AppConfig) -> AppConfig {
     // GUI
     ["--gui", value, ..rest] ->
       do_parse_args(rest, AppConfig(..acc, gui: Some(value)))
+    // Web auth opt-out — declines the SPRINGDRIFT_WEB_TOKEN requirement
+    // AND force-binds the GUI to 127.0.0.1. Localhost-dev only.
+    ["--web-no-auth", ..rest] ->
+      do_parse_args(rest, AppConfig(..acc, web_no_auth: Some(True)))
     // D' safety system
     ["--dprime", ..rest] ->
       do_parse_args(rest, AppConfig(..acc, dprime_enabled: Some(True)))
@@ -1721,6 +1735,7 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     log_max_file_bytes: get_int("log_max_file_bytes"),
     config_path: None,
     gui: get_str("gui"),
+    web_no_auth: get_toml_bool(table, ["web", "no_auth"]),
     dprime_enabled: get_bool("dprime_enabled"),
     dprime_config: get_str("dprime_config"),
     // ── [agent] ──

@@ -135,3 +135,52 @@ pub fn parse_bearer_bearer_with_spaces_test() {
   auth.parse_bearer("Bearer token with spaces")
   |> should.equal(Some("token with spaces"))
 }
+
+// ---------------------------------------------------------------------------
+// decide_startup — fail-closed policy for the web GUI
+// ---------------------------------------------------------------------------
+
+pub fn decide_startup_with_token_returns_auth_required_test() {
+  case auth.decide_startup(Some("super-secret"), False) {
+    auth.AuthRequired(token) -> token |> should.equal("super-secret")
+    _ -> should.fail()
+  }
+}
+
+pub fn decide_startup_token_present_ignores_no_auth_flag_test() {
+  // If the operator both sets a token AND passes --web-no-auth, the
+  // token wins — auth is the more conservative outcome and the no-auth
+  // flag is a footgun-protector for a different scenario.
+  case auth.decide_startup(Some("super-secret"), True) {
+    auth.AuthRequired(token) -> token |> should.equal("super-secret")
+    _ -> should.fail()
+  }
+}
+
+pub fn decide_startup_empty_token_refuses_to_start_test() {
+  // Empty string token is a misconfiguration (typically a shell that
+  // unset the variable but still exported the name). Not safe to
+  // proceed with auth required (token is "" — anyone can pass it),
+  // not safe to proceed without auth either. Refuse with explanation.
+  case auth.decide_startup(Some(""), False) {
+    auth.RefuseToStart(reason) -> { reason != "" } |> should.be_true
+    _ -> should.fail()
+  }
+}
+
+pub fn decide_startup_no_token_no_optout_refuses_to_start_test() {
+  // The critical case the security review was about. Default
+  // behaviour MUST be to refuse, not to start without auth.
+  case auth.decide_startup(None, False) {
+    auth.RefuseToStart(reason) -> { reason != "" } |> should.be_true
+    _ -> should.fail()
+  }
+}
+
+pub fn decide_startup_no_token_with_optout_returns_localhost_only_test() {
+  // Operator explicitly opted out — bind to localhost only.
+  case auth.decide_startup(None, True) {
+    auth.NoAuthLocalhostOnly -> Nil
+    _ -> should.fail()
+  }
+}

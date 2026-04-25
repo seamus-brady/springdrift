@@ -707,8 +707,18 @@ port = 12001
 max_upload_bytes = 26214400  # POST /upload cap (default 25 MB)
 ```
 
-Plus `SPRINGDRIFT_WEB_TOKEN` env var for auth (no auth if unset —
-fine for `localhost`, **not fine** for VPS).
+**Auth is required by default.** Set `SPRINGDRIFT_WEB_TOKEN` to a
+non-empty token before starting the GUI in `web` mode. If the token
+isn't set, Springdrift refuses to start the GUI with a clear error
+rather than silently shipping an unauthenticated surface — the
+default before this change was a footgun on VPS deploys, where a
+missing env var meant fully open chat / upload / admin panels.
+
+For localhost-only dev where auth is genuinely unwanted, pass
+`--web-no-auth` (or set `[web] no_auth = true`). This bypasses the
+token check AND force-binds mist to `127.0.0.1` so the no-auth
+surface can't be reached over a network. This combination is
+explicitly opt-in and reported in the startup banner.
 
 **Uploading documents from the chat tab.** The paperclip button
 next to the chat input opens a file picker. The file is sent
