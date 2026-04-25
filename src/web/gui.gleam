@@ -29,6 +29,10 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/set
 import gleam/string
+import knowledge/indexer as knowledge_indexer
+import knowledge/log as knowledge_log
+import knowledge/search as knowledge_search
+import knowledge/types as knowledge_types
 import llm/types.{type Message, Assistant, TextContent, User}
 import mist.{type Connection, type ResponseData}
 import narrative/export as narrative_export
@@ -45,6 +49,7 @@ import skills
 import skills/metrics as skills_metrics
 import skills/proposal_log
 import slog
+import tools/knowledge as knowledge_tools
 import web/auth
 import web/html
 import web/protocol
@@ -854,6 +859,152 @@ fn ws_handler(
                   )),
                 )
               mist.continue(state)
+            }
+            Ok(protocol.RequestDocumentList) -> {
+              let docs = knowledge_log.resolve(paths.knowledge_dir())
+              let documents_json =
+                json.to_string(json.array(docs, encode_doc_meta))
+              let _ =
+                mist.send_text_frame(
+                  conn,
+                  protocol.encode_server_message(protocol.DocumentListData(
+                    documents_json:,
+                  )),
+                )
+              mist.continue(state)
+            }
+            Ok(protocol.RequestDocumentView(doc_id:)) -> {
+              let docs = knowledge_log.resolve(paths.knowledge_dir())
+              let document_json = case
+                list.find(docs, fn(m: knowledge_types.DocumentMeta) {
+                  m.doc_id == doc_id
+                })
+              {
+                Error(_) -> "{\"error\":\"document not found\"}"
+                Ok(meta) ->
+                  case
+                    knowledge_indexer.load_index(
+                      paths.knowledge_indexes_dir(),
+                      doc_id,
+                    )
+                  {
+                    Error(reason) ->
+                      "{\"error\":\"index load failed: " <> reason <> "\"}"
+                    Ok(idx) -> encode_document_view(meta, idx)
+                  }
+              }
+              let _ =
+                mist.send_text_frame(
+                  conn,
+                  protocol.encode_server_message(protocol.DocumentViewData(
+                    doc_id:,
+                    document_json:,
+                  )),
+                )
+              mist.continue(state)
+            }
+            Ok(protocol.RequestSearchLibrary(query:, mode:, include_pending:)) -> {
+              let mode_v = case mode {
+                "keyword" -> knowledge_search.Keyword
+                "reasoning" -> knowledge_search.Reasoning
+                _ -> knowledge_search.Embedding
+              }
+              let all_docs = knowledge_log.resolve(paths.knowledge_dir())
+              let docs =
+                list.filter(all_docs, fn(m: knowledge_types.DocumentMeta) {
+                  case m.doc_type, m.status {
+                    knowledge_types.Export, knowledge_types.Rejected -> False
+                    knowledge_types.Export, knowledge_types.Promoted ->
+                      include_pending
+                    _, _ -> True
+                  }
+                })
+              let results =
+                knowledge_search.search(
+                  query,
+                  docs,
+                  paths.knowledge_indexes_dir(),
+                  mode_v,
+                  20,
+                  None,
+                  None,
+                  None,
+                )
+              let results_json =
+                json.to_string(json.array(results, encode_search_result))
+              let _ =
+                mist.send_text_frame(
+                  conn,
+                  protocol.encode_server_message(protocol.SearchResultsData(
+                    query:,
+                    results_json:,
+                  )),
+                )
+              mist.continue(state)
+            }
+            Ok(protocol.RequestApproveExport(slug:, note:)) -> {
+              let result =
+                knowledge_tools.transition_export(
+                  paths.knowledge_dir(),
+                  slug,
+                  knowledge_types.Approved,
+                  "approved",
+                  note,
+                )
+              let #(status, message) = case result {
+                Ok(m) -> #("ok", m)
+                Error(reason) -> #("error", reason)
+              }
+              let _ =
+                mist.send_text_frame(
+                  conn,
+                  protocol.encode_server_message(protocol.ApprovalResult(
+                    slug:,
+                    status:,
+                    message:,
+                  )),
+                )
+              mist.continue(state)
+            }
+            Ok(protocol.RequestRejectExport(slug:, reason:)) -> {
+              case string.trim(reason) {
+                "" -> {
+                  let _ =
+                    mist.send_text_frame(
+                      conn,
+                      protocol.encode_server_message(protocol.ApprovalResult(
+                        slug:,
+                        status: "error",
+                        message: "Rejection reason must not be empty",
+                      )),
+                    )
+                  mist.continue(state)
+                }
+                trimmed -> {
+                  let result =
+                    knowledge_tools.transition_export(
+                      paths.knowledge_dir(),
+                      slug,
+                      knowledge_types.Rejected,
+                      "rejected",
+                      trimmed,
+                    )
+                  let #(status, message) = case result {
+                    Ok(m) -> #("ok", m)
+                    Error(r) -> #("error", r)
+                  }
+                  let _ =
+                    mist.send_text_frame(
+                      conn,
+                      protocol.encode_server_message(protocol.ApprovalResult(
+                        slug:,
+                        status:,
+                        message:,
+                      )),
+                    )
+                  mist.continue(state)
+                }
+              }
             }
             Error(_) -> mist.continue(state)
           }
@@ -1710,4 +1861,61 @@ fn probe_provider_keys() -> List(String) {
       Error(_) -> False
     }
   })
+}
+
+// ---------------------------------------------------------------------------
+// Documents tab — JSON encoders
+// ---------------------------------------------------------------------------
+
+fn encode_doc_meta(m: knowledge_types.DocumentMeta) -> json.Json {
+  json.object([
+    #("doc_id", json.string(m.doc_id)),
+    #("doc_type", json.string(knowledge_types.doc_type_to_string(m.doc_type))),
+    #("domain", json.string(m.domain)),
+    #("title", json.string(m.title)),
+    #("path", json.string(m.path)),
+    #("status", json.string(knowledge_types.doc_status_to_string(m.status))),
+    #("node_count", json.int(m.node_count)),
+    #("created_at", json.string(m.created_at)),
+    #("updated_at", json.string(m.updated_at)),
+  ])
+}
+
+fn encode_document_view(
+  meta: knowledge_types.DocumentMeta,
+  idx: knowledge_types.DocumentIndex,
+) -> String {
+  json.to_string(
+    json.object([
+      #("meta", encode_doc_meta(meta)),
+      #("tree", encode_tree_node(idx.root)),
+      #("node_count", json.int(idx.node_count)),
+    ]),
+  )
+}
+
+fn encode_tree_node(node: knowledge_types.TreeNode) -> json.Json {
+  json.object([
+    #("id", json.string(node.id)),
+    #("title", json.string(node.title)),
+    #("content", json.string(node.content)),
+    #("depth", json.int(node.depth)),
+    #("line_start", json.int(node.source.line_start)),
+    #("line_end", json.int(node.source.line_end)),
+    #("children", json.array(node.children, encode_tree_node)),
+  ])
+}
+
+fn encode_search_result(r: knowledge_search.SearchResult) -> json.Json {
+  json.object([
+    #("doc_id", json.string(r.doc_id)),
+    #("doc_slug", json.string(r.doc_slug)),
+    #("doc_title", json.string(r.doc_title)),
+    #("domain", json.string(r.domain)),
+    #("node_title", json.string(r.node_title)),
+    #("section_path", json.string(r.section_path)),
+    #("content", json.string(r.content)),
+    #("citation", json.string(knowledge_search.format_citation(r))),
+    #("score", json.float(r.score)),
+  ])
 }

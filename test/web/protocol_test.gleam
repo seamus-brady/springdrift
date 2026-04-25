@@ -330,6 +330,162 @@ pub fn encode_scheduler_cycles_data_test() {
 }
 
 // ---------------------------------------------------------------------------
+// decode_client_message — Documents tab messages (PR 8)
+// ---------------------------------------------------------------------------
+
+pub fn decode_request_document_list_test() {
+  let json = "{\"type\": \"request_document_list\"}"
+  let result = protocol.decode_client_message(json)
+  result |> should.be_ok
+  let assert Ok(protocol.RequestDocumentList) = result
+}
+
+pub fn decode_request_document_view_test() {
+  let json = "{\"type\": \"request_document_view\", \"doc_id\": \"doc-123\"}"
+  let result = protocol.decode_client_message(json)
+  result |> should.be_ok
+  let assert Ok(protocol.RequestDocumentView(doc_id:)) = result
+  doc_id |> should.equal("doc-123")
+}
+
+pub fn decode_request_search_library_full_test() {
+  let json =
+    "{\"type\": \"request_search_library\", \"query\": \"recursion\", \"mode\": \"reasoning\", \"include_pending\": true}"
+  let result = protocol.decode_client_message(json)
+  result |> should.be_ok
+  let assert Ok(protocol.RequestSearchLibrary(query:, mode:, include_pending:)) =
+    result
+  query |> should.equal("recursion")
+  mode |> should.equal("reasoning")
+  include_pending |> should.be_true
+}
+
+pub fn decode_request_search_library_defaults_mode_and_include_test() {
+  // mode + include_pending are optional → mode defaults to "embedding",
+  // include_pending defaults to False
+  let json = "{\"type\": \"request_search_library\", \"query\": \"q\"}"
+  let result = protocol.decode_client_message(json)
+  result |> should.be_ok
+  let assert Ok(protocol.RequestSearchLibrary(query:, mode:, include_pending:)) =
+    result
+  query |> should.equal("q")
+  mode |> should.equal("embedding")
+  include_pending |> should.be_false
+}
+
+pub fn decode_request_approve_export_test() {
+  let json =
+    "{\"type\": \"request_approve_export\", \"slug\": \"my-report\", \"note\": \"looks good\"}"
+  let result = protocol.decode_client_message(json)
+  result |> should.be_ok
+  let assert Ok(protocol.RequestApproveExport(slug:, note:)) = result
+  slug |> should.equal("my-report")
+  note |> should.equal("looks good")
+}
+
+pub fn decode_request_approve_export_optional_note_test() {
+  let json = "{\"type\": \"request_approve_export\", \"slug\": \"my-report\"}"
+  let result = protocol.decode_client_message(json)
+  result |> should.be_ok
+  let assert Ok(protocol.RequestApproveExport(slug:, note:)) = result
+  slug |> should.equal("my-report")
+  note |> should.equal("")
+}
+
+pub fn decode_request_reject_export_test() {
+  let json =
+    "{\"type\": \"request_reject_export\", \"slug\": \"my-report\", \"reason\": \"unsourced claims\"}"
+  let result = protocol.decode_client_message(json)
+  result |> should.be_ok
+  let assert Ok(protocol.RequestRejectExport(slug:, reason:)) = result
+  slug |> should.equal("my-report")
+  reason |> should.equal("unsourced claims")
+}
+
+pub fn decode_request_reject_export_missing_reason_errors_test() {
+  // reason is required (not optional) — missing field must fail decode
+  let json = "{\"type\": \"request_reject_export\", \"slug\": \"my-report\"}"
+  protocol.decode_client_message(json) |> should.be_error
+}
+
+// ---------------------------------------------------------------------------
+// encode_server_message — Documents tab messages (PR 8)
+// ---------------------------------------------------------------------------
+
+pub fn encode_document_list_data_test() {
+  let msg =
+    protocol.DocumentListData(
+      documents_json: "[{\"doc_id\":\"a\",\"title\":\"A\"}]",
+    )
+  let json_str = protocol.encode_server_message(msg)
+  json_str |> should_contain("\"type\":\"document_list_data\"")
+  json_str
+  |> should_contain("\"documents\":[{\"doc_id\":\"a\",\"title\":\"A\"}]")
+}
+
+pub fn encode_document_view_data_test() {
+  let msg =
+    protocol.DocumentViewData(
+      doc_id: "doc-1",
+      document_json: "{\"meta\":{},\"tree\":{}}",
+    )
+  let json_str = protocol.encode_server_message(msg)
+  json_str |> should_contain("\"type\":\"document_view_data\"")
+  json_str |> should_contain("\"doc_id\":\"doc-1\"")
+  json_str |> should_contain("\"document\":{\"meta\":{},\"tree\":{}}")
+}
+
+pub fn encode_document_view_data_escapes_doc_id_test() {
+  // doc_id is a user-controlled string and goes through json.string for escaping
+  let msg =
+    protocol.DocumentViewData(
+      doc_id: "with \"quotes\" and \\slashes",
+      document_json: "{}",
+    )
+  let json_str = protocol.encode_server_message(msg)
+  // Quotes inside doc_id must be JSON-escaped
+  json_str |> should_contain("\\\"quotes\\\"")
+}
+
+pub fn encode_search_results_data_test() {
+  let msg =
+    protocol.SearchResultsData(
+      query: "test query",
+      results_json: "[{\"score\":0.9}]",
+    )
+  let json_str = protocol.encode_server_message(msg)
+  json_str |> should_contain("\"type\":\"search_results_data\"")
+  json_str |> should_contain("\"query\":\"test query\"")
+  json_str |> should_contain("\"results\":[{\"score\":0.9}]")
+}
+
+pub fn encode_approval_result_ok_test() {
+  let msg =
+    protocol.ApprovalResult(
+      slug: "report-2026-04",
+      status: "ok",
+      message: "Approved",
+    )
+  let json_str = protocol.encode_server_message(msg)
+  json_str |> should_contain("\"type\":\"approval_result\"")
+  json_str |> should_contain("\"slug\":\"report-2026-04\"")
+  json_str |> should_contain("\"status\":\"ok\"")
+  json_str |> should_contain("\"message\":\"Approved\"")
+}
+
+pub fn encode_approval_result_escapes_message_test() {
+  let msg =
+    protocol.ApprovalResult(
+      slug: "x",
+      status: "error",
+      message: "broke: \"oops\"",
+    )
+  let json_str = protocol.encode_server_message(msg)
+  // The user-visible message goes through json.string so quotes get escaped
+  json_str |> should_contain("\\\"oops\\\"")
+}
+
+// ---------------------------------------------------------------------------
 // Seq field — Phase 6b observability
 // ---------------------------------------------------------------------------
 

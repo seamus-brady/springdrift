@@ -64,6 +64,18 @@ pub type ClientMessage {
   /// Read-only memory tab — list Remembrancer consolidation runs from
   /// .springdrift/memory/consolidation/. Drives the admin Memory tab.
   RequestMemoryData
+  /// List all documents in the knowledge library. Drives the
+  /// Documents tab's main list view.
+  RequestDocumentList
+  /// Load a single document's tree + metadata for the section viewer.
+  RequestDocumentView(doc_id: String)
+  /// Search the library. Mode is "keyword" / "embedding" / "reasoning";
+  /// include_pending opts in to Promoted (un-approved) exports.
+  RequestSearchLibrary(query: String, mode: String, include_pending: Bool)
+  /// Operator approves a Promoted export. note is optional context.
+  RequestApproveExport(slug: String, note: String)
+  /// Operator rejects a Promoted export. reason is required.
+  RequestRejectExport(slug: String, reason: String)
 }
 
 pub type ServerMessage {
@@ -127,6 +139,15 @@ pub type ServerMessage {
   /// Memory tab data — Remembrancer consolidation runs (date, period,
   /// counts, report path) for read-only audit.
   MemoryData(runs_json: String)
+  /// Documents tab — list of all docs with metadata.
+  DocumentListData(documents_json: String)
+  /// Documents tab — single doc's tree + metadata for section viewer.
+  DocumentViewData(doc_id: String, document_json: String)
+  /// Documents tab — search results with citation strings.
+  SearchResultsData(query: String, results_json: String)
+  /// Documents tab — toast feedback for approve/reject actions.
+  /// status: "ok" | "error". slug + message for display.
+  ApprovalResult(slug: String, status: String, message: String)
 }
 
 pub type CycleDataJson {
@@ -183,6 +204,31 @@ pub fn decode_client_message(json_string: String) -> Result(ClientMessage, Nil) 
       }
       "request_skills_data" -> decode.success(RequestSkillsData)
       "request_memory_data" -> decode.success(RequestMemoryData)
+      "request_document_list" -> decode.success(RequestDocumentList)
+      "request_document_view" -> {
+        use doc_id <- decode.field("doc_id", decode.string)
+        decode.success(RequestDocumentView(doc_id:))
+      }
+      "request_search_library" -> {
+        use query <- decode.field("query", decode.string)
+        use mode <- decode.optional_field("mode", "embedding", decode.string)
+        use include_pending <- decode.optional_field(
+          "include_pending",
+          False,
+          decode.bool,
+        )
+        decode.success(RequestSearchLibrary(query:, mode:, include_pending:))
+      }
+      "request_approve_export" -> {
+        use slug <- decode.field("slug", decode.string)
+        use note <- decode.optional_field("note", "", decode.string)
+        decode.success(RequestApproveExport(slug:, note:))
+      }
+      "request_reject_export" -> {
+        use slug <- decode.field("slug", decode.string)
+        use reason <- decode.field("reason", decode.string)
+        decode.success(RequestRejectExport(slug:, reason:))
+      }
       _ -> decode.failure(UserMessage(""), "Unknown client message type")
     }
   }
@@ -411,6 +457,32 @@ fn encode_body(msg: ServerMessage) -> String {
       <> "}"
     MemoryData(runs_json:) ->
       "{\"type\":\"memory_data\",\"runs\":" <> runs_json <> "}"
+
+    DocumentListData(documents_json:) ->
+      "{\"type\":\"document_list_data\",\"documents\":" <> documents_json <> "}"
+
+    DocumentViewData(doc_id:, document_json:) ->
+      "{\"type\":\"document_view_data\",\"doc_id\":"
+      <> json.to_string(json.string(doc_id))
+      <> ",\"document\":"
+      <> document_json
+      <> "}"
+
+    SearchResultsData(query:, results_json:) ->
+      "{\"type\":\"search_results_data\",\"query\":"
+      <> json.to_string(json.string(query))
+      <> ",\"results\":"
+      <> results_json
+      <> "}"
+
+    ApprovalResult(slug:, status:, message:) ->
+      json.object([
+        #("type", json.string("approval_result")),
+        #("slug", json.string(slug)),
+        #("status", json.string(status)),
+        #("message", json.string(message)),
+      ])
+      |> json.to_string
   }
 }
 

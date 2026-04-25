@@ -917,42 +917,30 @@ fn run_reject_export(
   }
 }
 
-/// Shared transition logic. Finds the export by slug, verifies it's in
-/// an expected source state (Promoted), appends an UpdateStatus op,
-/// and writes a slog line recording the note/reason. Emits a clean
-/// error if the export doesn't exist or is already in a terminal
-/// state.
-fn transition_export_status(
-  cfg: KnowledgeConfig,
-  call_id: String,
+/// Shared transition logic, value-returning variant. Used by the
+/// tool runners (which wrap the result as a ToolResult) and by the
+/// web GUI (which needs a structured Ok/Error for the
+/// ApprovalResult message). Returns Ok(success_message) on a clean
+/// transition, Error(reason) when the export is missing or already
+/// terminal.
+pub fn transition_export(
+  knowledge_dir: String,
   slug: String,
   new_status: types.DocStatus,
   action: String,
   note: String,
-) -> llm_types.ToolResult {
-  let docs = knowledge_log.resolve(cfg.knowledge_dir)
+) -> Result(String, String) {
+  let docs = knowledge_log.resolve(knowledge_dir)
   // Exports are identified by doc_type=Export and title=slug
   // (promote_draft writes the slug into the title field).
   let match =
     list.find(docs, fn(m) { m.doc_type == types.Export && m.title == slug })
   case match {
-    Error(_) ->
-      llm_types.ToolFailure(
-        tool_use_id: call_id,
-        error: "No export with slug '" <> slug <> "' found",
-      )
+    Error(_) -> Error("No export with slug '" <> slug <> "' found")
     Ok(meta) ->
       case meta.status {
-        types.Approved ->
-          llm_types.ToolFailure(
-            tool_use_id: call_id,
-            error: "Export '" <> slug <> "' is already Approved",
-          )
-        types.Rejected ->
-          llm_types.ToolFailure(
-            tool_use_id: call_id,
-            error: "Export '" <> slug <> "' is already Rejected",
-          )
+        types.Approved -> Error("Export '" <> slug <> "' is already Approved")
+        types.Rejected -> Error("Export '" <> slug <> "' is already Rejected")
         _ -> {
           let updated =
             types.DocumentMeta(
@@ -962,7 +950,7 @@ fn transition_export_status(
               updated_at: get_datetime(),
               version: meta.version + 1,
             )
-          knowledge_log.append(cfg.knowledge_dir, updated)
+          knowledge_log.append(knowledge_dir, updated)
           // Audit trail: the note/reason goes into slog so the
           // operator (and future queries) can trace the decision
           // even though DocStatus itself can't carry the text.
@@ -979,11 +967,24 @@ fn transition_export_status(
             },
             option.None,
           )
-          llm_types.ToolSuccess(
-            tool_use_id: call_id,
-            content: "Export '" <> slug <> "' " <> action <> ".",
-          )
+          Ok("Export '" <> slug <> "' " <> action <> ".")
         }
       }
+  }
+}
+
+/// Tool-result wrapper around transition_export. Keeps the existing
+/// tool runners' shape unchanged.
+fn transition_export_status(
+  cfg: KnowledgeConfig,
+  call_id: String,
+  slug: String,
+  new_status: types.DocStatus,
+  action: String,
+  note: String,
+) -> llm_types.ToolResult {
+  case transition_export(cfg.knowledge_dir, slug, new_status, action, note) {
+    Ok(message) -> llm_types.ToolSuccess(tool_use_id: call_id, content: message)
+    Error(reason) -> llm_types.ToolFailure(tool_use_id: call_id, error: reason)
   }
 }
