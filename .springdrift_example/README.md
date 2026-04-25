@@ -93,7 +93,7 @@ patterns, and degradation paths. It lives in the skills directory and is served 
 `how_to` tool so the LLM can orient itself when unsure which tool to use.
 
 Included skills:
-- **`web-research/`** — decision tree for the 10 web tools (Kagi, Brave tiers, Jina, fallbacks)
+- **`web-research/`** — decision tree for the web tools (Brave tiers, Jina, DuckDuckGo / fetch_url fallbacks; Kagi optional)
 - **`shell-sandbox/`** — Podman sandbox usage guide (environment, conventions)
 
 ## Scheduler configuration

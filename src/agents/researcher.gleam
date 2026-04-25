@@ -35,37 +35,32 @@ fn generate_uuid() -> String
 @external(erlang, "springdrift_ffi", "get_datetime")
 fn get_datetime() -> String
 
-const system_prompt = "You are a research agent. Your job is to gather information using web search and extraction tools.
+const system_prompt_base = "You are a research agent. Your job is to gather information using web search and extraction tools.
 
 ## Tool selection strategy
 
-You have 10 web tools arranged in tiers. Pick the right tool for the task:
+Pick the right tool for the task:
 
-### Tier 1 — Kagi Search (preferred when KAGI_API_KEY available)
-- **kagi_search**: High quality, ad-free web search. Best general-purpose search when available.
-- **kagi_summarize**: Summarize any URL into concise text. Great for quickly digesting long pages.
-
-### Tier 2 — Brave Search (preferred when BRAVE_SEARCH_API_KEY available)
+### Tier 1 — Brave Search (preferred when BRAVE_SEARCH_API_KEY available)
 - **brave_answer**: Self-contained factual questions ('what is X', 'when did Y'). Fastest, cheapest for simple facts.
 - **brave_llm_context**: Returns machine-optimised context for reasoning over search results.
 - **brave_web_search**: Broad discovery with titles, URLs, and snippets. Good for finding multiple sources.
 - **brave_news_search**: Time-sensitive queries, current events, recent developments.
 - **brave_summarizer**: When you need citations plus follow-up threads. Uses search + summary chain.
 
-### Tier 3 — Jina Reader (preferred for URL extraction)
+### Tier 2 — Jina Reader (preferred for URL extraction)
 - **jina_reader**: Extract clean markdown from a URL. Better than fetch_url for content extraction.
 
-### Tier 4 — Fallback (no API keys needed)
+### Tier 3 — Fallback (no API keys needed)
 - **web_search**: DuckDuckGo keyword search. Use when no paid search keys are available.
 - **fetch_url**: Raw HTTP GET. Use when Jina key is unavailable, or for non-HTML content.
 
 ### Decision tree
-- General web search? → kagi_search (primary), brave_web_search (fallback)
+- General web search? → brave_web_search
 - Factual, self-contained question? → brave_answer
 - Need raw context to reason over? → brave_llm_context
 - Time-sensitive / news? → brave_news_search
 - Need citations + follow-up threads? → brave_summarizer
-- Have a URL, need summary? → kagi_summarize (primary), jina_reader (full text)
 - Have a URL, need full content? → jina_reader (primary), fetch_url (fallback)
 - No API keys available? → web_search (DuckDuckGo fallback)
 
@@ -92,6 +87,13 @@ Interpreted as: <one sentence summary of how you understood the task and what yo
 
 Keep it to one sentence. This lets the orchestrator notice if your interpretation doesn't match the intent."
 
+const kagi_addendum = "
+
+## Optional alternative — Kagi (KAGI_API_KEY required)
+Kagi tools are available as an alternative to Brave. Use only when Brave is unavailable or the operator has explicitly preferred Kagi for a task.
+- **kagi_search**: High quality, ad-free web search.
+- **kagi_summarize**: Summarize a URL into concise text."
+
 pub fn spec(
   provider: Provider,
   model: String,
@@ -104,22 +106,39 @@ pub fn spec(
   brave_cache_ttl_ms: Int,
   auto_store_threshold_bytes: Int,
   skills_dirs: List(String),
+  kagi_enabled: Bool,
 ) -> AgentSpec {
+  let kagi_tools = case kagi_enabled {
+    True -> kagi.all()
+    False -> []
+  }
   let tools =
     list.flatten([
       knowledge_tools.researcher_tools(),
-      kagi.all(),
       brave.all(),
       jina.all(),
       web.all(),
+      kagi_tools,
       artifacts.all(),
       builtin.agent_tools(),
     ])
 
+  let system_prompt = case kagi_enabled {
+    True -> system_prompt_base <> kagi_addendum
+    False -> system_prompt_base
+  }
+
+  let description = case kagi_enabled {
+    True ->
+      "Search the web and extract content from pages. Has Brave Search (web, news, LLM context, summarizer, answers), Jina Reader, DuckDuckGo web_search, fetch_url, and Kagi Search (alternative web search + summarizer). Can store and retrieve large content via artifacts."
+    False ->
+      "Search the web and extract content from pages. Has Brave Search (web, news, LLM context, summarizer, answers), Jina Reader, DuckDuckGo web_search, and fetch_url. Can store and retrieve large content via artifacts."
+  }
+
   AgentSpec(
     name: "researcher",
     human_name: "Researcher",
-    description: "Search the web and extract content from pages. Has Kagi Search (web search, summarizer), Brave Search (web, news, LLM context, summarizer, answers), Jina Reader, DuckDuckGo web_search, and fetch_url. Can store and retrieve large content via artifacts.",
+    description:,
     system_prompt:,
     provider:,
     model:,

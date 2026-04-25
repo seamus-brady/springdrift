@@ -225,8 +225,14 @@ summary_schedule = "weekly"
 # duckduckgo_url = "https://html.duckduckgo.com/html/"
 # brave_search_base_url = "https://api.search.brave.com"
 # brave_answers_base_url = "https://api.search.brave.com"
-# kagi_base_url = "https://kagi.com/api/v0"
 # jina_reader_base_url = "https://r.jina.ai/"
+
+# Kagi is an optional alternative search backend. Off by default —
+# Brave is the primary tier. Set kagi_enabled = true and set
+# KAGI_API_KEY in the environment to expose kagi_search and
+# kagi_summarize to the researcher agent.
+# kagi_enabled = false
+# kagi_base_url = "https://kagi.com/api/v0"
 
 # ── Timeouts (ms) ────────────────────────────────────────────────────────────
 

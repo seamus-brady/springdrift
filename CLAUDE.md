@@ -224,7 +224,7 @@ src/
 ├── tools/planner.gleam        Planner tools: task/endeavour CRUD, get_active_work, get_task_detail
 ├── tools/how_to_content.gleam Default HOW_TO content (builtin fallback)
 ├── tools/web.gleam            Web tools: fetch_url, web_search (DuckDuckGo)
-├── tools/kagi.gleam           Kagi tools: kagi_search, kagi_summarize (requires KAGI_API_KEY)
+├── tools/kagi.gleam           Optional: kagi_search, kagi_summarize (off by default; KAGI_API_KEY + kagi_enabled=true)
 ├── tools/artifacts.gleam      Artifact tools: store_result, retrieve_result (researcher agent)
 ├── tools/comms.gleam          Comms tools: send_email, list_contacts, check_inbox, read_message + hard allowlist
 ├── tools/sandbox.gleam        Sandbox tools: run_code, serve, stop_serve, sandbox_status, workspace_ls, sandbox_exec
@@ -463,6 +463,7 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `vertex_project_id` | — | None | GCP project ID (required for vertex provider) |
 | `vertex_location` | — | "europe-west1" | GCP location / region |
 | `vertex_endpoint` | — | derived from location | Vertex AI endpoint hostname (e.g. `europe-west1-aiplatform.googleapis.com`) |
+| `kagi_enabled` | — | False | Optional alternative search backend. When True, exposes `kagi_search` + `kagi_summarize` to the researcher (requires `KAGI_API_KEY`). TOML key: `[services] kagi_enabled`. Brave is the default Tier 1 search regardless. |
 | `comms_enabled` | — | False | Enable communications agent (email via AgentMail) |
 | `comms_inbox_id` | — | None | AgentMail inbox ID (required when comms enabled) |
 | `comms_api_key_env` | — | "AGENTMAIL_API_KEY" | Env var name for AgentMail API key |
@@ -1236,14 +1237,17 @@ Narrative, Log, Scheduler (job list with status and next-run times), and Cycles
 `RequestSchedulerData`/`SchedulerData` and `RequestSchedulerCycles`/`SchedulerCyclesData`
 power the admin tabs. The scheduler subject is threaded through `web/gui.gleam`.
 
-**Web research tools** — the researcher agent has 10 web tools in 4 tiers:
-Tier 1: `kagi_search`, `kagi_summarize` (Kagi API, requires `KAGI_API_KEY`).
-Tier 2: `brave_web_search`, `brave_news_search`, `brave_llm_context`,
+**Web research tools** — the researcher agent has 8 web tools by default in 3 tiers:
+Tier 1: `brave_web_search`, `brave_news_search`, `brave_llm_context`,
 `brave_summarizer`, `brave_answer` (Brave API, requires `BRAVE_SEARCH_API_KEY`).
-Tier 3: `jina_reader` (Jina, requires `JINA_API_KEY`).
-Tier 4: `web_search` (DuckDuckGo, no key), `fetch_url` (raw HTTP GET, no key).
-Tool modules: `tools/kagi.gleam`, `tools/brave.gleam`, `tools/jina.gleam`,
-`tools/web.gleam`. A `web-research` skill teaches the agent the decision tree
+Tier 2: `jina_reader` (Jina, requires `JINA_API_KEY`).
+Tier 3: `web_search` (DuckDuckGo, no key), `fetch_url` (raw HTTP GET, no key).
+Kagi (`kagi_search`, `kagi_summarize`) is an optional alternative — off by
+default. Enable with `kagi_enabled = true` under `[services]` plus
+`KAGI_API_KEY` in the environment; the researcher then gets two extra tools
+and an addendum to its prompt covering them.
+Tool modules: `tools/brave.gleam`, `tools/jina.gleam`, `tools/web.gleam`,
+`tools/kagi.gleam`. A `web-research` skill teaches the agent the decision tree
 for tool selection.
 
 **Tasks and Endeavours** — `planner/types.gleam`, `planner/log.gleam`, `tools/planner.gleam`.
@@ -1329,7 +1333,7 @@ The config is organized into these TOML sections:
 | `[agents.coder]` | Coder agent: max_tokens, max_turns, max_errors |
 | `[agents.writer]` | Writer agent: max_tokens, max_turns, max_errors |
 | `[web]` | Web GUI port |
-| `[services]` | External API base URLs (DuckDuckGo, Brave, Jina, Kagi) |
+| `[services]` | External API base URLs (DuckDuckGo, Brave, Jina) + `kagi_enabled` toggle for the optional Kagi backend |
 | `[sandbox]` | Local Podman sandbox: enabled, pool_size, memory, ports, image |
 | `[delegation]` | Agent delegation depth limits |
 | `[comms]` | Communications agent: enabled, inbox_id, api_key_env, allowed_recipients, rate limit |
