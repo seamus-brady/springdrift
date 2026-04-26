@@ -86,6 +86,7 @@ import tools/knowledge as tools_knowledge
 import tools/memory as tools_memory
 import tools/rate_limiter
 import tools/remembrancer as tools_remembrancer
+import tools/sandbox_admin
 import tui
 import web/auth as web_auth
 import web/gui as web_gui
@@ -637,6 +638,14 @@ fn run(cfg: AppConfig) -> Nil {
           ports_per_slot: option.unwrap(cfg.sandbox_ports_per_slot, 5),
           auto_machine: option.unwrap(cfg.sandbox_auto_machine, True),
           workspace_dir: paths.sandbox_workspaces_dir(),
+          image_recovery_enabled: option.unwrap(
+            cfg.sandbox_image_recovery_enabled,
+            True,
+          ),
+          image_pull_timeout_ms: option.unwrap(
+            cfg.sandbox_image_pull_timeout_ms,
+            300_000,
+          ),
         )
       case sandbox_manager_mod.start(sandbox_cfg, notify, option.None) {
         Ok(mgr) -> {
@@ -898,6 +907,10 @@ fn run(cfg: AppConfig) -> Nil {
       planner_dir: paths.planner_dir(),
       max_delegation_depth: option.unwrap(cfg.max_delegation_depth, 3),
       sandbox_enabled: option.is_some(sandbox_mgr),
+      sandbox_admin_images: sandbox_admin.ResetImages(
+        sandbox_image: option.unwrap(cfg.sandbox_image, "python:3.12-slim"),
+        coder_image: option.unwrap(cfg.coder_image, ""),
+      ),
       deterministic_config: case option.unwrap(cfg.dprime_enabled, True) {
         True -> option.Some(unified_dprime.deterministic)
         False -> option.None
@@ -1985,6 +1998,14 @@ fn maybe_build_real_coder_deps(
               ),
               provider_id: option.unwrap(cfg.coder_provider_id, "anthropic"),
               model_id: model_id,
+              image_recovery_enabled: option.unwrap(
+                cfg.coder_image_recovery_enabled,
+                True,
+              ),
+              image_pull_timeout_ms: option.unwrap(
+                cfg.coder_image_pull_timeout_ms,
+                300_000,
+              ),
             )
 
           let pool_config =

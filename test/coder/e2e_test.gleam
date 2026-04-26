@@ -117,6 +117,8 @@ fn run_dispatch(
       cost_poll_interval_ms: 5000,
       provider_id: provider_id,
       model_id: model_id,
+      image_recovery_enabled: True,
+      image_pull_timeout_ms: 300_000,
     )
 
   let pool_config =

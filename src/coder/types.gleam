@@ -65,6 +65,15 @@ pub type CoderConfig {
     /// BOTH OpenCode's bundled models.dev catalog AND the API key's
     /// allowed list. See `real-coder-opencode-phase2-notes.md` §1.
     model_id: String,
+    /// When True, the manager auto-detects image-corruption stderr
+    /// from podman, force-removes the local image, re-pulls, and
+    /// retries container creation once. Mirrors the sandbox manager
+    /// recovery — without it a corrupted coder image wedges every
+    /// dispatch on a VPS.
+    image_recovery_enabled: Bool,
+    /// Timeout (ms) for the recovery `podman pull`. Generous default
+    /// — slow registry connections can take minutes for a fresh pull.
+    image_pull_timeout_ms: Int,
   )
 }
 

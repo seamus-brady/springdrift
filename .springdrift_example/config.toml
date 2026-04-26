@@ -168,6 +168,15 @@ summary_schedule = "weekly"
 # container_cpus = "2"                          # CPU quota per container (default: "2")
 # container_pids_limit = 256                    # Process count cap; fork-bomb safety (default: 256)
 
+# ── Image-corruption auto-recovery ──
+# When podman reports image-related stderr (manifest unknown, blob
+# unknown, layer corrupt) on container spawn, the coder manager
+# force-removes the local image, re-pulls, and retries spawn once.
+# Mirrors the sandbox manager's recovery — without it a corrupted
+# coder image wedges every dispatch on a VPS.
+# image_recovery_enabled = true
+# image_pull_timeout_ms = 300000
+
 # ── Budget — defaults applied when dispatcher doesn't specify; ceilings enforce a hard wall ──
 [coder.budget]
 # default_max_tokens_per_task = 200000          # Default per-task token cap (default: 200000)
@@ -232,6 +241,14 @@ summary_schedule = "weekly"
 # port_stride = 100
 # ports_per_slot = 5
 # auto_machine = true
+# Image-corruption auto-recovery: when podman reports image-related
+# stderr (manifest unknown, blob unknown, layer corrupt, etc.) the
+# manager force-removes the local image, re-pulls, and retries
+# container creation once. Applied at startup AND on health-check
+# restart. Critical for unattended VPS deployments — without it a
+# corrupted image leaves the manager stuck in Failed state forever.
+# image_recovery_enabled = true
+# image_pull_timeout_ms = 300000   # generous — slow registries
 
 # ── Scheduler ────────────────────────────────────────────────────────────────
 

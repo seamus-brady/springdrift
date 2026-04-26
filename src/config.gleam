@@ -111,6 +111,8 @@ pub type AppConfig {
     sandbox_port_stride: Option(Int),
     sandbox_ports_per_slot: Option(Int),
     sandbox_auto_machine: Option(Bool),
+    sandbox_image_recovery_enabled: Option(Bool),
+    sandbox_image_pull_timeout_ms: Option(Int),
     // ── Housekeeper GenServer ──
     housekeeper_short_tick_ms: Option(Int),
     housekeeper_medium_tick_ms: Option(Int),
@@ -242,6 +244,12 @@ pub type AppConfig {
     coder_container_cpus: Option(String),
     /// Process count cap per container. Kernel-enforced via `--pids-limit`. Fork-bomb safety. Default: 256.
     coder_container_pids_limit: Option(Int),
+    /// When True (default), the coder manager auto-recovers from
+    /// corrupted local image: detects image-related podman errors,
+    /// force-removes the image, re-pulls, and retries spawn once.
+    coder_image_recovery_enabled: Option(Bool),
+    /// Timeout (ms) for the recovery `podman pull`. Default: 300000 (5 min).
+    coder_image_pull_timeout_ms: Option(Int),
     // ── Real-coder budget (ACP rebuild — R2) ──
     /// Tokens/cost/minutes/turns DEFAULT applied per task when the dispatcher
     /// doesn't specify. Used as the budget passed to the manager unless the
@@ -514,6 +522,8 @@ pub fn default() -> AppConfig {
     sandbox_port_stride: None,
     sandbox_ports_per_slot: None,
     sandbox_auto_machine: None,
+    sandbox_image_recovery_enabled: None,
+    sandbox_image_pull_timeout_ms: None,
     housekeeper_short_tick_ms: None,
     housekeeper_medium_tick_ms: None,
     housekeeper_long_tick_ms: None,
@@ -593,6 +603,8 @@ pub fn default() -> AppConfig {
     coder_container_memory_mb: None,
     coder_container_cpus: None,
     coder_container_pids_limit: None,
+    coder_image_recovery_enabled: None,
+    coder_image_pull_timeout_ms: None,
     coder_default_max_tokens_per_task: None,
     coder_default_max_cost_per_task_usd: None,
     coder_default_max_minutes_per_task: None,
@@ -837,6 +849,14 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     sandbox_auto_machine: option.or(
       override_cfg.sandbox_auto_machine,
       base.sandbox_auto_machine,
+    ),
+    sandbox_image_recovery_enabled: option.or(
+      override_cfg.sandbox_image_recovery_enabled,
+      base.sandbox_image_recovery_enabled,
+    ),
+    sandbox_image_pull_timeout_ms: option.or(
+      override_cfg.sandbox_image_pull_timeout_ms,
+      base.sandbox_image_pull_timeout_ms,
     ),
     housekeeper_short_tick_ms: option.or(
       override_cfg.housekeeper_short_tick_ms,
@@ -1126,6 +1146,14 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     coder_container_pids_limit: option.or(
       override_cfg.coder_container_pids_limit,
       base.coder_container_pids_limit,
+    ),
+    coder_image_recovery_enabled: option.or(
+      override_cfg.coder_image_recovery_enabled,
+      base.coder_image_recovery_enabled,
+    ),
+    coder_image_pull_timeout_ms: option.or(
+      override_cfg.coder_image_pull_timeout_ms,
+      base.coder_image_pull_timeout_ms,
     ),
     coder_default_max_tokens_per_task: option.or(
       override_cfg.coder_default_max_tokens_per_task,
@@ -1976,6 +2004,12 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     sandbox_port_stride: get_toml_int(table, ["sandbox", "port_stride"]),
     sandbox_ports_per_slot: get_toml_int(table, ["sandbox", "ports_per_slot"]),
     sandbox_auto_machine: get_toml_bool(table, ["sandbox", "auto_machine"]),
+    sandbox_image_recovery_enabled: get_toml_bool(table, [
+      "sandbox", "image_recovery_enabled",
+    ]),
+    sandbox_image_pull_timeout_ms: get_toml_int(table, [
+      "sandbox", "image_pull_timeout_ms",
+    ]),
     // ── [housekeeper] ──
     housekeeper_short_tick_ms: get_toml_int(table, [
       "housekeeper", "short_tick_ms",
@@ -2143,6 +2177,14 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     coder_container_pids_limit: get_toml_int(table, [
       "coder",
       "container_pids_limit",
+    ]),
+    coder_image_recovery_enabled: get_toml_bool(table, [
+      "coder",
+      "image_recovery_enabled",
+    ]),
+    coder_image_pull_timeout_ms: get_toml_int(table, [
+      "coder",
+      "image_pull_timeout_ms",
     ]),
     // ── [coder.budget] defaults + ceilings ──
     coder_default_max_tokens_per_task: get_toml_int(table, [

@@ -54,6 +54,7 @@ import tools/coder_dispatch
 import tools/learning_goals as learning_goal_tools
 import tools/memory
 import tools/planner as planner_tools
+import tools/sandbox_admin
 import tools/strategies as strategy_tools
 
 @external(erlang, "springdrift_ffi", "rescue")
@@ -90,6 +91,14 @@ pub fn start(
     Some(_) -> coder_dispatch.all()
     None -> []
   }
+  // sandbox_reset only appears when the sandbox is wired in. The cog
+  // loop calls podman directly through this tool, bypassing both
+  // managers — so it works even when a manager is itself wedged on
+  // a corrupted slot.
+  let sandbox_admin_tools = case cfg.sandbox_enabled {
+    True -> [sandbox_admin.reset_tool()]
+    False -> []
+  }
   let tools =
     list.flatten([
       // The cog loop needs read_skill on itself, not just on
@@ -106,6 +115,7 @@ pub fn start(
       strategy_tools.all(),
       captures_tool_set,
       coder_dispatch_tools,
+      sandbox_admin_tools,
       cfg.agent_tools,
       team_tools,
     ])
@@ -176,6 +186,7 @@ pub fn start(
           how_to_content: cfg.how_to_content,
           max_delegation_depth: cfg.max_delegation_depth,
           sandbox_enabled: cfg.sandbox_enabled,
+          sandbox_admin_images: cfg.sandbox_admin_images,
           deterministic_config: cfg.deterministic_config,
           fact_decay_half_life_days: cfg.fact_decay_half_life_days,
           escalation_config: cfg.escalation_config,

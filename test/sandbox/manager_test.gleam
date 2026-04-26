@@ -107,6 +107,8 @@ pub fn sandbox_config_construction_test() {
       ports_per_slot: 5,
       auto_machine: True,
       workspace_dir: "/tmp/test-workspaces",
+      image_recovery_enabled: True,
+      image_pull_timeout_ms: 300_000,
     )
   config.pool_size
   |> should.equal(2)

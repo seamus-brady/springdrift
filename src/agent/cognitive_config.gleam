@@ -29,6 +29,7 @@ import normative/types as normative_types
 import simplifile
 import tools/coder_dispatch
 import tools/memory
+import tools/sandbox_admin
 
 @external(erlang, "springdrift_ffi", "generate_uuid")
 fn generate_uuid() -> String
@@ -76,6 +77,10 @@ pub type CognitiveConfig {
     planner_dir: String,
     max_delegation_depth: Int,
     sandbox_enabled: Bool,
+    /// Image identifiers used by the `sandbox_reset` recovery tool.
+    /// `coder_image` is empty when the real-coder is disabled — the
+    /// reset tool then skips the coder pull leg.
+    sandbox_admin_images: sandbox_admin.ResetImages,
     deterministic_config: Option(DeterministicConfig),
     fact_decay_half_life_days: Int,
     escalation_config: EscalationConfig,
@@ -191,6 +196,10 @@ pub fn default_test_config(
     planner_dir: base <> "/planner",
     max_delegation_depth: 3,
     sandbox_enabled: False,
+    sandbox_admin_images: sandbox_admin.ResetImages(
+      sandbox_image: "",
+      coder_image: "",
+    ),
     deterministic_config: None,
     fact_decay_half_life_days: 30,
     escalation_config: escalation.default_config(),

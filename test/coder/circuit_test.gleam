@@ -22,6 +22,8 @@ fn cfg() -> types.CoderConfig {
     cost_poll_interval_ms: 5000,
     provider_id: "anthropic",
     model_id: "claude-sonnet-4-20250514",
+    image_recovery_enabled: True,
+    image_pull_timeout_ms: 300_000,
   )
 }
 

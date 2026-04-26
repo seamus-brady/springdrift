@@ -425,6 +425,7 @@ When a required API key is missing, fall back gracefully:
 - **Brave tools unavailable** (no `BRAVE_API_KEY`) → use `web_search` (DuckDuckGo, no key required)
 - **jina_reader unavailable** (no `JINA_API_KEY`) → use `fetch_url` as fallback
 - **Sandbox unavailable** (no podman) → coder uses `request_human_input` to ask user to run code
+- **Container state wedged** (sandbox/coder repeatedly fails with image/manifest errors AND auto-recovery hasn't fixed it) → call `sandbox_reset` (cog-loop tool, only available when `sandbox_enabled = true`). Pass `repull_image: true` if the symptom is image-related ("manifest unknown", "blob unknown", "no such image", "layer corrupt"). Slow — pull may take minutes. Pass `purge_coder: false` to leave the coder pool alone. The next sandbox or coder dispatch rebuilds containers automatically. Do NOT use this for ordinary "container exited" errors — the periodic health-check restart already handles those.
 - **Comms unavailable** (no `AGENTMAIL_API_KEY` or `comms_enabled = false`) → comms agent not loaded, email tools unavailable
 - **Captures scanner disabled** (`captures_scanner_enabled = false`) → no `<captures>` block in sensorium; `list_captures` / `clarify_capture` / `dismiss_capture` still available but act on existing log only
 - **Deputies disabled** (`deputies_enabled = false`) → no `<deputies>` sensorium block; specialist agents receive the raw instruction with no briefing prepended; `kill_deputy` returns "no active deputy" when called
