@@ -491,7 +491,7 @@ fn ws_handler(
         True -> mist.continue(state)
         False ->
           case protocol.decode_client_message(json_str) {
-            Ok(protocol.UserMessage(text:, client_msg_id:)) -> {
+            Ok(protocol.UserMessage(text:, client_msg_id:, attachments:)) -> {
               // Acknowledge the message frame BEFORE we dispatch to
               // cognitive. The server has now committed to processing
               // it; the client can clear its "sending..." state on the
@@ -518,10 +518,19 @@ fn ws_handler(
                   conn,
                   protocol.encode_server_message(protocol.Thinking),
                 )
-              // Dispatch to cognitive loop. reply_to is now a
+              // If the operator attached files since their last
+              // message, inline them as an <operator_attachments>
+              // block so the agent sees the file paths as part of the
+              // user's turn (the standard chat-assistant pattern). The
+              // tag mirrors the sensorium's convention so the agent
+              // can recognise it as UI-supplied metadata.
+              let final_text = render_user_message_text(text, attachments)
               process.send(
                 state.cognitive,
-                agent_types.UserInput(source_id: state.source_id, text:),
+                agent_types.UserInput(
+                  source_id: state.source_id,
+                  text: final_text,
+                ),
               )
               mist.continue(state)
             }
@@ -1336,6 +1345,54 @@ fn truncate(s: String, n: Int) -> String {
   }
 }
 
+/// Compose the user-message text the cognitive loop sees. When the
+/// operator attached files in the same turn, prepend an
+/// `<operator_attachments>` XML block listing each file's path and
+/// doc_id so the agent can read or reference them — the standard
+/// chat-assistant pattern (the agent is told *where* the file is
+/// rather than expected to discover it via ambient sensory events).
+///
+/// Returns the original text unchanged when no attachments are
+/// present, so legacy clients and turns without uploads stay
+/// byte-identical to the pre-attachment behaviour.
+pub fn render_user_message_text(
+  text: String,
+  attachments: List(protocol.Attachment),
+) -> String {
+  case attachments {
+    [] -> text
+    _ -> {
+      let lines =
+        list.map(attachments, fn(a) {
+          "  <file filename=\""
+          <> xml_escape(a.filename)
+          <> "\" path=\"sources/intray/"
+          <> xml_escape(a.slug)
+          <> ".md\" doc_id=\""
+          <> xml_escape(a.doc_id)
+          <> "\"/>"
+        })
+      "<operator_attachments>\n"
+      <> string.join(lines, "\n")
+      <> "\n</operator_attachments>\n\n"
+      <> text
+    }
+  }
+}
+
+/// Minimal XML escaping for filenames / doc_ids / slugs that go into
+/// attribute values. Only the five standard XML entities — these
+/// strings are short and operator-controlled, so we don't need to
+/// handle the broader XML 1.0 character set.
+fn xml_escape(s: String) -> String {
+  s
+  |> string.replace(each: "&", with: "&amp;")
+  |> string.replace(each: "<", with: "&lt;")
+  |> string.replace(each: ">", with: "&gt;")
+  |> string.replace(each: "\"", with: "&quot;")
+  |> string.replace(each: "'", with: "&apos;")
+}
+
 fn encode_cycle_node(node: dag_types.CycleNode) -> json.Json {
   json.object([
     #("cycle_id", json.string(node.cycle_id)),
@@ -1718,6 +1775,17 @@ fn upload_success(
       #("ok", json.bool(True)),
       #("filename", json.string(saved_filename)),
       #("processed", json.int(processed_count)),
+      #(
+        "normalised_files",
+        json.array(summary.normalised_files, fn(nf) {
+          json.object([
+            #("filename", json.string(nf.filename)),
+            #("doc_id", json.string(nf.doc_id)),
+            #("title", json.string(nf.title)),
+            #("slug", json.string(nf.slug)),
+          ])
+        }),
+      ),
       #("message", case processed_count, summary.failures {
         // Happy path — at least one file normalised, no failures.
         n, [] if n > 0 ->

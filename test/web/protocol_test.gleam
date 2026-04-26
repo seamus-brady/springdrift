@@ -24,10 +24,13 @@ pub fn decode_user_message_test() {
   let json = "{\"type\": \"user_message\", \"text\": \"hello\"}"
   let result = protocol.decode_client_message(json)
   result |> should.be_ok
-  let assert Ok(protocol.UserMessage(text:, client_msg_id:)) = result
+  let assert Ok(protocol.UserMessage(text:, client_msg_id:, attachments:)) =
+    result
   text |> should.equal("hello")
   // Legacy-shape message — no client_msg_id supplied.
   client_msg_id |> should.equal(None)
+  // Legacy-shape message — no attachments supplied, defaults to empty list.
+  attachments |> should.equal([])
 }
 
 pub fn decode_user_message_with_client_msg_id_test() {
@@ -35,9 +38,42 @@ pub fn decode_user_message_with_client_msg_id_test() {
     "{\"type\": \"user_message\", \"text\": \"hi\", \"client_msg_id\": \"abc-123\"}"
   let result = protocol.decode_client_message(json)
   result |> should.be_ok
-  let assert Ok(protocol.UserMessage(text:, client_msg_id:)) = result
+  let assert Ok(protocol.UserMessage(text:, client_msg_id:, attachments:)) =
+    result
   text |> should.equal("hi")
   client_msg_id |> should.equal(Some("abc-123"))
+  attachments |> should.equal([])
+}
+
+pub fn decode_user_message_with_attachments_test() {
+  let json =
+    "{\"type\":\"user_message\",\"text\":\"see attached\",\"attachments\":["
+    <> "{\"filename\":\"notes.pdf\",\"doc_id\":\"doc-abc\",\"slug\":\"notes\",\"title\":\"Notes\"}"
+    <> "]}"
+  let result = protocol.decode_client_message(json)
+  result |> should.be_ok
+  let assert Ok(protocol.UserMessage(text:, client_msg_id: _, attachments:)) =
+    result
+  text |> should.equal("see attached")
+  let assert [att] = attachments
+  att.filename |> should.equal("notes.pdf")
+  att.doc_id |> should.equal("doc-abc")
+  att.slug |> should.equal("notes")
+  att.title |> should.equal("Notes")
+}
+
+pub fn decode_user_message_attachment_title_optional_test() {
+  // title is optional in the attachment decoder — older clients or
+  // partially-processed uploads may omit it.
+  let json =
+    "{\"type\":\"user_message\",\"text\":\"x\",\"attachments\":["
+    <> "{\"filename\":\"a.txt\",\"doc_id\":\"d\",\"slug\":\"a\"}"
+    <> "]}"
+  let result = protocol.decode_client_message(json)
+  result |> should.be_ok
+  let assert Ok(protocol.UserMessage(attachments:, ..)) = result
+  let assert [att] = attachments
+  att.title |> should.equal("")
 }
 
 pub fn decode_user_answer_test() {

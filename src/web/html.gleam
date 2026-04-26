@@ -91,6 +91,7 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
       <div id=\"history-view-body\"></div>
     </div>
     <div id=\"input-area\">
+      <div id=\"pending-attachments\" hidden></div>
       <form id=\"chat-form\">
         <input type=\"file\" id=\"upload-input\" style=\"display:none\">
         <button type=\"button\" id=\"upload-btn\" aria-label=\"Upload to library\" title=\"Upload a document to the library\">
@@ -875,6 +876,13 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
   // silently disappear after a reconnect mid-cycle.
   var inFlightUserMessages = [];
 
+  // Files the operator has uploaded since their last sent message.
+  // Each entry: { filename, doc_id, slug, title }. The next sendMessage()
+  // ships them in the WS payload's `attachments` field; the server
+  // inlines them into the cognitive loop's input text so the agent
+  // sees the file paths as part of the user's turn.
+  var pendingAttachments = [];
+
   function makeClientMsgId() {
     return (typeof crypto !== 'undefined' && crypto.randomUUID)
       ? crypto.randomUUID()
@@ -891,12 +899,16 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
     } else {
       var msgId = makeClientMsgId();
       inFlightUserMessages.push({ id: msgId, text: text });
+      var attachments = pendingAttachments.slice();
       ws.send(JSON.stringify({
         type: 'user_message',
         text: text,
         client_msg_id: msgId,
+        attachments: attachments,
       }));
       addUserMessage(text);
+      pendingAttachments = [];
+      renderPendingAttachments();
     }
     input.value = '';
     input.style.height = 'auto';
@@ -948,6 +960,23 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
       .then(function(result) {
         if (result.status === 200 && result.json.ok) {
           addNotification(result.json.message || ('Uploaded ' + file.name));
+          // Track each normalised file as a pending attachment. The
+          // server sends back filename/doc_id/slug/title for everything
+          // it processed; the next sendMessage() ships them in the WS
+          // payload so the agent learns where the file lives.
+          var nfs = result.json.normalised_files || [];
+          for (var i = 0; i < nfs.length; i++) {
+            var nf = nfs[i];
+            if (nf && nf.doc_id && nf.slug) {
+              pendingAttachments.push({
+                filename: nf.filename || file.name,
+                doc_id: nf.doc_id,
+                slug: nf.slug,
+                title: nf.title || '',
+              });
+            }
+          }
+          renderPendingAttachments();
         } else {
           addNotification('Upload failed: ' + (result.json.message || ('HTTP ' + result.status)));
         }
@@ -955,6 +984,40 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
       .catch(function(err) {
         addNotification('Upload failed: ' + (err && err.message ? err.message : 'network error'));
       });
+  }
+
+  function renderPendingAttachments() {
+    var bar = document.getElementById('pending-attachments');
+    if (!bar) return;
+    if (pendingAttachments.length === 0) {
+      bar.hidden = true;
+      bar.innerHTML = '';
+      return;
+    }
+    bar.hidden = false;
+    bar.innerHTML = '';
+    for (var i = 0; i < pendingAttachments.length; i++) {
+      var att = pendingAttachments[i];
+      var chip = document.createElement('span');
+      chip.className = 'attachment-chip';
+      chip.title = 'Will be sent with your next message (sources/intray/' + att.slug + '.md)';
+      var label = document.createElement('span');
+      label.textContent = att.filename;
+      chip.appendChild(label);
+      var x = document.createElement('button');
+      x.type = 'button';
+      x.className = 'attachment-chip-x';
+      x.setAttribute('aria-label', 'Remove ' + att.filename);
+      x.textContent = '\\u00d7';
+      (function(idx) {
+        x.addEventListener('click', function() {
+          pendingAttachments.splice(idx, 1);
+          renderPendingAttachments();
+        });
+      })(i);
+      chip.appendChild(x);
+      bar.appendChild(chip);
+    }
   }
 
   function formatBytes(n) {
@@ -2287,11 +2350,20 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
     return '<span style=\"font-size:10px;text-transform:uppercase;letter-spacing:.05em;padding:1px 5px;border-radius:3px;border:1px solid ' + color + ';color:' + color + '\">' + escapeHtml(label || '?') + '</span>';
   }
 
-  function renderDocumentView(docId, documentJson) {
-    var doc;
-    try { doc = JSON.parse(documentJson); }
-    catch (e) {
-      showDocumentToast('error', 'Failed to parse document: ' + e.message);
+  function renderDocumentView(docId, payload) {
+    // The server embeds the document as a JSON object in the envelope, so
+    // it is already parsed by the outer JSON.parse on the WS frame. Accept
+    // a string too for defensive compatibility.
+    var doc = payload;
+    if (typeof doc === 'string') {
+      try { doc = JSON.parse(doc); }
+      catch (e) {
+        showDocumentToast('error', 'Failed to parse document: ' + e.message);
+        return;
+      }
+    }
+    if (!doc || typeof doc !== 'object') {
+      showDocumentToast('error', 'Failed to parse document: unexpected payload');
       return;
     }
     if (doc.error) {
@@ -3557,6 +3629,47 @@ fn shared_css() -> String {
     font-size: 13px;
     color: var(--text-dim);
     margin-top: 8px;
+  }
+  /* Pending-attachment chips — sit above the textarea so the operator
+     can see what'll be sent with their next message and remove any
+     mistakes before pressing send. */
+  #pending-attachments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  #pending-attachments[hidden] { display: none; }
+  .attachment-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px 4px 10px;
+    background: var(--input-bg);
+    border: 1px solid var(--input-border);
+    border-radius: 12px;
+    font-size: 12px;
+    color: var(--text);
+    max-width: 240px;
+  }
+  .attachment-chip > span:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .attachment-chip-x {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 4px;
+    border-radius: 50%;
+  }
+  .attachment-chip-x:hover {
+    background: rgba(255,255,255,0.08);
+    color: var(--text);
   }
 
   /* ── Chat history panel — leftmost column on the chat page.
