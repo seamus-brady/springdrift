@@ -26,10 +26,9 @@ import gleam/string
 import llm/types.{type Usage, Usage}
 import slog
 
-/// Monotonic positive integer — tagged onto every outbound ServerMessage
-/// JSON as a `seq` field so the client can detect reordering / gaps.
-@external(erlang, "springdrift_ffi", "monotonic_seq")
-fn monotonic_seq() -> Int
+// Per-client seq is assigned by `web/client_registry.gleam` at the
+// send site; this module just splices it into the JSON body via
+// `encode_server_message_with_seq/2`.
 
 // ---------------------------------------------------------------------------
 // Types
@@ -99,6 +98,16 @@ pub type ClientMessage {
   RequestApproveExport(slug: String, note: String)
   /// Operator rejects a Promoted export. reason is required.
   RequestRejectExport(slug: String, reason: String)
+  /// Outbox flow control. The client sends `{"type":"ack","seq":N}`
+  /// telling the server "I have received and applied every frame
+  /// through seq N". The server prunes its outbox up to N. Acks are
+  /// idempotent — duplicates and stale acks are no-ops.
+  Ack(seq: Int)
+  /// WebSocket keepalive reply. The server pings every ~25s to keep
+  /// the line alive across idle proxies; the client replies with
+  /// pong. A missed pong over `keepalive_grace_ms` triggers a
+  /// server-side close so the client reconnects fast.
+  Pong
 }
 
 pub type ServerMessage {
@@ -177,6 +186,9 @@ pub type ServerMessage {
   /// Documents tab — toast feedback for approve/reject actions.
   /// status: "ok" | "error". slug + message for display.
   ApprovalResult(slug: String, status: String, message: String)
+  /// WebSocket keepalive — server sends Ping every ~25s to keep
+  /// the line alive across idle proxies. Client replies with Pong.
+  Ping
 }
 
 pub type CycleDataJson {
@@ -271,6 +283,11 @@ pub fn decode_client_message(json_string: String) -> Result(ClientMessage, Nil) 
         use reason <- decode.field("reason", decode.string)
         decode.success(RequestRejectExport(slug:, reason:))
       }
+      "ack" -> {
+        use seq <- decode.field("seq", decode.int)
+        decode.success(Ack(seq:))
+      }
+      "pong" -> decode.success(Pong)
       _ ->
         decode.failure(UserMessage("", None, []), "Unknown client message type")
     }
@@ -293,21 +310,39 @@ fn attachment_decoder() -> decode.Decoder(Attachment) {
 // Encode (server → client)
 // ---------------------------------------------------------------------------
 
-/// Encode a server message as JSON with a monotonic `seq` field injected
-/// as the first key. The seq is a per-node monotonic integer so a client
-/// can detect reordering or gaps in delivered frames.
-pub fn encode_server_message(msg: ServerMessage) -> String {
-  with_seq(encode_body(msg))
+/// Encode a server message as JSON with a `seq` field injected as
+/// the first key. The seq is per-client and is assigned by the
+/// outbox registry at send time. Pass `0` if you genuinely want a
+/// seq-less frame (e.g. ping/pong).
+pub fn encode_server_message_with_seq(seq: Int, msg: ServerMessage) -> String {
+  with_seq(seq, encode_body(msg))
 }
 
-/// Inject a `"seq": N,` field at the start of the JSON object. All body
-/// encoders produce an object starting with `{` — we splice between the
-/// `{` and the first existing field so the resulting JSON stays valid.
-fn with_seq(body: String) -> String {
-  "{\"seq\":"
-  <> int.to_string(monotonic_seq())
-  <> ","
-  <> string.drop_start(body, 1)
+/// Back-compat alias for tests / callers that pre-date the
+/// per-client seq design. Emits a body with `seq:0`. Production
+/// callers should use `encode_server_message_with_seq` (via
+/// `web/gui.ws_send`) so the seq comes from the per-client outbox.
+pub fn encode_server_message(msg: ServerMessage) -> String {
+  encode_server_message_with_seq(0, msg)
+}
+
+/// Encode the JSON body of a server message *without* a seq prefix.
+/// Used by the outbox registry: the WS handler asks the registry to
+/// assign a seq for this body, then re-emits the body with the
+/// returned seq spliced in via `encode_server_message_with_seq/2`.
+pub fn encode_server_message_body(msg: ServerMessage) -> String {
+  encode_body(msg)
+}
+
+/// Splice the assigned seq into a body. All body encoders produce
+/// an object starting with `{` — we splice between the `{` and the
+/// first existing field so the resulting JSON stays valid.
+pub fn splice_seq(seq: Int, body: String) -> String {
+  with_seq(seq, body)
+}
+
+fn with_seq(seq: Int, body: String) -> String {
+  "{\"seq\":" <> int.to_string(seq) <> "," <> string.drop_start(body, 1)
 }
 
 fn encode_body(msg: ServerMessage) -> String {
@@ -540,6 +575,10 @@ fn encode_body(msg: ServerMessage) -> String {
         #("status", json.string(status)),
         #("message", json.string(message)),
       ])
+      |> json.to_string
+
+    Ping ->
+      json.object([#("type", json.string("ping"))])
       |> json.to_string
   }
 }

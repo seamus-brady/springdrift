@@ -548,14 +548,16 @@ pub fn encode_includes_seq_field_test() {
   }
 }
 
-pub fn seq_increments_between_calls_test() {
-  let a = protocol.encode_server_message(protocol.Thinking)
-  let b = protocol.encode_server_message(protocol.Thinking)
-  // Two back-to-back encodes must produce different seq values (monotonic).
-  // Extract the seq value from each and confirm b > a.
-  let seq_a = extract_seq(a)
-  let seq_b = extract_seq(b)
-  { seq_b > seq_a } |> should.be_true
+pub fn seq_passes_through_explicit_value_test() {
+  // Per-client seq is assigned by the outbox registry (see
+  // web/client_registry.gleam) and threaded through
+  // encode_server_message_with_seq. The protocol module just splices
+  // whatever value the caller hands it. Confirm the round-trip:
+  // pass seq=42, pull seq=42 back out.
+  let a = protocol.encode_server_message_with_seq(42, protocol.Thinking)
+  let b = protocol.encode_server_message_with_seq(43, protocol.Thinking)
+  extract_seq(a) |> should.equal(42)
+  extract_seq(b) |> should.equal(43)
 }
 
 fn extract_seq(json_str: String) -> Int {

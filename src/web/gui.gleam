@@ -53,7 +53,9 @@ import skills/proposal_log
 import slog
 import tools/knowledge as knowledge_tools
 import web/auth
+import web/client_registry
 import web/html
+import web/outbox
 import web/protocol
 
 // ---------------------------------------------------------------------------
@@ -65,7 +67,25 @@ type WsMsg {
   GotDelivery(Delivery)
   GotNotification(agent_types.Notification)
   SendHistory(String)
+  /// Replay payload from the outbox registry — emitted once during
+  /// `ws_on_init` when the client reconnected with `?since=N` and
+  /// the registry confirmed it can replay the gap. The handler emits
+  /// each frame with its *original* seq (not a fresh one) so the
+  /// client's local seq cursor advances correctly.
+  ReplayReady(outbox.ReplayResult)
+  /// Keepalive tick — server sends a Ping frame and reschedules
+  /// itself. If the connection has gone silent (idle proxy timeout,
+  /// OS-level NAT close, sleeping laptop) the write fails and the
+  /// WS goes through `mist.Closed`; the client reconnects fast
+  /// instead of waiting on its own timeouts.
+  KeepaliveTick
 }
+
+/// Server-driven keepalive interval. Anthropic's free LLM cycles
+/// can run several minutes; idle proxies and OS-level NAT often
+/// drop a TCP connection that's seen no traffic for 30-60s. 25s
+/// keeps us comfortably below those windows.
+const keepalive_tick_ms: Int = 25_000
 
 // ---------------------------------------------------------------------------
 // Notification relay — main process forwards to per-connection subjects
@@ -101,7 +121,57 @@ type WsState {
     /// Frontdoor and the reply routes back to this browser's
     /// delivery sink.
     source_id: String,
+    /// Stable client_id from the browser's localStorage. Survives
+    /// refresh, mid-cycle WS blips, sleep/resume. Keys the per-client
+    /// outbox so reconnects under the same id can replay frames the
+    /// previous WS process emitted.
+    client_id: String,
+    /// Per-client outbox registry. Every server-bound frame goes
+    /// through `ws_send` which calls `client_registry.append` to get
+    /// the seq, then mist.send_text_frame ships it. Acks from the
+    /// client prune the outbox; on reconnect the new WS process
+    /// replays missed frames.
+    registry: client_registry.Registry,
+    /// Self-feed for the keepalive timer. The handler re-arms it
+    /// each tick via process.send_after.
+    keepalive_subject: Subject(Nil),
   )
+}
+
+// ---------------------------------------------------------------------------
+// Wire-level send helper
+// ---------------------------------------------------------------------------
+
+/// Send a server message over the WS, going through the per-client
+/// outbox. The body JSON is appended to the outbox under this
+/// connection's client_id, the registry assigns a monotonic seq, and
+/// the seq-prefixed JSON is shipped over the wire. On disconnect the
+/// outbox survives in the registry; on reconnect under the same
+/// client_id, the new WS process can `replay_since` to fill the gap.
+///
+/// `Ping` is the lone exception — it's flow control, not a payload,
+/// and shouldn't sit in the outbox waiting for replay.
+fn ws_send(
+  state: WsState,
+  conn: mist.WebsocketConnection,
+  msg: protocol.ServerMessage,
+) -> Nil {
+  case msg {
+    protocol.Ping -> {
+      let _ =
+        mist.send_text_frame(
+          conn,
+          protocol.encode_server_message_with_seq(0, msg),
+        )
+      Nil
+    }
+    _ -> {
+      let body = protocol.encode_server_message_body(msg)
+      let seq = client_registry.append(state.registry, state.client_id, body)
+      let _ = mist.send_text_frame(conn, protocol.splice_seq(seq, body))
+      Nil
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -154,6 +224,9 @@ pub fn start(
     auth.RefuseToStart(_) -> #(None, True)
   }
   let relay: Subject(RelayMsg) = process.new_subject()
+  // Per-client outbox registry. Lives for the GUI process's lifetime;
+  // each WS connection looks up / creates its outbox by client_id.
+  let registry = client_registry.start()
   let auth_label = case auth_token {
     Some(_) -> "with bearer auth"
     None -> "WITHOUT auth (localhost-only opt-out)"
@@ -170,6 +243,7 @@ pub fn start(
         req,
         cognitive,
         relay,
+        registry,
         initial_messages,
         narrative_dir,
         auth_token,
@@ -205,6 +279,7 @@ fn handle_request(
   req: Request(Connection),
   cognitive: Subject(agent_types.CognitiveMessage),
   relay: Subject(RelayMsg),
+  registry: client_registry.Registry,
   initial_messages: List(Message),
   narrative_dir: String,
   auth_token: Option(String),
@@ -229,6 +304,7 @@ fn handle_request(
         req,
         cognitive,
         relay,
+        registry,
         initial_messages,
         narrative_dir,
         auth_token,
@@ -249,6 +325,7 @@ fn handle_authenticated_request(
   req: Request(Connection),
   cognitive: Subject(agent_types.CognitiveMessage),
   relay: Subject(RelayMsg),
+  registry: client_registry.Registry,
   initial_messages: List(Message),
   narrative_dir: String,
   auth_token: Option(String),
@@ -353,12 +430,29 @@ fn handle_authenticated_request(
               }
             Error(_) -> option.None
           }
+          // ?since=N — client tells us "I have applied every frame
+          // through seq N; replay everything after". Absent or 0
+          // means a fresh connection (no replay) and we send a full
+          // session_history rebuild.
+          let since = case request.get_query(req) {
+            Ok(params) ->
+              case list.key_find(params, "since") {
+                Ok(s) ->
+                  case int.parse(s) {
+                    Ok(n) -> n
+                    Error(_) -> 0
+                  }
+                Error(_) -> 0
+              }
+            Error(_) -> 0
+          }
           mist.websocket(
             request: req,
             on_init: fn(_conn) {
               ws_on_init(
                 cognitive,
                 relay,
+                registry,
                 initial_messages,
                 narrative_dir,
                 lib,
@@ -366,6 +460,7 @@ fn handle_authenticated_request(
                 scheduler,
                 frontdoor,
                 client_id,
+                since,
               )
             },
             on_close: fn(state) {
@@ -394,6 +489,7 @@ fn handle_authenticated_request(
 fn ws_on_init(
   cognitive: Subject(agent_types.CognitiveMessage),
   relay: Subject(RelayMsg),
+  registry: client_registry.Registry,
   initial_messages: List(Message),
   narrative_dir: String,
   lib: Option(Subject(LibrarianMessage)),
@@ -401,21 +497,26 @@ fn ws_on_init(
   scheduler: Option(Subject(scheduler_types.SchedulerMessage)),
   frontdoor: Subject(FrontdoorMessage),
   client_id: option.Option(String),
+  since: Int,
 ) -> #(WsState, option.Option(Selector(WsMsg))) {
   // Per-connection subjects owned by this WebSocket handler process.
   let delivery_subject: Subject(Delivery) = process.new_subject()
   let notify_subject: Subject(agent_types.Notification) = process.new_subject()
   let history_subject: Subject(String) = process.new_subject()
+  let replay_subject: Subject(outbox.ReplayResult) = process.new_subject()
 
-  // source_id derived from the browser's stable client_id when supplied,
-  // so a refresh / reconnect under the same browser reuses the same
-  // Frontdoor routing key. Without client_id we fall back to a fresh
-  // per-socket UUID for backward compat — legacy clients keep working
-  // but lose the cross-reconnect benefits.
-  let source_id = case client_id {
-    option.Some(id) -> "ws:" <> id
-    option.None -> "ws:" <> generate_uuid()
+  // Resolve the stable client_id; fall back to a fresh UUID for
+  // legacy clients without localStorage support. The fallback breaks
+  // outbox replay (no continuity across reconnects), but the
+  // connection still works otherwise.
+  let resolved_client_id = case client_id {
+    option.Some(id) -> id
+    option.None -> generate_uuid()
   }
+  // source_id is the Frontdoor routing key. We prefix "ws:" so
+  // Frontdoor's Subscribe / pending tables aren't keyed on bare UUIDs
+  // (avoids collisions with hypothetical other source-id schemes).
+  let source_id = "ws:" <> resolved_client_id
 
   // Subscribe this connection with Frontdoor. Every reply / question for
   // a cycle claimed by this source_id will arrive on `delivery_subject`.
@@ -427,11 +528,19 @@ fn ws_on_init(
   // Register for broadcast notifications (tool-calling, status, affect, etc.).
   process.send(relay, Register(notify_subject))
 
+  // Keepalive subject — periodic Ping ticks come back here so the
+  // selector can route them to the handler. process.send_after is
+  // re-armed on each tick by the handler.
+  let keepalive_subject: Subject(Nil) = process.new_subject()
+  let _ = process.send_after(keepalive_subject, keepalive_tick_ms, Nil)
+
   let selector: Selector(WsMsg) =
     process.new_selector()
     |> process.select_map(delivery_subject, fn(d) { GotDelivery(d) })
     |> process.select_map(notify_subject, fn(n) { GotNotification(n) })
     |> process.select_map(history_subject, fn(h) { SendHistory(h) })
+    |> process.select_map(replay_subject, fn(r) { ReplayReady(r) })
+    |> process.select_map(keepalive_subject, fn(_) { KeepaliveTick })
 
   let state =
     WsState(
@@ -445,9 +554,54 @@ fn ws_on_init(
       scheduler:,
       ws_max_bytes:,
       source_id:,
+      client_id: resolved_client_id,
+      registry:,
+      keepalive_subject:,
     )
 
-  // Query live messages from the cognitive loop (not the static boot snapshot)
+  // Decide what to send first:
+  //   - since > 0 AND outbox can replay → ReplayReady drives the WS
+  //     forward through the gap (no fresh session_history needed)
+  //   - since == 0 OR replay says TooOld → fresh session_history
+  //     rebuild so the client repopulates from authoritative state
+  case since > 0 {
+    True -> {
+      let r = client_registry.replay_since(registry, resolved_client_id, since)
+      case r {
+        outbox.UpToDate -> {
+          // Client is fully up to date. Just emit history so the
+          // chat tab repopulates if it needed to (e.g. fresh tab
+          // joined an existing client_id session).
+          spawn_history_query(cognitive, initial_messages, history_subject)
+        }
+        outbox.Replay(_) -> {
+          // Replay path: deliver the gap frames directly via the
+          // ReplayReady selector branch. ws_handler emits each
+          // frame's body with its original seq.
+          process.send(replay_subject, r)
+        }
+        outbox.TooOld(_) -> {
+          // Gap too wide; fall back to session_history. Client's
+          // local state is wiped + rebuilt, no replay attempted.
+          spawn_history_query(cognitive, initial_messages, history_subject)
+        }
+      }
+    }
+    False -> spawn_history_query(cognitive, initial_messages, history_subject)
+  }
+
+  #(state, Some(selector))
+}
+
+/// Async helper — fires a GetMessages at cognitive and pushes the
+/// JSON onto the per-WS history channel. Pulled out of `ws_on_init`
+/// because it's the same shape whether we're starting fresh or
+/// falling back from a too-old replay.
+fn spawn_history_query(
+  cognitive: Subject(agent_types.CognitiveMessage),
+  initial_messages: List(Message),
+  history_subject: Subject(String),
+) -> Nil {
   process.spawn_unlinked(fn() {
     process.sleep(50)
     let msg_subject: Subject(List(Message)) = process.new_subject()
@@ -455,7 +609,6 @@ fn ws_on_init(
     let selector =
       process.new_selector()
       |> process.select(msg_subject)
-    // Wait up to 2s for cognitive loop to respond
     let live_messages = case process.selector_receive(selector, 2000) {
       Ok(msgs) -> msgs
       Error(_) -> initial_messages
@@ -475,8 +628,7 @@ fn ws_on_init(
       )
     process.send(history_subject, messages_json)
   })
-
-  #(state, Some(selector))
+  Nil
 }
 
 fn ws_handler(
@@ -502,22 +654,17 @@ fn ws_handler(
               case client_msg_id {
                 option.Some(id) -> {
                   let _ =
-                    mist.send_text_frame(
+                    ws_send(
+                      state,
                       conn,
-                      protocol.encode_server_message(protocol.UserMessageAck(
-                        client_msg_id: id,
-                      )),
+                      protocol.UserMessageAck(client_msg_id: id),
                     )
                   Nil
                 }
                 option.None -> Nil
               }
               // Send thinking indicator
-              let _ =
-                mist.send_text_frame(
-                  conn,
-                  protocol.encode_server_message(protocol.Thinking),
-                )
+              let _ = ws_send(state, conn, protocol.Thinking)
               // If the operator attached files since their last
               // message, inline them as an <operator_attachments>
               // block so the agent sees the file paths as part of the
@@ -543,11 +690,7 @@ fn ws_handler(
             }
             Ok(protocol.RequestLogData) -> {
               let entries = slog.load_entries()
-              let _ =
-                mist.send_text_frame(
-                  conn,
-                  protocol.encode_server_message(protocol.LogData(entries:)),
-                )
+              let _ = ws_send(state, conn, protocol.LogData(entries:))
               mist.continue(state)
             }
             Ok(protocol.RequestNarrativeData) -> {
@@ -562,21 +705,14 @@ fn ws_handler(
               }
               let entries_json =
                 json.to_string(json.array(entries, narrative_log.encode_entry))
-              let msg =
-                protocol.encode_server_message(protocol.NarrativeData(
-                  entries_json:,
-                ))
               slog.info(
                 "web/gui",
                 "narrative",
-                "Sending "
-                  <> int.to_string(list.length(entries))
-                  <> " entries ("
-                  <> int.to_string(string.byte_size(msg))
-                  <> " bytes)",
+                "Sending " <> int.to_string(list.length(entries)) <> " entries",
                 None,
               )
-              let _ = mist.send_text_frame(conn, msg)
+              let _ =
+                ws_send(state, conn, protocol.NarrativeData(entries_json:))
               mist.continue(state)
             }
             Ok(protocol.RequestSchedulerData) -> {
@@ -595,12 +731,7 @@ fn ws_handler(
                           scheduler_types.encode_job,
                         ))
                       let _ =
-                        mist.send_text_frame(
-                          conn,
-                          protocol.encode_server_message(protocol.SchedulerData(
-                            jobs_json:,
-                          )),
-                        )
+                        ws_send(state, conn, protocol.SchedulerData(jobs_json:))
                       Nil
                     }
                     Error(_) -> Nil
@@ -626,11 +757,10 @@ fn ws_handler(
                       let cycles_json =
                         json.to_string(json.array(cycles, encode_cycle_node))
                       let _ =
-                        mist.send_text_frame(
+                        ws_send(
+                          state,
                           conn,
-                          protocol.encode_server_message(
-                            protocol.SchedulerCyclesData(cycles_json:),
-                          ),
+                          protocol.SchedulerCyclesData(cycles_json:),
                         )
                       Nil
                     }
@@ -651,12 +781,10 @@ fn ws_handler(
                   let endeavours_json =
                     json.to_string(json.array(endeavours, encode_endeavour))
                   let _ =
-                    mist.send_text_frame(
+                    ws_send(
+                      state,
                       conn,
-                      protocol.encode_server_message(protocol.PlannerData(
-                        tasks_json:,
-                        endeavours_json:,
-                      )),
+                      protocol.PlannerData(tasks_json:, endeavours_json:),
                     )
                   Nil
                 }
@@ -683,12 +811,7 @@ fn ws_handler(
                           encode_dprime_gate,
                         ))
                       let _ =
-                        mist.send_text_frame(
-                          conn,
-                          protocol.encode_server_message(protocol.DprimeData(
-                            gates_json:,
-                          )),
-                        )
+                        ws_send(state, conn, protocol.DprimeData(gates_json:))
                       Nil
                     }
                     Error(_) -> Nil
@@ -715,12 +838,7 @@ fn ws_handler(
                 False -> base_json
               }
               let _ =
-                mist.send_text_frame(
-                  conn,
-                  protocol.encode_server_message(protocol.DprimeConfigData(
-                    config_json:,
-                  )),
-                )
+                ws_send(state, conn, protocol.DprimeConfigData(config_json:))
               mist.continue(state)
             }
             Ok(protocol.RequestCommsData) -> {
@@ -757,13 +875,7 @@ fn ws_handler(
                     ])
                   }),
                 )
-              let _ =
-                mist.send_text_frame(
-                  conn,
-                  protocol.encode_server_message(protocol.CommsData(
-                    messages_json:,
-                  )),
-                )
+              let _ = ws_send(state, conn, protocol.CommsData(messages_json:))
               mist.continue(state)
             }
             Ok(protocol.RequestAffectData) -> {
@@ -773,13 +885,7 @@ fn ws_handler(
                   snapshots,
                   affect_types.encode_snapshot,
                 ))
-              let _ =
-                mist.send_text_frame(
-                  conn,
-                  protocol.encode_server_message(protocol.AffectData(
-                    snapshots_json:,
-                  )),
-                )
+              let _ = ws_send(state, conn, protocol.AffectData(snapshots_json:))
               mist.continue(state)
             }
             Ok(protocol.RequestHistoryIndex) -> {
@@ -787,13 +893,7 @@ fn ws_handler(
               // per-day summaries: count, last activity, one-line headline.
               // Newest day first.
               let days_json = history_index_json(state.narrative_dir)
-              let _ =
-                mist.send_text_frame(
-                  conn,
-                  protocol.encode_server_message(protocol.HistoryIndex(
-                    days_json:,
-                  )),
-                )
+              let _ = ws_send(state, conn, protocol.HistoryIndex(days_json:))
               mist.continue(state)
             }
             Ok(protocol.RequestHistoryDay(date:)) -> {
@@ -801,13 +901,7 @@ fn ws_handler(
               let entries_json =
                 json.to_string(json.array(entries, narrative_log.encode_entry))
               let _ =
-                mist.send_text_frame(
-                  conn,
-                  protocol.encode_server_message(protocol.HistoryDay(
-                    date:,
-                    entries_json:,
-                  )),
-                )
+                ws_send(state, conn, protocol.HistoryDay(date:, entries_json:))
               mist.continue(state)
             }
             Ok(protocol.RequestSkillsData) -> {
@@ -852,12 +946,10 @@ fn ws_handler(
                 proposal_log.load_lines_for_date(paths.skills_log_dir(), today)
               let log_json = "[" <> string.join(log_lines, ",") <> "]"
               let _ =
-                mist.send_text_frame(
+                ws_send(
+                  state,
                   conn,
-                  protocol.encode_server_message(protocol.SkillsData(
-                    skills_json:,
-                    log_json:,
-                  )),
+                  protocol.SkillsData(skills_json:, log_json:),
                 )
               mist.continue(state)
             }
@@ -889,11 +981,7 @@ fn ws_handler(
                     ])
                   }),
                 )
-              let _ =
-                mist.send_text_frame(
-                  conn,
-                  protocol.encode_server_message(protocol.MemoryData(runs_json:)),
-                )
+              let _ = ws_send(state, conn, protocol.MemoryData(runs_json:))
               mist.continue(state)
             }
             Ok(protocol.RequestChatHistoryDay(date:)) -> {
@@ -916,25 +1004,24 @@ fn ws_handler(
                   }),
                 )
               let _ =
-                mist.send_text_frame(
+                ws_send(
+                  state,
                   conn,
-                  protocol.encode_server_message(protocol.ChatHistoryDay(
-                    date:,
-                    pairs_json:,
-                  )),
+                  protocol.ChatHistoryDay(date:, pairs_json:),
                 )
               mist.continue(state)
             }
             Ok(protocol.RequestRewind(index: _)) -> {
               // Rewind is no longer supported — agent starts fresh each session
               let _ =
-                mist.send_text_frame(
+                ws_send(
+                  state,
                   conn,
-                  protocol.encode_server_message(protocol.AssistantMessage(
+                  protocol.AssistantMessage(
                     text: "[Rewind not available — agent starts fresh each session. Use recall_recent to check history.]",
                     model: "system",
                     usage: None,
-                  )),
+                  ),
                 )
               mist.continue(state)
             }
@@ -943,12 +1030,7 @@ fn ws_handler(
               let documents_json =
                 json.to_string(json.array(docs, encode_doc_meta))
               let _ =
-                mist.send_text_frame(
-                  conn,
-                  protocol.encode_server_message(protocol.DocumentListData(
-                    documents_json:,
-                  )),
-                )
+                ws_send(state, conn, protocol.DocumentListData(documents_json:))
               mist.continue(state)
             }
             Ok(protocol.RequestDocumentView(doc_id:)) -> {
@@ -972,12 +1054,10 @@ fn ws_handler(
                   }
               }
               let _ =
-                mist.send_text_frame(
+                ws_send(
+                  state,
                   conn,
-                  protocol.encode_server_message(protocol.DocumentViewData(
-                    doc_id:,
-                    document_json:,
-                  )),
+                  protocol.DocumentViewData(doc_id:, document_json:),
                 )
               mist.continue(state)
             }
@@ -1011,12 +1091,10 @@ fn ws_handler(
               let results_json =
                 json.to_string(json.array(results, encode_search_result))
               let _ =
-                mist.send_text_frame(
+                ws_send(
+                  state,
                   conn,
-                  protocol.encode_server_message(protocol.SearchResultsData(
-                    query:,
-                    results_json:,
-                  )),
+                  protocol.SearchResultsData(query:, results_json:),
                 )
               mist.continue(state)
             }
@@ -1034,13 +1112,10 @@ fn ws_handler(
                 Error(reason) -> #("error", reason)
               }
               let _ =
-                mist.send_text_frame(
+                ws_send(
+                  state,
                   conn,
-                  protocol.encode_server_message(protocol.ApprovalResult(
-                    slug:,
-                    status:,
-                    message:,
-                  )),
+                  protocol.ApprovalResult(slug:, status:, message:),
                 )
               mist.continue(state)
             }
@@ -1048,13 +1123,14 @@ fn ws_handler(
               case string.trim(reason) {
                 "" -> {
                   let _ =
-                    mist.send_text_frame(
+                    ws_send(
+                      state,
                       conn,
-                      protocol.encode_server_message(protocol.ApprovalResult(
+                      protocol.ApprovalResult(
                         slug:,
                         status: "error",
                         message: "Rejection reason must not be empty",
-                      )),
+                      ),
                     )
                   mist.continue(state)
                 }
@@ -1072,17 +1148,25 @@ fn ws_handler(
                     Error(r) -> #("error", r)
                   }
                   let _ =
-                    mist.send_text_frame(
+                    ws_send(
+                      state,
                       conn,
-                      protocol.encode_server_message(protocol.ApprovalResult(
-                        slug:,
-                        status:,
-                        message:,
-                      )),
+                      protocol.ApprovalResult(slug:, status:, message:),
                     )
                   mist.continue(state)
                 }
               }
+            }
+            Ok(protocol.Ack(seq:)) -> {
+              client_registry.ack(state.registry, state.client_id, seq)
+              mist.continue(state)
+            }
+            Ok(protocol.Pong) -> {
+              // Keepalive reply — no action needed. The mere fact
+              // that we received any text frame means the connection
+              // is alive; mist's idle-timeout (if any) reset on
+              // receive. No state change required.
+              mist.continue(state)
             }
             Error(_) -> mist.continue(state)
           }
@@ -1095,8 +1179,7 @@ fn ws_handler(
       case delivery {
         DeliverReply(cycle_id: _, response:, model:, usage:, tools_fired: _) -> {
           let msg = protocol.AssistantMessage(text: response, model:, usage:)
-          let _ =
-            mist.send_text_frame(conn, protocol.encode_server_message(msg))
+          let _ = ws_send(state, conn, msg)
           mist.continue(state)
         }
         DeliverQuestion(cycle_id: _, question_id: _, question:, origin:) -> {
@@ -1105,8 +1188,7 @@ fn ws_handler(
             AgentOrigin(agent_name:) -> protocol.agent_source(agent_name)
           }
           let msg = protocol.Question(text: question, source: source_str)
-          let _ =
-            mist.send_text_frame(conn, protocol.encode_server_message(msg))
+          let _ = ws_send(state, conn, msg)
           mist.continue(state)
         }
         DeliverClosed -> mist.stop()
@@ -1116,18 +1198,48 @@ fn ws_handler(
     // Notification arrived via selector
     mist.Custom(GotNotification(notification)) -> {
       let server_msg = notification_to_server_message(notification)
-      let _ =
-        mist.send_text_frame(conn, protocol.encode_server_message(server_msg))
+      let _ = ws_send(state, conn, server_msg)
       mist.continue(state)
     }
 
     // Session history on connect
     mist.Custom(SendHistory(messages_json)) -> {
+      let _ = ws_send(state, conn, protocol.SessionHistory(messages_json:))
+      mist.continue(state)
+    }
+
+    // Outbox replay on reconnect with `?since=N`. Each frame ships
+    // with its ORIGINAL seq (from when the previous WS process
+    // emitted it), not a fresh one — the client uses these seqs to
+    // advance its `lastSeenSeq` cursor as if it had received them
+    // live. Frames go straight to the wire; we don't go through
+    // ws_send because that would re-append to the outbox and double
+    // the sequence numbers.
+    mist.Custom(ReplayReady(replay)) -> {
+      case replay {
+        outbox.Replay(frames) -> {
+          list.each(frames, fn(frame) {
+            let _ =
+              mist.send_text_frame(
+                conn,
+                protocol.splice_seq(frame.seq, frame.body_json),
+              )
+            Nil
+          })
+        }
+        _ -> Nil
+      }
+      mist.continue(state)
+    }
+
+    // Keepalive — emit a Ping (seq:0, doesn't enter outbox) and
+    // re-arm the timer. If the connection has gone silent, the
+    // mist.send_text_frame fails and the process moves to
+    // mist.Closed; the client reconnects fast.
+    mist.Custom(KeepaliveTick) -> {
+      let _ = ws_send(state, conn, protocol.Ping)
       let _ =
-        mist.send_text_frame(
-          conn,
-          protocol.encode_server_message(protocol.SessionHistory(messages_json:)),
-        )
+        process.send_after(state.keepalive_subject, keepalive_tick_ms, Nil)
       mist.continue(state)
     }
 
