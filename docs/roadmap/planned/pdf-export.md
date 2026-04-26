@@ -20,7 +20,7 @@ real-world delivery (clients, regulators, archivists) the
 deliverable is a PDF.
 
 There's no `export_pdf` tool. There's no PDF anywhere in the
-pipeline. The pdftotext binary used for *ingestion* doesn't run in
+pipeline. The unpdf binary used for *ingestion* doesn't run in
 reverse.
 
 ## Approach
@@ -102,11 +102,11 @@ Per the user's "update everything" instruction:
 1. **`docs/operators-manual.md`** — install section gains tectonic
    (`brew install tectonic` macOS, curl-from-releases Linux).
 2. **`scripts/setup/macos.sh`** — add `brew install tectonic` (and
-   pandoc + poppler if not already there — they should be, but
+   pandoc + unpdf if not already there — they should be, but
    currently aren't in the setup script even though the manual
    names them).
-3. **`scripts/setup/linux.sh`** — `apt install pandoc poppler-utils`
-   and a curl line for tectonic with a SHA check.
+3. **`scripts/setup/linux.sh`** — `apt install pandoc` and curl
+   lines for unpdf and tectonic with SHA checks.
 4. **New skill** — `writer-pdf-export/SKILL.md` teaching the writer
    when to call `export_pdf` (after operator approval, not before;
    not on drafts; one PDF per slug per export, regenerate after
@@ -123,7 +123,7 @@ Per the user's "update everything" instruction:
 
 - Markdown happy path: small fixture → pandoc + tectonic → output
   PDF exists, file size > 0. Skip cleanly if tectonic isn't on
-  PATH (same pattern as the existing `pdftotext` skip in PR 6).
+  PATH (same pattern as the existing `unpdf` skip in PR 6).
 - BinaryMissing path: mock the run_cmd to return a "command not
   found" error; verify the agent gets the install hint.
 - Slug containment: an attempt to export a slug that traverses out

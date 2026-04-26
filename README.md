@@ -107,9 +107,10 @@ compatibility promises). Each release is summarised in
 - Ollama (optional -- semantic embeddings for CBR retrieval; the system
   works without it but retrieval quality is reduced)
 - AgentMail account (optional -- email send/receive; free at https://agentmail.to)
-- poppler-utils (optional -- `pdftotext` for ingesting PDFs into the
-  knowledge library; without it, PDF files dropped into
-  `.springdrift/knowledge/inbox/` are skipped with a clean error)
+- unpdf (optional -- structured PDF→markdown for ingesting PDFs into
+  the knowledge library; without it, PDF files dropped into
+  `.springdrift/knowledge/inbox/` are skipped with a clean error.
+  Download from https://github.com/iyulab/unpdf/releases/latest)
 - Pandoc (optional -- converts HTML / docx / epub into markdown for
   knowledge-library ingestion; without it, those formats are skipped
   with a clean error)

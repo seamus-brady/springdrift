@@ -112,12 +112,12 @@ fn sanitise_filename(filename: String) -> Result(String, String) {
 /// Reason a single intray file could not be normalised.
 /// Distinct variants so operator-facing messages can be specific —
 /// `BinaryMissing` is fixable by installing the host package
-/// (poppler-utils for pdftotext, pandoc for docx/epub/html);
+/// (unpdf for PDFs, pandoc for docx/epub/html);
 /// `UnsupportedExtension` means the file type isn't in our list at
 /// all; `ConversionFailed` is everything else the converter raised.
 pub type ProcessFailure {
   /// The host is missing the binary needed to convert this file
-  /// (e.g. `pdftotext`). Operator action: install it.
+  /// (e.g. `unpdf`). Operator action: install it.
   BinaryMissing(filename: String, binary: String)
   /// The file extension isn't in the supported set. Operator
   /// action: convert before uploading.
@@ -260,8 +260,10 @@ pub fn format_failure(f: ProcessFailure) -> String {
       <> "' could not be normalised — '"
       <> binary
       <> "' is not installed on the host. "
-      <> "Install it (e.g. `apt install poppler-utils` for pdftotext, "
-      <> "`apt install pandoc` for pandoc) and re-trigger intake."
+      <> "Install it (unpdf: download from "
+      <> "https://github.com/iyulab/unpdf/releases/latest; "
+      <> "pandoc: `apt install pandoc` or `brew install pandoc`) "
+      <> "and re-trigger intake."
     UnsupportedExtension(filename:, extension:) ->
       "'"
       <> filename
@@ -284,7 +286,7 @@ fn process_file(
 ) -> Result(NormalisedFile, String) {
   let source_path = intray_dir <> "/" <> filename
   // Route through the converter — markdown/txt read as-is, others shell
-  // out to pdftotext / pandoc. Errors leave the file in the intray so
+  // out to unpdf / pandoc. Errors leave the file in the intray so
   // the operator can see it and investigate.
   case converter.convert(source_path) {
     Error(converter.UnsupportedExtension(extension:)) ->

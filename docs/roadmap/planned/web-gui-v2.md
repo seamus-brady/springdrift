@@ -275,7 +275,7 @@ Operators can upload documents through the UI for the Learner Ingestion system (
 
 - Markdown (.md) — stored directly
 - Plain text (.txt) — stored directly
-- PDF (.pdf) — text extracted, stored as markdown (requires Python `pdftotext` or similar)
+- PDF (.pdf) — text extracted, stored as structured markdown (requires `unpdf` binary)
 - Word (.docx) — text extracted, stored as markdown
 
 ### Download / Export

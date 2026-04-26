@@ -135,9 +135,11 @@ else
 fi
 
 # ── Document converters (optional) ──────────────────────────────────────────
-# pandoc + poppler power document ingestion (PDFs / .docx / .epub / .html →
-# markdown). pandoc + tectonic power export_pdf (markdown → PDF on the way
-# out). All optional — operations skip with a clear error when missing.
+# pandoc handles HTML / docx / epub ingestion + markdown → PDF on export.
+# unpdf handles PDF → structured markdown on ingestion (real H1/H2 detection
+# from font sizes — replaces the older pdftotext path which produced flat
+# text and broke the indexer's tree builder).
+# All optional — operations skip with a clear error when missing.
 if command -v pandoc &>/dev/null; then
   ok "pandoc (already installed)"
 else
@@ -147,12 +149,34 @@ else
   fi
 fi
 
-if command -v pdftotext &>/dev/null; then
-  ok "poppler-utils (already installed — provides pdftotext)"
+if command -v unpdf &>/dev/null; then
+  ok "unpdf (already installed — structured PDF → markdown)"
 else
-  if ask_yn "Install poppler-utils? (provides pdftotext for PDF ingestion)"; then
-    brew install poppler
-    command -v pdftotext &>/dev/null || warn "poppler installation failed — PDF ingestion will skip"
+  if ask_yn "Install unpdf? (structured PDF → markdown for ingestion)"; then
+    # No Homebrew formula — download the prebuilt binary from GitHub
+    # Releases. arm64 vs x86_64 detected from `uname -m`.
+    UNPDF_VERSION="v0.4.5"
+    UNPDF_ARCH="$(uname -m)"
+    case "$UNPDF_ARCH" in
+      arm64|aarch64) UNPDF_TRIPLE="macos-aarch64" ;;
+      x86_64)        UNPDF_TRIPLE="macos-x86_64" ;;
+      *) warn "unpdf: unsupported arch '$UNPDF_ARCH' — skipping"; UNPDF_TRIPLE="" ;;
+    esac
+    if [ -n "$UNPDF_TRIPLE" ]; then
+      UNPDF_URL="https://github.com/iyulab/unpdf/releases/download/${UNPDF_VERSION}/unpdf-${UNPDF_TRIPLE}-${UNPDF_VERSION}.tar.gz"
+      TMPDIR_UNPDF="$(mktemp -d)"
+      if curl -fsSL "$UNPDF_URL" | tar -xz -C "$TMPDIR_UNPDF"; then
+        sudo mv "$TMPDIR_UNPDF/unpdf" /usr/local/bin/unpdf
+        sudo chmod +x /usr/local/bin/unpdf
+        rm -rf "$TMPDIR_UNPDF"
+        command -v unpdf &>/dev/null \
+          && ok "unpdf installed to /usr/local/bin/unpdf" \
+          || warn "unpdf installation failed — PDF ingestion will skip"
+      else
+        rm -rf "$TMPDIR_UNPDF"
+        warn "unpdf download failed — PDF ingestion will skip"
+      fi
+    fi
   fi
 fi
 

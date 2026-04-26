@@ -3,9 +3,9 @@
 //// Two layers of test:
 ////
 //// 1. Pure dispatch logic (extension_of, is_supported) — always run.
-//// 2. End-to-end: actually invoke pdftotext on a fixture PDF. Gracefully
+//// 2. End-to-end: actually invoke unpdf on a fixture PDF. Gracefully
 ////    skips if the host binary isn't present so CI doesn't fail on a
-////    machine without poppler-utils. Also exercises the
+////    machine without unpdf installed. Also exercises the
 ////    BinaryMissing error path for pandoc (which is unlikely to be
 ////    installed everywhere).
 
@@ -126,13 +126,13 @@ pub fn convert_rejects_unsupported_extension_test() {
 }
 
 // ---------------------------------------------------------------------------
-// End-to-end: PDF conversion via pdftotext
+// End-to-end: PDF conversion via unpdf
 // ---------------------------------------------------------------------------
 
-pub fn convert_pdf_via_pdftotext_test() {
-  // Skip if pdftotext isn't on PATH — don't fail CI on machines
-  // without poppler-utils.
-  case exec.which("pdftotext") {
+pub fn convert_pdf_via_unpdf_test() {
+  // Skip if unpdf isn't on PATH — don't fail CI on machines without
+  // unpdf installed.
+  case exec.which("unpdf") {
     Error(_) -> Nil
     Ok(_) -> {
       // Fixture PDF ships in the repo under test/fixtures/sample.pdf.

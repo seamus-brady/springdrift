@@ -272,7 +272,7 @@ can verify every citation traces back to a stored source.
 
 PDF is a first-class format, not an afterthought:
 
-1. **Text extraction** — via Erlang `:pdf` module or external tool (`pdftotext`)
+1. **Text extraction** — via external tool (`unpdf` — emits structured markdown with real headings)
 2. **Page-level indexing** — tree nodes carry `page` numbers, not just line numbers
 3. **Fallback** — if text extraction fails (scanned PDF, complex layout),
    store the raw file and log a warning. The agent can still reference it

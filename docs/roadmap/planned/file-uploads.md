@@ -58,6 +58,6 @@ additional tooling.
 - Should uploads go through D' safety evaluation? The content is
   operator-provided, so the input gate fast-accept path may be appropriate.
 - PDF text extraction — use an existing Erlang library or shell out to
-  `pdftotext`?
+  `unpdf`?
 - Should the TUI also support file references (e.g. `/upload path/to/file`)?
 - Interaction with the planned document library feature?

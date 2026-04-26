@@ -66,8 +66,8 @@ Append, don't replace. New entries on top with a date stamp:
   unusually clean section structure.
 
 ## 2026-04-23
-- Why does pdftotext lose two-column layout? Could marker be
-  better? Open question.
+- Why does unpdf misclassify some Python comments as headings? Could
+  the indexer pre-strip code fences? Open question.
 ```
 
 When `update_draft` (or here, `write_note`) replaces the file, **read

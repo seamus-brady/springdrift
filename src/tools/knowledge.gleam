@@ -466,8 +466,8 @@ fn run_list_intray(
           let footer =
             "\n\nFiles sit here until intake.process normalises them. "
             <> "If a file is stuck, the binary needed to convert it "
-            <> "may not be installed on the host (e.g. pdftotext for "
-            <> ".pdf via poppler-utils, pandoc for .docx/.epub/.html). "
+            <> "may not be installed on the host (e.g. unpdf for "
+            <> ".pdf, pandoc for .docx/.epub/.html). "
             <> "The deposit handler logs a specific failure reason; "
             <> "check the operator chat for the upload result."
           llm_types.ToolSuccess(

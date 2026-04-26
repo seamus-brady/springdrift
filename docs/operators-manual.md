@@ -865,15 +865,26 @@ Office documents into `.springdrift/knowledge/intray/`, and for
 generating PDFs from approved exports):
 
 ```bash
-apt install -y poppler-utils pandoc
+# pandoc handles HTML / docx / epub on ingest, and markdown → PDF on export
+apt install -y pandoc
+
+# unpdf handles PDF → structured markdown on ingest. Single Rust
+# binary downloaded from GitHub Releases; no Rust toolchain needed.
+curl -L \
+  https://github.com/iyulab/unpdf/releases/latest/download/unpdf-linux-x86_64-v0.4.5.tar.gz \
+  | tar xz -C /usr/local/bin unpdf
+chmod +x /usr/local/bin/unpdf
 ```
 
-`poppler-utils` provides `pdftotext`, used for PDF ingestion.
-`pandoc` handles HTML, docx, and epub on the way in, and markdown
-→ PDF on the way out. Both are optional — if absent, the relevant
-operations skip with a specific error message — but PDF is the
-dominant real-world document format so you'll want poppler at
-minimum.
+`unpdf` extracts PDFs into structured markdown — real `#` / `##`
+headings detected from PDF font sizes — which the document-library
+indexer needs to build a navigable section tree. (The previous
+backend, `pdftotext`, emitted flat text with no headings, so the
+indexer couldn't tell chapters from paragraphs.) `pandoc` handles
+HTML, docx, and epub on the way in, and markdown → PDF on the way
+out. Both are optional — if absent, the relevant operations skip
+with a specific error message — but PDF is the dominant real-world
+document format so you'll want `unpdf` at minimum.
 
 For PDF *generation* (the writer's `export_pdf` tool), install
 `tectonic` as well — pandoc by itself doesn't render PDFs, it

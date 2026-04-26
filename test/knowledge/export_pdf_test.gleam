@@ -144,7 +144,7 @@ pub fn slug_with_path_traversal_does_not_escape_exports_test() {
 // ---------------------------------------------------------------------------
 // Happy path — runs only if pandoc + tectonic are on PATH so CI
 // without the binaries stays green. Same skip pattern as the
-// existing pdftotext-dependent tests.
+// existing unpdf-dependent tests.
 // ---------------------------------------------------------------------------
 
 pub fn export_pdf_renders_when_binaries_present_test() {
