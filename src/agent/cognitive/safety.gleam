@@ -30,6 +30,7 @@ import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
+import llm/message_history
 import llm/provider
 import llm/types as llm_types
 import narrative/librarian
@@ -44,11 +45,12 @@ fn get_datetime() -> String
 /// Add a synthetic assistant message to state so message history stays
 /// well-formed (alternating user/assistant) when going to Idle after an error.
 fn with_assistant_error(state: CognitiveState, text: String) -> CognitiveState {
-  let msg =
-    llm_types.Message(role: llm_types.Assistant, content: [
+  CognitiveState(
+    ..state,
+    messages: message_history.add_assistant(state.messages, [
       llm_types.TextContent(text:),
-    ])
-  CognitiveState(..state, messages: list.append(state.messages, [msg]))
+    ]),
+  )
 }
 
 /// Technical rejection notice for the agent — goes to notification channel,
@@ -174,7 +176,7 @@ pub fn spawn_safety_gate(
     |> string.join("; ")
 
   // Build context from recent messages (character-budget walker, all content types)
-  let ctx = build_context_string(state.messages, 2000)
+  let ctx = build_context_string(message_history.to_list(state.messages), 2000)
 
   let det_config = state.config.deterministic_config
   let redact_secrets = state.redact_secrets
@@ -418,8 +420,6 @@ pub fn handle_safety_gate_complete(
                   <> "]",
               )
             })
-          let assistant_msg =
-            llm_types.Message(role: llm_types.Assistant, content: resp.content)
           let result_blocks =
             list.map(error_results, fn(r) {
               case r {
@@ -437,9 +437,10 @@ pub fn handle_safety_gate_complete(
                   )
               }
             })
-          let user_msg =
-            llm_types.Message(role: llm_types.User, content: result_blocks)
-          let messages = list.append(state.messages, [assistant_msg, user_msg])
+          let messages =
+            state.messages
+            |> message_history.add_assistant(resp.content)
+            |> message_history.add_user(result_blocks)
           let new_task_id = cycle_log.generate_uuid()
           let req = cognitive_llm.build_request(state, messages)
           worker.spawn_think(
@@ -470,17 +471,15 @@ pub fn handle_safety_gate_complete(
         }
         _ -> {
           // Normal MODIFY — append caution instruction and re-think
-          let assistant_msg =
-            llm_types.Message(role: llm_types.Assistant, content: resp.content)
-          let modify_msg =
-            llm_types.Message(role: llm_types.User, content: [
+          let messages =
+            state.messages
+            |> message_history.add_assistant(resp.content)
+            |> message_history.add_user([
               llm_types.TextContent(
                 text: build_rejection_notice("tool", result, "tool dispatch")
                 <> " Please reconsider your approach and proceed with additional caution.",
               ),
             ])
-          let messages =
-            list.append(state.messages, [assistant_msg, modify_msg])
           let new_task_id = cycle_log.generate_uuid()
           let req = cognitive_llm.build_request(state, messages)
           case state.verbose {
@@ -518,8 +517,6 @@ pub fn handle_safety_gate_complete(
 
     dprime_types.Reject -> {
       // Generate error tool results for all calls and continue
-      let assistant_msg =
-        llm_types.Message(role: llm_types.Assistant, content: resp.content)
       let error_blocks =
         list.map(calls, fn(call) {
           llm_types.ToolResultContent(
@@ -532,9 +529,10 @@ pub fn handle_safety_gate_complete(
             is_error: True,
           )
         })
-      let user_msg =
-        llm_types.Message(role: llm_types.User, content: error_blocks)
-      let messages = list.append(state.messages, [assistant_msg, user_msg])
+      let messages =
+        state.messages
+        |> message_history.add_assistant(resp.content)
+        |> message_history.add_user(error_blocks)
 
       let new_task_id = cycle_log.generate_uuid()
       let req = cognitive_llm.build_request(state, messages)
@@ -591,7 +589,8 @@ pub fn spawn_input_safety_gate(
   let scorer_model = state.task_model
   let verbose = state.verbose
   let instruction = text
-  let base_ctx = build_context_string(state.messages, 2000)
+  let base_ctx =
+    build_context_string(message_history.to_list(state.messages), 2000)
   // Phase D follow-up — meta-learning. Prepend any persisted
   // affect-performance correlation warnings (negative r ≤ -0.4) so the
   // input gate's LLM scorer can weight risk against the agent's known
@@ -963,14 +962,13 @@ pub fn handle_input_safety_gate_complete(
 
     dprime_types.Modify -> {
       // Inject a caution message into history, then proceed
-      let caution_msg =
-        llm_types.Message(role: llm_types.User, content: [
+      let messages =
+        message_history.add_user(state.messages, [
           llm_types.TextContent(
             text: build_rejection_notice("input", result, "user query")
             <> " Please proceed with additional caution.",
           ),
         ])
-      let messages = list.append(state.messages, [caution_msg])
       cognitive_llm.proceed_with_model(
         CognitiveState(..state, messages:),
         model,
@@ -1137,7 +1135,7 @@ pub fn handle_post_execution_gate_complete(
 pub fn check_deterministic_only(
   state: CognitiveState,
   reply_text: String,
-  messages: List(llm_types.Message),
+  messages: message_history.MessageHistory,
   task_id: String,
   usage: llm_types.Usage,
 ) -> CognitiveState {
@@ -1237,7 +1235,7 @@ pub fn spawn_output_gate(
   state: CognitiveState,
   output_state: dprime_types.DprimeState,
   report_text: String,
-  messages: List(llm_types.Message),
+  messages: message_history.MessageHistory,
   task_id: String,
   modification_count: Int,
 ) -> CognitiveState {
@@ -1249,7 +1247,7 @@ pub fn spawn_output_gate(
   // Use the most recent user message as query context, not the potentially
   // stale last_user_input which may predate multiple tool turns (BF-05).
   let query =
-    list.reverse(state.messages)
+    list.reverse(message_history.to_list(state.messages))
     |> list.find_map(fn(m) {
       case m.role {
         llm_types.User ->
@@ -1465,14 +1463,13 @@ pub fn handle_output_gate_complete(
             "Output gate: MODIFY (" <> explanation <> ")",
             state.cycle_id,
           )
-          let correction_msg =
-            llm_types.Message(role: llm_types.User, content: [
+          let messages =
+            message_history.add_user(state.messages, [
               llm_types.TextContent(
                 text: "[SYSTEM: Your response was NOT delivered to the user. The quality gate flagged specific issues listed below. IMPORTANT: Fix ONLY the flagged issues. Preserve all other content, structure, and tone from your original response. Do not remove information that was not flagged. Do not add unnecessary hedging or caveats. Produce a corrected version of your full response.]\n\nFlagged issues:\n"
                 <> explanation,
               ),
             ])
-          let messages = list.append(state.messages, [correction_msg])
           let new_state = CognitiveState(..state, messages:)
           let task_id = cycle_log.generate_uuid()
           let req = cognitive_llm.build_request(new_state, messages)

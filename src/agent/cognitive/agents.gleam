@@ -36,6 +36,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import knowledge/search as knowledge_search
+import llm/message_history
 import llm/response
 import llm/types as llm_types
 import narrative/appraiser
@@ -211,9 +212,7 @@ fn handle_own_human_input(
     frontdoor_types.CognitiveLoopOrigin,
   )
 
-  let assistant_msg =
-    llm_types.Message(role: llm_types.Assistant, content: resp.content)
-  let messages = list.append(state.messages, [assistant_msg])
+  let messages = message_history.add_assistant(state.messages, resp.content)
 
   let ctx = OwnToolWaiting(tool_use_id: call.id)
 
@@ -472,11 +471,10 @@ fn handle_memory_tools(
   case remaining_calls {
     [] -> {
       // Only memory calls — add results to messages and re-think
-      let assistant_msg =
-        llm_types.Message(role: llm_types.Assistant, content: resp.content)
-      let user_msg =
-        llm_types.Message(role: llm_types.User, content: memory_results)
-      let messages = list.append(state.messages, [assistant_msg, user_msg])
+      let messages =
+        state.messages
+        |> message_history.add_assistant(resp.content)
+        |> message_history.add_user(memory_results)
 
       let new_task_id = cycle_log.generate_uuid()
       let cycle_id = option.unwrap(state.cycle_id, new_task_id)
@@ -537,11 +535,10 @@ fn handle_memory_tools(
       case agent_calls {
         [] -> {
           // No agent calls either — just memory + unknown tools, re-think
-          let assistant_msg =
-            llm_types.Message(role: llm_types.Assistant, content: resp.content)
-          let user_msg =
-            llm_types.Message(role: llm_types.User, content: initial)
-          let messages = list.append(state.messages, [assistant_msg, user_msg])
+          let messages =
+            state.messages
+            |> message_history.add_assistant(resp.content)
+            |> message_history.add_user(initial)
           let new_task_id = cycle_log.generate_uuid()
           let cycle_id = option.unwrap(state.cycle_id, new_task_id)
           // Check for mid-cycle escalation before re-thinking
@@ -625,9 +622,7 @@ fn dispatch_agent_calls(
         "" -> "No agent tools matched."
         t -> t
       }
-      let assistant_msg =
-        llm_types.Message(role: llm_types.Assistant, content: resp.content)
-      let messages = list.append(state.messages, [assistant_msg])
+      let messages = message_history.add_assistant(state.messages, resp.content)
       output.send_reply(
         state,
         reply_text,
@@ -996,8 +991,6 @@ fn do_dispatch_agents(
       // that, every subsequent cycle re-sends this orphaned tool_use
       // and the API 400s. Emit a user message with synthesised error
       // tool_result blocks for every tool_use we refused to dispatch.
-      let assistant_msg =
-        llm_types.Message(role: llm_types.Assistant, content: resp.content)
       let tool_use_calls =
         list.filter_map(resp.content, fn(block) {
           case block {
@@ -1014,11 +1007,12 @@ fn do_dispatch_agents(
             is_error: True,
           )
         })
-      let user_msg =
-        llm_types.Message(role: llm_types.User, content: error_results)
       let messages = case error_results {
-        [] -> list.append(state.messages, [assistant_msg])
-        _ -> list.append(state.messages, [assistant_msg, user_msg])
+        [] -> message_history.add_assistant(state.messages, resp.content)
+        _ ->
+          state.messages
+          |> message_history.add_assistant(resp.content)
+          |> message_history.add_user(error_results)
       }
       CognitiveState(
         ..state,
@@ -1045,9 +1039,7 @@ fn do_dispatch_agents(
       let pending_ids = list.append(agent_pending_ids, coder_pending_ids)
 
       // Add assistant message with tool use content
-      let assistant_msg =
-        llm_types.Message(role: llm_types.Assistant, content: resp.content)
-      let messages = list.append(state.messages, [assistant_msg])
+      let messages = message_history.add_assistant(state.messages, resp.content)
 
       // Insert new pending entries (agents + coder dispatches) into the dict
       let new_pending =
@@ -1488,10 +1480,11 @@ pub fn handle_agent_complete(
             _ -> [tool_result_block]
           }
 
-          // Build ONE user message with ALL accumulated results
-          let user_msg =
-            llm_types.Message(role: llm_types.User, content: all_results)
-          let messages = list.append(state.messages, [user_msg])
+          // Build ONE user message with ALL accumulated results.
+          // MessageHistory.add_user strips any orphan tool_result whose
+          // tool_use_id isn't paired with a tool_use in the prior assistant
+          // message — invariant maintained by construction.
+          let messages = message_history.add_user(state.messages, all_results)
 
           // Spawn post-execution D' re-check if enabled
           let result_text =
@@ -1661,9 +1654,7 @@ pub fn handle_coder_dispatch_complete(
               list.append(accumulated_results, [tool_result_block])
             _ -> [tool_result_block]
           }
-          let user_msg =
-            llm_types.Message(role: llm_types.User, content: all_results)
-          let messages = list.append(state.messages, [user_msg])
+          let messages = message_history.add_user(state.messages, all_results)
           let new_task_id = cycle_log.generate_uuid()
           let cycle_id = option.unwrap(state.cycle_id, new_task_id)
           let state = CognitiveState(..state, messages:, pending: remaining)
@@ -1922,9 +1913,8 @@ pub fn handle_user_answer(
           content: answer,
           is_error: False,
         )
-      let user_msg =
-        llm_types.Message(role: llm_types.User, content: [tool_result_block])
-      let messages = list.append(state.messages, [user_msg])
+      let messages =
+        message_history.add_user(state.messages, [tool_result_block])
 
       // Spawn a continuation think worker
       let new_task_id = cycle_log.generate_uuid()
@@ -2342,7 +2332,7 @@ pub fn dispatch_deferred(
         })
       CognitiveState(
         ..state,
-        messages: list.append(state.messages, error_results),
+        messages: message_history.add_all(state.messages, error_results),
       )
     }
     True -> {
