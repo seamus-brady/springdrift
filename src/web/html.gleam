@@ -2350,11 +2350,20 @@ pub fn admin_page(agent_name: String, agent_version: String) -> String {
     return '<span style=\"font-size:10px;text-transform:uppercase;letter-spacing:.05em;padding:1px 5px;border-radius:3px;border:1px solid ' + color + ';color:' + color + '\">' + escapeHtml(label || '?') + '</span>';
   }
 
-  function renderDocumentView(docId, documentJson) {
-    var doc;
-    try { doc = JSON.parse(documentJson); }
-    catch (e) {
-      showDocumentToast('error', 'Failed to parse document: ' + e.message);
+  function renderDocumentView(docId, payload) {
+    // The server embeds the document as a JSON object in the envelope, so
+    // it is already parsed by the outer JSON.parse on the WS frame. Accept
+    // a string too for defensive compatibility.
+    var doc = payload;
+    if (typeof doc === 'string') {
+      try { doc = JSON.parse(doc); }
+      catch (e) {
+        showDocumentToast('error', 'Failed to parse document: ' + e.message);
+        return;
+      }
+    }
+    if (!doc || typeof doc !== 'object') {
+      showDocumentToast('error', 'Failed to parse document: unexpected payload');
       return;
     }
     if (doc.error) {
