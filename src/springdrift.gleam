@@ -75,6 +75,7 @@ import scheduler/types as scheduler_types
 import simplifile
 import skills
 import slog
+import strategy/seed as strategy_seed
 import tools/cache
 import tools/how_to_content
 import tools/knowledge as tools_knowledge
@@ -509,6 +510,16 @@ fn run(cfg: AppConfig) -> Nil {
       option.None,
     )
   librarian.init_captures(librarian_subj, paths.captures_dir())
+
+  // Seed the Strategy Registry's floor strategies on a fresh instance.
+  // No-op when the registry already has any events — operator-curated
+  // and CBR-mined strategies are never disturbed. The four floor
+  // strategies (reconnaissance-first, search-then-read,
+  // synthesise-in-root, parallel-after-reconnaissance) are derived
+  // from the 2026-04-26 Nemo session and ship in
+  // .springdrift_example/skills/orchestration-large-inputs and
+  // .springdrift_example/skills/when-to-use-writer.
+  let _ = strategy_seed.seed_if_empty(paths.strategy_log_dir())
 
   // Start the Housekeeper (non-critical — log + continue on failure)
   let hk_default = housekeeper.default_config()

@@ -25,8 +25,8 @@ import simplifile
 import slog
 import strategy/types.{
   type Strategy, type StrategyEvent, type StrategySource, Observed,
-  OperatorDefined, Proposed, Strategy, StrategyArchived, StrategyCreated,
-  StrategyDescriptionUpdated, StrategyOutcome, StrategyRenamed,
+  OperatorDefined, Proposed, SkillSeeded, Strategy, StrategyArchived,
+  StrategyCreated, StrategyDescriptionUpdated, StrategyOutcome, StrategyRenamed,
   StrategySuperseded, StrategyUsed,
 }
 
@@ -537,6 +537,7 @@ fn encode_source(s: StrategySource) -> String {
     Observed -> "observed"
     Proposed -> "proposed"
     OperatorDefined -> "operator_defined"
+    SkillSeeded -> "skill_seeded"
   }
 }
 
@@ -545,6 +546,7 @@ fn decode_source(s: String) -> StrategySource {
     "observed" -> Observed
     "proposed" -> Proposed
     "operator_defined" -> OperatorDefined
+    "skill_seeded" -> SkillSeeded
     _ -> Observed
   }
 }
