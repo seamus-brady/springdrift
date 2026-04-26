@@ -36,6 +36,7 @@ import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
+import llm/message_history
 import llm/response
 import llm/types as llm_types
 import meta/log as meta_log
@@ -121,7 +122,7 @@ pub fn start(
         max_tokens: cfg.max_tokens,
         max_context_messages: cfg.max_context_messages,
         tools:,
-        messages: cfg.initial_messages,
+        messages: message_history.from_list(cfg.initial_messages),
         registry: cfg.registry,
         pending: dict.new(),
         status: Idle,
@@ -344,7 +345,9 @@ fn handle_message(
     types.SetScheduler(scheduler) ->
       CognitiveState(..state, scheduler: Some(scheduler))
     types.GetMessages(reply_to:) -> {
-      process.send(reply_to, state.messages)
+      // GetMessages is the WS / TUI snapshot path — they want a flat
+      // List(Message) for rendering. for_send is the wire export.
+      process.send(reply_to, message_history.for_send(state.messages))
       state
     }
     types.Ping(reply_to:) -> {
@@ -1147,13 +1150,12 @@ fn handle_think_complete(
                 state.cycle_id,
               )
               let new_task_id = cycle_log.generate_uuid()
-              let nudge_msg =
-                llm_types.Message(role: llm_types.User, content: [
+              let retry_messages =
+                message_history.add_user(state.messages, [
                   llm_types.TextContent(
                     "Your previous response was empty. Please provide a substantive response.",
                   ),
                 ])
-              let retry_messages = list.append(state.messages, [nudge_msg])
               let req =
                 cognitive_llm.build_request_with_model(
                   state,
@@ -1200,8 +1202,8 @@ fn handle_think_complete(
                     state.cycle_id,
                   )
                   let new_task_id = cycle_log.generate_uuid()
-                  let nudge_msg =
-                    llm_types.Message(role: llm_types.User, content: [
+                  let retry_messages =
+                    message_history.add_user(state.messages, [
                       llm_types.TextContent(
                         "Your previous response was cut off at the token cap"
                         <> " (output_tokens="
@@ -1222,7 +1224,6 @@ fn handle_think_complete(
                         <> " a different result.",
                       ),
                     ])
-                  let retry_messages = list.append(state.messages, [nudge_msg])
                   let req =
                     cognitive_llm.build_request_with_model(
                       state,
@@ -1299,12 +1300,8 @@ fn handle_think_complete(
                     )
                     None -> #(text, req_model)
                   }
-                  let assistant_msg =
-                    llm_types.Message(
-                      role: llm_types.Assistant,
-                      content: resp.content,
-                    )
-                  let messages = list.append(state.messages, [assistant_msg])
+                  let messages =
+                    message_history.add_assistant(state.messages, resp.content)
                   // Output gate strategy:
                   // - Autonomous (scheduler) cycles: full LLM scorer + normative
                   //   calculus — nobody's watching, quality matters before delivery

@@ -21,7 +21,7 @@ import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
-import llm/message_repair
+import llm/message_history.{type MessageHistory}
 import llm/request
 import llm/types as llm_types
 import meta/types as meta_types
@@ -60,7 +60,7 @@ pub fn proceed_with_model(
           queue_depth: list.length(state.input_queue),
           session_since: state.identity.session_since,
           agents_active: registry.count_running(state.registry),
-          message_count: list.length(state.messages),
+          message_count: message_history.length(state.messages),
           sensory_events: state.pending_sensory_events,
           active_delegations: dict.values(state.active_delegations),
           sandbox_enabled: state.config.sandbox_enabled,
@@ -81,11 +81,7 @@ pub fn proceed_with_model(
   // Consume pending Layer 3b meta intervention if any
   let state = consume_meta_intervention(state, cycle_id)
 
-  let msg =
-    llm_types.Message(role: llm_types.User, content: [
-      llm_types.TextContent(text:),
-    ])
-  let messages = list.append(state.messages, [msg])
+  let messages = message_history.add_user_text(state.messages, text)
   let task_id = cycle_id
 
   let req = build_request_with_model(state, model, messages)
@@ -230,11 +226,10 @@ pub fn handle_think_error(
           // well-formed (alternating user/assistant). Without this, the
           // next user input would create two consecutive user messages
           // and the API would reject the request.
-          let error_msg =
-            llm_types.Message(role: llm_types.Assistant, content: [
+          let messages =
+            message_history.add_assistant(state.messages, [
               llm_types.TextContent(text: user_text),
             ])
-          let messages = list.append(state.messages, [error_msg])
           CognitiveState(
             ..state,
             messages:,
@@ -267,11 +262,10 @@ pub fn handle_think_down(
       )
       let user_text = render_user_error(InternalCrash)
       output.send_reply(state, user_text, state.model, None, [])
-      let error_msg =
-        llm_types.Message(role: llm_types.Assistant, content: [
+      let messages =
+        message_history.add_assistant(state.messages, [
           llm_types.TextContent(text: user_text),
         ])
-      let messages = list.append(state.messages, [error_msg])
       CognitiveState(
         ..state,
         messages:,
@@ -286,29 +280,34 @@ pub fn handle_think_down(
 /// Build an LLM request using the current model.
 pub fn build_request(
   state: CognitiveState,
-  messages: List(llm_types.Message),
+  messages: MessageHistory,
 ) -> llm_types.LlmRequest {
   build_request_with_model(state, state.model, messages)
 }
 
 /// Build an LLM request with a specific model.
+///
+/// The `MessageHistory` is invariant-bearing by construction (see
+/// `llm/message_history.gleam`): orphan tool_uses, orphan
+/// tool_results, leading-assistant, and same-role-runs are all
+/// impossible to introduce. The reactive `repair_orphans_and_warn`
+/// pipeline this function used to call is gone — there's nothing
+/// left to repair.
+///
+/// What remains here are the *quantitative* trims that depend on
+/// runtime knobs (`max_context_messages`) and the hard token-budget
+/// safety net. Those still apply to the wire-side `List(Message)`.
 pub fn build_request_with_model(
   state: CognitiveState,
   model: String,
-  messages: List(llm_types.Message),
+  messages: MessageHistory,
 ) -> llm_types.LlmRequest {
-  // Defensive repair: inject synthetic tool_result blocks for any
-  // orphaned tool_use ids. Anthropic's API rejects histories where an
-  // assistant tool_use isn't immediately followed by a matching
-  // tool_result; once an orphan lands in state.messages, every cycle
-  // keeps sending it until something repairs it. This is the last
-  // line of defence — upstream paths still need to be tidy. We
-  // slog.warn on any repair so orphan sources stay visible.
-  let repaired = repair_orphans_and_warn(messages, state.cycle_id)
-  // Message count trim (configurable)
+  let raw = message_history.for_send(messages)
+  // Message count trim (configurable). `context.trim` keeps the
+  // tool_use/tool_result pairing intact even after dropping by count.
   let trimmed = case state.max_context_messages {
-    None -> context.ensure_alternation(repaired)
-    Some(max) -> context.trim(repaired, max)
+    None -> context.ensure_alternation(raw)
+    Some(max) -> context.trim(raw, max)
   }
   // Token budget safety net — hard cap to prevent API 400 errors.
   // System prompt + tools + response budget need headroom, so cap messages
@@ -326,30 +325,6 @@ pub fn build_request_with_model(
   case state.tools {
     [] -> base
     tools -> request.with_tools(base, tools)
-  }
-}
-
-/// Wrap `message_repair.repair` with a warn log when it has to act.
-/// Each orphan is a bug upstream — we want the logs to point operators
-/// (and us) at the code path that left it dangling.
-fn repair_orphans_and_warn(
-  messages: List(llm_types.Message),
-  cycle_id: option.Option(String),
-) -> List(llm_types.Message) {
-  case message_repair.find_orphans(messages) {
-    [] -> messages
-    orphans -> {
-      slog.warn(
-        "cognitive/llm",
-        "build_request",
-        "Repairing "
-          <> int.to_string(list.length(orphans))
-          <> " orphaned tool_use id(s): "
-          <> string.join(orphans, ", "),
-        cycle_id,
-      )
-      message_repair.repair(messages)
-    }
   }
 }
 

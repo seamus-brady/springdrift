@@ -24,6 +24,7 @@ import gleam/dict.{type Dict}
 import gleam/erlang/process.{type Subject}
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import llm/message_history.{type MessageHistory}
 import llm/provider.{type Provider}
 import llm/retry
 import llm/types as llm_types
@@ -165,7 +166,7 @@ pub type CognitiveState {
     system: String,
     max_context_messages: Option(Int),
     tools: List(llm_types.Tool),
-    messages: List(llm_types.Message),
+    messages: MessageHistory,
     // --- Loop control ---
     status: CognitiveStatus,
     cycle_id: Option(String),
