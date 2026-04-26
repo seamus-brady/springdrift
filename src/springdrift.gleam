@@ -1887,32 +1887,76 @@ fn ensure_coder_image(image: String) -> Result(Nil, String) {
   }
 }
 
+/// Reject `project_root` paths that would let the coder edit
+/// Springdrift's own state. The OpenCode container runs with the
+/// project bind-mounted at /workspace/project; if that mount sits
+/// over (or above) the agent's own .springdrift/ data dir, the
+/// coder agent can scribble on its own memory, history, identity —
+/// or the source code, when the operator runs Springdrift from
+/// inside its own repo.
+///
+/// Refusal triggers:
+///   * project_root contains a `.springdrift/` subdirectory (the
+///     load-bearing case — the operator pointed the coder at the
+///     directory the agent is running in)
+///   * project_root is empty or "."
+///   * project_root resolves into the running data dir
+///
+/// Symlink-resolved containment isn't done here; the simple-string
+/// containment + filesystem check covers the operator's footgun
+/// without making this function a security boundary it can't
+/// actually be (rootless podman is the trust boundary; this is just
+/// don't-shoot-yourself).
+fn project_root_safe(project_root: String) -> Result(Nil, String) {
+  case project_root {
+    "" -> Error("project_root is empty")
+    "." -> Error("project_root is '.', would point at Springdrift's cwd")
+    _ ->
+      case simplifile.is_directory(project_root <> "/.springdrift") {
+        Ok(True) ->
+          Error(
+            "project_root contains a .springdrift/ subdirectory — "
+            <> "this would let the coder edit the agent's own state. "
+            <> "Use a separate scratch directory or a different project repo.",
+          )
+        _ ->
+          // Also reject if project_root itself ends in /.springdrift —
+          // operator pointed the coder directly at the agent's data dir.
+          case string.ends_with(project_root, "/.springdrift") {
+            True ->
+              Error(
+                "project_root IS a .springdrift/ data directory — refusing.",
+              )
+            False -> Ok(Nil)
+          }
+      }
+  }
+}
+
 /// Build the RealCoderDeps the coder agent needs for real-coder mode.
-/// Returns None when ANTHROPIC_API_KEY is missing or the image build
-/// fails. Defaults: image = "springdrift-coder:1.14.25" (set in
-/// AppConfig.default), project_root = cwd if not configured,
-/// model_id = "claude-sonnet-4-6" (set in AppConfig.default). The only
-/// thing the operator MUST provide is ANTHROPIC_API_KEY.
-///   - [coder] image
-///   - [coder] project_root
-///   - [coder] model_id
-///   - ANTHROPIC_API_KEY env var
-/// Each gating omission logs a warn-level reason at startup so the
-/// operator can see why real-coder isn't active.
+/// Returns None when ANTHROPIC_API_KEY is missing, when project_root
+/// isn't explicitly configured, when project_root would let the coder
+/// edit Springdrift's own state, or when the image build fails.
+/// Defaults: image = "springdrift-coder:1.14.25",
+/// model_id = "claude-sonnet-4-6". The operator MUST provide:
+///   - ANTHROPIC_API_KEY in .env
+///   - [coder] project_root pointing at a directory that DOES NOT
+///     contain a .springdrift/ subdir (i.e. not the agent's own data dir)
+///
+/// **Why no cwd fallback.** A previous version defaulted project_root
+/// to cwd when unset. Springdrift's cwd contains its own .springdrift/
+/// data dir, so the OpenCode container would happily edit the agent's
+/// state — including the source code, when the operator ran the agent
+/// from its own repo. Self-edit is too sharp a footgun for a
+/// "convenient default" to justify; the operator must be explicit.
 fn maybe_build_real_coder_deps(
   cfg: AppConfig,
   planner_dir: String,
   librarian: process.Subject(librarian.LibrarianMessage),
   appraiser_ctx: option.Option(appraiser.AppraiserContext),
 ) -> option.Option(coder.RealCoderDeps) {
-  // Defaults come from AppConfig.default (image + provider_id +
-  // model_id). project_root falls back to cwd. Operator only needs to
-  // set ANTHROPIC_API_KEY.
   let image = option.unwrap(cfg.coder_image, "")
-  let project_root = case cfg.coder_project_root {
-    option.Some(p) -> p
-    option.None -> get_cwd()
-  }
+  let project_root = option.unwrap(cfg.coder_project_root, "")
   let model_id = option.unwrap(cfg.coder_model_id, "")
   let api_key = case get_env("ANTHROPIC_API_KEY") {
     Ok(k) -> k
@@ -1930,10 +1974,17 @@ fn maybe_build_real_coder_deps(
       option.None
     }
     _, "", _, _ -> {
+      io.println(
+        "Coder    : [coder] project_root not set — coder agent disabled. "
+        <> "Add it to .springdrift/config.toml and restart to enable. "
+        <> "Use a directory that does NOT contain a .springdrift/ subdir "
+        <> "(e.g. an empty scratch dir, or a project repo of yours).",
+      )
       slog.info(
         "coder",
         "wire",
-        "real-coder mode disabled: cwd unavailable as project_root fallback",
+        "real-coder mode disabled: [coder] project_root not set; "
+          <> "no cwd fallback (would let coder edit agent's own state)",
         option.None,
       )
       option.None
@@ -1960,107 +2011,125 @@ fn maybe_build_real_coder_deps(
       option.None
     }
     _, _, _, _ ->
-      case ensure_coder_image(image) {
+      case project_root_safe(project_root) {
         Error(reason) -> {
-          io.println("Coder    : image build failed — " <> reason)
+          io.println(
+            "Coder    : refusing project_root '"
+            <> project_root
+            <> "' — "
+            <> reason,
+          )
           slog.warn(
             "coder",
             "wire",
-            "Coder image build failed: " <> reason,
+            "real-coder mode disabled: project_root rejected — " <> reason,
             option.None,
           )
           option.None
         }
-        Ok(Nil) -> {
-          let coder_config =
-            coder_types.CoderConfig(
-              image: image,
-              project_root: project_root,
-              session_timeout_ms: option.unwrap(
-                cfg.coder_session_timeout_ms,
-                600_000,
-              ),
-              max_tokens_per_task: option.unwrap(
-                cfg.coder_max_tokens_per_task,
-                200_000,
-              ),
-              max_cost_per_task_usd: option.unwrap(
-                cfg.coder_max_cost_per_task_usd,
-                5.0,
-              ),
-              max_cost_per_hour_usd: option.unwrap(
-                cfg.coder_max_cost_per_hour_usd,
-                20.0,
-              ),
-              cost_poll_interval_ms: option.unwrap(
-                cfg.coder_cost_poll_interval_ms,
-                5000,
-              ),
-              provider_id: option.unwrap(cfg.coder_provider_id, "anthropic"),
-              model_id: model_id,
-              image_recovery_enabled: option.unwrap(
-                cfg.coder_image_recovery_enabled,
-                True,
-              ),
-              image_pull_timeout_ms: option.unwrap(
-                cfg.coder_image_pull_timeout_ms,
-                300_000,
-              ),
-            )
-
-          let pool_config =
-            coder_manager.pool_config_from_options(
-              warm_pool_size: cfg.coder_warm_pool_size,
-              max_concurrent_sessions: cfg.coder_max_concurrent_sessions,
-              container_idle_ttl_ms: cfg.coder_container_idle_ttl_ms,
-              container_name_prefix: cfg.coder_container_name_prefix,
-              slot_id_base: cfg.coder_slot_id_base,
-              container_memory_mb: cfg.coder_container_memory_mb,
-              container_cpus: cfg.coder_container_cpus,
-              container_pids_limit: cfg.coder_container_pids_limit,
-            )
-
-          case
-            coder_manager.start(
-              coder_config,
-              api_key,
-              paths.cbr_dir(),
-              paths.coder_sessions_dir(),
-              pool_config,
-            )
-          {
+        Ok(Nil) ->
+          case ensure_coder_image(image) {
             Error(reason) -> {
+              io.println("Coder    : image build failed — " <> reason)
               slog.warn(
                 "coder",
                 "wire",
-                "CoderManager startup failed: " <> reason,
+                "Coder image build failed: " <> reason,
                 option.None,
               )
               option.None
             }
-            Ok(mgr) -> {
-              slog.info(
-                "coder",
-                "wire",
-                "real-coder mode active: image="
-                  <> image
-                  <> " project_root="
-                  <> project_root
-                  <> " model="
-                  <> model_id,
-                option.None,
-              )
-              option.Some(coder.RealCoderDeps(
-                manager: mgr,
-                project_root: project_root,
-                planner_dir: planner_dir,
-                librarian: librarian,
-                appraiser_ctx: appraiser_ctx,
-                dispatch_defaults: build_dispatch_defaults(cfg),
-              ))
+            Ok(Nil) -> {
+              let coder_config =
+                coder_types.CoderConfig(
+                  image: image,
+                  project_root: project_root,
+                  session_timeout_ms: option.unwrap(
+                    cfg.coder_session_timeout_ms,
+                    600_000,
+                  ),
+                  max_tokens_per_task: option.unwrap(
+                    cfg.coder_max_tokens_per_task,
+                    200_000,
+                  ),
+                  max_cost_per_task_usd: option.unwrap(
+                    cfg.coder_max_cost_per_task_usd,
+                    5.0,
+                  ),
+                  max_cost_per_hour_usd: option.unwrap(
+                    cfg.coder_max_cost_per_hour_usd,
+                    20.0,
+                  ),
+                  cost_poll_interval_ms: option.unwrap(
+                    cfg.coder_cost_poll_interval_ms,
+                    5000,
+                  ),
+                  provider_id: option.unwrap(cfg.coder_provider_id, "anthropic"),
+                  model_id: model_id,
+                  image_recovery_enabled: option.unwrap(
+                    cfg.coder_image_recovery_enabled,
+                    True,
+                  ),
+                  image_pull_timeout_ms: option.unwrap(
+                    cfg.coder_image_pull_timeout_ms,
+                    300_000,
+                  ),
+                )
+
+              let pool_config =
+                coder_manager.pool_config_from_options(
+                  warm_pool_size: cfg.coder_warm_pool_size,
+                  max_concurrent_sessions: cfg.coder_max_concurrent_sessions,
+                  container_idle_ttl_ms: cfg.coder_container_idle_ttl_ms,
+                  container_name_prefix: cfg.coder_container_name_prefix,
+                  slot_id_base: cfg.coder_slot_id_base,
+                  container_memory_mb: cfg.coder_container_memory_mb,
+                  container_cpus: cfg.coder_container_cpus,
+                  container_pids_limit: cfg.coder_container_pids_limit,
+                )
+
+              case
+                coder_manager.start(
+                  coder_config,
+                  api_key,
+                  paths.cbr_dir(),
+                  paths.coder_sessions_dir(),
+                  pool_config,
+                )
+              {
+                Error(reason) -> {
+                  slog.warn(
+                    "coder",
+                    "wire",
+                    "CoderManager startup failed: " <> reason,
+                    option.None,
+                  )
+                  option.None
+                }
+                Ok(mgr) -> {
+                  slog.info(
+                    "coder",
+                    "wire",
+                    "real-coder mode active: image="
+                      <> image
+                      <> " project_root="
+                      <> project_root
+                      <> " model="
+                      <> model_id,
+                    option.None,
+                  )
+                  option.Some(coder.RealCoderDeps(
+                    manager: mgr,
+                    project_root: project_root,
+                    planner_dir: planner_dir,
+                    librarian: librarian,
+                    appraiser_ctx: appraiser_ctx,
+                    dispatch_defaults: build_dispatch_defaults(cfg),
+                  ))
+                }
+              }
             }
           }
-        }
       }
   }
 }
