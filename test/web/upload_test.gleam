@@ -21,6 +21,7 @@ import gleeunit/should
 import sandbox/podman_ffi as exec
 import simplifile
 import web/gui as web_gui
+import web/protocol
 
 fn test_root(suffix: String) -> String {
   let root = "/tmp/springdrift_test_upload_" <> suffix
@@ -207,4 +208,71 @@ pub fn deposit_returns_normalised_files_metadata_test() {
 
   let _ = simplifile.delete(root)
   Nil
+}
+
+// ---------------------------------------------------------------------------
+// render_user_message_text — operator attachment inlining
+// ---------------------------------------------------------------------------
+
+pub fn render_user_message_text_passthrough_when_empty_test() {
+  // No attachments → text is byte-identical. This guarantees we don't
+  // break legacy clients (no attachments field) or turns where the
+  // operator just typed a message without uploading.
+  web_gui.render_user_message_text("hello agent", [])
+  |> should.equal("hello agent")
+}
+
+pub fn render_user_message_text_inlines_attachment_block_test() {
+  // The agent should see a clearly-tagged block telling it where the
+  // file lives, then the operator's message verbatim. The format is
+  // the contract — keep this test sensitive to it so accidental
+  // edits to the prefix get caught.
+  let attachments = [
+    protocol.Attachment(
+      filename: "memo.pdf",
+      doc_id: "doc-abc123",
+      slug: "memo",
+      title: "Q1 Memo",
+    ),
+  ]
+  let out = web_gui.render_user_message_text("summarise this", attachments)
+  out |> string.contains("<operator_attachments>") |> should.be_true
+  out |> string.contains("</operator_attachments>") |> should.be_true
+  out |> string.contains("filename=\"memo.pdf\"") |> should.be_true
+  out |> string.contains("path=\"sources/intray/memo.md\"") |> should.be_true
+  out |> string.contains("doc_id=\"doc-abc123\"") |> should.be_true
+  // Operator's typed text is preserved at the end.
+  out |> string.ends_with("summarise this") |> should.be_true
+}
+
+pub fn render_user_message_text_escapes_xml_specials_test() {
+  // Operator-supplied filenames can contain quotes / ampersands. The
+  // attachment block is parsed by the LLM, not a strict XML parser,
+  // but escaping keeps the structure unambiguous and matches what
+  // the rest of the sensorium does.
+  let attachments = [
+    protocol.Attachment(
+      filename: "weird & \"name\".txt",
+      doc_id: "d",
+      slug: "weird",
+      title: "",
+    ),
+  ]
+  let out = web_gui.render_user_message_text("x", attachments)
+  out |> string.contains("&amp;") |> should.be_true
+  out |> string.contains("&quot;") |> should.be_true
+  // The raw unescaped quote must NOT appear inside the attribute value.
+  out |> string.contains("\"name\".txt\"") |> should.be_false
+}
+
+pub fn render_user_message_text_lists_multiple_attachments_test() {
+  let attachments = [
+    protocol.Attachment(filename: "a.md", doc_id: "d-a", slug: "a", title: "A"),
+    protocol.Attachment(filename: "b.md", doc_id: "d-b", slug: "b", title: "B"),
+  ]
+  let out = web_gui.render_user_message_text("look at these", attachments)
+  out |> string.contains("path=\"sources/intray/a.md\"") |> should.be_true
+  out |> string.contains("path=\"sources/intray/b.md\"") |> should.be_true
+  out |> string.contains("doc_id=\"d-a\"") |> should.be_true
+  out |> string.contains("doc_id=\"d-b\"") |> should.be_true
 }

@@ -35,13 +35,31 @@ fn monotonic_seq() -> Int
 // Types
 // ---------------------------------------------------------------------------
 
+/// Operator-uploaded file reference attached to a UserMessage. The
+/// client tracks files uploaded since the last user message and ships
+/// them alongside the next message so the agent can see them inline
+/// (the standard chat-assistant pattern). Fields mirror the JSON
+/// returned from `POST /upload`.
+pub type Attachment {
+  Attachment(filename: String, doc_id: String, slug: String, title: String)
+}
+
 pub type ClientMessage {
   /// `client_msg_id` is an optional client-assigned id used for
   /// per-message acknowledgement. The server echoes it back in
   /// `UserMessageAck` once the WS handler has accepted the frame, so
   /// the client knows to clear that bubble's "sending..." state.
   /// Legacy clients omit it; in that case no ack is emitted.
-  UserMessage(text: String, client_msg_id: Option(String))
+  ///
+  /// `attachments` lists files the operator uploaded since their last
+  /// message. The server inlines them into the cognitive loop's input
+  /// text as an `<operator_attachments>` block so the agent sees the
+  /// file paths as part of the user's turn. Empty for legacy clients.
+  UserMessage(
+    text: String,
+    client_msg_id: Option(String),
+    attachments: List(Attachment),
+  )
   UserAnswer(text: String)
   RequestLogData
   RequestRewind(index: Int)
@@ -193,7 +211,12 @@ pub fn decode_client_message(json_string: String) -> Result(ClientMessage, Nil) 
           None,
           decode.optional(decode.string),
         )
-        decode.success(UserMessage(text:, client_msg_id:))
+        use attachments <- decode.optional_field(
+          "attachments",
+          [],
+          decode.list(attachment_decoder()),
+        )
+        decode.success(UserMessage(text:, client_msg_id:, attachments:))
       }
       "user_answer" -> {
         use text <- decode.field("text", decode.string)
@@ -248,13 +271,22 @@ pub fn decode_client_message(json_string: String) -> Result(ClientMessage, Nil) 
         use reason <- decode.field("reason", decode.string)
         decode.success(RequestRejectExport(slug:, reason:))
       }
-      _ -> decode.failure(UserMessage("", None), "Unknown client message type")
+      _ ->
+        decode.failure(UserMessage("", None, []), "Unknown client message type")
     }
   }
   case json.parse(json_string, decoder) {
     Ok(msg) -> Ok(msg)
     Error(_) -> Error(Nil)
   }
+}
+
+fn attachment_decoder() -> decode.Decoder(Attachment) {
+  use filename <- decode.field("filename", decode.string)
+  use doc_id <- decode.field("doc_id", decode.string)
+  use slug <- decode.field("slug", decode.string)
+  use title <- decode.optional_field("title", "", decode.string)
+  decode.success(Attachment(filename:, doc_id:, slug:, title:))
 }
 
 // ---------------------------------------------------------------------------
