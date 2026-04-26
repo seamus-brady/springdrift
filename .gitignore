@@ -13,3 +13,4 @@ springdrift-066b5291fc32.json
 ./claude/worktrees/
 .local/
 .cache/
+.npm/
