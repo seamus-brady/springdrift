@@ -41,6 +41,22 @@ pub fn agent_tools() -> List(Tool) {
   ]
 }
 
+/// True when `name` is a builtin tool the cognitive loop needs to
+/// dispatch synchronously through `builtin.execute`. Currently only
+/// `read_skill` — the cog loop's own playbook-reading tool. The cog
+/// loop's other builtin (`request_human_input`) is handled via a
+/// separate early branch in `dispatch_tool_calls` because it pauses
+/// the loop on a question rather than running a tool.
+///
+/// Without this predicate, `read_skill` falls through every other
+/// partition and lands in `dispatch_agent_calls`, which doesn't
+/// recognise it (no `agent_` / `team_` prefix) and silently drops the
+/// tool_use — producing the "agent says 'let me read X' then nothing
+/// happens" symptom.
+pub fn is_cog_builtin_tool(name: String) -> Bool {
+  name == "read_skill"
+}
+
 /// Read the delegation hierarchy around the specialist's current cycle.
 /// Takes an optional scope parameter; the cycle_id is injected by the
 /// framework so the LLM doesn't need to know it. Returns a compact text

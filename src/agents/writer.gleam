@@ -65,6 +65,22 @@ Interpreted as: <one sentence summary of how you understood the task and what yo
 
 Keep it to one sentence. This lets the orchestrator notice if your interpretation doesn't match the intent."
 
+/// True when this agent's executor (or the framework wrapper around
+/// it) has a real branch for `name`. Used by the routing-coverage
+/// test — keep in sync with `writer_executor`.
+pub fn routes_tool(name: String) -> Bool {
+  knowledge_tools.is_knowledge_tool(name)
+  || name == "store_result"
+  || name == "retrieve_result"
+  || name == "calculator"
+  || name == "get_current_datetime"
+  || name == "read_skill"
+  // Framework-level intercepts:
+  || name == "read_hierarchy"
+  || name == "ask_deputy"
+  || name == "request_human_input"
+}
+
 pub fn spec(
   provider: Provider,
   model: String,
@@ -114,9 +130,15 @@ fn writer_executor(
   max_artifact_chars: Int,
   skills_dirs: List(String),
 ) -> fn(llm_types.ToolCall) -> llm_types.ToolResult {
+  // See routes_tool for the routing-coverage contract.
   fn(call: llm_types.ToolCall) -> llm_types.ToolResult {
-    case call.name {
-      "create_draft" | "update_draft" | "promote_draft" ->
+    // Predicate-based routing — `read_draft` and `export_pdf` were
+    // exposed in writer_tools() but the previous hardcoded match only
+    // covered create/update/promote, so reading a draft or rendering
+    // a PDF returned "Unknown tool" via the builtin fallthrough. New
+    // knowledge tools added later route automatically.
+    case knowledge_tools.is_knowledge_tool(call.name) {
+      True ->
         knowledge_tools.execute(
           call,
           knowledge_tools.KnowledgeConfig(
@@ -131,7 +153,7 @@ fn writer_executor(
             reason_fn: Some(knowledge_search.make_reason_fn(provider, model)),
           ),
         )
-      _ ->
+      False ->
         case call.name, lib {
           "store_result", Some(l) | "retrieve_result", Some(l) ->
             artifacts.execute(
