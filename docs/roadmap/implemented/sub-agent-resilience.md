@@ -1,9 +1,23 @@
 # Sub-Agent Resilience — Truncation Recovery, Auto-Save, Context Bundles, and Checkpointing
 
-**Status**: Planned
-**Priority**: High — observed in production. A two-document comparative-analysis task in a 2026-04-26 Nemo session capped 14 of 14 sub-agent delegations. The cog-loop truncation guard shipped earlier the same day didn't fire because the failure happened one layer down, inside specialist agents. Useful work was produced but truncated mid-output and could not be recovered for follow-up cycles.
-**Effort**: Medium-Large (~400-500 LOC across four sub-fixes + tests). Best shipped in two PRs: the truncation/auto-save pair as one, the context bundle and skill updates as a second.
+**Status**: Implemented (2026-04-26)
+**Priority**: High — observed in production.
+**Effort**: ~1500 LOC across three PRs (#166 truncation guard + auto-save, #167 referenced_artifacts + checkpoint, this branch's PR for skills + Strategy Registry seeding) plus 33 new tests.
 **Source**: 2026-04-26 Nemo session — operator asked for a comparative analysis of two large documents (a 467-line spec and a 9,110-line book with 309 sections). Researcher and writer agents repeatedly hit `max_tokens` while assembling output. 13 researcher delegations and 1 writer delegation, all output-capped. Total: ~772k tokens spent, partial findings produced, no clean deliverable until the orchestrator gave up on delegation and synthesised directly.
+
+## What Shipped
+
+All five fixes landed across three PRs:
+
+- **Fix 1 — Sub-agent truncation guard** (PR #166). React loop in `src/agent/framework.gleam` detects MaxTokens-with-no-tool-calls. First hit retries with scope-down nudge without burning a turn; second hit ships a deterministic admission via `framework.build_truncation_admission`. `[truncation_guard:<agent>]` prefix is the load-bearing signal.
+- **Fix 2 — Auto-save partial output** (PR #166). Design deviation from the original plan: instead of writing partial work to a separate artifact via the artifacts subsystem, the admission text **embeds** the agent's accumulated text (across all turns of the failing react loop) with head/tail elision when over 4KB. Keeps the framework decoupled from artifact infrastructure; the orchestrator's LLM can still call `store_result` on the admission content if it wants persistence.
+- **Fix 3 — Delegation context bundle** (PR #167). New `referenced_artifacts` parameter on every `agent_*` tool call (comma-separated artifact IDs). Framework intercepts in `dispatch_single_agent`, retrieves each artifact's content via the librarian, and prepends as `<reference_artifact id="...">CONTENT</reference_artifact>` blocks. Resolution failures render `status="not_found"` markers; over-50KB bundles render `status="elided"` markers. New helpers `parse_referenced_artifacts_csv` and `render_referenced_artifacts_bundle` are public for testability.
+- **Fix 4 — Checkpoint tool + skill discipline** (PR #167). New `checkpoint(label, content)` tool in `src/tools/artifacts.gleam` — lighter sibling of `store_result` with sensible defaults. Wired into writer and researcher routing. `.springdrift_example/skills/document-library/SKILL.md` updated with explicit guidance on the checkpoint pattern and the reconnaissance-then-followups pattern using `referenced_artifacts`.
+- **Fix 5 — Codify Nemo's strategies as skills + Strategy Registry seeding** (this PR). Two new skill files: `orchestration-large-inputs/SKILL.md` covers reconnaissance-first / search-then-read / parallel-after-reconnaissance; `when-to-use-writer/SKILL.md` covers synthesise-in-root judgment. New `SkillSeeded` variant on `StrategySource`. `strategy/seed.gleam` writes the four floor strategies to an empty registry at instance boot — idempotent, no-op when the registry has any events, never overwrites operator-curated or CBR-mined strategies.
+
+Test counts across the three PRs: framework_truncation_guard_test (10), referenced_artifacts_test (9), checkpoint_tool_test (6), strategy seed_test (9), plus updates to existing framework_test. Total 33+ new tests, suite at 2083 passing.
+
+The original plan is preserved below for context.
 
 ## The Symptom
 

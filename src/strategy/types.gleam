@@ -30,6 +30,14 @@ pub type StrategySource {
   Proposed
   /// Defined by the operator in config or a seed file.
   OperatorDefined
+  /// Auto-seeded at instance boot from skill content. Floor
+  /// strategies (`reconnaissance-first`, `search-then-read`, etc.)
+  /// that ship in the codebase as `.springdrift/skills/...` files.
+  /// A fresh instance gets these on first run rather than having to
+  /// re-discover the same lessons through CBR over many cycles.
+  /// Distinguished from OperatorDefined so telemetry can show what
+  /// came from skills vs operator curation vs agent learning.
+  SkillSeeded
 }
 
 /// Resolved current state of a strategy after replaying the event log.
