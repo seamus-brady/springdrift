@@ -149,9 +149,19 @@ pub fn dispatch_tool_calls(
         list.partition(after_goals, fn(c) {
           strategy_tools.is_strategy_tool(c.name)
         })
-      let #(captures_calls, remaining_calls) =
+      let #(captures_calls, after_captures) =
         list.partition(after_strategy, fn(c) {
           captures_tools.is_captures_tool(c.name)
+        })
+      // Cog-loop builtin tools (currently only `read_skill`). Without
+      // this partition, read_skill falls through every other bucket and
+      // ends up in dispatch_agent_calls, which doesn't recognise it
+      // (no agent_/team_ prefix) and drops the tool_use silently —
+      // produces the "agent says 'let me read X' then nothing happens"
+      // symptom.
+      let #(builtin_calls, remaining_calls) =
+        list.partition(after_captures, fn(c) {
+          builtin.is_cog_builtin_tool(c.name)
         })
       let sync_calls =
         list.flatten([
@@ -161,6 +171,7 @@ pub fn dispatch_tool_calls(
           learning_goal_calls,
           strategy_calls,
           captures_calls,
+          builtin_calls,
         ])
       case sync_calls {
         [] -> dispatch_agent_calls(state, task_id, resp, remaining_calls)

@@ -94,6 +94,41 @@ Kagi tools are available as an alternative to Brave. Use only when Brave is unav
 - **kagi_search**: High quality, ad-free web search.
 - **kagi_summarize**: Summarize a URL into concise text."
 
+/// True when this agent's executor (or the framework wrapper around
+/// it) has a real branch for `name`. Used by the routing-coverage
+/// test to assert no tool in the agent's spec falls through to
+/// `builtin.execute("Unknown tool")`. Mirrors the dispatch in
+/// `researcher_executor` plus the framework-level intercepts
+/// (`request_human_input`, `ask_deputy`, `read_hierarchy`).
+///
+/// Keep this in sync with `researcher_executor`. The routing test
+/// will fail if `spec(...)` exposes a tool whose name doesn't return
+/// True here — which is exactly what happened when document_info /
+/// list_sections / read_section_by_id / read_range shipped with no
+/// executor branch.
+pub fn routes_tool(name: String) -> Bool {
+  knowledge_tools.is_knowledge_tool(name)
+  || name == "kagi_search"
+  || name == "kagi_summarize"
+  || name == "fetch_url"
+  || name == "web_search"
+  || name == "brave_web_search"
+  || name == "brave_news_search"
+  || name == "brave_llm_context"
+  || name == "brave_summarizer"
+  || name == "brave_answer"
+  || name == "jina_reader"
+  || name == "store_result"
+  || name == "retrieve_result"
+  || name == "calculator"
+  || name == "get_current_datetime"
+  || name == "read_skill"
+  // Framework-level intercepts (handled before the executor sees them):
+  || name == "read_hierarchy"
+  || name == "ask_deputy"
+  || name == "request_human_input"
+}
+
 pub fn spec(
   provider: Provider,
   model: String,
@@ -180,8 +215,14 @@ fn researcher_executor(
   skills_dirs: List(String),
 ) -> fn(llm_types.ToolCall) -> llm_types.ToolResult {
   fn(call: llm_types.ToolCall) -> llm_types.ToolResult {
-    let raw = case call.name {
-      "save_to_library" | "search_library" | "read_section" | "get_document" ->
+    // Route every knowledge_tools-owned name through its executor.
+    // Predicate-based dispatch instead of a hand-maintained literal
+    // match — that drift is exactly what shipped read_section_by_id /
+    // list_sections / document_info / read_range to the LLM with no
+    // executor branch when PR #162 added them. New knowledge tools
+    // now route automatically.
+    let raw = case knowledge_tools.is_knowledge_tool(call.name) {
+      True ->
         knowledge_tools.execute(
           call,
           knowledge_tools.KnowledgeConfig(
@@ -199,35 +240,38 @@ fn researcher_executor(
             )),
           ),
         )
-      "kagi_search" | "kagi_summarize" -> kagi.execute(call)
-      "fetch_url" | "web_search" -> web.execute(call)
-      "brave_web_search"
-      | "brave_news_search"
-      | "brave_llm_context"
-      | "brave_summarizer" ->
-        execute_brave_cached(
-          call,
-          brave_cache,
-          brave_search_limiter,
-          brave_cache_ttl_ms,
-        )
-      "brave_answer" ->
-        execute_brave_cached(
-          call,
-          brave_cache,
-          brave_answers_limiter,
-          brave_cache_ttl_ms,
-        )
-      "jina_reader" -> jina.execute(call)
-      "store_result" | "retrieve_result" ->
-        artifacts.execute(
-          call,
-          artifacts_dir,
-          "researcher",
-          lib,
-          max_artifact_chars,
-        )
-      _ -> builtin.execute(call, skills_dirs)
+      False ->
+        case call.name {
+          "kagi_search" | "kagi_summarize" -> kagi.execute(call)
+          "fetch_url" | "web_search" -> web.execute(call)
+          "brave_web_search"
+          | "brave_news_search"
+          | "brave_llm_context"
+          | "brave_summarizer" ->
+            execute_brave_cached(
+              call,
+              brave_cache,
+              brave_search_limiter,
+              brave_cache_ttl_ms,
+            )
+          "brave_answer" ->
+            execute_brave_cached(
+              call,
+              brave_cache,
+              brave_answers_limiter,
+              brave_cache_ttl_ms,
+            )
+          "jina_reader" -> jina.execute(call)
+          "store_result" | "retrieve_result" ->
+            artifacts.execute(
+              call,
+              artifacts_dir,
+              "researcher",
+              lib,
+              max_artifact_chars,
+            )
+          _ -> builtin.execute(call, skills_dirs)
+        }
     }
     case should_auto_store(call.name), auto_store_threshold_bytes {
       _, t if t <= 0 -> raw
