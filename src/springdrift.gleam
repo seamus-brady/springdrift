@@ -1887,6 +1887,43 @@ fn ensure_coder_image(image: String) -> Result(Nil, String) {
   }
 }
 
+/// Resolve the default project_root scratch directory when the
+/// operator hasn't set one. Goal: somewhere ALWAYS writable, ALWAYS
+/// disjoint from cwd (so it can't contain the agent's .springdrift/
+/// state), and per-user (so concurrent Springdrift instances under
+/// different OS users don't collide).
+///
+/// Resolution:
+///   * macOS: $TMPDIR is set per-user (e.g. /var/folders/.../T/) and
+///     the kernel-managed temp area persists across reboots
+///   * Linux: $TMPDIR usually unset; fall back to /tmp/ which is
+///     writable for all users (sticky bit + per-process subdir
+///     isolates us from collisions)
+///
+/// Auto-created with `simplifile.create_directory_all/1`. Stable
+/// across restarts of the same instance so the coder remembers
+/// previous commits / state files inside the workspace.
+fn default_coder_workspace() -> String {
+  let base = case get_env("TMPDIR") {
+    Ok(t) ->
+      case string.trim(t) {
+        "" -> "/tmp"
+        trimmed ->
+          // Strip any trailing slash so the join below produces a
+          // single separator. macOS TMPDIR ends in /, Linux's
+          // typically doesn't.
+          case string.ends_with(trimmed, "/") {
+            True -> string.drop_end(trimmed, 1)
+            False -> trimmed
+          }
+      }
+    Error(_) -> "/tmp"
+  }
+  let workspace = base <> "/springdrift-coder-workspace"
+  let _ = simplifile.create_directory_all(workspace)
+  workspace
+}
+
 /// Reject `project_root` paths that would let the coder edit
 /// Springdrift's own state. The OpenCode container runs with the
 /// project bind-mounted at /workspace/project; if that mount sits
@@ -1956,7 +1993,20 @@ fn maybe_build_real_coder_deps(
   appraiser_ctx: option.Option(appraiser.AppraiserContext),
 ) -> option.Option(coder.RealCoderDeps) {
   let image = option.unwrap(cfg.coder_image, "")
-  let project_root = option.unwrap(cfg.coder_project_root, "")
+  // project_root resolution:
+  //   1. operator's [coder] project_root if set
+  //   2. ${TMPDIR}/springdrift-coder-workspace (per-user via TMPDIR;
+  //      e.g. /var/folders/.../T/springdrift-coder-workspace on macOS)
+  //   3. /tmp/springdrift-coder-workspace (Linux fallback)
+  //
+  // Crucially the temp dir is NEVER cwd, so it never contains the
+  // running agent's .springdrift/ data. Auto-created on first boot.
+  // Operators who want the coder pointed at a real project of theirs
+  // override via [coder] project_root.
+  let project_root = case cfg.coder_project_root {
+    option.Some(p) -> p
+    option.None -> default_coder_workspace()
+  }
   let model_id = option.unwrap(cfg.coder_model_id, "")
   let api_key = case get_env("ANTHROPIC_API_KEY") {
     Ok(k) -> k
@@ -1974,17 +2024,13 @@ fn maybe_build_real_coder_deps(
       option.None
     }
     _, "", _, _ -> {
-      io.println(
-        "Coder    : [coder] project_root not set — coder agent disabled. "
-        <> "Add it to .springdrift/config.toml and restart to enable. "
-        <> "Use a directory that does NOT contain a .springdrift/ subdir "
-        <> "(e.g. an empty scratch dir, or a project repo of yours).",
-      )
+      // Should be unreachable now that we always have a default —
+      // kept exhaustive in case the workspace resolver is ever
+      // re-introduced as fallible.
       slog.info(
         "coder",
         "wire",
-        "real-coder mode disabled: [coder] project_root not set; "
-          <> "no cwd fallback (would let coder edit agent's own state)",
+        "real-coder mode disabled: project_root unresolvable",
         option.None,
       )
       option.None
