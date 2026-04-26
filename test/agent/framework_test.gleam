@@ -12,6 +12,7 @@ import agent/types.{
 }
 import gleam/erlang/process
 import gleam/option
+import gleam/string
 import gleeunit/should
 import llm/adapters/mock
 import llm/types as llm_types
@@ -89,9 +90,13 @@ pub fn agent_success_test() {
 // ---------------------------------------------------------------------------
 
 pub fn agent_success_surfaces_truncation_test() {
-  // Provider returns a response with stop_reason=MaxTokens. The framework
-  // must mark the AgentSuccess with truncated: True so the orchestrator
-  // can warn the operator.
+  // Provider returns a response with stop_reason=MaxTokens on every call.
+  // The truncation guard (added 2026-04-26) now retries once with a
+  // scope-down nudge; on the second hit it ships a deterministic
+  // admission rather than the raw truncated text. The `truncated` flag
+  // on AgentSuccess remains True so an orchestrator checking that
+  // signal still knows the cycle was capped, even though the result
+  // text is the admission rather than the half-finished output.
   let provider = mock.provider_with_truncated_text("partial answer cut off")
   let spec = make_spec(provider)
   let assert Ok(#(_pid, task_subj)) = framework.start_agent(spec)
@@ -117,7 +122,13 @@ pub fn agent_success_surfaces_truncation_test() {
       case outcome {
         AgentSuccess(truncated:, result:, ..) -> {
           truncated |> should.be_true
-          result |> should.equal("partial answer cut off")
+          // Result is the deterministic admission — embeds the agent
+          // name in the prefix and includes the partial work so the
+          // orchestrator can pick it up.
+          result
+          |> string.contains("[truncation_guard:test-agent]")
+          |> should.be_true
+          result |> string.contains("partial answer cut off") |> should.be_true
         }
         AgentFailure(..) -> should.fail()
       }
