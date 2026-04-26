@@ -120,6 +120,7 @@ pub fn routes_tool(name: String) -> Bool {
   || name == "jina_reader"
   || name == "store_result"
   || name == "retrieve_result"
+  || name == "checkpoint"
   || name == "calculator"
   || name == "get_current_datetime"
   || name == "read_skill"
@@ -262,7 +263,7 @@ fn researcher_executor(
               brave_cache_ttl_ms,
             )
           "jina_reader" -> jina.execute(call)
-          "store_result" | "retrieve_result" ->
+          "store_result" | "retrieve_result" | "checkpoint" ->
             artifacts.execute(
               call,
               artifacts_dir,

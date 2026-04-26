@@ -80,3 +80,48 @@ Reports in progress. Revise across multiple sessions, promote when ready.
 Search results include formatted citations:
 `[Document Title, §Section Name, lines 145-178]`
 Include these in reports so claims are traceable to sources.
+
+## Checkpointing — don't blow your token cap on a synthesis
+
+When producing structured output (multi-section drafts, multi-topic
+comparisons, anything over ~500 words), **call `checkpoint(label,
+content)` after each major section**. Don't try to assemble the
+whole final output in one response — that's how you blow your
+token cap and lose all the work.
+
+`checkpoint` is the lightweight sibling of `store_result`: just a
+label and content. It writes to the artifact store with sensible
+defaults and returns a compact `artifact_id` you can reference
+later or hand back to your orchestrator.
+
+**Pattern**:
+1. Write section 1 → `checkpoint("draft-section-1-memory", content)` → got `art-abc123`
+2. Write section 2 → `checkpoint("draft-section-2-affect", content)` → got `art-def456`
+3. Write section 3 → `checkpoint("draft-section-3-safety", content)` → got `art-789xyz`
+4. Final response: brief summary + the three artifact IDs. Orchestrator can retrieve any of them with `retrieve_result`.
+
+**Anti-pattern**: try to write all three sections inline in one
+final response, hit `max_tokens` mid-section-2, ship a half-finished
+output (or worse, get caught by the truncation guard and ship a
+[truncation_guard:writer] admission with no artifacts to recover
+from). The truncation guard is a safety net, not a substitute for
+discipline.
+
+This is especially important for the writer agent (synthesis is its
+job) and for the researcher when extracting from large documents.
+
+## Sharing context between agents — referenced_artifacts
+
+When you delegate to a sub-agent that needs the same structural
+context another agent already produced (e.g. a section outline,
+prior findings, a checkpoint), pass the artifact_ids on the
+delegation tool call via `referenced_artifacts: "art-abc123,art-def456"`.
+The framework auto-prepends the artifact CONTENT as
+`<reference_artifact>` blocks to the child's first message — the
+child sees it immediately without calling `retrieve_result`.
+
+**Pattern for large document tasks**: one reconnaissance delegation
+to map the structure → checkpoint the outline → dispatch N parallel
+followups, each carrying the outline ID via `referenced_artifacts`.
+Eliminates the redundant-bootstrap cost of every child re-discovering
+the same structure.

@@ -34,7 +34,7 @@ fn iso_now() -> String
 // ---------------------------------------------------------------------------
 
 pub fn all() -> List(llm_types.Tool) {
-  [store_result_tool(), retrieve_result_tool()]
+  [store_result_tool(), retrieve_result_tool(), checkpoint_tool()]
 }
 
 fn store_result_tool() -> llm_types.Tool {
@@ -54,6 +54,35 @@ fn store_result_tool() -> llm_types.Tool {
   |> tool.add_string_param(
     "summary",
     "Brief one-line summary of the content",
+    True,
+  )
+  |> tool.build()
+}
+
+fn checkpoint_tool() -> llm_types.Tool {
+  tool.new("checkpoint")
+  |> tool.with_description(
+    "Save in-progress work as an artifact mid-task. Lighter than"
+    <> " store_result — auto-fills tool=\"checkpoint\" and uses your"
+    <> " label as the summary. Use this every major section when"
+    <> " producing structured output (multi-section drafts,"
+    <> " comparisons, anything over ~500 words). DO NOT try to assemble"
+    <> " the whole final output in one response — that's how you blow"
+    <> " your token cap and lose all the work. Save in chunks, then"
+    <> " reference them by artifact_id when you respond to your"
+    <> " orchestrator. Returns a compact artifact_id.",
+  )
+  |> tool.add_string_param(
+    "label",
+    "Short label for this checkpoint (e.g. \"draft-section-1-memory\")."
+      <> " Used as the artifact's summary so you can find it later.",
+    True,
+  )
+  |> tool.add_string_param(
+    "content",
+    "The work to save. No upper limit on the agent side — content is"
+      <> " written to disk and a compact ID returned. Truncation only"
+      <> " kicks in at the storage layer's hard cap.",
     True,
   )
   |> tool.build()
@@ -88,6 +117,8 @@ pub fn execute(
     "store_result" ->
       run_store_result(call, artifacts_dir, cycle_id, lib, max_artifact_chars)
     "retrieve_result" -> run_retrieve_result(call, lib)
+    "checkpoint" ->
+      run_checkpoint(call, artifacts_dir, cycle_id, lib, max_artifact_chars)
     _ ->
       llm_types.ToolFailure(
         tool_use_id: call.id,
@@ -160,6 +191,77 @@ fn run_store_result(
           <> "\" ("
           <> string.inspect(string.length(content))
           <> " chars). Reference this ID to retrieve later.",
+      )
+    }
+  }
+}
+
+/// Lighter sibling of `run_store_result`: takes just `label` and
+/// `content`, fills the rest from sensible defaults so the agent
+/// doesn't pay token cost on metadata. Same on-disk shape as
+/// store_result; the discriminator is `tool: "checkpoint"` in the
+/// ArtifactRecord, which downstream lookup tools can filter on.
+fn run_checkpoint(
+  call: llm_types.ToolCall,
+  artifacts_dir: String,
+  cycle_id: String,
+  lib: Subject(LibrarianMessage),
+  max_artifact_chars: Int,
+) -> llm_types.ToolResult {
+  let decoder = {
+    use label <- decode.field("label", decode.string)
+    use content <- decode.field("content", decode.string)
+    decode.success(#(label, content))
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) ->
+      llm_types.ToolFailure(
+        tool_use_id: call.id,
+        error: "Invalid checkpoint input — expected `label` and `content`.",
+      )
+    Ok(#(label, content)) -> {
+      let artifact_id = "art-" <> uuid_v4()
+      let now = iso_now()
+      let summary = "checkpoint: " <> label
+      let record =
+        ArtifactRecord(
+          schema_version: 1,
+          artifact_id:,
+          cycle_id:,
+          stored_at: now,
+          tool: "checkpoint",
+          url: "",
+          summary:,
+          char_count: string.length(content),
+          truncated: False,
+        )
+      artifacts_log.append(artifacts_dir, record, content, max_artifact_chars)
+      let meta =
+        ArtifactMeta(
+          artifact_id:,
+          cycle_id:,
+          stored_at: now,
+          tool: "checkpoint",
+          url: "",
+          summary:,
+          char_count: string.length(content),
+          truncated: False,
+        )
+      librarian.index_artifact(lib, meta)
+      slog.debug(
+        "tools/artifacts",
+        "checkpoint",
+        "Stored checkpoint " <> artifact_id <> " (" <> label <> ")",
+        Some(cycle_id),
+      )
+      llm_types.ToolSuccess(
+        tool_use_id: call.id,
+        content: "Checkpointed as artifact_id=\""
+          <> artifact_id
+          <> "\" ("
+          <> string.inspect(string.length(content))
+          <> " chars). Reference this ID to retrieve later or pass it"
+          <> " back to your orchestrator via referenced_artifacts.",
       )
     }
   }
