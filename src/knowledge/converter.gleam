@@ -3,10 +3,16 @@
 ////
 //// Extension-based dispatch:
 ////   .md / .txt   → no conversion (read as-is)
-////   .pdf         → pdftotext -layout (from poppler-utils)
+////   .pdf         → unpdf markdown (https://github.com/iyulab/unpdf)
 ////   .html / .htm → pandoc
 ////   .docx        → pandoc
 ////   .epub        → pandoc
+////
+//// PDF backend rationale: `pdftotext -layout` produced a flat text
+//// dump with no heading markers, so the indexer's tree-builder had
+//// nothing to attach sections to. unpdf detects headings from PDF
+//// font sizes and emits real `#` / `##` ATX markers, which the tree
+//// builder uses to populate a navigable section tree.
 ////
 //// The converter shells out to the host binaries listed above. They are
 //// deterministic file-format converters, not agent-written code, so
@@ -38,7 +44,7 @@ pub type ConverterError {
   /// File extension isn't in the supported set. Carries the extension
   /// (no leading dot) so the caller can log it.
   UnsupportedExtension(extension: String)
-  /// Required host binary (e.g. "pdftotext", "pandoc") is not on PATH.
+  /// Required host binary (e.g. "unpdf", "pandoc") is not on PATH.
   BinaryMissing(binary: String)
   /// Binary ran but exited non-zero, or the file could not be read, or
   /// the output was empty.
@@ -51,7 +57,7 @@ pub type ConverterError {
 pub fn convert(path: String) -> Result(String, ConverterError) {
   case extension_of(path) {
     "md" | "markdown" | "txt" -> read_file(path)
-    "pdf" -> run_pdftotext(path)
+    "pdf" -> run_unpdf(path)
     "html" | "htm" -> run_pandoc(path, "html")
     "docx" -> run_pandoc(path, "docx")
     "epub" -> run_pandoc(path, "epub")
@@ -101,21 +107,23 @@ fn read_file(path: String) -> Result(String, ConverterError) {
   }
 }
 
-fn run_pdftotext(path: String) -> Result(String, ConverterError) {
-  use _ <- require_binary("pdftotext")
-  // `-layout` preserves column structure for two-column papers.
-  // `-` as output path sends to stdout.
-  case exec.run_cmd("pdftotext", ["-layout", path, "-"], default_timeout_ms) {
+fn run_unpdf(path: String) -> Result(String, ConverterError) {
+  use _ <- require_binary("unpdf")
+  // `markdown <file>` writes structured markdown to stdout when no
+  // `-o` is supplied. unpdf detects headings from PDF font sizes and
+  // emits real `#` / `##` markers — the structural fidelity the tree
+  // indexer needs.
+  case exec.run_cmd("unpdf", ["markdown", path], default_timeout_ms) {
     Ok(result) ->
       case result.exit_code, string.trim(result.stdout) {
         0, "" ->
           Error(ConversionFailed(
-            reason: "pdftotext produced no output for " <> path,
+            reason: "unpdf produced no output for " <> path,
           ))
         0, stdout -> Ok(stdout)
         code, _ ->
           Error(ConversionFailed(
-            reason: "pdftotext exited "
+            reason: "unpdf exited "
             <> int_to_string(code)
             <> ": "
             <> string.slice(result.stderr, 0, 500),

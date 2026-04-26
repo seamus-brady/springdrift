@@ -158,7 +158,11 @@ else
 fi
 
 # ── Document converters (optional) ──────────────────────────────────────────
-# pandoc + poppler-utils for ingestion; pandoc + tectonic for export_pdf.
+# pandoc handles HTML / docx / epub ingestion + markdown → PDF on export.
+# unpdf handles PDF → structured markdown on ingestion (real H1/H2 detection
+# from font sizes — replaces the older pdftotext path which produced flat
+# text and broke the indexer's tree builder).
+# tectonic powers export_pdf (markdown → PDF on the way out).
 # All optional — operations skip with a clear error message when missing.
 if command -v pandoc &>/dev/null; then
   ok "pandoc (already installed)"
@@ -169,12 +173,34 @@ else
   fi
 fi
 
-if command -v pdftotext &>/dev/null; then
-  ok "poppler-utils (already installed — provides pdftotext)"
+if command -v unpdf &>/dev/null; then
+  ok "unpdf (already installed — structured PDF → markdown)"
 else
-  if ask_yn "Install poppler-utils? (provides pdftotext for PDF ingestion)"; then
-    sudo apt install -y poppler-utils
-    command -v pdftotext &>/dev/null || warn "poppler-utils installation failed — PDF ingestion will skip"
+  if ask_yn "Install unpdf? (structured PDF → markdown for ingestion — single binary, ~5 MB)"; then
+    # No apt package; download the prebuilt binary from the project's
+    # GitHub releases. Pin a known version; operators can upgrade by
+    # editing this script or running `unpdf update`.
+    UNPDF_VERSION="v0.4.5"
+    ARCH="$(uname -m)"
+    case "$ARCH" in
+      x86_64) UNPDF_TRIPLE="linux-x86_64" ;;
+      *) warn "unpdf: no prebuilt Linux binary for '$ARCH' — install via 'cargo install unpdf-cli' or skip"; UNPDF_TRIPLE="" ;;
+    esac
+    if [ -n "$UNPDF_TRIPLE" ]; then
+      UNPDF_URL="https://github.com/iyulab/unpdf/releases/download/${UNPDF_VERSION}/unpdf-${UNPDF_TRIPLE}-${UNPDF_VERSION}.tar.gz"
+      TMPDIR_UNPDF="$(mktemp -d)"
+      if curl -fsSL "$UNPDF_URL" | tar -xz -C "$TMPDIR_UNPDF"; then
+        sudo mv "$TMPDIR_UNPDF/unpdf" /usr/local/bin/unpdf
+        sudo chmod +x /usr/local/bin/unpdf
+        rm -rf "$TMPDIR_UNPDF"
+        command -v unpdf &>/dev/null \
+          && ok "unpdf installed to /usr/local/bin/unpdf" \
+          || warn "unpdf installation failed — PDF ingestion will skip"
+      else
+        rm -rf "$TMPDIR_UNPDF"
+        warn "unpdf download failed — PDF ingestion will skip"
+      fi
+    fi
   fi
 fi
 

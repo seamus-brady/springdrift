@@ -97,7 +97,7 @@ After upload, there is:
 - No `recall_recent`-style query that would surface deposits.
 - No `QueuedSensoryEvent` emitted on deposit.
 
-So even if pdftotext were installed and normalisation worked, the
+So even if unpdf were installed and normalisation worked, the
 agent wouldn't *know* a file is there until the operator explicitly
 points at it. For a system positioned as an "Artificial Retainer"
 that should notice things, this is a meaningful gap.
@@ -107,8 +107,8 @@ that should notice things, this is a meaningful gap.
 The PR 12 message "No files normalised (unsupported extension or
 converter missing)" lumps two different problems into one string.
 For a `.pdf` upload (extension *is* supported), the only realistic
-cause is `pdftotext` not on PATH. The operator can't act on the
-generic message — they don't know whether to install poppler-utils,
+cause is `unpdf` not on PATH. The operator can't act on the
+generic message — they don't know whether to install unpdf,
 re-encode the file, or stop trying.
 
 ## Fix Plan
@@ -174,7 +174,7 @@ stream.
 
 After this, an operator uploading a file leaves an unambiguous
 breadcrumb: the agent's next cycle starts with "1 file pending in
-intray (Services_…pdf, 4.6 MB, deposit failed: pdftotext not found)."
+intray (Services_…pdf, 4.6 MB, deposit failed: unpdf not found)."
 The agent can act, ask, or escalate from there.
 
 ### Fix 4 — Make the normalisation error specific
@@ -188,18 +188,17 @@ already exist (`BinaryMissing(binary:)`, `UnsupportedExtension(extension:)`,
 them. Keep them distinct in the operator-facing message so they can
 act:
 
-- `BinaryMissing("pdftotext")` → "Cannot convert .pdf — pdftotext
-  binary not found. Install poppler-utils on the host (e.g. `apt
-  install poppler-utils`) and re-trigger intake."
+- `BinaryMissing("unpdf")` → "Cannot convert .pdf — unpdf binary
+  not found. Install from https://github.com/iyulab/unpdf/releases
+  and re-trigger intake."
 - `UnsupportedExtension(".xyz")` → "Cannot convert .xyz — extension
   not in our supported set. Convert to markdown / PDF / docx / epub
   / HTML before uploading."
 
-`docs/operators-manual.md` should also call out pdftotext as required
+`docs/operators-manual.md` should also call out unpdf as required
 in the install section (it currently mentions it but lower in the
-doc). And the deployed Curragh probably needs `apt install
-poppler-utils` (separate ops issue, but worth flagging as part of
-shipping this).
+doc). And the deployed Curragh probably needs the unpdf binary
+(separate ops issue, but worth flagging as part of shipping this).
 
 ## Where to Hold Off
 

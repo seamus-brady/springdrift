@@ -8,8 +8,8 @@
 ////    and that bytes land verbatim.
 //// 2. `process(...)` — the consumer that drains the intray into
 ////    sources/. Tests cover unsupported-extension skip, markdown
-////    happy path, and PDF end-to-end (skipped when pdftotext is
-////    not on PATH so CI without poppler stays green).
+////    happy path, and PDF end-to-end (skipped when unpdf is
+////    not on PATH so CI without unpdf stays green).
 
 // Copyright (C) 2026 Seamus Brady <seamus@corvideon.ie>
 //
@@ -175,18 +175,18 @@ pub fn process_summary_markdown_success_test() {
 
 pub fn format_failure_binary_missing_includes_install_hint_test() {
   // The whole point of splitting this variant out: the operator
-  // gets an ACTIONABLE message ("install poppler-utils") rather than
+  // gets an ACTIONABLE message (where to download unpdf) rather than
   // a generic "couldn't process." Pin the contract — if someone
   // edits format_failure to drop the install hint, the test catches
   // it.
   let msg =
     intake.format_failure(intake.BinaryMissing(
       filename: "report.pdf",
-      binary: "pdftotext",
+      binary: "unpdf",
     ))
-  msg |> string.contains("pdftotext") |> should.be_true
+  msg |> string.contains("unpdf") |> should.be_true
   msg |> string.contains("not installed") |> should.be_true
-  msg |> string.contains("apt install") |> should.be_true
+  msg |> string.contains("github.com/iyulab/unpdf") |> should.be_true
 }
 
 pub fn format_failure_unsupported_extension_includes_action_test() {
@@ -253,8 +253,8 @@ pub fn process_handles_markdown_test() {
 }
 
 pub fn process_converts_pdf_end_to_end_test() {
-  // Skip if pdftotext isn't on PATH.
-  case exec.which("pdftotext") {
+  // Skip if unpdf isn't on PATH.
+  case exec.which("unpdf") {
     Error(_) -> Nil
     Ok(_) -> {
       let root = test_root("pdf")

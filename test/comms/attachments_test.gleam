@@ -77,7 +77,7 @@ pub fn attachment_then_intake_processing_round_trip_test() {
 
   // Step 1: simulate the poller depositing an attachment in the intray.
   // We use a markdown attachment so PR 1's converter doesn't need
-  // pdftotext / pandoc to be installed for this test to run on CI.
+  // unpdf / pandoc to be installed for this test to run on CI.
   let bytes = <<"# Attached\n\nFrom email.\n":utf8>>
   let suggested = poller.build_intray_filename("msg-emailtest123", "memo.md")
   let assert Ok(saved_filename) =
@@ -117,10 +117,10 @@ pub fn attachment_then_intake_processing_round_trip_test() {
 }
 
 // PDF version of the chain — uses the test fixture from PR 1 if
-// pdftotext is available. Skips otherwise so CI without poppler
-// stays green.
+// unpdf is available. Skips otherwise so CI without unpdf stays
+// green.
 pub fn attachment_pdf_round_trip_via_converter_test() {
-  case exec.which("pdftotext") {
+  case exec.which("unpdf") {
     Error(_) -> Nil
     Ok(_) -> {
       let root = test_dir("e2e_pdf")

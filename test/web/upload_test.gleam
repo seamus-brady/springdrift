@@ -73,10 +73,10 @@ pub fn deposit_markdown_lands_and_processes_test() {
 }
 
 pub fn deposit_pdf_lands_and_processes_test() {
-  // PDF path requires pdftotext; skip if the binary isn't present so
-  // CI without poppler stays green. Same skip pattern as the
+  // PDF path requires unpdf; skip if the binary isn't present so
+  // CI without unpdf stays green. Same skip pattern as the
   // attachments PDF test.
-  case exec.which("pdftotext") {
+  case exec.which("unpdf") {
     Error(_) -> Nil
     Ok(_) -> {
       let root = test_root("pdf_happy")
