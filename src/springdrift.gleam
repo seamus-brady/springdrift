@@ -26,6 +26,8 @@ import agents/writer
 import backup/actor as backup_actor
 import captures/expiry as captures_expiry
 import cbr/bridge as cbr_bridge
+import coder/manager as coder_manager
+import coder/types as coder_types
 import comms/email as comms_email
 import comms/poller as comms_poller
 import comms/types as comms_types
@@ -67,6 +69,7 @@ import planner/config as planner_config
 import planner/forecaster
 import planner/types as planner_types
 import sandbox/manager as sandbox_manager_mod
+import sandbox/podman_ffi as sandbox_podman
 import sandbox/types as sandbox_types
 import scenario/runner as scenario_runner
 import scheduler/log as schedule_log
@@ -76,6 +79,7 @@ import simplifile
 import skills
 import slog
 import tools/cache
+import tools/coder_dispatch
 import tools/how_to_content
 import tools/knowledge as tools_knowledge
 import tools/memory as tools_memory
@@ -650,7 +654,7 @@ fn run(cfg: AppConfig) -> Nil {
   // spec's system_prompt. Specialists only see "always-inject" skills
   // (empty contexts list); domain-scoped skills require live cycle
   // context which the Curator handles for the cognitive loop.
-  let agent_specs =
+  let #(raw_agent_specs, real_coder_deps) =
     default_agent_specs(
       cfg,
       p,
@@ -660,10 +664,16 @@ fn run(cfg: AppConfig) -> Nil {
       brave_search_limiter,
       brave_answers_limiter,
       brave_cache_ttl_ms,
-      sandbox_mgr,
       skill_dirs,
     )
+  let agent_specs =
+    raw_agent_specs
     |> list.map(fn(spec) { append_skills_to_spec(spec, discovered) })
+  let coder_manager_handle = case real_coder_deps {
+    option.Some(deps) -> option.Some(deps.manager)
+    option.None -> option.None
+  }
+  let coder_dispatch_defaults = build_dispatch_defaults(cfg)
 
   // Build agent tools for the cognitive loop (includes scheduler)
   let scheduler_tool =
@@ -929,6 +939,8 @@ fn run(cfg: AppConfig) -> Nil {
       deputies_max_tokens: option.unwrap(cfg.deputies_max_tokens, 800),
       deputy_timeout_ms: option.unwrap(cfg.deputy_timeout_ms, 15_000),
       skills_dirs: skill_dirs,
+      coder_manager: coder_manager_handle,
+      coder_dispatch_defaults: coder_dispatch_defaults,
     ))
   {
     Ok(subj) -> subj
@@ -1522,9 +1534,8 @@ fn default_agent_specs(
     process.Subject(rate_limiter.RateLimiterMessage),
   ),
   brave_cache_ttl_ms: Int,
-  sandbox_manager: option.Option(sandbox_types.SandboxManager),
   skill_dirs: List(String),
-) -> List(agent_types.AgentSpec) {
+) -> #(List(agent_types.AgentSpec), option.Option(coder.RealCoderDeps)) {
   let delay = option.unwrap(cfg.inter_turn_delay_ms, 200)
   let p_spec = planner.spec(provider, task_model)
   let appraiser_ctx =
@@ -1566,16 +1577,21 @@ fn default_agent_specs(
       skill_dirs,
       kagi_enabled,
     )
-  let c_spec =
-    coder.spec(
-      provider,
-      task_model,
-      sandbox_manager,
-      paths.artifacts_dir(),
-      option.Some(librarian_subj),
-      max_artifact_chars,
-      skill_dirs,
+  // Real-coder mode activates only when [coder] is fully configured
+  // AND ANTHROPIC_API_KEY is in env. When None, the coder agent is
+  // simply not registered — the cog/PM still has dispatch_coder
+  // exposed via the cog-loop tool list, but agent_coder is absent.
+  let real_coder_deps =
+    maybe_build_real_coder_deps(
+      cfg,
+      paths.planner_dir(),
+      librarian_subj,
+      appraiser_ctx,
     )
+  let c_spec_list = case real_coder_deps {
+    option.Some(deps) -> [coder.spec(provider, task_model, skill_dirs, deps)]
+    option.None -> []
+  }
   let w_spec =
     writer.spec(
       provider,
@@ -1601,7 +1617,7 @@ fn default_agent_specs(
       max_artifact_chars,
     )
   let redact = option.unwrap(cfg.redact_secrets, True)
-  [
+  let specs = [
     agent_types.AgentSpec(
       ..p_spec,
       max_tokens: option.unwrap(cfg.planner_max_tokens, p_spec.max_tokens),
@@ -1640,17 +1656,6 @@ fn default_agent_specs(
       redact_secrets: redact,
     ),
     agent_types.AgentSpec(
-      ..c_spec,
-      max_tokens: option.unwrap(cfg.coder_max_tokens, c_spec.max_tokens),
-      max_turns: option.unwrap(cfg.coder_max_turns, c_spec.max_turns),
-      max_consecutive_errors: option.unwrap(
-        cfg.coder_max_errors,
-        c_spec.max_consecutive_errors,
-      ),
-      inter_turn_delay_ms: delay,
-      redact_secrets: redact,
-    ),
-    agent_types.AgentSpec(
       ..w_spec,
       max_tokens: option.unwrap(cfg.writer_max_tokens, w_spec.max_tokens),
       max_turns: option.unwrap(cfg.writer_max_turns, w_spec.max_turns),
@@ -1662,7 +1667,20 @@ fn default_agent_specs(
       redact_secrets: redact,
     ),
     agent_types.AgentSpec(..o_spec, redact_secrets: redact),
-    ..list.append(
+    ..list.flatten([
+      list.map(c_spec_list, fn(c_spec) {
+        agent_types.AgentSpec(
+          ..c_spec,
+          max_tokens: option.unwrap(cfg.coder_max_tokens, c_spec.max_tokens),
+          max_turns: option.unwrap(cfg.coder_max_turns, c_spec.max_turns),
+          max_consecutive_errors: option.unwrap(
+            cfg.coder_max_errors,
+            c_spec.max_consecutive_errors,
+          ),
+          inter_turn_delay_ms: delay,
+          redact_secrets: redact,
+        )
+      }),
       comms_specs(cfg, provider, task_model, delay, redact, skill_dirs),
       remembrancer_specs(
         cfg,
@@ -1673,8 +1691,9 @@ fn default_agent_specs(
         redact,
         skill_dirs,
       ),
-    )
+    ])
   ]
+  #(specs, real_coder_deps)
 }
 
 fn comms_specs(
@@ -1754,6 +1773,263 @@ fn comms_specs(
         ]
       }
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Real-coder (OpenCode-backed) wiring
+// ---------------------------------------------------------------------------
+
+/// Resolve per-task budget defaults + ceilings from AppConfig, applying
+/// the same defaults used by `default_test_config` so the values stay
+/// consistent between live runs and tests.
+fn build_dispatch_defaults(cfg: AppConfig) -> coder_dispatch.DispatchDefaults {
+  coder_dispatch.DispatchDefaults(
+    default_max_tokens: option.unwrap(
+      cfg.coder_default_max_tokens_per_task,
+      200_000,
+    ),
+    default_max_cost_usd: option.unwrap(
+      cfg.coder_default_max_cost_per_task_usd,
+      5.0,
+    ),
+    default_max_minutes: option.unwrap(
+      cfg.coder_default_max_minutes_per_task,
+      10,
+    ),
+    default_max_turns: option.unwrap(cfg.coder_default_max_turns_per_task, 50),
+    ceiling_max_tokens: option.unwrap(
+      cfg.coder_ceiling_max_tokens_per_task,
+      1_000_000,
+    ),
+    ceiling_max_cost_usd: option.unwrap(
+      cfg.coder_ceiling_max_cost_per_task_usd,
+      25.0,
+    ),
+    ceiling_max_minutes: option.unwrap(
+      cfg.coder_ceiling_max_minutes_per_task,
+      60,
+    ),
+    ceiling_max_turns: option.unwrap(cfg.coder_ceiling_max_turns_per_task, 200),
+  )
+}
+
+@external(erlang, "springdrift_ffi", "get_cwd")
+fn get_cwd() -> String
+
+/// Ensure the coder image exists locally, building it from
+/// Containerfile.coder when missing. Logs progress so first-boot
+/// users see what's happening (the build can take several minutes).
+/// Returns Ok(Nil) when the image is present (already there or just
+/// built), Error(reason) on build failure.
+fn ensure_coder_image(image: String) -> Result(Nil, String) {
+  case sandbox_podman.run_cmd("podman", ["image", "exists", image], 5000) {
+    Ok(r) if r.exit_code == 0 -> Ok(Nil)
+    _ -> {
+      slog.info(
+        "coder",
+        "ensure_image",
+        "Image "
+          <> image
+          <> " not present locally; building now (one-time, takes a few minutes)",
+        option.None,
+      )
+      io.println(
+        "Coder    : building " <> image <> " (first boot — a few minutes)…",
+      )
+      let cf = get_cwd() <> "/Containerfile.coder"
+      case
+        sandbox_podman.run_cmd(
+          "podman",
+          ["build", "-f", cf, "-t", image, "."],
+          900_000,
+        )
+      {
+        Ok(r) if r.exit_code == 0 -> {
+          slog.info("coder", "ensure_image", "Built " <> image, option.None)
+          io.println("Coder    : built " <> image)
+          Ok(Nil)
+        }
+        Ok(r) ->
+          Error(
+            "podman build exited "
+            <> int.to_string(r.exit_code)
+            <> ":\n"
+            <> r.stderr,
+          )
+        Error(reason) -> Error("podman build failed to start: " <> reason)
+      }
+    }
+  }
+}
+
+/// Build the RealCoderDeps the coder agent needs for real-coder mode.
+/// Returns None when ANTHROPIC_API_KEY is missing or the image build
+/// fails. Defaults: image = "springdrift-coder:1.14.25" (set in
+/// AppConfig.default), project_root = cwd if not configured,
+/// model_id = "claude-sonnet-4-6" (set in AppConfig.default). The only
+/// thing the operator MUST provide is ANTHROPIC_API_KEY.
+///   - [coder] image
+///   - [coder] project_root
+///   - [coder] model_id
+///   - ANTHROPIC_API_KEY env var
+/// Each gating omission logs a warn-level reason at startup so the
+/// operator can see why real-coder isn't active.
+fn maybe_build_real_coder_deps(
+  cfg: AppConfig,
+  planner_dir: String,
+  librarian: process.Subject(librarian.LibrarianMessage),
+  appraiser_ctx: option.Option(appraiser.AppraiserContext),
+) -> option.Option(coder.RealCoderDeps) {
+  // Defaults come from AppConfig.default (image + provider_id +
+  // model_id). project_root falls back to cwd. Operator only needs to
+  // set ANTHROPIC_API_KEY.
+  let image = option.unwrap(cfg.coder_image, "")
+  let project_root = case cfg.coder_project_root {
+    option.Some(p) -> p
+    option.None -> get_cwd()
+  }
+  let model_id = option.unwrap(cfg.coder_model_id, "")
+  let api_key = case get_env("ANTHROPIC_API_KEY") {
+    Ok(k) -> k
+    Error(_) -> ""
+  }
+
+  case image, project_root, model_id, api_key {
+    "", _, _, _ -> {
+      slog.info(
+        "coder",
+        "wire",
+        "real-coder mode disabled: [coder] image not set",
+        option.None,
+      )
+      option.None
+    }
+    _, "", _, _ -> {
+      slog.info(
+        "coder",
+        "wire",
+        "real-coder mode disabled: cwd unavailable as project_root fallback",
+        option.None,
+      )
+      option.None
+    }
+    _, _, "", _ -> {
+      slog.info(
+        "coder",
+        "wire",
+        "real-coder mode disabled: [coder] model_id not set",
+        option.None,
+      )
+      option.None
+    }
+    _, _, _, "" -> {
+      io.println(
+        "Coder    : ANTHROPIC_API_KEY not set in .env — coder agent disabled. Add it and restart to enable.",
+      )
+      slog.info(
+        "coder",
+        "wire",
+        "real-coder mode disabled: ANTHROPIC_API_KEY env var not set",
+        option.None,
+      )
+      option.None
+    }
+    _, _, _, _ ->
+      case ensure_coder_image(image) {
+        Error(reason) -> {
+          io.println("Coder    : image build failed — " <> reason)
+          slog.warn(
+            "coder",
+            "wire",
+            "Coder image build failed: " <> reason,
+            option.None,
+          )
+          option.None
+        }
+        Ok(Nil) -> {
+          let coder_config =
+            coder_types.CoderConfig(
+              image: image,
+              project_root: project_root,
+              session_timeout_ms: option.unwrap(
+                cfg.coder_session_timeout_ms,
+                600_000,
+              ),
+              max_tokens_per_task: option.unwrap(
+                cfg.coder_max_tokens_per_task,
+                200_000,
+              ),
+              max_cost_per_task_usd: option.unwrap(
+                cfg.coder_max_cost_per_task_usd,
+                5.0,
+              ),
+              max_cost_per_hour_usd: option.unwrap(
+                cfg.coder_max_cost_per_hour_usd,
+                20.0,
+              ),
+              cost_poll_interval_ms: option.unwrap(
+                cfg.coder_cost_poll_interval_ms,
+                5000,
+              ),
+              provider_id: option.unwrap(cfg.coder_provider_id, "anthropic"),
+              model_id: model_id,
+            )
+
+          let pool_config =
+            coder_manager.pool_config_from_options(
+              warm_pool_size: cfg.coder_warm_pool_size,
+              max_concurrent_sessions: cfg.coder_max_concurrent_sessions,
+              container_idle_ttl_ms: cfg.coder_container_idle_ttl_ms,
+              container_name_prefix: cfg.coder_container_name_prefix,
+              slot_id_base: cfg.coder_slot_id_base,
+              container_memory_mb: cfg.coder_container_memory_mb,
+              container_cpus: cfg.coder_container_cpus,
+              container_pids_limit: cfg.coder_container_pids_limit,
+            )
+
+          case
+            coder_manager.start(
+              coder_config,
+              api_key,
+              paths.cbr_dir(),
+              paths.coder_sessions_dir(),
+              pool_config,
+            )
+          {
+            Error(reason) -> {
+              slog.warn(
+                "coder",
+                "wire",
+                "CoderManager startup failed: " <> reason,
+                option.None,
+              )
+              option.None
+            }
+            Ok(mgr) -> {
+              slog.info(
+                "coder",
+                "wire",
+                "real-coder mode active: image="
+                  <> image
+                  <> " project_root="
+                  <> project_root
+                  <> " model="
+                  <> model_id,
+                option.None,
+              )
+              option.Some(coder.RealCoderDeps(
+                manager: mgr,
+                project_root: project_root,
+                planner_dir: planner_dir,
+                librarian: librarian,
+                appraiser_ctx: appraiser_ctx,
+                dispatch_defaults: build_dispatch_defaults(cfg),
+              ))
+            }
+          }
+        }
+      }
   }
 }
 

@@ -185,6 +185,80 @@ pub type AppConfig {
     coder_max_tokens: Option(Int),
     coder_max_turns: Option(Int),
     coder_max_errors: Option(Int),
+    // ── Real-coder (Phase 2: OpenCode-backed coding agent) ──
+    /// Image tag for the coder sandbox. Default: "springdrift-coder:latest".
+    /// Operator builds via scripts/build-coder-image.sh and verifies via
+    /// scripts/smoke-coder-image.sh before relying on a new pin.
+    coder_image: Option(String),
+    /// Host path bind-mounted as the project root inside the coder slot.
+    /// Required when the real-coder agent is in use. Cannot be or contain
+    /// the .springdrift/ data directory.
+    coder_project_root: Option(String),
+    /// Hard ceiling on a single coding task's wall time (ms). Default: 600000
+    /// (10 minutes).
+    coder_session_timeout_ms: Option(Int),
+    /// Token budget per coding task. Circuit breaker kills the session
+    /// when this is exceeded. Default: 200000.
+    coder_max_tokens_per_task: Option(Int),
+    /// Cost budget (USD) per coding task. Default: 5.0.
+    coder_max_cost_per_task_usd: Option(Float),
+    /// Aggregate cost cap (USD) across all coder tasks in a rolling hour.
+    /// Default: 20.0. Refuses new sessions until the window rolls.
+    coder_max_cost_per_hour_usd: Option(Float),
+    /// How often the supervisor polls session usage to feed the circuit
+    /// breaker. Default: 5000 (5 seconds).
+    coder_cost_poll_interval_ms: Option(Int),
+    /// Provider id passed to OpenCode on every send_message — must
+    /// match a provider OpenCode knows about (anthropic, openai, etc.).
+    /// Default: "anthropic".
+    coder_provider_id: Option(String),
+    /// Model id passed to OpenCode on every send_message. Default
+    /// "claude-haiku-4-5-20251001" — matches the model Curragh uses for
+    /// task_model. Operator sets this to whatever Anthropic model their
+    /// API key has access to. OpenCode's bundled models.dev catalog
+    /// drifts from Anthropic's actual API surface, so operators are
+    /// expected to override here when their API rejects the catalog
+    /// default.
+    coder_model_id: Option(String),
+    // ── Real-coder pool + container limits (ACP rebuild — R2) ──
+    /// Host path bind-mounted ro into the container at /root/.config/opencode.
+    /// Operator's existing opencode auth lives there. Default: "~/.config/opencode".
+    coder_auth_config_path: Option(String),
+    /// Number of containers kept warm at boot. Each is one ACP slot.
+    /// Default: 1. More containers = faster parallel dispatch, more idle resource use.
+    coder_warm_pool_size: Option(Int),
+    /// Hard cap on concurrent coder sessions. Refuses new dispatches above this.
+    /// Default: 4.
+    coder_max_concurrent_sessions: Option(Int),
+    /// Janitor reaps idle containers (no active session) older than this. Default: 3600000 (1h).
+    coder_container_idle_ttl_ms: Option(Int),
+    /// Container name prefix. Default: "springdrift-coder".
+    coder_container_name_prefix: Option(String),
+    /// Slot id allocator base. Default: 100. Counter increments monotonically.
+    coder_slot_id_base: Option(Int),
+    /// Memory limit per container (MB). Kernel-enforced via `--memory`. Default: 2048.
+    coder_container_memory_mb: Option(Int),
+    /// CPU limit per container. Kernel-enforced via `--cpus`. Default: "2".
+    coder_container_cpus: Option(String),
+    /// Process count cap per container. Kernel-enforced via `--pids-limit`. Fork-bomb safety. Default: 256.
+    coder_container_pids_limit: Option(Int),
+    // ── Real-coder budget (ACP rebuild — R2) ──
+    /// Tokens/cost/minutes/turns DEFAULT applied per task when the dispatcher
+    /// doesn't specify. Used as the budget passed to the manager unless the
+    /// dispatch tool overrides.
+    coder_default_max_tokens_per_task: Option(Int),
+    coder_default_max_cost_per_task_usd: Option(Float),
+    coder_default_max_minutes_per_task: Option(Int),
+    coder_default_max_turns_per_task: Option(Int),
+    /// CEILING — the agent cannot exceed these no matter what it requests.
+    /// Manager clamps requests above the ceiling and reports the clamp.
+    coder_ceiling_max_tokens_per_task: Option(Int),
+    coder_ceiling_max_cost_per_task_usd: Option(Float),
+    coder_ceiling_max_minutes_per_task: Option(Int),
+    coder_ceiling_max_turns_per_task: Option(Int),
+    // (Hourly aggregate cap re-uses the existing
+    // coder_max_cost_per_hour_usd field declared earlier — TOML now
+    // accepts it under [coder.budget] OR the legacy [coder] path.)
     writer_max_tokens: Option(Int),
     writer_max_turns: Option(Int),
     writer_max_errors: Option(Int),
@@ -497,6 +571,36 @@ pub fn default() -> AppConfig {
     coder_max_tokens: None,
     coder_max_turns: None,
     coder_max_errors: None,
+    // Real-coder is enabled by default. The manager auto-builds the
+    // image from Containerfile.coder if it's missing, picks the cwd as
+    // project_root if unset, and uses the pinned-version image tag.
+    // Operator only needs ANTHROPIC_API_KEY in .env.
+    coder_image: Some("springdrift-coder:1.14.25"),
+    coder_project_root: None,
+    coder_session_timeout_ms: None,
+    coder_max_tokens_per_task: None,
+    coder_max_cost_per_task_usd: None,
+    coder_max_cost_per_hour_usd: None,
+    coder_cost_poll_interval_ms: None,
+    coder_provider_id: Some("anthropic"),
+    coder_model_id: Some("claude-sonnet-4-6"),
+    coder_auth_config_path: None,
+    coder_warm_pool_size: None,
+    coder_max_concurrent_sessions: None,
+    coder_container_idle_ttl_ms: None,
+    coder_container_name_prefix: None,
+    coder_slot_id_base: None,
+    coder_container_memory_mb: None,
+    coder_container_cpus: None,
+    coder_container_pids_limit: None,
+    coder_default_max_tokens_per_task: None,
+    coder_default_max_cost_per_task_usd: None,
+    coder_default_max_minutes_per_task: None,
+    coder_default_max_turns_per_task: None,
+    coder_ceiling_max_tokens_per_task: None,
+    coder_ceiling_max_cost_per_task_usd: None,
+    coder_ceiling_max_minutes_per_task: None,
+    coder_ceiling_max_turns_per_task: None,
     writer_max_tokens: None,
     writer_max_turns: None,
     writer_max_errors: None,
@@ -956,6 +1060,104 @@ pub fn merge(base: AppConfig, override override_cfg: AppConfig) -> AppConfig {
     coder_max_errors: option.or(
       override_cfg.coder_max_errors,
       base.coder_max_errors,
+    ),
+    coder_image: option.or(override_cfg.coder_image, base.coder_image),
+    coder_project_root: option.or(
+      override_cfg.coder_project_root,
+      base.coder_project_root,
+    ),
+    coder_session_timeout_ms: option.or(
+      override_cfg.coder_session_timeout_ms,
+      base.coder_session_timeout_ms,
+    ),
+    coder_max_tokens_per_task: option.or(
+      override_cfg.coder_max_tokens_per_task,
+      base.coder_max_tokens_per_task,
+    ),
+    coder_max_cost_per_task_usd: option.or(
+      override_cfg.coder_max_cost_per_task_usd,
+      base.coder_max_cost_per_task_usd,
+    ),
+    coder_max_cost_per_hour_usd: option.or(
+      override_cfg.coder_max_cost_per_hour_usd,
+      base.coder_max_cost_per_hour_usd,
+    ),
+    coder_cost_poll_interval_ms: option.or(
+      override_cfg.coder_cost_poll_interval_ms,
+      base.coder_cost_poll_interval_ms,
+    ),
+    coder_provider_id: option.or(
+      override_cfg.coder_provider_id,
+      base.coder_provider_id,
+    ),
+    coder_model_id: option.or(override_cfg.coder_model_id, base.coder_model_id),
+    coder_auth_config_path: option.or(
+      override_cfg.coder_auth_config_path,
+      base.coder_auth_config_path,
+    ),
+    coder_warm_pool_size: option.or(
+      override_cfg.coder_warm_pool_size,
+      base.coder_warm_pool_size,
+    ),
+    coder_max_concurrent_sessions: option.or(
+      override_cfg.coder_max_concurrent_sessions,
+      base.coder_max_concurrent_sessions,
+    ),
+    coder_container_idle_ttl_ms: option.or(
+      override_cfg.coder_container_idle_ttl_ms,
+      base.coder_container_idle_ttl_ms,
+    ),
+    coder_container_name_prefix: option.or(
+      override_cfg.coder_container_name_prefix,
+      base.coder_container_name_prefix,
+    ),
+    coder_slot_id_base: option.or(
+      override_cfg.coder_slot_id_base,
+      base.coder_slot_id_base,
+    ),
+    coder_container_memory_mb: option.or(
+      override_cfg.coder_container_memory_mb,
+      base.coder_container_memory_mb,
+    ),
+    coder_container_cpus: option.or(
+      override_cfg.coder_container_cpus,
+      base.coder_container_cpus,
+    ),
+    coder_container_pids_limit: option.or(
+      override_cfg.coder_container_pids_limit,
+      base.coder_container_pids_limit,
+    ),
+    coder_default_max_tokens_per_task: option.or(
+      override_cfg.coder_default_max_tokens_per_task,
+      base.coder_default_max_tokens_per_task,
+    ),
+    coder_default_max_cost_per_task_usd: option.or(
+      override_cfg.coder_default_max_cost_per_task_usd,
+      base.coder_default_max_cost_per_task_usd,
+    ),
+    coder_default_max_minutes_per_task: option.or(
+      override_cfg.coder_default_max_minutes_per_task,
+      base.coder_default_max_minutes_per_task,
+    ),
+    coder_default_max_turns_per_task: option.or(
+      override_cfg.coder_default_max_turns_per_task,
+      base.coder_default_max_turns_per_task,
+    ),
+    coder_ceiling_max_tokens_per_task: option.or(
+      override_cfg.coder_ceiling_max_tokens_per_task,
+      base.coder_ceiling_max_tokens_per_task,
+    ),
+    coder_ceiling_max_cost_per_task_usd: option.or(
+      override_cfg.coder_ceiling_max_cost_per_task_usd,
+      base.coder_ceiling_max_cost_per_task_usd,
+    ),
+    coder_ceiling_max_minutes_per_task: option.or(
+      override_cfg.coder_ceiling_max_minutes_per_task,
+      base.coder_ceiling_max_minutes_per_task,
+    ),
+    coder_ceiling_max_turns_per_task: option.or(
+      override_cfg.coder_ceiling_max_turns_per_task,
+      base.coder_ceiling_max_turns_per_task,
     ),
     writer_max_tokens: option.or(
       override_cfg.writer_max_tokens,
@@ -1886,6 +2088,103 @@ fn toml_to_config(table: dict.Dict(String, tom.Toml)) -> AppConfig {
     coder_max_tokens: get_toml_int(table, ["agents", "coder", "max_tokens"]),
     coder_max_turns: get_toml_int(table, ["agents", "coder", "max_turns"]),
     coder_max_errors: get_toml_int(table, ["agents", "coder", "max_errors"]),
+    // [coder] real-coder (Phase 2)
+    coder_image: get_toml_str(table, ["coder", "image"]),
+    coder_project_root: get_toml_str(table, ["coder", "project_root"]),
+    coder_session_timeout_ms: get_toml_int(table, [
+      "coder",
+      "session_timeout_ms",
+    ]),
+    coder_max_tokens_per_task: get_toml_int(table, [
+      "coder",
+      "max_tokens_per_task",
+    ]),
+    coder_max_cost_per_task_usd: get_toml_float(table, [
+      "coder",
+      "max_cost_per_task_usd",
+    ]),
+    // Hourly cap: prefer the new [coder.budget] path; fall back to the
+    // legacy [coder] path so operators upgrading from R-1 don't see a
+    // silent default-revert.
+    coder_max_cost_per_hour_usd: option.or(
+      get_toml_float(table, ["coder", "budget", "max_cost_per_hour_usd"]),
+      get_toml_float(table, ["coder", "max_cost_per_hour_usd"]),
+    ),
+    coder_cost_poll_interval_ms: get_toml_int(table, [
+      "coder",
+      "cost_poll_interval_ms",
+    ]),
+    coder_provider_id: get_toml_str(table, ["coder", "provider_id"]),
+    coder_model_id: get_toml_str(table, ["coder", "model_id"]),
+    // ── [coder] pool + container limits ──
+    coder_auth_config_path: get_toml_str(table, [
+      "coder",
+      "auth_config_path",
+    ]),
+    coder_warm_pool_size: get_toml_int(table, ["coder", "warm_pool_size"]),
+    coder_max_concurrent_sessions: get_toml_int(table, [
+      "coder",
+      "max_concurrent_sessions",
+    ]),
+    coder_container_idle_ttl_ms: get_toml_int(table, [
+      "coder",
+      "container_idle_ttl_ms",
+    ]),
+    coder_container_name_prefix: get_toml_str(table, [
+      "coder",
+      "container_name_prefix",
+    ]),
+    coder_slot_id_base: get_toml_int(table, ["coder", "slot_id_base"]),
+    coder_container_memory_mb: get_toml_int(table, [
+      "coder",
+      "container_memory_mb",
+    ]),
+    coder_container_cpus: get_toml_str(table, ["coder", "container_cpus"]),
+    coder_container_pids_limit: get_toml_int(table, [
+      "coder",
+      "container_pids_limit",
+    ]),
+    // ── [coder.budget] defaults + ceilings ──
+    coder_default_max_tokens_per_task: get_toml_int(table, [
+      "coder",
+      "budget",
+      "default_max_tokens_per_task",
+    ]),
+    coder_default_max_cost_per_task_usd: get_toml_float(table, [
+      "coder",
+      "budget",
+      "default_max_cost_per_task_usd",
+    ]),
+    coder_default_max_minutes_per_task: get_toml_int(table, [
+      "coder",
+      "budget",
+      "default_max_minutes_per_task",
+    ]),
+    coder_default_max_turns_per_task: get_toml_int(table, [
+      "coder",
+      "budget",
+      "default_max_turns_per_task",
+    ]),
+    coder_ceiling_max_tokens_per_task: get_toml_int(table, [
+      "coder",
+      "budget",
+      "ceiling_max_tokens_per_task",
+    ]),
+    coder_ceiling_max_cost_per_task_usd: get_toml_float(table, [
+      "coder",
+      "budget",
+      "ceiling_max_cost_per_task_usd",
+    ]),
+    coder_ceiling_max_minutes_per_task: get_toml_int(table, [
+      "coder",
+      "budget",
+      "ceiling_max_minutes_per_task",
+    ]),
+    coder_ceiling_max_turns_per_task: get_toml_int(table, [
+      "coder",
+      "budget",
+      "ceiling_max_turns_per_task",
+    ]),
     writer_max_tokens: get_toml_int(table, ["agents", "writer", "max_tokens"]),
     writer_max_turns: get_toml_int(table, ["agents", "writer", "max_turns"]),
     writer_max_errors: get_toml_int(table, ["agents", "writer", "max_errors"]),
@@ -2228,7 +2527,7 @@ const known_keys = [
   "housekeeper", "cbr", "agents", "web", "services", "scheduler", "xstructor",
   "forecaster", "sandbox", "delegation", "escalation", "dprime", "vertex",
   "anthropic", "mistral", "local", "backup", "comms", "appraisal", "affect",
-  "teams", "knowledge", "remembrancer", "agentlair", "meta_learning",
+  "teams", "knowledge", "remembrancer", "agentlair", "meta_learning", "coder",
 ]
 
 const known_narrative_keys = [

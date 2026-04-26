@@ -108,6 +108,13 @@ pub fn planner_dir() -> String {
   project_dir() <> "/memory/planner"
 }
 
+/// Coder session archive directory: .springdrift/memory/coder/sessions/
+/// Each completed coder dispatch dumps its raw OpenCode session JSON
+/// here for forensics + replay. CBR cases are derived from these.
+pub fn coder_sessions_dir() -> String {
+  project_dir() <> "/memory/coder/sessions"
+}
+
 /// Schedule directory: .springdrift/memory/schedule/
 pub fn schedule_dir() -> String {
   project_dir() <> "/memory/schedule"

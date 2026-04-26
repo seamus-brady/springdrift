@@ -26,7 +26,8 @@
          re_match_caseless/2,
          re_is_valid_pattern/1,
          set_env/2,
-         run_cmd/3, which/1,
+         run_cmd/3, which/1, get_cwd/0,
+         acp_open/2, acp_send/2, acp_close/1,
          json_encode_term/1, json_decode_to_string/1,
          identity/1,
          sign_rs256/2, unix_now/0,
@@ -740,6 +741,89 @@ which(Name) when is_binary(Name) ->
         false -> {error, nil};
         Path -> {ok, list_to_binary(Path)}
     end.
+
+%% Current working directory of the BEAM node, as a binary.
+%% file:get_cwd/0 returns {ok, Path}; we never expect that to fail in
+%% practice but fall back to "." on the off chance.
+get_cwd() ->
+    case file:get_cwd() of
+        {ok, Path} -> list_to_binary(Path);
+        _ -> <<".">>
+    end.
+
+%% Open an ACP subprocess: `podman exec -i <ContainerId> opencode acp`.
+%% Returns the PID of an Erlang controller process that owns the port
+%% and forwards both directions of the JSON-RPC dialogue.
+%%
+%% ClientSubject is a Gleam Subject — the wire form is
+%% `{subject, OwnerPid, Tag}`. The controller extracts OwnerPid + Tag
+%% and sends Gleam-formatted control messages directly into the
+%% Subject's mailbox:
+%%   {ctl_inbound, Line :: binary()}
+%%   {ctl_subprocess_exited, ExitStatus :: integer()}
+%%
+%% Drivers use acp_send/2 and acp_close/1 — never raw `!`.
+acp_open(ContainerId, ClientSubject)
+  when is_binary(ContainerId) ->
+    {subject, ClientPid, Tag} = ClientSubject,
+    Pid = spawn(fun() -> acp_loop_init(ContainerId, ClientPid, Tag) end),
+    {ok, Pid}.
+
+acp_loop_init(ContainerId, ClientPid, Tag) ->
+    %% Find podman; bail loudly if missing rather than crash mid-loop.
+    PodmanPath = case os:find_executable("podman") of
+        false ->
+            ClientPid ! {Tag, {ctl_subprocess_exited, -1}},
+            exit(normal);
+        P -> P
+    end,
+    Args = [<<"exec">>, <<"-i">>, ContainerId, <<"opencode">>, <<"acp">>],
+    try
+        Port = open_port({spawn_executable, PodmanPath},
+                         [{args, Args},
+                          binary,
+                          exit_status,
+                          use_stdio,
+                          stderr_to_stdout,
+                          {line, 65536}]),
+        acp_loop(Port, ClientPid, Tag)
+    catch
+        _:_ ->
+            ClientPid ! {Tag, {ctl_subprocess_exited, -2}}
+    end.
+
+acp_loop(Port, ClientPid, Tag) ->
+    receive
+        {Port, {data, {eol, Line}}} ->
+            ClientPid ! {Tag, {ctl_inbound, Line}},
+            acp_loop(Port, ClientPid, Tag);
+        {Port, {data, {noeol, _Partial}}} ->
+            %% Line longer than 64KB. ACP messages we exchange are
+            %% well under that; if this fires we drop the partial
+            %% rather than buffer unbounded.
+            acp_loop(Port, ClientPid, Tag);
+        {Port, {exit_status, N}} ->
+            ClientPid ! {Tag, {ctl_subprocess_exited, N}};
+        {acp_send, Line} when is_binary(Line) ->
+            port_command(Port, [Line, $\n]),
+            acp_loop(Port, ClientPid, Tag);
+        acp_close ->
+            try port_close(Port) catch _:_ -> ok end;
+        _Other ->
+            acp_loop(Port, ClientPid, Tag)
+    end.
+
+%% Send one JSON-RPC line to the subprocess. The trailing newline is
+%% added by the controller. Returns ok regardless — port write is
+%% best-effort; if the subprocess died, the caller will see acp_exit.
+acp_send(Pid, Line) when is_pid(Pid), is_binary(Line) ->
+    Pid ! {acp_send, Line},
+    ok.
+
+%% Tell the controller to close the port and exit.
+acp_close(Pid) when is_pid(Pid) ->
+    Pid ! acp_close,
+    ok.
 
 %% Extract Content-Type from a headers list. Returns {ContentTypeStr, RemainingHeaders}.
 extract_content_type(Headers) ->

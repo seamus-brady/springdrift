@@ -742,10 +742,145 @@ cpus = "1"
 image = "python:3.12-slim"
 ```
 
-If Podman isn't available, the coder agent falls back to
-`request_human_input`. Workspace dirs live at `.sandbox-workspaces/`
-in the project root (sibling of `.springdrift/`, not inside it —
-ephemeral container state vs persistent agent memory).
+Workspace dirs live at `.sandbox-workspaces/` in the project root
+(sibling of `.springdrift/`, not inside it — ephemeral container state
+vs persistent agent memory).
+
+### Coder (OpenCode-backed)
+
+The coder side of Springdrift is built around two pieces:
+
+- **`dispatch_coder`** — a cog-loop / PM tool. One call spawns one
+  OpenCode session inside a sandbox slot, blocks until the session
+  returns (asynchronously, via an OTP worker — the cog stays
+  responsive), and returns a summary plus the CBR case. Use this when
+  you want a single self-contained coding task delegated.
+- **`agent_coder`** — a specialist agent that wraps the above. It
+  frames the work via `project_status`/`project_read`/`project_grep`,
+  delegates each edit via `dispatch_coder` (potentially multiple
+  times), verifies on disk, and integrates with the Planner via
+  `complete_task_step`/`flag_risk`/`report_blocker`. Use this when the
+  PM should hand off a multi-step work item.
+
+Both share the same OpenCode container pool, the same per-task budget
+caps, and the same CBR ingest (sessions land as `CodePattern` cases
+keyed by the tools the in-container model used).
+
+#### Activation
+
+Both `dispatch_coder` (on the cog/PM) and the specialist `agent_coder`
+require ALL of these:
+
+- `[coder] image` — your built coder image tag
+- `[coder] project_root` — the host directory the coder operates against
+- `[coder] model_id` — a model identifier OpenCode and your API key both accept
+- `ANTHROPIC_API_KEY` env var — typically loaded from `.env`
+
+If any of those is missing, neither path is wired. Startup logs say
+which gate failed (`real-coder mode disabled: [coder] image not set`).
+The cog still runs; coder work just isn't available until you set the
+missing field.
+
+#### One-time setup
+
+```sh
+# 1. Build the coder image (pinned OpenCode version)
+scripts/build-coder-image.sh
+
+# 2. Verify the pinned version actually works headless
+scripts/smoke-coder-image.sh
+
+# 3. (Optional) Run the full e2e smoke against a real LLM call
+#    Costs a couple of cents per run, proves end-to-end wiring
+#    (manager + ACP + ingest, including CBR + session archive)
+scripts/e2e-coder.sh
+```
+
+The smoke is the contract — if it fails, the pinned OpenCode version
+isn't usable on your host. Don't proceed until smoke is green.
+
+#### Configuration
+
+```toml
+[coder]
+image = "springdrift-coder:latest"      # Built by scripts/build-coder-image.sh
+project_root = "/Users/you/Repos/foo"   # Must NOT contain .springdrift/
+provider_id = "anthropic"
+model_id = "claude-sonnet-4-20250514"   # See "Model selection" below
+# session_timeout_ms = 600000           # 10 min wall-clock cap per session
+# max_cost_per_hour_usd = 20.0          # Aggregate cap across all dispatches in a rolling hour
+
+[coder.budget]
+# Per-task budget defaults the dispatch_coder tool clamps against. The
+# agent can request more than the default via the tool params; the
+# manager enforces the ceilings.
+# default_max_tokens_per_task   = 200000
+# default_max_cost_per_task_usd = 5.0
+# default_max_minutes_per_task  = 10
+# default_max_turns_per_task    = 50
+# ceiling_max_tokens_per_task   = 1000000
+# ceiling_max_cost_per_task_usd = 25.0
+# ceiling_max_minutes_per_task  = 60
+# ceiling_max_turns_per_task    = 200
+```
+
+`project_root` must be a directory you own. `/tmp` does NOT work on
+macOS — podman bind-mounts it as `nobody:nogroup` and OpenCode's
+provider init silently fails. Use `/Users/you/Repos/<project>` or
+similar.
+
+#### Model selection
+
+The pinned OpenCode version (1.14.25) ships with a current model
+catalog including all Claude 4.x models — Sonnet 4.6, Opus 4.7,
+Haiku 4.5. List the available IDs with `scripts/discover-coder-endpoints.sh`
+or by running `opencode models` inside the container.
+
+Set `[coder] model_id` to a model your Anthropic API key has access
+to. Reasonable defaults:
+- `claude-haiku-4-5-20251001` — cheapest, fast iteration
+- `claude-sonnet-4-6` — balance, default for most coding tasks
+- `claude-opus-4-7` — heavy reasoning, expensive
+
+Note: the OpenCode catalog drifts when new Anthropic models ship —
+periodically bump the pinned OpenCode version (procedure below) to
+pick up new model IDs.
+
+#### Bump procedure
+
+```sh
+# 1. Edit Containerfile.coder, change ARG OPENCODE_VERSION=...
+# 2. Rebuild
+scripts/build-coder-image.sh
+
+# 3. Verify smoke still passes against the new pin
+scripts/smoke-coder-image.sh
+
+# 4. (Optional) Run e2e with a real LLM call
+scripts/e2e-coder.sh
+
+# 5. Commit Containerfile.coder. The image's :latest tag now points
+#    at the new version; existing slots running the old image keep
+#    running until restart.
+```
+
+Smoke is the gate. Don't ship to production unless it passes against
+the new pin.
+
+#### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `real-coder mode disabled: ...` at startup | `[coder]` not fully set or no API key | Check the startup log line — it names the missing field. The cog/PM still has `dispatch_coder` and the project_* tools, but the specialist `agent_coder` is not registered until [coder] is complete. |
+| `ProviderModelNotFoundError` from `dispatch_coder` | `model_id` not in OpenCode's catalog | Use a model that's in `/config/providers` (run `scripts/discover-coder-endpoints.sh` to see the list) |
+| `not_found_error` from Anthropic | Model is in OpenCode's catalog but Anthropic deprecated it | Bump to a newer model (4.x family) |
+| OpenCode silently shuts down on serve | Probably `project_root` permission/idmap issue | Confirm `project_root` is user-owned, not `/tmp` |
+| Stranded `springdrift-coder-*` containers | A dispatch crashed before manager teardown could run | `podman ps -a \| grep springdrift-coder-` then `podman rm -f <name>`; the manager will spin up fresh containers on the next dispatch |
+| `dispatch_coder failed: cost budget exceeded` | Per-task cost cap fired mid-session | Raise `coder_default_max_cost_per_task_usd` (and the matching ceiling) in `[coder.budget]`, or set `max_cost_usd` per-call when invoking `dispatch_coder` |
+| Cog loop appears unresponsive during a long coder run | (R5b regression check) — should NOT happen; dispatch_coder spawns a worker so the cog stays free | If you see this, file a bug. The cog should still process sensory events, AgentProgress, and `cancel_coder_session` while a dispatch is in flight |
+
+See `docs/roadmap/planned/real-coder-opencode-phase2-notes.md` for the
+full set of findings from the build.
 
 ### Where to look for everything else
 
