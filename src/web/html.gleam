@@ -569,13 +569,16 @@ pub fn chat_page(agent_name: String, agent_version: String) -> String {
         renderChatHistoryDay(data.date, data.pairs);
         break;
       case 'user_message_ack':
-        // Server has accepted our message frame. Drop the in-flight
-        // entry so it won't be re-rendered if a SessionHistory rebuild
-        // comes through later. The bubble itself is already in the DOM
-        // from sendMessage; nothing more to do visually here.
-        inFlightUserMessages = inFlightUserMessages.filter(function(m) {
-          return m.id !== data.client_msg_id;
-        });
+        // Server has accepted our message frame. Historically this
+        // dropped the entry from inFlightUserMessages immediately,
+        // but that raced with reconnect-mid-cycle: ack arrives,
+        // entry dropped, then session_history rebuild wipes the
+        // DOM, message not in server's view yet → bubble vanishes.
+        //
+        // The fix: keep the entry in inFlightUserMessages until the
+        // text-match drop in renderSessionHistory confirms cog has
+        // actually persisted it. The ack stays useful as a 'sending
+        // → sent' UI hint (decoupled from the durable tracking).
         break;
       case 'assistant_message':
         removeThinking();
@@ -1453,20 +1456,46 @@ pub fn mobile_page(agent_name: String, agent_version: String) -> String {
   });
   input.addEventListener('input', autoGrow);
 
-  // Server tags every frame with a monotonic `seq`. Track the last one we
-  // saw so we can console.warn if frames arrive out of order — useful
-  // signal if the wire path ever does reorder things. Reset on reconnect.
+  // Per-client outbox cursor (mobile view). Server assigns a
+  // monotonic seq to every frame; we track the highest applied
+  // locally so reconnect can tell the server 'I have through seq N
+  // — replay from N+1'. Persisted in sessionStorage so a tab
+  // refresh under the same browser doesn't lose the cursor.
   var lastSeenSeq = 0;
+  var lastAckedSeq = 0;
+  var ackInterval = null;
+  try {
+    var stored = sessionStorage.getItem('springdrift_last_seq_mobile');
+    if (stored) lastSeenSeq = parseInt(stored, 10) || 0;
+  } catch (e) {}
+
+  function buildWsUrlWithSince() {
+    var base = wsUrl();
+    if (lastSeenSeq <= 0) return base;
+    var sep = base.indexOf('?') >= 0 ? '&' : '?';
+    return base + sep + 'since=' + lastSeenSeq;
+  }
   function connect() {
-    lastSeenSeq = 0;
-    ws = new WebSocket(wsUrl());
+    ws = new WebSocket(buildWsUrlWithSince());
     ws.onopen = function() {
       setStatus('connected');
       reconnectDelay = 1000;
+      if (ackInterval) clearInterval(ackInterval);
+      ackInterval = setInterval(function() {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        if (lastSeenSeq > lastAckedSeq) {
+          ws.send(JSON.stringify({ type: 'ack', seq: lastSeenSeq }));
+          lastAckedSeq = lastSeenSeq;
+        }
+      }, 5000);
     };
     ws.onclose = function() {
       setStatus('disconnected');
       hideThinking();
+      if (ackInterval) { clearInterval(ackInterval); ackInterval = null; }
+      try {
+        sessionStorage.setItem('springdrift_last_seq_mobile', String(lastSeenSeq));
+      } catch (e) {}
       setTimeout(connect, reconnectDelay);
       reconnectDelay = Math.min(reconnectDelay * 2, 30000);
     };
@@ -1474,11 +1503,23 @@ pub fn mobile_page(agent_name: String, agent_version: String) -> String {
     ws.onmessage = function(evt) {
       var msg;
       try { msg = JSON.parse(evt.data); } catch (e) { return; }
-      if (typeof msg.seq === 'number') {
+      // Server keepalive — echo pong, take no further action.
+      if (msg.type === 'ping') {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'pong' }));
+        }
+        return;
+      }
+      if (typeof msg.seq === 'number' && msg.seq > 0) {
         if (lastSeenSeq > 0 && msg.seq < lastSeenSeq) {
           console.warn('ws frame arrived out of order: seq=' + msg.seq + ' after ' + lastSeenSeq + ' (type=' + msg.type + ')');
         }
-        if (msg.seq > lastSeenSeq) lastSeenSeq = msg.seq;
+        if (msg.seq > lastSeenSeq) {
+          lastSeenSeq = msg.seq;
+          try {
+            sessionStorage.setItem('springdrift_last_seq_mobile', String(lastSeenSeq));
+          } catch (e) {}
+        }
       }
       switch (msg.type) {
         case 'session_history':
@@ -1522,12 +1563,12 @@ pub fn mobile_page(agent_name: String, agent_version: String) -> String {
           }
           break;
         case 'user_message_ack':
-          // Server confirmed the message frame. Drop the in-flight
-          // entry so it won't be re-rendered on the next history
-          // rebuild.
-          inFlightUserMessages = inFlightUserMessages.filter(function(im) {
-            return im.id !== msg.client_msg_id;
-          });
+          // Server confirmed the WS frame was received but cog may
+          // not have persisted the message yet — see the chat-page
+          // handler comment for the disappearing-bubble race. The
+          // in-flight entry is dropped only when renderSessionHistory
+          // observes the message in the server's authoritative view
+          // (text-match drop in the session_history handler above).
           break;
         case 'thinking':
           showThinking();
@@ -4389,17 +4430,36 @@ fn ws_connect_js() -> String {
   }
   var clientId = getClientId();
 
-  // Server tags every frame with a monotonic seq. Detect reordering in
-  // console for diagnostics. Reset on reconnect.
+  // Per-client outbox cursor. Server assigns a monotonic seq to
+  // every frame; we track the highest applied locally so reconnect
+  // can tell the server 'I have through seq N — replay from N+1'.
+  // Persisted in sessionStorage so a tab refresh under the same
+  // browser doesn't lose the cursor and trigger a needless full
+  // session_history rebuild.
   var lastSeenSeq = 0;
+  try {
+    var stored = sessionStorage.getItem('springdrift_last_seq_' + clientId);
+    if (stored) lastSeenSeq = parseInt(stored, 10) || 0;
+  } catch (e) {}
+  // Track the highest seq we've ack'd to the server. Avoids spamming
+  // duplicate acks when no new frames have arrived.
+  var lastAckedSeq = 0;
+  // Periodic ack loop. Every ~5s, if our cursor has moved past the
+  // last ack we sent, ship an ack frame. Server prunes its outbox
+  // up to the acked seq.
+  var ackInterval = null;
+
   function connect() {
-    lastSeenSeq = 0;
     var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     var params = new URLSearchParams(location.search);
     var token = params.get('token');
     var qsParts = [];
     if (token) qsParts.push('token=' + encodeURIComponent(token));
     qsParts.push('client_id=' + encodeURIComponent(clientId));
+    // Only add since=N when we have a non-zero cursor — a fresh tab
+    // (no sessionStorage) should get a session_history rebuild, not
+    // try to replay from seq 0.
+    if (lastSeenSeq > 0) qsParts.push('since=' + lastSeenSeq);
     var qs = qsParts.length ? '?' + qsParts.join('&') : '';
     ws = new WebSocket(proto + '//' + location.host + '/ws' + qs);
 
@@ -4428,11 +4488,26 @@ fn ws_connect_js() -> String {
         else if (tab === 'dprime') requestDprimeData();
         else if (tab === 'dprime-config') requestDprimeConfig();
       }
+      // Start the periodic ack loop on every (re)connect.
+      if (ackInterval) clearInterval(ackInterval);
+      ackInterval = setInterval(function() {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        if (lastSeenSeq > lastAckedSeq) {
+          ws.send(JSON.stringify({ type: 'ack', seq: lastSeenSeq }));
+          lastAckedSeq = lastSeenSeq;
+        }
+      }, 5000);
     };
 
     ws.onclose = function() {
       statusEl.textContent = 'reconnecting...';
       statusDot.className = 'dot disconnected';
+      if (ackInterval) { clearInterval(ackInterval); ackInterval = null; }
+      // Persist the last-seen cursor so reconnect (or a refresh
+      // before reconnect lands) opens with ?since=N.
+      try {
+        sessionStorage.setItem('springdrift_last_seq_' + clientId, String(lastSeenSeq));
+      } catch (e) {}
       setTimeout(connect, reconnectDelay);
       reconnectDelay = Math.min(reconnectDelay * 2, 10000);
     };
@@ -4442,11 +4517,24 @@ fn ws_connect_js() -> String {
     ws.onmessage = function(evt) {
       var data;
       try { data = JSON.parse(evt.data); } catch(e) { console.error('WS parse error:', e.message, 'data length:', evt.data.length); return; }
-      if (typeof data.seq === 'number') {
+      // Server-side keepalive — reply pong, do nothing else. Doesn't
+      // affect lastSeenSeq (server emits ping with seq:0 explicitly).
+      if (data.type === 'ping') {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'pong' }));
+        }
+        return;
+      }
+      if (typeof data.seq === 'number' && data.seq > 0) {
         if (lastSeenSeq > 0 && data.seq < lastSeenSeq) {
           console.warn('ws frame arrived out of order: seq=' + data.seq + ' after ' + lastSeenSeq + ' (type=' + data.type + ')');
         }
-        if (data.seq > lastSeenSeq) lastSeenSeq = data.seq;
+        if (data.seq > lastSeenSeq) {
+          lastSeenSeq = data.seq;
+          try {
+            sessionStorage.setItem('springdrift_last_seq_' + clientId, String(lastSeenSeq));
+          } catch (e) {}
+        }
       }
       handleServerMessage(data);
     };
