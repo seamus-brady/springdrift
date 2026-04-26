@@ -1108,6 +1108,7 @@ fn handle_think_complete(
       fallback_from:,
       output_gate_count: ogc,
       empty_retried:,
+      truncation_retried:,
       node_type:,
       ..,
     )) -> {
@@ -1117,6 +1118,7 @@ fn handle_think_complete(
         False -> {
           // Final text response
           let raw_text = response.text(resp)
+          let is_truncated = resp.stop_reason == Some(llm_types.MaxTokens)
           // Auto-retry once on empty response before surfacing error
           case raw_text == "" && !empty_retried {
             True -> {
@@ -1159,171 +1161,249 @@ fn handle_think_complete(
                     fallback_from:,
                     output_gate_count: ogc,
                     empty_retried: True,
+                    truncation_retried: False,
                     node_type:,
                   ),
                 ),
               )
             }
-            False -> {
-              // Detect length-capped stops on the cognitive loop's own
-              // response. When the LLM hit max_tokens AND produced no tool
-              // calls, the reply may be mid-sentence or have had a tool_use
-              // block sliced off before it could be emitted — the operator-
-              // visible "agent promises and doesn't deliver" pattern.
-              case resp.stop_reason == Some(llm_types.MaxTokens) {
-                True ->
-                  slog.warn(
+            False ->
+              case is_truncated, truncation_retried {
+                // Truncation guard, first hit: the previous response
+                // was capped at max_tokens with no tool calls. Retry
+                // once with a scope-down nudge before falling through
+                // to the deterministic admission. Mirrors the empty-
+                // response retry above.
+                True, False -> {
+                  slog.info(
                     "cognitive",
                     "handle_think_complete",
-                    "Response was length-capped at max_tokens with no tool calls — output may be truncated or a tool_use block may have been sliced off",
+                    "truncation_guard: max_tokens hit with no tool calls, retrying with scope-down nudge",
                     state.cycle_id,
                   )
-                False -> Nil
-              }
-              // Prefix if this was a model fallback
-              let text = case raw_text {
-                "" -> {
-                  slog.warn(
-                    "cognitive",
-                    "handle_think_complete",
-                    "LLM returned empty response (no text, no tool calls)",
-                    state.cycle_id,
-                  )
-                  "[Empty response from model — please try again]"
-                }
-                _ -> raw_text
-              }
-              let #(reply_text, reply_model) = case fallback_from {
-                Some(original) -> #(
-                  "["
-                    <> original
-                    <> " unavailable, used "
-                    <> req_model
-                    <> "] "
-                    <> text,
-                  req_model,
-                )
-                None -> #(text, req_model)
-              }
-              let assistant_msg =
-                llm_types.Message(
-                  role: llm_types.Assistant,
-                  content: resp.content,
-                )
-              let messages = list.append(state.messages, [assistant_msg])
-              // Output gate strategy:
-              // - Autonomous (scheduler) cycles: full LLM scorer + normative
-              //   calculus — nobody's watching, quality matters before delivery
-              // - Interactive cycles: deterministic rules only — the operator
-              //   is the quality gate, don't destroy good output with false positives
-              let is_autonomous =
-                state.cycle_node_type == dag_types.SchedulerCycle
-              // Stash LLM usage for DAG finalisation after gate completes
-              // Accumulate cycle token counters
-              let state =
-                CognitiveState(
-                  ..state,
-                  pending_output_usage: Some(resp.usage),
-                  cycle_tokens_in: state.cycle_tokens_in
-                    + resp.usage.input_tokens,
-                  cycle_tokens_out: state.cycle_tokens_out
-                    + resp.usage.output_tokens,
-                )
-              case state.output_dprime_state, is_autonomous {
-                Some(output_state), True -> {
-                  // Autonomous delivery — full output gate evaluation
-                  cognitive_safety.spawn_output_gate(
-                    state,
-                    output_state,
-                    reply_text,
-                    messages,
-                    task_id,
-                    ogc,
-                  )
-                }
-                Some(_), False -> {
-                  // Interactive session — deterministic rules only, skip LLM scorer
-                  cognitive_safety.check_deterministic_only(
-                    state,
-                    reply_text,
-                    messages,
-                    task_id,
-                    resp.usage,
-                  )
-                }
-                None, _ -> {
-                  // Update DAG node with final outcome
-                  let duration_ms = case state.cycle_started_ms {
-                    0 -> 0
-                    started -> monotonic_now_ms() - started
-                  }
-                  case state.memory.librarian {
-                    Some(lib) ->
-                      process.send(
-                        lib,
-                        librarian.UpdateNode(node: dag_types.CycleNode(
-                          cycle_id: option.unwrap(state.cycle_id, task_id),
-                          parent_id: None,
-                          node_type: node_type,
-                          timestamp: "",
-                          outcome: dag_types.NodeSuccess,
-                          model: reply_model,
-                          complexity: "",
-                          tool_calls: state.cycle_tool_calls,
-                          dprime_gates: list.map(state.dprime_decisions, fn(d) {
-                            dag_types.GateSummary(
-                              gate: d.gate,
-                              decision: d.decision,
-                              score: d.score,
-                            )
-                          }),
-                          tokens_in: resp.usage.input_tokens,
-                          tokens_out: resp.usage.output_tokens,
-                          duration_ms:,
-                          agent_output: None,
-                          instance_name: state.identity.agent_name,
-                          instance_id: string.slice(
-                            state.identity.agent_uuid,
-                            0,
-                            8,
-                          ),
-                        )),
-                      )
-                    None -> Nil
-                  }
-                  output.send_reply(
-                    state,
-                    reply_text,
-                    reply_model,
-                    Some(resp.usage),
-                    list.map(state.cycle_tool_calls, fn(t) { t.name }),
-                  )
-                  // Spawn Archivist (fire-and-forget)
-                  cognitive_memory.maybe_spawn_archivist(
-                    state,
-                    reply_text,
-                    reply_model,
-                    Some(resp.usage),
-                  )
-                  // Post-cycle meta observation (Layer 3b)
-                  let state =
-                    cognitive_state.apply_meta_observation(
+                  let new_task_id = cycle_log.generate_uuid()
+                  let nudge_msg =
+                    llm_types.Message(role: llm_types.User, content: [
+                      llm_types.TextContent(
+                        "Your previous response was cut off at the token cap"
+                        <> " (output_tokens="
+                        <> int.to_string(resp.usage.output_tokens)
+                        <> ", limit="
+                        <> int.to_string(state.max_tokens)
+                        <> "). Two recovery options:\n\n"
+                        <> "1. Decompose into multiple turns. Use a tool"
+                        <> " call (delegate to writer with `update_draft` per"
+                        <> " section, or break the work across cycles)"
+                        <> " instead of producing the full output in one"
+                        <> " response.\n\n"
+                        <> "2. Tighten scope. Produce a substantially"
+                        <> " shorter version that fits within the cap,"
+                        <> " calling out explicitly what you would have"
+                        <> " included if more room were available.\n\n"
+                        <> "Do NOT produce the same output again expecting"
+                        <> " a different result.",
+                      ),
+                    ])
+                  let retry_messages = list.append(state.messages, [nudge_msg])
+                  let req =
+                    cognitive_llm.build_request_with_model(
                       state,
-                      resp.usage.input_tokens + resp.usage.output_tokens,
+                      req_model,
+                      retry_messages,
                     )
-                  // Fire-and-forget save
-                  let new_state =
+                  worker.spawn_think(
+                    new_task_id,
+                    req,
+                    state.provider,
+                    state.self,
+                    state.config.retry_config,
+                  )
+                  CognitiveState(
+                    ..state,
+                    status: Thinking(task_id: new_task_id),
+                    pending: dict.insert(
+                      dict.delete(state.pending, task_id),
+                      new_task_id,
+                      PendingThink(
+                        task_id: new_task_id,
+                        model: req_model,
+                        fallback_from:,
+                        output_gate_count: ogc,
+                        empty_retried:,
+                        truncation_retried: True,
+                        node_type:,
+                      ),
+                    ),
+                  )
+                }
+                // Truncation guard, second hit (or normal final
+                // response). Either ship the deterministic admission
+                // (when retrying didn't help) or the model's text.
+                _, _ -> {
+                  let text = case is_truncated, truncation_retried {
+                    True, True -> {
+                      slog.info(
+                        "cognitive",
+                        "handle_think_complete",
+                        "truncation_guard: retry also hit max_tokens, shipping deterministic admission",
+                        state.cycle_id,
+                      )
+                      output.build_truncation_admission(
+                        req_model,
+                        resp.usage.output_tokens,
+                        state.max_tokens,
+                        list.map(state.cycle_tool_calls, fn(t) { t.name }),
+                      )
+                    }
+                    _, _ ->
+                      case raw_text {
+                        "" -> {
+                          slog.warn(
+                            "cognitive",
+                            "handle_think_complete",
+                            "LLM returned empty response (no text, no tool calls)",
+                            state.cycle_id,
+                          )
+                          "[Empty response from model — please try again]"
+                        }
+                        _ -> raw_text
+                      }
+                  }
+                  let #(reply_text, reply_model) = case fallback_from {
+                    Some(original) -> #(
+                      "["
+                        <> original
+                        <> " unavailable, used "
+                        <> req_model
+                        <> "] "
+                        <> text,
+                      req_model,
+                    )
+                    None -> #(text, req_model)
+                  }
+                  let assistant_msg =
+                    llm_types.Message(
+                      role: llm_types.Assistant,
+                      content: resp.content,
+                    )
+                  let messages = list.append(state.messages, [assistant_msg])
+                  // Output gate strategy:
+                  // - Autonomous (scheduler) cycles: full LLM scorer + normative
+                  //   calculus — nobody's watching, quality matters before delivery
+                  // - Interactive cycles: deterministic rules only — the operator
+                  //   is the quality gate, don't destroy good output with false positives
+                  let is_autonomous =
+                    state.cycle_node_type == dag_types.SchedulerCycle
+                  // Stash LLM usage for DAG finalisation after gate completes
+                  // Accumulate cycle token counters
+                  let state =
                     CognitiveState(
                       ..state,
-                      messages:,
-                      status: Idle,
-                      pending: dict.delete(state.pending, task_id),
-                      cycles_today: state.cycles_today + 1,
+                      pending_output_usage: Some(resp.usage),
+                      cycle_tokens_in: state.cycle_tokens_in
+                        + resp.usage.input_tokens,
+                      cycle_tokens_out: state.cycle_tokens_out
+                        + resp.usage.output_tokens,
                     )
-                  new_state
+                  case state.output_dprime_state, is_autonomous {
+                    Some(output_state), True -> {
+                      // Autonomous delivery — full output gate evaluation
+                      cognitive_safety.spawn_output_gate(
+                        state,
+                        output_state,
+                        reply_text,
+                        messages,
+                        task_id,
+                        ogc,
+                      )
+                    }
+                    Some(_), False -> {
+                      // Interactive session — deterministic rules only, skip LLM scorer
+                      cognitive_safety.check_deterministic_only(
+                        state,
+                        reply_text,
+                        messages,
+                        task_id,
+                        resp.usage,
+                      )
+                    }
+                    None, _ -> {
+                      // Update DAG node with final outcome
+                      let duration_ms = case state.cycle_started_ms {
+                        0 -> 0
+                        started -> monotonic_now_ms() - started
+                      }
+                      case state.memory.librarian {
+                        Some(lib) ->
+                          process.send(
+                            lib,
+                            librarian.UpdateNode(node: dag_types.CycleNode(
+                              cycle_id: option.unwrap(state.cycle_id, task_id),
+                              parent_id: None,
+                              node_type: node_type,
+                              timestamp: "",
+                              outcome: dag_types.NodeSuccess,
+                              model: reply_model,
+                              complexity: "",
+                              tool_calls: state.cycle_tool_calls,
+                              dprime_gates: list.map(
+                                state.dprime_decisions,
+                                fn(d) {
+                                  dag_types.GateSummary(
+                                    gate: d.gate,
+                                    decision: d.decision,
+                                    score: d.score,
+                                  )
+                                },
+                              ),
+                              tokens_in: resp.usage.input_tokens,
+                              tokens_out: resp.usage.output_tokens,
+                              duration_ms:,
+                              agent_output: None,
+                              instance_name: state.identity.agent_name,
+                              instance_id: string.slice(
+                                state.identity.agent_uuid,
+                                0,
+                                8,
+                              ),
+                            )),
+                          )
+                        None -> Nil
+                      }
+                      output.send_reply(
+                        state,
+                        reply_text,
+                        reply_model,
+                        Some(resp.usage),
+                        list.map(state.cycle_tool_calls, fn(t) { t.name }),
+                      )
+                      // Spawn Archivist (fire-and-forget)
+                      cognitive_memory.maybe_spawn_archivist(
+                        state,
+                        reply_text,
+                        reply_model,
+                        Some(resp.usage),
+                      )
+                      // Post-cycle meta observation (Layer 3b)
+                      let state =
+                        cognitive_state.apply_meta_observation(
+                          state,
+                          resp.usage.input_tokens + resp.usage.output_tokens,
+                        )
+                      // Fire-and-forget save
+                      let new_state =
+                        CognitiveState(
+                          ..state,
+                          messages:,
+                          status: Idle,
+                          pending: dict.delete(state.pending, task_id),
+                          cycles_today: state.cycles_today + 1,
+                        )
+                      new_state
+                    }
+                  }
                 }
               }
-            }
           }
         }
         True -> {

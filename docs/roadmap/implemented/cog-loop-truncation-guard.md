@@ -1,9 +1,19 @@
 # Cog-Loop Truncation Guard — Don't Ship Half-Sentences as Replies
 
-**Status**: Planned
-**Priority**: High — observed in production. The cog loop currently delivers truncated mid-sentence replies as if they were successful outcomes, leaving the operator with no signal that anything went wrong and no actionable recovery path.
-**Effort**: Small (~80-120 LOC + tests)
+**Status**: Implemented (2026-04-26)
+**Priority**: High — observed in production.
+**Effort**: ~140 LOC across `agent/cognitive.gleam`, `agent/cognitive/output.gleam`, `agent/types.gleam` + call-site updates and 9 tests.
 **Source**: 2026-04-26 incident — operator asked for a comparative analysis of two long documents, the writer hit `max_tokens=4096` twice, the orchestrator decided to write directly and hit its own `max_tokens=2048` mid-sentence, and the cycle terminated cleanly with `## Springdrift × The Synthetic` as the visible reply.
+
+## What Shipped
+
+- `truncation_retried: Bool` on `PendingThink` mirrors the existing `empty_retried` flag.
+- `handle_think_complete` detects `MaxTokens` with no tool calls. First hit triggers a retry with a scope-down nudge ("decompose into multiple turns OR tighten scope"). Second hit ships the deterministic admission instead of the truncated text.
+- `output.build_truncation_admission` is the pure helper that builds the operator-facing reply. `[truncation_guard]` prefix lets operators recognise the failure mode.
+- 5 pure tests for the admission text + 4 end-to-end tests driving the cog loop with mock providers that return `MaxTokens` on a controlled schedule. Proved retry-success, second-hit-admission, and the regression case (empty-response retry still works independently).
+- Test discovery: `ensure_alternation` coalesces same-role messages, so the retry nudge ends up merged into the original user message. Test discriminator switched from message count to content match on the nudge sentinel string.
+
+The original plan is preserved below for context.
 
 ## The Symptom
 
