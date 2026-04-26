@@ -480,6 +480,8 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `sandbox_port_stride` | — | 100 | Host port stride per slot |
 | `sandbox_ports_per_slot` | — | 5 | Ports forwarded per slot |
 | `sandbox_auto_machine` | — | True | Auto-start podman machine on macOS |
+| `sandbox_image_recovery_enabled` | — | True | When podman reports image-corruption stderr (manifest unknown / no such image / blob unknown / etc.), force-remove the local image, re-pull, and retry container creation once. Applied at startup AND on health-check restart. |
+| `sandbox_image_pull_timeout_ms` | — | 300000 | Timeout (ms) for the recovery `podman pull`. |
 | `coder_image` | — | None | Image tag for the OpenCode-backed coder slot. Set to `springdrift-coder:<version>` after `scripts/build-coder-image.sh`. |
 | `coder_project_root` | — | None | Host path bind-mounted as the project root inside the coder slot. Required for real-coder use. Cannot contain `.springdrift/`. |
 | `coder_session_timeout_ms` | — | 600000 | Hard ceiling on a single coding task's wall time (10 min). |
@@ -489,6 +491,8 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `coder_cost_poll_interval_ms` | — | 5000 | How often supervisor polls session usage to feed the circuit breaker. |
 | `coder_provider_id` | — | None | Provider id passed to OpenCode (e.g. "anthropic"). |
 | `coder_model_id` | — | None | Model id passed to OpenCode. Operator must set to a model in BOTH OpenCode's bundled models.dev catalog AND their API key's allowed list — these drift over time. |
+| `coder_image_recovery_enabled` | — | True | When podman reports image-corruption stderr while spawning a coder container, force-remove the local image, re-pull, and retry once. Mirrors the sandbox manager's recovery — without it a corrupted coder image wedges every dispatch on a VPS. |
+| `coder_image_pull_timeout_ms` | — | 300000 | Timeout (ms) for the coder recovery `podman pull`. |
 | `vertex_project_id` | — | None | GCP project ID (required for vertex provider) |
 | `vertex_location` | — | "europe-west1" | GCP location / region |
 | `vertex_endpoint` | — | derived from location | Vertex AI endpoint hostname (e.g. `europe-west1-aiplatform.googleapis.com`) |
@@ -581,6 +585,7 @@ agent. Heavy planner operations moved to the Planner agent.
 | `reflect` | DAG | Aggregated day-level stats (cycles, tokens, models, gate decisions) |
 | `introspect` | All | Perceive system state: identity, agent roster, D' config, cycle ID |
 | `how_to` | HOW_TO.md | Operator guide: tool selection heuristics, degradation paths |
+| `sandbox_reset` | Podman (direct) | Last-resort recovery for wedged container state. Force-removes every `springdrift-sandbox-*` and (optionally) `springdrift-coder-*` container; optional `repull_image` rmi+pulls the configured images. Bypasses both manager actors so it works even when one is itself stuck. Only registered when `sandbox_enabled = true`. |
 | `cancel_agent` | Registry | Stop a running agent delegation by name |
 | `complete_task_step` | Tasks | Mark a step complete on a task |
 | `activate_task` | Tasks | Set a pending task as current focus |

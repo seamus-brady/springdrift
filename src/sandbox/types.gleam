@@ -30,6 +30,14 @@ pub type SandboxConfig {
     ports_per_slot: Int,
     auto_machine: Bool,
     workspace_dir: String,
+    /// When True, the manager auto-detects image-corruption stderr
+    /// from podman, force-removes the local image, re-pulls, and
+    /// retries container creation. Set False to disable autonomous
+    /// recovery (operator must intervene on corruption).
+    image_recovery_enabled: Bool,
+    /// Timeout (ms) for the recovery `podman pull`. Generous default
+    /// — slow registry connections can take minutes for a fresh pull.
+    image_pull_timeout_ms: Int,
   )
 }
 

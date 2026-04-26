@@ -20,6 +20,7 @@ import gleam/result
 import gleam/string
 import sandbox/diagnostics
 import sandbox/podman_ffi
+import sandbox/recovery
 import sandbox/types.{
   type SandboxConfig, type SandboxManager, type SandboxMessage, type SandboxSlot,
   SandboxManager, SandboxSlot,
@@ -130,6 +131,20 @@ pub fn start(
 
       // Create containers (synchronous, before spawning the actor)
       let slots = create_containers(abs_config)
+
+      // Image-corruption auto-recovery (autonomous, no human needed):
+      // if any slot failed with image-related stderr, re-pull the image
+      // once and re-create the failed slots. This handles the case
+      // where the local image got corrupted between runs (incomplete
+      // pull, registry transient that left junk on disk). Without this
+      // the manager would refuse to start and a VPS deployment would
+      // be wedged until an operator logged in.
+      let slots = case
+        any_image_error(slots) && abs_config.image_recovery_enabled
+      {
+        False -> slots
+        True -> recover_and_retry(abs_config, slots)
+      }
 
       let running_count =
         dict.values(slots)
@@ -783,6 +798,57 @@ fn clean_workspace(workspace: String) -> Nil {
   }
 }
 
+/// True when at least one slot failed creation with an image-related
+/// error (vs a runtime / config / resource problem).
+fn any_image_error(slots: Dict(Int, SandboxSlot)) -> Bool {
+  dict.values(slots)
+  |> list.any(fn(s) {
+    case s.status {
+      types.Failed(reason:) -> recovery.is_image_error(reason)
+      _ -> False
+    }
+  })
+}
+
+/// Run image recovery once, then re-create any slot still in Failed
+/// state. Slots already Ready are left alone.
+fn recover_and_retry(
+  config: SandboxConfig,
+  slots: Dict(Int, SandboxSlot),
+) -> Dict(Int, SandboxSlot) {
+  slog.warn(
+    "sandbox",
+    "recover",
+    "Image-related error detected, attempting recovery: " <> config.image,
+    None,
+  )
+  case recovery.recover_image(config.image, config.image_pull_timeout_ms) {
+    Error(msg) -> {
+      slog.log_error(
+        "sandbox",
+        "recover",
+        "Image recovery failed for " <> config.image <> ": " <> msg,
+        None,
+      )
+      slots
+    }
+    Ok(_) -> {
+      slog.info(
+        "sandbox",
+        "recover",
+        "Image recovery succeeded, re-creating failed slots",
+        None,
+      )
+      dict.map_values(slots, fn(slot_id, slot) {
+        case slot.status {
+          types.Failed(_) -> create_container(config, slot_id)
+          _ -> slot
+        }
+      })
+    }
+  }
+}
+
 fn health_check_slots(state: ManagerState) -> Dict(Int, SandboxSlot) {
   dict.fold(state.slots, state.slots, fn(acc, slot_id, slot) {
     case slot.status {
@@ -860,6 +926,48 @@ fn health_check_slots(state: ManagerState) -> Dict(Int, SandboxSlot) {
                     }
 
                     let new_slot = create_container(state.config, slot_id)
+                    // If the restart failed with an image error, run
+                    // image recovery once and retry. Same autonomous
+                    // recovery as startup — without this a corrupted
+                    // image discovered mid-session would loop forever.
+                    let new_slot = case new_slot.status {
+                      types.Failed(reason:) ->
+                        case
+                          recovery.is_image_error(reason)
+                          && state.config.image_recovery_enabled
+                        {
+                          False -> new_slot
+                          True -> {
+                            slog.warn(
+                              "sandbox",
+                              "health_check",
+                              "Image-related restart failure on slot "
+                                <> int.to_string(slot_id)
+                                <> "; recovering image: "
+                                <> state.config.image,
+                              None,
+                            )
+                            case
+                              recovery.recover_image(
+                                state.config.image,
+                                state.config.image_pull_timeout_ms,
+                              )
+                            {
+                              Error(msg) -> {
+                                slog.log_error(
+                                  "sandbox",
+                                  "health_check",
+                                  "Image recovery failed: " <> msg,
+                                  None,
+                                )
+                                new_slot
+                              }
+                              Ok(_) -> create_container(state.config, slot_id)
+                            }
+                          }
+                        }
+                      _ -> new_slot
+                    }
                     dict.insert(acc, slot_id, new_slot)
                   }
                 }

@@ -32,6 +32,7 @@ import normative/drift as normative_drift
 import normative/types as normative_types
 import scheduler/types as scheduler_types
 import tools/coder_dispatch
+import tools/sandbox_admin
 
 @external(erlang, "springdrift_ffi", "get_datetime")
 fn get_datetime() -> String
@@ -86,6 +87,8 @@ pub type RuntimeConfig {
     how_to_content: Option(String),
     max_delegation_depth: Int,
     sandbox_enabled: Bool,
+    /// Image identifiers used by the `sandbox_reset` recovery tool.
+    sandbox_admin_images: sandbox_admin.ResetImages,
     deterministic_config: Option(DeterministicConfig),
     fact_decay_half_life_days: Int,
     escalation_config: EscalationConfig,

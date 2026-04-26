@@ -40,7 +40,9 @@ import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/string
 import sandbox/podman_ffi
+import sandbox/recovery
 import slog
 
 // ---------------------------------------------------------------------------
@@ -199,6 +201,27 @@ pub fn start(
   case api_key {
     "" -> Error("CoderManager: ANTHROPIC_API_KEY is empty.")
     _ -> {
+      // Sweep stale coder containers from prior runs before warming
+      // the pool. Mirrors sandbox/diagnostics.sweep_stale_containers.
+      // Without this, a previous crashed run leaves
+      // springdrift-coder-100 etc. behind and the next spawn collides
+      // on the container name.
+      let swept = sweep_stale_coder_containers(pool.container_name_prefix)
+      case swept > 0 {
+        True ->
+          slog.info(
+            "coder/manager",
+            "start",
+            "Swept "
+              <> int.to_string(swept)
+              <> " stale "
+              <> pool.container_name_prefix
+              <> "-* containers",
+            None,
+          )
+        False -> Nil
+      }
+
       let setup = process.new_subject()
       process.spawn(fn() {
         let self: Subject(CoderMessage) = process.new_subject()
@@ -494,7 +517,14 @@ fn message_loop(state: ManagerState) -> Nil {
       message_loop(new_state)
     }
     JanitorTick -> {
-      let new_state = run_janitor(state)
+      // Health-check first (drops idle dead containers) then run the
+      // TTL janitor (reaps idle-too-long containers). Order matters
+      // only insofar as the health check shrinks the dict the
+      // janitor walks — both are idempotent.
+      let new_state =
+        state
+        |> run_health_check
+        |> run_janitor
       let _ = process.send_after(state.self, janitor_tick_ms, JanitorTick)
       message_loop(new_state)
     }
@@ -1037,6 +1067,16 @@ fn acquire_container(
 fn spawn_container(
   state: ManagerState,
 ) -> #(ManagerState, Result(String, String)) {
+  do_spawn_container(state, False)
+}
+
+/// `recovered_already` flips True after the first image-recovery
+/// attempt to prevent infinite recursion when the registry itself is
+/// the problem.
+fn do_spawn_container(
+  state: ManagerState,
+  recovered_already: Bool,
+) -> #(ManagerState, Result(String, String)) {
   let slot_id = state.next_slot_id
   let name = state.pool.container_name_prefix <> "-" <> int.to_string(slot_id)
 
@@ -1065,13 +1105,163 @@ fn spawn_container(
           let _ = write_auth(name, state.api_key)
           #(new_state, Ok(name))
         }
-        _ -> #(
-          state,
-          Error(
-            "podman run exit " <> int.to_string(r.exit_code) <> ": " <> r.stderr,
-          ),
-        )
+        _ -> {
+          // Image-corruption auto-recovery: if podman stderr looks
+          // like an image problem and we haven't recovered yet this
+          // call, re-pull the image and retry once. Same autonomous
+          // recovery as the sandbox manager — without it a corrupted
+          // coder image wedges every dispatch on a VPS.
+          case
+            !recovered_already
+            && state.config.image_recovery_enabled
+            && recovery.is_image_error(r.stderr)
+          {
+            False -> #(
+              state,
+              Error(
+                "podman run exit "
+                <> int.to_string(r.exit_code)
+                <> ": "
+                <> r.stderr,
+              ),
+            )
+            True -> {
+              slog.warn(
+                "coder/manager",
+                "spawn",
+                "Image-related spawn failure; recovering image: "
+                  <> state.config.image,
+                None,
+              )
+              case
+                recovery.recover_image(
+                  state.config.image,
+                  state.config.image_pull_timeout_ms,
+                )
+              {
+                Error(msg) -> {
+                  slog.log_error(
+                    "coder/manager",
+                    "spawn",
+                    "Image recovery failed: " <> msg,
+                    None,
+                  )
+                  #(
+                    state,
+                    Error("image recovery failed after spawn error: " <> msg),
+                  )
+                }
+                Ok(_) -> do_spawn_container(state, True)
+              }
+            }
+          }
+        }
       }
+  }
+}
+
+/// Health check pass: drop containers that podman reports as not
+/// running. Idle dead containers are removed from the pool — the
+/// next dispatch will spawn a fresh one. Busy dead containers cause
+/// the owning driver to fail on its next ACP call (catching it here
+/// would race with the driver's own teardown), so we just log and
+/// leave them; the driver's existing failure path will release the
+/// container via `release_session`.
+fn run_health_check(state: ManagerState) -> ManagerState {
+  let dead_idle =
+    state.containers
+    |> dict.to_list
+    |> list.filter_map(fn(kv) {
+      let #(name, info) = kv
+      case info.busy {
+        True -> Error(Nil)
+        False ->
+          case container_alive(name) {
+            True -> Error(Nil)
+            False -> Ok(name)
+          }
+      }
+    })
+
+  case dead_idle {
+    [] -> state
+    names -> {
+      list.each(names, fn(name) {
+        slog.warn(
+          "coder/manager",
+          "health_check",
+          "Idle container " <> name <> " not running; removing from pool",
+          None,
+        )
+        // Best-effort cleanup of any lingering podman state.
+        let _ = podman_ffi.run_cmd("podman", ["rm", "-f", name], 5000)
+        Nil
+      })
+      let surviving =
+        list.filter(dict.to_list(state.containers), fn(kv) {
+          let #(name, _) = kv
+          !list.contains(names, name)
+        })
+      ManagerState(..state, containers: dict.from_list(surviving))
+    }
+  }
+}
+
+/// True when `podman inspect` reports the container is running.
+/// Errors are treated as "alive" (fail-open) so a transient podman
+/// hiccup doesn't trigger spurious removals.
+fn container_alive(name: String) -> Bool {
+  case
+    podman_ffi.run_cmd(
+      "podman",
+      ["inspect", "--format", "{{.State.Running}}", name],
+      5000,
+    )
+  {
+    Ok(r) ->
+      case r.exit_code {
+        0 -> string.contains(r.stdout, "true")
+        _ -> True
+      }
+    Error(_) -> True
+  }
+}
+
+/// Remove leftover springdrift-coder-* containers from a prior run.
+/// Returns the count removed. Pure best-effort — failures are
+/// swallowed so a podman hiccup at startup never blocks the manager.
+pub fn sweep_stale_coder_containers(prefix: String) -> Int {
+  case
+    podman_ffi.run_cmd(
+      "podman",
+      [
+        "ps",
+        "-a",
+        "--filter",
+        "name=" <> prefix <> "-",
+        "--format",
+        "{{.Names}}",
+      ],
+      10_000,
+    )
+  {
+    Ok(result) ->
+      case result.exit_code {
+        0 -> {
+          let names =
+            result.stdout
+            |> string.trim
+            |> string.split("\n")
+            |> list.filter(fn(n) { n != "" })
+          list.each(names, fn(name) {
+            let _ = podman_ffi.run_cmd("podman", ["rm", "-f", name], 10_000)
+            Nil
+          })
+          list.length(names)
+        }
+        _ -> 0
+      }
+    Error(_) -> 0
   }
 }
 
@@ -1211,15 +1401,16 @@ fn handle_cancel(
 fn run_janitor(state: ManagerState) -> ManagerState {
   let now = now_ms()
   let ttl = state.pool.container_idle_ttl_ms
-  let prefix = state.pool.container_name_prefix
 
-  let #(keep, reap) =
+  let partitioned =
     state.containers
     |> dict.to_list
     |> list.partition(fn(kv) {
       let #(_, info) = kv
       info.busy || { now - info.last_used_at_ms } < ttl
     })
+  let keep = partitioned.0
+  let reap = partitioned.1
 
   list.each(reap, fn(kv) {
     let #(name, _) = kv
@@ -1227,7 +1418,6 @@ fn run_janitor(state: ManagerState) -> ManagerState {
     slog.info("coder/manager", "janitor", "Reaped idle " <> name, None)
   })
 
-  let _ = prefix
   ManagerState(..state, containers: dict.from_list(keep))
 }
 

@@ -54,6 +54,7 @@ import tools/knowledge as knowledge_tools
 import tools/learning_goals as learning_goal_tools
 import tools/memory
 import tools/planner as planner_tools
+import tools/sandbox_admin
 import tools/strategies as strategy_tools
 
 @external(erlang, "springdrift_ffi", "get_datetime")
@@ -170,9 +171,17 @@ pub fn dispatch_tool_calls(
       // calls — keep them sync. dispatch_coder is the long-running one
       // and goes through the async worker path further down so the cog
       // loop stays responsive while the OpenCode session runs.
-      let #(coder_sync_calls, remaining_calls) =
+      let #(coder_sync_calls, after_coder_sync) =
         list.partition(after_builtin, fn(c) {
           coder_dispatch.is_sync_coder_dispatch_tool(c.name)
+        })
+      // sandbox_reset must run sync — it's a recovery tool the agent
+      // reaches for when things are wedged, and the agent should see
+      // the result (counts removed, pull status) before deciding what
+      // to do next.
+      let #(sandbox_admin_calls, remaining_calls) =
+        list.partition(after_coder_sync, fn(c) {
+          sandbox_admin.is_sandbox_admin_tool(c.name)
         })
       let sync_calls =
         list.flatten([
@@ -184,6 +193,7 @@ pub fn dispatch_tool_calls(
           captures_calls,
           builtin_calls,
           coder_sync_calls,
+          sandbox_admin_calls,
         ])
       case sync_calls {
         [] -> dispatch_agent_calls(state, task_id, resp, remaining_calls)
@@ -407,18 +417,32 @@ fn handle_memory_tools(
                                     state.cycle_id,
                                   )
                                 False ->
-                                  memory.execute_with_how_to(
-                                    call,
-                                    state.memory.narrative_dir,
-                                    state.memory.librarian,
-                                    facts_ctx,
-                                    introspect_ctx,
-                                    state.config.memory_limits,
-                                    state.config.how_to_content,
-                                    option.Some(memory.AgentManagementContext(
-                                      supervisor: state.supervisor,
-                                    )),
-                                  )
+                                  case
+                                    sandbox_admin.is_sandbox_admin_tool(
+                                      call.name,
+                                    )
+                                  {
+                                    True ->
+                                      sandbox_admin.execute(
+                                        call,
+                                        state.config.sandbox_admin_images,
+                                      )
+                                    False ->
+                                      memory.execute_with_how_to(
+                                        call,
+                                        state.memory.narrative_dir,
+                                        state.memory.librarian,
+                                        facts_ctx,
+                                        introspect_ctx,
+                                        state.config.memory_limits,
+                                        state.config.how_to_content,
+                                        option.Some(
+                                          memory.AgentManagementContext(
+                                            supervisor: state.supervisor,
+                                          ),
+                                        ),
+                                      )
+                                  }
                               }
                           }
                       }
