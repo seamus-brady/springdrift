@@ -62,8 +62,23 @@ type ReactStats {
     /// Sticky: once any LLM response in the react loop comes back with
     /// stop_reason=MaxTokens, this stays True for the rest of the loop.
     truncated: Bool,
+    /// True after the truncation guard has retried once because the
+    /// previous LLM response was a final-text response capped by
+    /// max_tokens. Mirrors `empty_retried` on the cog loop's
+    /// PendingThink. On the second hit in the same react loop the
+    /// guard ships a deterministic admission instead of retrying
+    /// again.
+    truncation_retried: Bool,
   )
 }
+
+/// Maximum chars of partial output to embed in a truncation admission.
+/// The accumulated assistant text from the failing react loop is
+/// shown so the operator sees what the agent produced, even though
+/// the LLM didn't get a chance to format the final synthesis.
+/// Beyond this we keep the head and tail and elide the middle so
+/// the admission itself stays a manageable size.
+const truncation_admission_preview_chars: Int = 4000
 
 type ReactResult {
   ReactResult(result: Result(String, String), stats: ReactStats)
@@ -243,6 +258,7 @@ fn do_react_loop(
       input_tokens: 0,
       output_tokens: 0,
       truncated: False,
+      truncation_retried: False,
     )
   let react_result =
     do_react(
@@ -297,7 +313,96 @@ fn do_react(
             )
           case response.needs_tool_execution(resp) {
             False ->
-              ReactResult(result: Ok(response.text(resp)), stats: updated_stats)
+              // Truncation guard: when an agent's final-text response
+              // is capped by max_tokens with no tool calls, it would
+              // otherwise return a half-finished string to its parent
+              // and lose all the work. First hit: retry once with a
+              // scope-down nudge, do NOT burn a turn (same `remaining`
+              // value passed to the recursive call). Second hit: ship
+              // a deterministic admission via `build_truncation_admission`,
+              // embedding the accumulated partial output so the operator
+              // and orchestrator can see what was produced.
+              case hit_max_tokens, stats.truncation_retried {
+                True, False -> {
+                  slog.info(
+                    "framework",
+                    "do_react",
+                    "truncation_guard:"
+                      <> spec.name
+                      <> " — max_tokens hit, retrying with scope-down nudge",
+                    Some(cycle_id),
+                  )
+                  let assistant_msg =
+                    llm_types.Message(
+                      role: llm_types.Assistant,
+                      content: resp.content,
+                    )
+                  let nudge_msg =
+                    llm_types.Message(role: llm_types.User, content: [
+                      llm_types.TextContent(
+                        text: "Your previous response was cut off at the"
+                        <> " token cap (output_tokens="
+                        <> int.to_string(resp.usage.output_tokens)
+                        <> ", limit="
+                        <> int.to_string(spec.max_tokens)
+                        <> "). You cannot recursively delegate from here —"
+                        <> " your two recovery options are:\n\n"
+                        <> "1. Tighten scope. Produce a substantially"
+                        <> " shorter version that fits within the cap,"
+                        <> " calling out explicitly what you would have"
+                        <> " included if more room were available.\n\n"
+                        <> "2. If you have already done substantial work,"
+                        <> " return a structured summary of findings"
+                        <> " (bulleted, compact) rather than full prose.\n\n"
+                        <> "Do NOT produce the same output again expecting"
+                        <> " a different result.",
+                      ),
+                    ])
+                  let retry_messages =
+                    list.append(req.messages, [assistant_msg, nudge_msg])
+                  let retry_req =
+                    llm_types.LlmRequest(..req, messages: retry_messages)
+                  // Same `remaining` value — the truncation retry must
+                  // NOT consume one of the agent's allowed turns.
+                  // Otherwise a single MaxTokens hit eats two turns and
+                  // leaves the agent worse off than today.
+                  do_react(
+                    retry_req,
+                    spec,
+                    remaining,
+                    consecutive_errors,
+                    cycle_id,
+                    cognitive,
+                    ReactStats(..updated_stats, truncation_retried: True),
+                    task_depth,
+                    deputy_subject,
+                  )
+                }
+                True, True -> {
+                  slog.info(
+                    "framework",
+                    "do_react",
+                    "truncation_guard:"
+                      <> spec.name
+                      <> " — retry also hit max_tokens, shipping deterministic admission",
+                    Some(cycle_id),
+                  )
+                  let admission =
+                    build_truncation_admission(
+                      spec.name,
+                      spec.model,
+                      resp.usage.output_tokens,
+                      spec.max_tokens,
+                      collect_assistant_text(req.messages, response.text(resp)),
+                    )
+                  ReactResult(result: Ok(admission), stats: updated_stats)
+                }
+                False, _ ->
+                  ReactResult(
+                    result: Ok(response.text(resp)),
+                    stats: updated_stats,
+                  )
+              }
             True -> {
               let calls = response.tool_calls(resp)
               let tool_names = list.map(calls, fn(c) { c.name })
@@ -535,6 +640,103 @@ fn build_agent_request(spec: AgentSpec, task: AgentTask) -> llm_types.LlmRequest
     [] -> base
     t -> request.with_tools(base, t)
   }
+}
+
+// ---------------------------------------------------------------------------
+// Truncation guard helpers
+// ---------------------------------------------------------------------------
+
+/// Walk an agent's react-loop message history and collect every text
+/// block that the agent (Assistant role) emitted, plus the truncated
+/// final response's text. Returned as one concatenated string with
+/// `\n---\n` separators between turns. Used by the truncation
+/// admission to embed the agent's accumulated partial work so the
+/// operator can see what was produced even though the synthesis was
+/// capped.
+fn collect_assistant_text(
+  messages: List(llm_types.Message),
+  final_text: String,
+) -> String {
+  let prior =
+    list.filter_map(messages, fn(m: llm_types.Message) {
+      case m.role {
+        llm_types.Assistant -> Ok(extract_text_blocks(m.content))
+        _ -> Error(Nil)
+      }
+    })
+    |> list.filter(fn(t) { t != "" })
+  let all = case final_text {
+    "" -> prior
+    _ -> list.append(prior, [final_text])
+  }
+  string.join(all, "\n---\n")
+}
+
+fn extract_text_blocks(blocks: List(llm_types.ContentBlock)) -> String {
+  blocks
+  |> list.filter_map(fn(b) {
+    case b {
+      llm_types.TextContent(text: t) -> Ok(t)
+      _ -> Error(Nil)
+    }
+  })
+  |> string.join("")
+}
+
+/// Build the deterministic admission text the framework returns when
+/// an agent's truncation guard fires twice in the same react loop.
+/// Pure function — no LLM call, no I/O — so the admission itself
+/// cannot be truncated.
+///
+/// The `[truncation_guard:<agent>]` prefix is operator-facing, mirrors
+/// the cog-loop guard's `[truncation_guard]` convention. Embeds up to
+/// `truncation_admission_preview_chars` of the agent's accumulated
+/// partial output; if longer, keeps the head and tail and elides the
+/// middle so the orchestrator and operator see what was produced
+/// without bloating the message stack.
+pub fn build_truncation_admission(
+  agent_name: String,
+  model: String,
+  output_tokens: Int,
+  limit: Int,
+  partial: String,
+) -> String {
+  let preview = case string.length(partial) {
+    n if n <= truncation_admission_preview_chars -> partial
+    n -> {
+      let head = truncation_admission_preview_chars / 2
+      let tail = truncation_admission_preview_chars / 2
+      string.slice(partial, 0, head)
+      <> "\n\n[...truncation_guard: "
+      <> int.to_string(n - head - tail)
+      <> " chars elided...]\n\n"
+      <> string.slice(partial, n - tail, tail)
+    }
+  }
+  let body = case preview {
+    "" -> "(no text was produced before truncation)"
+    p -> p
+  }
+  "[truncation_guard:"
+  <> agent_name
+  <> "] My output budget was exhausted twice in this react loop"
+  <> " (model="
+  <> model
+  <> ", output_tokens="
+  <> int.to_string(output_tokens)
+  <> ", limit="
+  <> int.to_string(limit)
+  <> "). I cannot fit the full synthesis into one response.\n\n"
+  <> "Partial work produced across all turns:\n\n"
+  <> body
+  <> "\n\n---\n"
+  <> "Suggested next steps for whoever called me:\n"
+  <> "  - Re-dispatch with narrower scope (one section, one topic)\n"
+  <> "  - Raise max_tokens for "
+  <> agent_name
+  <> " in .springdrift/config.toml\n"
+  <> "  - If the partial work above is sufficient, save it via store_result"
+  <> " and skip a re-dispatch"
 }
 
 // ---------------------------------------------------------------------------
