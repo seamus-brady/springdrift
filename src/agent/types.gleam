@@ -485,6 +485,13 @@ pub type PendingTask {
     fallback_from: Option(String),
     output_gate_count: Int,
     empty_retried: Bool,
+    /// True after the cog loop has retried once because the previous
+    /// LLM response was truncated by max_tokens with no tool calls.
+    /// On the second hit in the same cycle the truncation guard
+    /// stops retrying and ships a deterministic admission instead of
+    /// the truncated text. Mirrors `empty_retried` for the
+    /// max_tokens failure mode.
+    truncation_retried: Bool,
     node_type: dag_types.CycleNodeType,
   )
   PendingAgent(task_id: String, tool_use_id: String, agent: String)
