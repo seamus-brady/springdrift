@@ -19,7 +19,35 @@ every web page — that's artifacts. Save it if you'd want to cite it.
 **Tools**:
 - `save_to_library` — store content permanently, indexed by section
 - `search_library` — find passages (embedding mode default, keyword for exact)
-- `read_section` — read one section without loading the full document
+- `document_info` — inspect a doc's shape (structured vs flat, line count) before deciding how to read
+- `list_sections` — enumerate the section tree for a structured doc; returns ids you can pass to `read_section_by_id`
+- `read_section_by_id` — read one section by its exact id from `list_sections` (no fuzzy title matching)
+- `read_range` — read a line range; the universal primitive that works on any document, including flat ones with no headings
+
+## Reading a document — the decision tree
+
+When you are handed a `doc_id` you've never seen, **call `document_info` first**.
+It is cheap (no LLM, no embedding) and tells you whether the document has a
+section tree to navigate or is a single block of text.
+
+- **Structured (`structured: true`)**: the document has chapters / sections.
+  Call `list_sections` to see the tree, pick a section_id from the result,
+  then call `read_section_by_id`. Do NOT guess section titles — the old
+  `read_section` tool that fuzzy-matched titles has been removed because it
+  could silently return the wrong section when a short query matched
+  multiple node titles.
+- **Flat (`structured: false`)**: there's no section tree. Either:
+  - Read the whole doc with `read_range(doc_id, 1, total_lines)` if it's
+    small (use `total_lines` from `document_info`), or
+  - Use `search_library` to find relevant chunks, then `read_range` for
+    surrounding context using the line numbers in the search hits.
+
+`read_range` is also the right tool for reading context around a search
+hit on either kind of document — search results give you line spans, and
+`read_range` slices the source markdown directly.
+
+`read_range` is capped at 2000 lines per call. For larger reads, chunk
+into multiple calls.
 
 ## Your Workspace
 Your own documents — journal, notes, drafts. Persists across sessions.

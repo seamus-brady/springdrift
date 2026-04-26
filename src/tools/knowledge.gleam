@@ -35,6 +35,15 @@ fn get_datetime() -> String
 fn sha256_hex(input: String) -> String
 
 // ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/// Hard cap on a single `read_range` call. Keeps a runaway request from
+/// flooding the agent's context window with thousands of lines. Operators
+/// who legitimately need more should chunk into multiple calls.
+pub const read_range_max_lines: Int = 2000
+
+// ---------------------------------------------------------------------------
 // Tool definitions
 // ---------------------------------------------------------------------------
 
@@ -53,7 +62,10 @@ pub fn cognitive_tools() -> List(llm_types.Tool) {
 pub fn researcher_tools() -> List(llm_types.Tool) {
   [
     search_library_tool(),
-    read_section_tool(),
+    document_info_tool(),
+    list_sections_tool(),
+    read_section_by_id_tool(),
+    read_range_tool(),
     save_to_library_tool(),
   ]
 }
@@ -166,15 +178,79 @@ fn search_library_tool() -> llm_types.Tool {
   |> tool.build()
 }
 
-fn read_section_tool() -> llm_types.Tool {
-  tool.new("read_section")
+fn document_info_tool() -> llm_types.Tool {
+  tool.new("document_info")
   |> tool.with_description(
-    "Read a specific section from an indexed document without loading the full document. Context-efficient for large papers and books.",
+    "Inspect a document's shape before deciding how to read it. "
+    <> "Returns title, total line count, top-level section count, and a "
+    <> "structured-vs-flat signal. Call this FIRST when you receive a new "
+    <> "doc_id and don't yet know whether it has chapters/sections or is "
+    <> "a single block of text. Cheap — no LLM, no embedding, just metadata.",
+  )
+  |> tool.add_string_param("doc_id", "Document identifier", True)
+  |> tool.build()
+}
+
+fn list_sections_tool() -> llm_types.Tool {
+  tool.new("list_sections")
+  |> tool.with_description(
+    "Enumerate the section tree of a structured document. Returns a flat "
+    <> "list of (section_id, title, depth, path, line span) for each node. "
+    <> "Use after `document_info` confirms the document is structured. "
+    <> "Pick a section_id from the result and pass it to "
+    <> "`read_section_by_id` — that's how you avoid the silent-wrong-answer "
+    <> "mode of substring-matching titles. Returns an empty list for flat "
+    <> "documents (no headings detected); use `read_range` for those.",
+  )
+  |> tool.add_string_param("doc_id", "Document identifier", True)
+  |> tool.add_integer_param(
+    "max_depth",
+    "Optional cap on tree depth (e.g. 1 = chapters only, 2 = chapters + "
+      <> "sections). Omit for the full tree.",
+    False,
+  )
+  |> tool.build()
+}
+
+fn read_section_by_id_tool() -> llm_types.Tool {
+  tool.new("read_section_by_id")
+  |> tool.with_description(
+    "Read a specific section by its exact UUID from `list_sections`. "
+    <> "Does NOT do fuzzy title matching — pass a real section_id or get "
+    <> "an error. This is the safe sibling of the old `read_section` tool, "
+    <> "which substring-matched titles and could silently return the wrong "
+    <> "section. Returns the section's content with a structured citation.",
   )
   |> tool.add_string_param("doc_id", "Document identifier", True)
   |> tool.add_string_param(
-    "section",
-    "Section title or path (e.g. 'introduction', 'methods', '3.2')",
+    "section_id",
+    "Exact section UUID from `list_sections`",
+    True,
+  )
+  |> tool.build()
+}
+
+fn read_range_tool() -> llm_types.Tool {
+  tool.new("read_range")
+  |> tool.with_description(
+    "Read a line range from a document's source markdown. The universal "
+    <> "primitive — works on any document, structured or flat. Use for "
+    <> "documents with no section tree (memos, scraped pages, OCR output) "
+    <> "or to read context around a search hit's line span. "
+    <> "Lines are 1-indexed and inclusive. Capped at "
+    <> int.to_string(read_range_max_lines)
+    <> " lines per call to keep "
+    <> "context windows sane — chunk larger reads into multiple calls.",
+  )
+  |> tool.add_string_param("doc_id", "Document identifier", True)
+  |> tool.add_integer_param(
+    "start_line",
+    "First line to read (1-indexed)",
+    True,
+  )
+  |> tool.add_integer_param(
+    "end_line",
+    "Last line to read (inclusive, 1-indexed). Clamped to total document length.",
     True,
   )
   |> tool.build()
@@ -315,7 +391,10 @@ pub fn is_knowledge_tool(name: String) -> Bool {
   || name == "write_note"
   || name == "read_note"
   || name == "search_library"
-  || name == "read_section"
+  || name == "document_info"
+  || name == "list_sections"
+  || name == "read_section_by_id"
+  || name == "read_range"
   || name == "save_to_library"
   || name == "create_draft"
   || name == "read_draft"
@@ -359,7 +438,10 @@ pub fn execute(
     "write_note" -> run_write_note(call, cfg)
     "read_note" -> run_read_note(call, cfg)
     "search_library" -> run_search_library(call, cfg)
-    "read_section" -> run_read_section(call, cfg)
+    "document_info" -> run_document_info(call, cfg)
+    "list_sections" -> run_list_sections(call, cfg)
+    "read_section_by_id" -> run_read_section_by_id(call, cfg)
+    "read_range" -> run_read_range(call, cfg)
     "save_to_library" -> run_save_to_library(call, cfg)
     "create_draft" -> run_create_draft(call, cfg)
     "read_draft" -> run_read_draft(call, cfg)
@@ -679,47 +761,283 @@ fn run_search_library(
   }
 }
 
-fn run_read_section(
+// ---------------------------------------------------------------------------
+// document_info / list_sections / read_section_by_id / read_range
+//
+// These four tools replace the old `read_section` (substring-matching on
+// section titles), which could silently return the wrong section when a
+// short query matched multiple node titles. The new flow is two-step for
+// structured docs (list → read by id) and one-step for flat docs (read
+// by line range), with `document_info` as the cheap "what kind of doc is
+// this?" probe.
+// ---------------------------------------------------------------------------
+
+/// Look up a DocumentMeta by doc_id. Used by every tool below to resolve
+/// the markdown source path and the citation slug. Returns Error with a
+/// user-readable message when the doc_id isn't in the knowledge log.
+fn lookup_meta(
+  cfg: KnowledgeConfig,
+  doc_id: String,
+) -> Result(types.DocumentMeta, String) {
+  let docs = knowledge_log.resolve(cfg.knowledge_dir)
+  case list.find(docs, fn(m: types.DocumentMeta) { m.doc_id == doc_id }) {
+    Ok(meta) -> Ok(meta)
+    Error(_) -> Error("Document not found: " <> doc_id)
+  }
+}
+
+/// Read the source markdown for a document. The `path` field on
+/// DocumentMeta is relative to `knowledge_dir`. Returns the line list
+/// (split on `\n`) so callers can slice ranges or count lines.
+fn read_source_lines(
+  cfg: KnowledgeConfig,
+  meta: types.DocumentMeta,
+) -> Result(List(String), String) {
+  let full_path = cfg.knowledge_dir <> "/" <> meta.path
+  case simplifile.read(full_path) {
+    Ok(content) -> Ok(string.split(content, "\n"))
+    Error(reason) -> Error("Failed to read source: " <> string.inspect(reason))
+  }
+}
+
+/// Walk a tree depth-first looking for a node with the given UUID.
+/// Returns the matched node and its breadcrumb path of ancestor titles.
+fn find_node_by_id(
+  node: types.TreeNode,
+  target_id: String,
+  parent_path: String,
+) -> Option(#(types.TreeNode, String)) {
+  case node.id == target_id {
+    True -> Some(#(node, parent_path))
+    False -> {
+      let child_path = case parent_path {
+        "" -> node.title
+        _ -> parent_path <> " / " <> node.title
+      }
+      list.fold(node.children, None, fn(acc, child) {
+        case acc {
+          Some(_) -> acc
+          None -> find_node_by_id(child, target_id, child_path)
+        }
+      })
+    }
+  }
+}
+
+/// Walk the tree and emit a flat description of every node, capped to
+/// `max_depth` (None = no cap). Each entry carries the node's id, title,
+/// depth, breadcrumb path, and source line span — everything the caller
+/// needs to pick a section to read or to display to the LLM.
+fn collect_sections(
+  node: types.TreeNode,
+  parent_path: String,
+  max_depth: Option(Int),
+  acc: List(SectionEntry),
+) -> List(SectionEntry) {
+  let entry =
+    SectionEntry(
+      id: node.id,
+      title: node.title,
+      depth: node.depth,
+      path: parent_path,
+      line_start: node.source.line_start,
+      line_end: node.source.line_end,
+    )
+  let acc = [entry, ..acc]
+  let descend = case max_depth {
+    Some(cap) -> node.depth < cap
+    None -> True
+  }
+  case descend {
+    False -> acc
+    True -> {
+      let child_path = case parent_path {
+        "" -> node.title
+        _ -> parent_path <> " / " <> node.title
+      }
+      list.fold(node.children, acc, fn(a, child) {
+        collect_sections(child, child_path, max_depth, a)
+      })
+    }
+  }
+}
+
+type SectionEntry {
+  SectionEntry(
+    id: String,
+    title: String,
+    depth: Int,
+    path: String,
+    line_start: Int,
+    line_end: Int,
+  )
+}
+
+fn run_document_info(
   call: llm_types.ToolCall,
   cfg: KnowledgeConfig,
 ) -> llm_types.ToolResult {
   let decoder = {
     use doc_id <- decode.field("doc_id", decode.string)
-    use section <- decode.field("section", decode.string)
-    decode.success(#(doc_id, section))
+    decode.success(doc_id)
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) ->
+      llm_types.ToolFailure(tool_use_id: call.id, error: "Missing doc_id")
+    Ok(doc_id) ->
+      case lookup_meta(cfg, doc_id) {
+        Error(reason) ->
+          llm_types.ToolFailure(tool_use_id: call.id, error: reason)
+        Ok(meta) ->
+          case indexer.load_index(cfg.indexes_dir, doc_id) {
+            Error(reason) ->
+              llm_types.ToolFailure(tool_use_id: call.id, error: reason)
+            Ok(idx) -> {
+              let total_lines = case read_source_lines(cfg, meta) {
+                Ok(lines) -> list.length(lines)
+                Error(_) -> 0
+              }
+              let top_level_count = list.length(idx.root.children)
+              // Heuristic: a doc with 2+ top-level sections OR more than
+              // a handful of total nodes is "structured" enough that
+              // list_sections will be useful. A flat blob has a single
+              // root with all content underneath.
+              let structured = top_level_count >= 2 || idx.node_count >= 4
+              let body =
+                "doc_id: "
+                <> meta.doc_id
+                <> "\ntitle: "
+                <> meta.title
+                <> "\ntype: "
+                <> types.doc_type_to_string(meta.doc_type)
+                <> "\ndomain: "
+                <> meta.domain
+                <> "\nstatus: "
+                <> types.doc_status_to_string(meta.status)
+                <> "\npath: "
+                <> meta.path
+                <> "\ntotal_lines: "
+                <> int.to_string(total_lines)
+                <> "\nnode_count: "
+                <> int.to_string(idx.node_count)
+                <> "\ntop_level_sections: "
+                <> int.to_string(top_level_count)
+                <> "\nstructured: "
+                <> case structured {
+                  True -> "true (use list_sections)"
+                  False -> "false (use read_range or search_library)"
+                }
+              llm_types.ToolSuccess(tool_use_id: call.id, content: body)
+            }
+          }
+      }
+  }
+}
+
+fn run_list_sections(
+  call: llm_types.ToolCall,
+  cfg: KnowledgeConfig,
+) -> llm_types.ToolResult {
+  let decoder = {
+    use doc_id <- decode.field("doc_id", decode.string)
+    use max_depth <- decode.optional_field("max_depth", -1, decode.int)
+    decode.success(#(doc_id, max_depth))
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) ->
+      llm_types.ToolFailure(tool_use_id: call.id, error: "Missing doc_id")
+    Ok(#(doc_id, max_depth_raw)) -> {
+      let max_depth = case max_depth_raw {
+        n if n < 0 -> None
+        n -> Some(n)
+      }
+      case indexer.load_index(cfg.indexes_dir, doc_id) {
+        Error(reason) ->
+          llm_types.ToolFailure(tool_use_id: call.id, error: reason)
+        Ok(idx) -> {
+          let entries = collect_sections(idx.root, "", max_depth, [])
+          // Drop the synthetic root node entry — callers want the
+          // navigable sections, not the document container.
+          let body_entries =
+            list.filter(entries, fn(e: SectionEntry) { e.depth > 0 })
+          case body_entries {
+            [] ->
+              llm_types.ToolSuccess(
+                tool_use_id: call.id,
+                content: "No sections — this document is flat (no headings "
+                  <> "detected). Use `read_range` or `search_library` "
+                  <> "instead.",
+              )
+            _ -> {
+              // Reverse: collect_sections accumulates head-first, so the
+              // list is currently last-seen-first. Restore document order.
+              let ordered = list.reverse(body_entries)
+              let lines =
+                list.map(ordered, fn(e: SectionEntry) {
+                  let indent = string.repeat("  ", e.depth - 1)
+                  indent
+                  <> "[depth "
+                  <> int.to_string(e.depth)
+                  <> "] "
+                  <> e.title
+                  <> "  (id="
+                  <> e.id
+                  <> ", L"
+                  <> int.to_string(e.line_start)
+                  <> "-"
+                  <> int.to_string(e.line_end)
+                  <> ")"
+                })
+              let header =
+                int.to_string(list.length(ordered))
+                <> " section(s) — pass an `id` to `read_section_by_id`:\n\n"
+              llm_types.ToolSuccess(
+                tool_use_id: call.id,
+                content: header <> string.join(lines, "\n"),
+              )
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+fn run_read_section_by_id(
+  call: llm_types.ToolCall,
+  cfg: KnowledgeConfig,
+) -> llm_types.ToolResult {
+  let decoder = {
+    use doc_id <- decode.field("doc_id", decode.string)
+    use section_id <- decode.field("section_id", decode.string)
+    decode.success(#(doc_id, section_id))
   }
   case json.parse(call.input_json, decoder) {
     Error(_) ->
       llm_types.ToolFailure(
         tool_use_id: call.id,
-        error: "Missing doc_id or section",
+        error: "Missing doc_id or section_id",
       )
-    Ok(#(doc_id, section)) ->
+    Ok(#(doc_id, section_id)) ->
       case indexer.load_index(cfg.indexes_dir, doc_id) {
         Error(reason) ->
           llm_types.ToolFailure(tool_use_id: call.id, error: reason)
         Ok(idx) ->
-          case indexer.find_section_with_path(idx.root, section) {
+          case find_node_by_id(idx.root, section_id, "") {
             None ->
               llm_types.ToolFailure(
                 tool_use_id: call.id,
-                error: "Section '"
-                  <> section
+                error: "section_id '"
+                  <> section_id
                   <> "' not found in document "
-                  <> doc_id,
+                  <> doc_id
+                  <> ". Call `list_sections` to see valid section IDs.",
               )
             Some(#(node, parent_path)) -> {
-              // Look up the DocumentMeta so we can build a stable
-              // slug-based citation. If the lookup misses (shouldn't
-              // happen in practice but is safe), fall back to doc_id.
-              let docs = knowledge_log.resolve(cfg.knowledge_dir)
-              let slug = case list.find(docs, fn(m) { m.doc_id == doc_id }) {
+              let slug = case lookup_meta(cfg, doc_id) {
                 Ok(meta) -> search.doc_slug_for(meta)
                 Error(_) -> doc_id
               }
-              // Section path: breadcrumb from root, with the matched
-              // node's own title appended. Root-only matches yield
-              // just the node title (no " / " prefix).
               let section_or_path = case parent_path {
                 "" -> node.title
                 _ -> parent_path <> " / " <> node.title
@@ -738,6 +1056,93 @@ fn run_read_section(
                 tool_use_id: call.id,
                 content: header <> node.content,
               )
+            }
+          }
+      }
+  }
+}
+
+fn run_read_range(
+  call: llm_types.ToolCall,
+  cfg: KnowledgeConfig,
+) -> llm_types.ToolResult {
+  let decoder = {
+    use doc_id <- decode.field("doc_id", decode.string)
+    use start_line <- decode.field("start_line", decode.int)
+    use end_line <- decode.field("end_line", decode.int)
+    decode.success(#(doc_id, start_line, end_line))
+  }
+  case json.parse(call.input_json, decoder) {
+    Error(_) ->
+      llm_types.ToolFailure(
+        tool_use_id: call.id,
+        error: "Missing doc_id, start_line, or end_line",
+      )
+    Ok(#(doc_id, start_raw, end_raw)) ->
+      case lookup_meta(cfg, doc_id) {
+        Error(reason) ->
+          llm_types.ToolFailure(tool_use_id: call.id, error: reason)
+        Ok(meta) ->
+          case read_source_lines(cfg, meta) {
+            Error(reason) ->
+              llm_types.ToolFailure(tool_use_id: call.id, error: reason)
+            Ok(lines) -> {
+              let total = list.length(lines)
+              // Clamp + sanity-check. start at least 1, end at most
+              // total, end >= start. A request of 1..0 or backwards is
+              // a caller error worth returning rather than silently
+              // ignoring — the LLM should know its arithmetic was off.
+              let start = case start_raw {
+                n if n < 1 -> 1
+                n -> n
+              }
+              let end_clamped = case end_raw {
+                n if n > total -> total
+                n -> n
+              }
+              case end_clamped < start {
+                True ->
+                  llm_types.ToolFailure(
+                    tool_use_id: call.id,
+                    error: "end_line ("
+                      <> int.to_string(end_raw)
+                      <> ") is before start_line ("
+                      <> int.to_string(start_raw)
+                      <> ") after clamping to document length "
+                      <> int.to_string(total),
+                  )
+                False ->
+                  case end_clamped - start + 1 > read_range_max_lines {
+                    True ->
+                      llm_types.ToolFailure(
+                        tool_use_id: call.id,
+                        error: "Requested range ("
+                          <> int.to_string(end_clamped - start + 1)
+                          <> " lines) exceeds the per-call cap of "
+                          <> int.to_string(read_range_max_lines)
+                          <> ". Chunk into multiple calls.",
+                      )
+                    False -> {
+                      let slice =
+                        lines
+                        |> list.drop(start - 1)
+                        |> list.take(end_clamped - start + 1)
+                      let slug = search.doc_slug_for(meta)
+                      let citation =
+                        "doc:"
+                        <> slug
+                        <> " L"
+                        <> int.to_string(start)
+                        <> "-"
+                        <> int.to_string(end_clamped)
+                      let header = "Citation: " <> citation <> "\n\n"
+                      llm_types.ToolSuccess(
+                        tool_use_id: call.id,
+                        content: header <> string.join(slice, "\n"),
+                      )
+                    }
+                  }
+              }
             }
           }
       }
