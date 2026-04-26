@@ -245,15 +245,31 @@ Agent finds a paper via kagi_search
 
 ### Reading Specific Sections
 
-The `read_section` tool retrieves a specific section by path without loading
-the entire document into context. This is critical for large documents
-(books, long papers) where the full text would blow the context window:
+Reading is a two-step flow for structured docs and a one-step flow for
+flat ones — the original spec's `read_section(doc_id, section)` substring
+matcher was replaced post-ship because it could silently return the
+wrong section when a short query matched multiple node titles.
+
+For a structured paper or book:
 
 ```
-read_section(doc_id: "aamodt-plaza-1994", section: "3.2")
-→ Returns: "3.2 Similarity Assessment\n\nThe similarity function..."
-   (just that section, ~500 tokens, not the full 15,000-token paper)
+document_info(doc_id)              → "structured: true, top_level_sections: 16"
+list_sections(doc_id)              → tree with (section_id, title, line span) per node
+read_section_by_id(doc_id, id)     → exact section content with citation
 ```
+
+For a flat document (memo, scraped page, OCR'd text) where there's no
+section tree to navigate:
+
+```
+document_info(doc_id)              → "structured: false, total_lines: 320"
+read_range(doc_id, 1, 320)         → raw markdown lines with citation
+```
+
+`read_range` is the universal primitive — it works on any document,
+slices `sources/<...>.md` directly, and is also useful for reading
+context around a `search_library` hit's line span. Capped at 2000 lines
+per call to keep the agent's context window from getting flooded.
 
 ### Citations
 
@@ -292,8 +308,10 @@ Twelve tools across three agents:
 |---|---|
 | `save_to_library` | Fetch a URL or file, normalise, index, store permanently as a source |
 | `search_library` | Search indexed documents (keyword/embedding/reasoning mode) |
-| `read_section` | Retrieve a specific section by document ID + section path |
-| `get_document` | Retrieve full document metadata and content |
+| `document_info` | Cheap probe: title, line count, structured-vs-flat signal |
+| `list_sections` | Enumerate the section tree for a structured document |
+| `read_section_by_id` | Read a specific section by exact UUID from `list_sections` |
+| `read_range` | Read a line range from the source markdown (universal primitive) |
 
 ### Cognitive Loop Tools
 
@@ -328,9 +346,21 @@ Twelve tools across three agents:
 - `domain` (string, optional) — filter by domain
 - `type` (string, optional) — filter: "source", "journal", "note", "draft", "export"
 
-`read_section`:
+`document_info`:
 - `doc_id` (string, required) — document identifier
-- `section` (string, required) — section path (e.g. "3.2" or "introduction")
+
+`list_sections`:
+- `doc_id` (string, required) — document identifier
+- `max_depth` (int, optional) — cap on tree depth (e.g. 1 = chapters only)
+
+`read_section_by_id`:
+- `doc_id` (string, required) — document identifier
+- `section_id` (string, required) — exact section UUID from `list_sections`
+
+`read_range`:
+- `doc_id` (string, required) — document identifier
+- `start_line` (int, required) — first line (1-indexed)
+- `end_line` (int, required) — last line (inclusive); clamped to total length, capped at 2000 lines per call
 
 `write_journal`:
 - `content` (string, required) — freeform markdown to append
@@ -790,7 +820,7 @@ This traces all the way through: email → intray → source → study → CBR c
 | 1 | Knowledge directory + index.jsonl + Librarian ETS | Small | None |
 | 2 | Markdown + PDF tree indexer (port Curragh's Python to Gleam) | Medium | Phase 1 |
 | 3 | Embedding per tree node (reuse Ollama infra) | Small | Phase 2, CBR embeddings |
-| 4 | Researcher tools: save_to_library, search_library, read_section, get_document | Medium | Phase 2-3 |
+| 4 | Researcher tools: save_to_library, search_library, document_info, list_sections, read_section_by_id, read_range, get_document | Medium | Phase 2-3 |
 | 5 | Agent workspace: write_journal, write_note, read_note, create/update/promote_draft | Medium | Phase 1 |
 | 6 | Document library skill (.springdrift/skills/document-library/SKILL.md) | Small | Phase 4-5 |
 | 7 | Sensorium integration (knowledge block + journal + active notes/drafts) | Small | Phase 5 |
