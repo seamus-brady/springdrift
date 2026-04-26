@@ -72,6 +72,7 @@ pub fn routes_tool(name: String) -> Bool {
   knowledge_tools.is_knowledge_tool(name)
   || name == "store_result"
   || name == "retrieve_result"
+  || name == "checkpoint"
   || name == "calculator"
   || name == "get_current_datetime"
   || name == "read_skill"
@@ -155,7 +156,10 @@ fn writer_executor(
         )
       False ->
         case call.name, lib {
-          "store_result", Some(l) | "retrieve_result", Some(l) ->
+          "store_result", Some(l)
+          | "retrieve_result", Some(l)
+          | "checkpoint", Some(l)
+          ->
             artifacts.execute(
               call,
               artifacts_dir,
@@ -163,7 +167,7 @@ fn writer_executor(
               l,
               max_artifact_chars,
             )
-          "store_result", None | "retrieve_result", None ->
+          "store_result", None | "retrieve_result", None | "checkpoint", None ->
             llm_types.ToolFailure(
               tool_use_id: call.id,
               error: "Artifact tools unavailable (no librarian)",

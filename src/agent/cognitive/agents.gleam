@@ -641,6 +641,21 @@ fn dispatch_single_agent(
     Some(task_subject) -> {
       let agent_task_id = cycle_log.generate_uuid()
       let #(raw_instruction, ctx) = parse_agent_params(call.input_json)
+      // Auto-prepend referenced_artifacts content as <reference_artifact>
+      // blocks. Eliminates the redundant-bootstrapping pattern observed
+      // in 2026-04-26 Nemo session: orchestrator does ONE reconnaissance
+      // delegation, stores the structural outline, then passes the
+      // artifact_id via referenced_artifacts to N parallel followups —
+      // each downstream agent sees the structure immediately without
+      // calling retrieve_result. Empty when no IDs supplied or no
+      // librarian available.
+      let refs_csv = parse_referenced_artifacts_csv(call.input_json)
+      let refs_bundle =
+        render_referenced_artifacts_bundle(refs_csv, state.memory.librarian)
+      let raw_instruction = case refs_bundle {
+        "" -> raw_instruction
+        bundle -> bundle <> raw_instruction
+      }
       // L2 failure-context injection: when an agent is re-dispatched
       // this cycle after a prior failure (same agent_id), prepend a
       // short block describing what failed last time. Blind retries
@@ -1880,6 +1895,113 @@ pub fn parse_agent_params(input_json: String) -> #(String, String) {
   case refs_prefix {
     "" -> #(instruction, ctx)
     _ -> #(refs_prefix <> "\n\n" <> instruction, ctx)
+  }
+}
+
+/// Hard cap on the total size of the auto-prepended artifact bundle
+/// produced by `referenced_artifacts`. Protects a child agent's
+/// context window from being swamped by a parent that supplies many
+/// or huge artifact references. When the cap is exceeded, the
+/// remaining artifacts are still listed by id with a "[...elided
+/// for size...]" marker so the agent sees what was attempted.
+const referenced_artifacts_bundle_cap_chars: Int = 50_000
+
+/// Resolve a comma-separated `referenced_artifacts` string into a
+/// list of `<reference_artifact>` XML blocks containing the actual
+/// artifact content, ready to prepend to the agent's instruction.
+///
+/// Resolution failures (artifact not found, content not on disk) are
+/// rendered as `<reference_artifact id="X" status="not_found"/>`
+/// blocks rather than silently dropped — the agent sees what the
+/// orchestrator tried to pass and can react. Cap-busts are rendered
+/// as `<reference_artifact id="X" status="elided" reason="bundle_size"/>`
+/// markers so the agent knows the content existed but was withheld.
+///
+/// Returns "" when the input is empty or there's no librarian — the
+/// caller can treat the empty string as "no bundle, dispatch normally."
+pub fn render_referenced_artifacts_bundle(
+  csv: String,
+  lib: Option(Subject(librarian.LibrarianMessage)),
+) -> String {
+  case csv, lib {
+    "", _ -> ""
+    _, None -> ""
+    csv, Some(librarian_subj) -> {
+      let ids =
+        string.split(csv, ",")
+        |> list.map(string.trim)
+        |> list.filter(fn(s) { s != "" })
+      let #(blocks_rev, _final_size) =
+        list.fold(ids, #([], 0), fn(acc, id) {
+          let #(blocks, size_so_far) = acc
+          case size_so_far >= referenced_artifacts_bundle_cap_chars {
+            True -> {
+              let elided =
+                "<reference_artifact id=\""
+                <> id
+                <> "\" status=\"elided\" reason=\"bundle_size\"/>"
+              #([elided, ..blocks], size_so_far)
+            }
+            False ->
+              case librarian.lookup_artifact(librarian_subj, id) {
+                Error(Nil) -> {
+                  let missing =
+                    "<reference_artifact id=\""
+                    <> id
+                    <> "\" status=\"not_found\"/>"
+                  #([missing, ..blocks], size_so_far)
+                }
+                Ok(meta) ->
+                  case
+                    librarian.retrieve_artifact_content(
+                      librarian_subj,
+                      id,
+                      meta.stored_at,
+                    )
+                  {
+                    Error(Nil) -> {
+                      let missing =
+                        "<reference_artifact id=\""
+                        <> id
+                        <> "\" status=\"content_missing\"/>"
+                      #([missing, ..blocks], size_so_far)
+                    }
+                    Ok(content) -> {
+                      let block =
+                        "<reference_artifact id=\""
+                        <> id
+                        <> "\">\n"
+                        <> content
+                        <> "\n</reference_artifact>"
+                      #([block, ..blocks], size_so_far + string.length(content))
+                    }
+                  }
+              }
+          }
+        })
+      let blocks = list.reverse(blocks_rev)
+      case blocks {
+        [] -> ""
+        _ ->
+          "<reference_artifacts>\n"
+          <> string.join(blocks, "\n")
+          <> "\n</reference_artifacts>\n\n"
+      }
+    }
+  }
+}
+
+/// Extract the comma-separated `referenced_artifacts` value from the
+/// agent_* tool call's input JSON. Returns "" if the param isn't
+/// present.
+pub fn parse_referenced_artifacts_csv(input_json: String) -> String {
+  let decoder = {
+    use refs <- decode.optional_field("referenced_artifacts", "", decode.string)
+    decode.success(refs)
+  }
+  case json.parse(input_json, decoder) {
+    Ok(refs) -> refs
+    Error(_) -> ""
   }
 }
 

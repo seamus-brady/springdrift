@@ -48,6 +48,11 @@ pub fn agent_to_tool(spec: AgentSpec) -> Tool {
     False,
   )
   |> tool.add_string_param(
+    "referenced_artifacts",
+    "Comma-separated artifact IDs whose CONTENT should be auto-prepended to the agent's first message — the agent sees the material immediately without calling retrieve_result. Use this for reconnaissance-then-followups patterns: parent does one delegation to map a large input, stores the outline as an artifact, then dispatches downstream agents with that ID here so they don't re-bootstrap. Differs from artifact_id (which only embeds the ID as a hint that the agent must retrieve itself). Total content capped at ~50KB to protect the child's context.",
+    False,
+  )
+  |> tool.add_string_param(
     "task_id",
     "If the instruction targets an existing planner task, pass its ID here.",
     False,
