@@ -10,6 +10,7 @@ import agent/registry.{type Registry}
 import agent/team
 import agent/types.{type Notification}
 import agentlair/types as agentlair_types
+import coder/manager.{type CoderManager}
 import dprime/deterministic.{type DeterministicConfig}
 import dprime/types as dprime_types
 import facts/provenance_check
@@ -26,6 +27,7 @@ import narrative/librarian.{type LibrarianMessage}
 import narrative/threading
 import normative/types as normative_types
 import simplifile
+import tools/coder_dispatch
 import tools/memory
 
 @external(erlang, "springdrift_ffi", "generate_uuid")
@@ -121,6 +123,16 @@ pub type CognitiveConfig {
     /// allowed to read from. Same list passed to specialist agents.
     /// Used by `is_safe_skill_path` for canonical-path containment.
     skills_dirs: List(String),
+    /// Real-coder manager handle. Present when [coder] is fully
+    /// configured and the manager started cleanly; None otherwise.
+    /// When None the dispatch_coder / cancel_coder_session /
+    /// list_coder_sessions tools return a "coder not configured"
+    /// failure rather than crashing.
+    coder_manager: Option(CoderManager),
+    /// Per-task budget defaults + ceilings used when the cog loop
+    /// dispatches a coding task. The agent can request more than the
+    /// default; the manager clamps each field against the ceiling.
+    coder_dispatch_defaults: coder_dispatch.DispatchDefaults,
   )
 }
 
@@ -199,5 +211,16 @@ pub fn default_test_config(
     deputies_max_tokens: 800,
     deputy_timeout_ms: 15_000,
     skills_dirs: [],
+    coder_manager: None,
+    coder_dispatch_defaults: coder_dispatch.DispatchDefaults(
+      default_max_tokens: 200_000,
+      default_max_cost_usd: 5.0,
+      default_max_minutes: 10,
+      default_max_turns: 50,
+      ceiling_max_tokens: 1_000_000,
+      ceiling_max_cost_usd: 25.0,
+      ceiling_max_minutes: 60,
+      ceiling_max_turns: 200,
+    ),
   )
 }

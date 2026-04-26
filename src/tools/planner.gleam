@@ -59,6 +59,19 @@ pub fn all() -> List(llm_types.Tool) {
   ]
 }
 
+/// Group A — work-management tools for the coder agent. Lets the
+/// coder mark step completion, flag materialised risks, and report
+/// blockers as it drives an OpenCode session, so PM and Forecaster
+/// see live progress within a task rather than only at task boundary.
+pub fn coder_agent_tools() -> List(llm_types.Tool) {
+  [
+    get_task_detail_tool(),
+    complete_task_step_tool(),
+    flag_risk_tool(),
+    report_blocker_tool(),
+  ]
+}
+
 /// Tools for the Planner agent — heavier planning operations that
 /// warrant a full agent delegation. Also carries the lightweight
 /// step-completion + activation tools so a PM delegation can close its

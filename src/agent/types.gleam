@@ -5,6 +5,7 @@
 // by the Free Software Foundation, either version 3 of the License, or
 // (at your option) any later version.
 
+import coder/types as coder_types
 import dag/types as dag_types
 import deputy/types as deputy_types
 import dprime/types as dprime_types
@@ -353,6 +354,16 @@ pub type CognitiveMessage {
   ThinkError(task_id: String, error: String, retryable: Bool)
   ThinkWorkerDown(task_id: String, reason: String)
   AgentComplete(outcome: AgentOutcome)
+  /// Real-coder dispatch worker has finished. Routed back to the cog
+  /// loop so the result can be folded into the conversation as a
+  /// tool_result block — same shape as AgentComplete uses for agent
+  /// dispatches. Carries the resolved budget clamps so the formatted
+  /// reply mentions any operator-ceiling enforcement.
+  CoderDispatchComplete(
+    task_id: String,
+    result: Result(coder_types.DispatchResult, coder_types.CoderError),
+    clamps: List(coder_types.BudgetClamp),
+  )
   AgentProgress(progress: DelegationProgress)
   AgentQuestion(question: String, agent: String, reply_to: Subject(String))
   /// Request from a specialist (via framework) for a compact rendering
@@ -500,6 +511,16 @@ pub type PendingTask {
     node_type: dag_types.CycleNodeType,
   )
   PendingAgent(task_id: String, tool_use_id: String, agent: String)
+  /// Real-coder dispatch in flight. Lives in the same `pending` Dict
+  /// and the same WaitingForAgents.pending_ids list as PendingAgent so
+  /// the cog loop's existing all-pending-cleared bookkeeping just
+  /// works.
+  PendingCoderDispatch(
+    task_id: String,
+    tool_use_id: String,
+    brief: String,
+    started_at_ms: Int,
+  )
 }
 
 // ---------------------------------------------------------------------------

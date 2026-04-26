@@ -1,0 +1,88 @@
+# Springdrift coder sandbox image.
+#
+# Provides a containerised OpenCode (https://github.com/sst/opencode) for
+# Springdrift's coder agent to drive via ACP (Agent Client Protocol).
+# The container is the trust boundary — the project is bind-mounted in
+# at runtime, OpenCode operates against that mount, and nothing escapes
+# the slot.
+#
+# Build:
+#   scripts/build-coder-image.sh
+#   # or, with an explicit pin:
+#   OPENCODE_VERSION=1.14.25 scripts/build-coder-image.sh
+#
+# The OPENCODE_VERSION arg is a hard pin. Operators bump it explicitly
+# and re-run scripts/smoke-coder-image.sh before relying on the new pin.
+#
+# ── Why this container runs as root ────────────────────────────────────
+# With rootless podman + --userns=keep-id + --security-opt=no-new-privileges,
+# "root inside the container" is bounded by the user namespace — it
+# cannot escape, cannot touch host files outside bind mounts, cannot
+# make privileged syscalls. Inside the container is OpenCode's domain.
+#
+# Running as root lets the agent `apt install` system packages it
+# discovers it needs mid-task, instead of failing 12 turns deep on a
+# missing dep and forcing a manual blocker→install→retry round-trip.
+# The container's ephemerality (janitor reaps idle containers on TTL)
+# keeps cruft from accumulating forever.
+
+FROM node:22-bookworm-slim
+
+ARG OPENCODE_VERSION=1.14.25
+
+# Tooling OpenCode shells out to during normal operation:
+#   git           — every coding task ends in a commit
+#   gh            — GitHub CLI (auth via SPRINGDRIFT_CODER_GITHUB_TOKEN env)
+#   ripgrep / fd  — file discovery
+#   curl          — health probes, occasional fetches
+#   jq            — JSON inspection (operator + smoke-test friendly)
+#   build-essential — for native-dep installs during a task
+#   python3-minimal — some OpenCode plugins shell out to python
+#   ca-certificates — TLS to provider APIs
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        git \
+        ripgrep \
+        fd-find \
+        curl \
+        jq \
+        build-essential \
+        python3-minimal \
+        ca-certificates \
+        gnupg \
+    && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+       | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+       > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends gh \
+    && rm -rf /var/lib/apt/lists/*
+
+# fd-find ships its binary as `fdfind` on Debian to avoid a name clash
+# that doesn't apply in a container — alias it back to `fd` so OpenCode
+# and operators get the upstream name.
+RUN ln -s /usr/bin/fdfind /usr/local/bin/fd
+
+# OpenCode itself, pinned. The npm-as-root warning is cosmetic — we
+# deliberately run as root inside the container (see header).
+RUN npm install -g opencode-ai@${OPENCODE_VERSION}
+
+# Auth + workspace dirs. Project is bind-mounted at /workspace/project
+# at runtime; OpenCode's auth lives at /root/.config/opencode/auth.json
+# (bind-mounted read-only from the host's auth dir, OR written at
+# container-start by Springdrift from env-var-supplied keys).
+RUN mkdir -p /workspace/project /root/.config/opencode
+
+WORKDIR /workspace/project
+
+# No CMD — slot starts with `sleep infinity`; Springdrift `podman exec`s
+# `opencode acp` (or any landlord-mode command) on demand. Operators can
+# override on the command line for one-off testing:
+#   podman run --rm -it \
+#       -v $PWD:/workspace/project \
+#       -v $HOME/.config/opencode:/root/.config/opencode:ro \
+#       -e ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY \
+#       springdrift-coder:latest \
+#       opencode acp
+CMD ["sleep", "infinity"]

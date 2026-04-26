@@ -19,6 +19,7 @@ import agent/types.{
   WaitingForUser,
 }
 import agent/worker
+import coder/types as coder_types
 import cycle_log
 import dag/types as dag_types
 import deputy/framework as deputy_framework
@@ -47,6 +48,7 @@ import planner/types as planner_types
 import slog
 import tools/builtin
 import tools/captures as captures_tools
+import tools/coder_dispatch
 import tools/knowledge as knowledge_tools
 import tools/learning_goals as learning_goal_tools
 import tools/memory
@@ -159,9 +161,17 @@ pub fn dispatch_tool_calls(
       // (no agent_/team_ prefix) and drops the tool_use silently —
       // produces the "agent says 'let me read X' then nothing happens"
       // symptom.
-      let #(builtin_calls, remaining_calls) =
+      let #(builtin_calls, after_builtin) =
         list.partition(after_captures, fn(c) {
           builtin.is_cog_builtin_tool(c.name)
+        })
+      // cancel_coder_session and list_coder_sessions are fast manager
+      // calls — keep them sync. dispatch_coder is the long-running one
+      // and goes through the async worker path further down so the cog
+      // loop stays responsive while the OpenCode session runs.
+      let #(coder_sync_calls, remaining_calls) =
+        list.partition(after_builtin, fn(c) {
+          coder_dispatch.is_sync_coder_dispatch_tool(c.name)
         })
       let sync_calls =
         list.flatten([
@@ -172,6 +182,7 @@ pub fn dispatch_tool_calls(
           strategy_calls,
           captures_calls,
           builtin_calls,
+          coder_sync_calls,
         ])
       case sync_calls {
         [] -> dispatch_agent_calls(state, task_id, resp, remaining_calls)
@@ -385,18 +396,31 @@ fn handle_memory_tools(
                                   )
                               }
                             False ->
-                              memory.execute_with_how_to(
-                                call,
-                                state.memory.narrative_dir,
-                                state.memory.librarian,
-                                facts_ctx,
-                                introspect_ctx,
-                                state.config.memory_limits,
-                                state.config.how_to_content,
-                                option.Some(memory.AgentManagementContext(
-                                  supervisor: state.supervisor,
-                                )),
-                              )
+                              case
+                                coder_dispatch.is_sync_coder_dispatch_tool(
+                                  call.name,
+                                )
+                              {
+                                True ->
+                                  coder_dispatch.execute(
+                                    call,
+                                    state.coder_manager,
+                                    state.cycle_id,
+                                  )
+                                False ->
+                                  memory.execute_with_how_to(
+                                    call,
+                                    state.memory.narrative_dir,
+                                    state.memory.librarian,
+                                    facts_ctx,
+                                    introspect_ctx,
+                                    state.config.memory_limits,
+                                    state.config.how_to_content,
+                                    option.Some(memory.AgentManagementContext(
+                                      supervisor: state.supervisor,
+                                    )),
+                                  )
+                              }
                           }
                       }
                   }
@@ -570,24 +594,31 @@ fn dispatch_agent_calls(
   resp: llm_types.LlmResponse,
   calls: List(llm_types.ToolCall),
 ) -> CognitiveState {
-  // Separate agent calls, team calls, and unknown calls
+  // Separate agent calls, team calls, coder dispatch, and unknown calls.
   let #(agent_calls, non_agent) =
     list.partition(calls, fn(call) { string.starts_with(call.name, "agent_") })
-  let #(team_calls, other_calls) =
+  let #(team_calls, after_team) =
     list.partition(non_agent, fn(call) {
       string.starts_with(call.name, "team_")
     })
+  let #(coder_calls, other_calls) =
+    list.partition(after_team, fn(call) {
+      coder_dispatch.is_dispatch_coder_tool(call.name)
+    })
 
-  // Convert team calls into agent-like dispatches (team orchestrator acts as agent)
-  let all_dispatchable = list.append(agent_calls, team_calls)
+  // All async dispatches share the same pending machinery — agents,
+  // teams, and coder dispatch all land in PendingTask + WaitingForAgents
+  // so the cog loop's existing all-pending-cleared bookkeeping just
+  // covers them.
+  let all_dispatchable = list.flatten([agent_calls, team_calls, coder_calls])
 
   case all_dispatchable, other_calls {
-    // Only agent/team calls
+    // Only async dispatches
     dispatchable, [] -> {
       do_dispatch_agents(state, task_id, resp, dispatchable, [])
     }
 
-    // No agent or team calls — unknown tools, send error
+    // No async dispatches — unknown tools, send error
     [], _other -> {
       let text = response.text(resp)
       let reply_text = case text {
@@ -729,6 +760,82 @@ fn dispatch_single_agent(
   }
 }
 
+/// Dispatch each `dispatch_coder` call as an unlinked worker. Each
+/// worker calls `manager.dispatch_task` and ships the result back as
+/// `CoderDispatchComplete`. Cog stays free to handle other input,
+/// `cancel_coder_session` is reachable mid-flight, and a single LLM
+/// turn can fan out multiple coder dispatches in parallel.
+///
+/// Returns:
+///   - `pending` — PendingCoderDispatch entries to insert in the
+///     pending Dict and the WaitingForAgents pending_ids list
+///   - `error_blocks` — synthetic tool_results for calls whose JSON
+///     failed to parse (kept here so the LLM gets one block per
+///     tool_use, satisfying Anthropic's API contract)
+fn dispatch_coder_calls(
+  state: CognitiveState,
+  calls: List(llm_types.ToolCall),
+) -> #(List(types.PendingTask), List(llm_types.ContentBlock)) {
+  case state.coder_manager {
+    None -> {
+      let blocks =
+        list.map(calls, fn(call) {
+          llm_types.ToolResultContent(
+            tool_use_id: call.id,
+            content: "Coder dispatch unavailable: real-coder mode not configured.",
+            is_error: True,
+          )
+        })
+      #([], blocks)
+    }
+    Some(mgr) -> {
+      let now_ms = monotonic_now_ms()
+      list.fold(calls, #([], []), fn(acc, call) {
+        let #(pending_acc, error_acc) = acc
+        let task_id = cycle_log.generate_uuid()
+        case
+          coder_dispatch.spawn_dispatch_worker(
+            call,
+            mgr,
+            state.coder_dispatch_defaults,
+            state.self,
+            task_id,
+            fn(tid, result, clamps) {
+              types.CoderDispatchComplete(
+                task_id: tid,
+                result: result,
+                clamps: clamps,
+              )
+            },
+          )
+        {
+          coder_dispatch.DispatchSpawned(task_id: tid, brief:, ..) -> #(
+            list.append(pending_acc, [
+              types.PendingCoderDispatch(
+                task_id: tid,
+                tool_use_id: call.id,
+                brief: brief,
+                started_at_ms: now_ms,
+              ),
+            ]),
+            error_acc,
+          )
+          coder_dispatch.DispatchInvalid(tool_use_id:, reason:) -> #(
+            pending_acc,
+            list.append(error_acc, [
+              llm_types.ToolResultContent(
+                tool_use_id: tool_use_id,
+                content: reason,
+                is_error: True,
+              ),
+            ]),
+          )
+        }
+      })
+    }
+  }
+}
+
 /// Dispatch a team call (team_ prefix). Spawns a team orchestrator process
 /// that internally coordinates member agents and sends AgentComplete back.
 fn dispatch_team_call(
@@ -816,9 +923,15 @@ fn do_dispatch_agents(
 ) -> CognitiveState {
   let cycle_id = option.unwrap(state.cycle_id, task_id)
 
-  // Partition agent calls: immediate vs deferred (depends_on)
-  let #(immediate_calls, deferred_calls) =
+  // Partition: agent vs team vs coder dispatch calls; agent calls
+  // further split by depends_on (immediate vs deferred). Team and
+  // coder dispatch calls are always immediate.
+  let #(coder_calls, agent_or_team_calls) =
     list.partition(agent_calls, fn(call) {
+      coder_dispatch.is_dispatch_coder_tool(call.name)
+    })
+  let #(immediate_calls, deferred_calls) =
+    list.partition(agent_or_team_calls, fn(call) {
       let is_team = string.starts_with(call.name, "team_")
       case is_team {
         True -> True
@@ -826,7 +939,7 @@ fn do_dispatch_agents(
       }
     })
 
-  // Dispatch immediate calls
+  // Dispatch agent + team calls
   let new_pending_agents =
     list.filter_map(immediate_calls, fn(call) {
       let is_team = string.starts_with(call.name, "team_")
@@ -839,6 +952,14 @@ fn do_dispatch_agents(
         False -> dispatch_single_agent(state, call, name, cycle_id)
       }
     })
+
+  // Dispatch coder dispatch calls — each spawns an unlinked worker
+  // that publishes CoderDispatchComplete to cog when manager.dispatch
+  // returns. Failed-parse calls produce synthetic error tool_results
+  // that go in initial_results so the LLM gets one block per tool_use
+  // (Anthropic API contract).
+  let #(coder_pending, coder_error_blocks) =
+    dispatch_coder_calls(state, coder_calls)
 
   // Register deferred dispatches
   let new_deferred =
@@ -857,9 +978,9 @@ fn do_dispatch_agents(
       deferred_dispatches: list.append(state.deferred_dispatches, new_deferred),
     )
 
-  // Guard: if no agents were dispatched, reply with error and return to Idle
-  case new_pending_agents {
-    [] -> {
+  // Guard: if nothing was dispatched, reply with error and return to Idle
+  case new_pending_agents, coder_pending {
+    [], [] -> {
       let error_text = "[Error: no matching agents available]"
       output.send_reply(
         state,
@@ -906,44 +1027,57 @@ fn do_dispatch_agents(
         pending: dict.delete(state.pending, task_id),
       )
     }
-    _ -> {
-      let pending_ids =
+    _, _ -> {
+      let agent_pending_ids =
         list.map(new_pending_agents, fn(p) {
           case p {
             PendingAgent(task_id: tid, ..) -> tid
             _ -> ""
           }
         })
+      let coder_pending_ids =
+        list.map(coder_pending, fn(p) {
+          case p {
+            types.PendingCoderDispatch(task_id: tid, ..) -> tid
+            _ -> ""
+          }
+        })
+      let pending_ids = list.append(agent_pending_ids, coder_pending_ids)
 
       // Add assistant message with tool use content
       let assistant_msg =
         llm_types.Message(role: llm_types.Assistant, content: resp.content)
       let messages = list.append(state.messages, [assistant_msg])
 
-      // Insert new pending agents into the dict
+      // Insert new pending entries (agents + coder dispatches) into the dict
       let new_pending =
         list.fold(
-          new_pending_agents,
+          list.append(new_pending_agents, coder_pending),
           dict.delete(state.pending, task_id),
           fn(d, p) {
             case p {
               PendingAgent(task_id: tid, ..) -> dict.insert(d, tid, p)
+              types.PendingCoderDispatch(task_id: tid, ..) ->
+                dict.insert(d, tid, p)
               _ -> d
             }
           },
         )
 
-      // Log agent dispatch calls and accumulate ToolSummaries
+      // Log dispatch calls (agents + teams + coder) and accumulate
+      // ToolSummaries.
+      let dispatched_calls = list.append(agent_or_team_calls, coder_calls)
       let agent_summaries =
-        list.map(agent_calls, fn(call) {
+        list.map(dispatched_calls, fn(call) {
           cycle_log.log_tool_call(cycle_id, call, state.redact_secrets)
           dag_types.ToolSummary(name: call.name, success: True, error: None)
         })
 
-      // Build initial delegation tracking entries
+      // Build initial delegation tracking entries (agents + teams only;
+      // coder dispatch is not a delegation in the agent-framework sense)
       let now_ms = monotonic_now_ms()
       let new_delegations =
-        list.fold(agent_calls, state.active_delegations, fn(d, call) {
+        list.fold(agent_or_team_calls, state.active_delegations, fn(d, call) {
           let agent_name = case string.starts_with(call.name, "team_") {
             True -> "team:" <> string.drop_start(call.name, 5)
             False -> string.drop_start(call.name, 6)
@@ -979,15 +1113,14 @@ fn do_dispatch_agents(
           }
         })
 
+      let accumulated = list.append(initial_results, coder_error_blocks)
+
       CognitiveState(
         ..state,
         messages:,
         cycle_tool_calls: list.append(state.cycle_tool_calls, agent_summaries),
         active_delegations: new_delegations,
-        status: WaitingForAgents(
-          pending_ids:,
-          accumulated_results: initial_results,
-        ),
+        status: WaitingForAgents(pending_ids:, accumulated_results: accumulated),
         pending: new_pending,
       )
     }
@@ -1310,12 +1443,14 @@ pub fn handle_agent_complete(
       let updated_delegations =
         dict.delete(state.active_delegations, outcome_task_id)
 
-      // Check if all agents are done
+      // Check if any async dispatches (agents or coder) are still in
+      // flight. Both share the WaitingForAgents accumulator.
       let still_waiting =
         dict.fold(remaining, False, fn(acc, _key, p) {
           acc
           || case p {
             PendingAgent(..) -> True
+            types.PendingCoderDispatch(..) -> True
             _ -> False
           }
         })
@@ -1439,6 +1574,116 @@ pub fn handle_agent_complete(
             status: Thinking(task_id: new_task_id),
             pending: dict.insert(
               remaining,
+              new_task_id,
+              PendingThink(
+                task_id: new_task_id,
+                model: state.model,
+                fallback_from: None,
+                output_gate_count: 0,
+                empty_retried: False,
+                truncation_retried: False,
+                node_type: state.cycle_node_type,
+              ),
+            ),
+          )
+        }
+      }
+    }
+  }
+}
+
+/// Wake-up handler for a finished real-coder dispatch. Folds the
+/// dispatch result into the same WaitingForAgents accumulator that
+/// agent dispatches use, then re-thinks once all pending async work
+/// is cleared. Coder dispatches do not produce DAG nodes, do not
+/// participate in curator write-back, and do not chain deferred
+/// dispatches — they're plain tool calls dressed up to ride the
+/// existing async machinery.
+pub fn handle_coder_dispatch_complete(
+  state: CognitiveState,
+  task_id: String,
+  result: Result(coder_types.DispatchResult, coder_types.CoderError),
+  clamps: List(coder_types.BudgetClamp),
+) -> CognitiveState {
+  case dict.get(state.pending, task_id) {
+    Error(_) -> state
+    Ok(pending_entry) -> {
+      let tool_use_id = case pending_entry {
+        types.PendingCoderDispatch(tool_use_id: tuid, ..) -> tuid
+        _ -> ""
+      }
+      let #(content, is_error) = case result {
+        Ok(dr) -> #(coder_dispatch.format_dispatch_result(dr, clamps), False)
+        Error(e) -> #(
+          "dispatch_coder failed: " <> coder_types.format_error(e),
+          True,
+        )
+      }
+      let tool_result_block =
+        llm_types.ToolResultContent(
+          tool_use_id: tool_use_id,
+          content: content,
+          is_error: is_error,
+        )
+      let remaining = dict.delete(state.pending, task_id)
+      let still_waiting =
+        dict.fold(remaining, False, fn(acc, _key, p) {
+          acc
+          || case p {
+            PendingAgent(..) -> True
+            types.PendingCoderDispatch(..) -> True
+            _ -> False
+          }
+        })
+      case still_waiting {
+        True -> {
+          // Other dispatches still in flight — fold this result in.
+          case state.status {
+            WaitingForAgents(pending_ids:, accumulated_results:) ->
+              CognitiveState(
+                ..state,
+                status: WaitingForAgents(
+                  pending_ids:,
+                  accumulated_results: list.append(accumulated_results, [
+                    tool_result_block,
+                  ]),
+                ),
+                pending: remaining,
+              )
+            _ -> CognitiveState(..state, pending: remaining)
+          }
+        }
+        False -> {
+          // Last one home — flush all accumulated results into a
+          // user message and re-think.
+          let all_results = case state.status {
+            WaitingForAgents(accumulated_results:, ..) ->
+              list.append(accumulated_results, [tool_result_block])
+            _ -> [tool_result_block]
+          }
+          let user_msg =
+            llm_types.Message(role: llm_types.User, content: all_results)
+          let messages = list.append(state.messages, [user_msg])
+          let new_task_id = cycle_log.generate_uuid()
+          let cycle_id = option.unwrap(state.cycle_id, new_task_id)
+          let state = CognitiveState(..state, messages:, pending: remaining)
+          let req = cognitive_llm.build_request(state, messages)
+          case state.verbose {
+            True -> cycle_log.log_llm_request(cycle_id, req)
+            False -> Nil
+          }
+          worker.spawn_think(
+            new_task_id,
+            req,
+            state.provider,
+            state.self,
+            state.config.retry_config,
+          )
+          CognitiveState(
+            ..state,
+            status: Thinking(task_id: new_task_id),
+            pending: dict.insert(
+              state.pending,
               new_task_id,
               PendingThink(
                 task_id: new_task_id,

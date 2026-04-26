@@ -204,7 +204,7 @@ When verification fails, use `recall_cases` to check if this is a known pattern.
 - **agent_researcher** — web research and fact gathering (web + artifact + builtin tools)
 - **agent_planner** — pure plan reasoning: task decomposition, steps, dependencies, risks (no tools, XML output, max 5 turns)
 - **agent_project_manager** — full work management: endeavours, phases, sessions, blockers, forecaster config, task/endeavour editing and deletion (24 planner tools incl. complete_task_step, max 8 turns)
-- **agent_coder** — code writing, debugging, refactoring (builtin tools, max 10 turns)
+- **agent_coder** — orchestrates code edits via the OpenCode-backed sandbox. Has `project_status`/`read`/`grep` (host-side), `dispatch_coder`/`cancel_coder_session`/`list_coder_sessions` (delegate to OpenCode), plus Group A planner integration (`get_task_detail`, `complete_task_step`, `flag_risk`, `report_blocker`). Max 20 turns. See the `coder-delegation` skill for the framing/dispatch/verify loop. Only registered when `[coder]` is fully configured (image, project_root, model_id, ANTHROPIC_API_KEY); without that, the cog/PM still has `dispatch_coder` directly but no specialist coder agent.
 - **agent_writer** — long-form writing, structured reports, drafts via document library, PDF export via pandoc + tectonic (knowledge draft tools + `export_pdf` + artifacts + builtin, max 5 turns). See the `writer-pdf-export` skill for when to call `export_pdf` and what its failure modes mean.
 - **agent_observer** — diagnostic memory examination, CBR curation (18 diagnostic tools, max 6 turns)
 - **agent_comms** — email send/receive via AgentMail (comms tools, max 6 turns, requires `comms_enabled`)

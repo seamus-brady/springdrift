@@ -14,6 +14,7 @@ import agent/types.{
   type SensoryEvent, type SupervisorMessage,
 }
 import agentlair/types as agentlair_types
+import coder/manager.{type CoderManager}
 import dag/types as dag_types
 import dprime/deterministic.{type DeterministicConfig}
 import dprime/types as dprime_types
@@ -29,6 +30,7 @@ import llm/types as llm_types
 import normative/drift as normative_drift
 import normative/types as normative_types
 import scheduler/types as scheduler_types
+import tools/coder_dispatch
 
 @external(erlang, "springdrift_ffi", "get_datetime")
 fn get_datetime() -> String
@@ -229,6 +231,14 @@ pub type CognitiveState {
     watchdog_generation: Int,
     // --- Normative calculus drift tracking ---
     drift_state: Option(normative_drift.DriftState),
+    // --- Real-coder dispatch ---
+    /// Manager handle for the OpenCode-backed coder. None when
+    /// real-coder mode is not configured; the dispatch tools then
+    /// return a friendly "not configured" failure.
+    coder_manager: Option(CoderManager),
+    /// Per-task budget defaults + ceilings the dispatch tool clamps
+    /// agent-requested budgets against.
+    coder_dispatch_defaults: coder_dispatch.DispatchDefaults,
   )
 }
 

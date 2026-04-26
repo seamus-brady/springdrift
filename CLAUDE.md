@@ -233,6 +233,13 @@ src/
 │   ├── podman_ffi.gleam       FFI declarations for subprocess execution (run_cmd, which)
 │   └── diagnostics.gleam      Startup checks: podman version, machine status, image pull
 │
+├── coder/                     Real-coder execution layer (OpenCode-backed via ACP)
+│   ├── types.gleam            CoderConfig, CoderError, TaskBudget, BudgetClamp, DispatchResult, SessionSummary, format_error/1
+│   ├── circuit.gleam          Pure token/cost circuit breaker — per-task + rolling-hour caps
+│   ├── acp.gleam              JSON-RPC-over-stdio Agent Client Protocol bindings: open/initialize/session_new/session_prompt(_async)/session_cancel/close + AcpEvent stream + pure decoders pinned against probed shapes
+│   ├── manager.gleam          OTP actor: warm container pool, allocate per dispatch, spawn driver, route cancels, per-task budget enforcement, three-stage kill chain. dispatch_task/3 is the public entry; cog-loop async-wraps it via the worker pattern in tools/coder_dispatch.gleam
+│   └── ingest.gleam           Coder session → CbrCase (CodePattern, tools_used = ACP tool titles) + raw-JSON archive under .springdrift/memory/coder/sessions/
+│
 ├── tui.gleam                  Alternate-screen TUI; Chat + Log + Narrative tabs
 │
 ├── web/                       Web chat GUI + admin dashboard
@@ -261,6 +268,23 @@ gleam test            # Run the test suite
 gleam format          # Format all source files
 gleam build           # Compile only
 ```
+
+### Coder sandbox image scripts (Phase 2 onwards)
+
+The OpenCode-backed coder agent runs in a dedicated sandbox image
+(`springdrift-coder:<version>`). The image and its tooling are
+operator-controlled — Springdrift never auto-builds or auto-pulls.
+
+```sh
+scripts/build-coder-image.sh             # Build the pinned image
+scripts/smoke-coder-image.sh             # Verify the pinned opencode version starts headless and serves /app
+scripts/discover-coder-endpoints.sh      # Probe the running container's endpoint surface (drives client design + version-bump diffs)
+scripts/vendor-opencode-spec.sh          # Save the OpenAPI spec under docs/vendor/opencode-<version>-openapi.json
+scripts/e2e-coder.sh                     # End-to-end Phase 2 test: real container + real Anthropic + real "say pong" round-trip (~$0.001/run)
+```
+
+Pin-and-lag policy: bump `OPENCODE_VERSION` in `Containerfile.coder`,
+rebuild, run smoke. Only after smoke passes is the new pin usable.
 
 ## Code quality requirements
 
@@ -456,6 +480,15 @@ All fields are `Option` types. Defaults are applied in `springdrift.gleam`.
 | `sandbox_port_stride` | — | 100 | Host port stride per slot |
 | `sandbox_ports_per_slot` | — | 5 | Ports forwarded per slot |
 | `sandbox_auto_machine` | — | True | Auto-start podman machine on macOS |
+| `coder_image` | — | None | Image tag for the OpenCode-backed coder slot. Set to `springdrift-coder:<version>` after `scripts/build-coder-image.sh`. |
+| `coder_project_root` | — | None | Host path bind-mounted as the project root inside the coder slot. Required for real-coder use. Cannot contain `.springdrift/`. |
+| `coder_session_timeout_ms` | — | 600000 | Hard ceiling on a single coding task's wall time (10 min). |
+| `coder_max_tokens_per_task` | — | 200000 | Token budget per coding task — circuit breaker kills the session above this. Currently inert on synchronous path; live in Phase 4 SSE wiring. |
+| `coder_max_cost_per_task_usd` | — | 5.0 | Cost budget (USD) per coding task. |
+| `coder_max_cost_per_hour_usd` | — | 20.0 | Aggregate cost cap (USD) across all coder tasks per rolling hour. |
+| `coder_cost_poll_interval_ms` | — | 5000 | How often supervisor polls session usage to feed the circuit breaker. |
+| `coder_provider_id` | — | None | Provider id passed to OpenCode (e.g. "anthropic"). |
+| `coder_model_id` | — | None | Model id passed to OpenCode. Operator must set to a model in BOTH OpenCode's bundled models.dev catalog AND their API key's allowed list — these drift over time. |
 | `vertex_project_id` | — | None | GCP project ID (required for vertex provider) |
 | `vertex_location` | — | "europe-west1" | GCP location / region |
 | `vertex_endpoint` | — | derived from location | Vertex AI endpoint hostname (e.g. `europe-west1-aiplatform.googleapis.com`) |
@@ -507,6 +540,7 @@ indexed in ETS by the Librarian actor for fast queries.
 | DAG nodes | (in-memory ETS, populated from cycle log) | `CycleNode` | Operational telemetry: token counts, tool calls, D' gates, agent output per cycle |
 | Comms | `.springdrift/memory/comms/YYYY-MM-DD-comms.jsonl` | `CommsMessage` | Sent and received email messages with delivery status |
 | Consolidation | `.springdrift/memory/consolidation/YYYY-MM-DD-consolidation.jsonl` | `ConsolidationRun` | Remembrancer run records: period, counts, report path |
+| Coder sessions | `.springdrift/memory/coder/sessions/<session_id>.json` | OpenCode session export | Phase 4 ingestion archives every completed coder dispatch as raw conversation JSON for forensics + replay. CBR cases derived from these via `coder/ingest.gleam` |
 | Strategies | `.springdrift/memory/strategies/YYYY-MM-DD-strategies.jsonl` | `StrategyEvent` | Meta-learning Phase A. Append-only Created/Used/Outcome/Archived events; `Strategy` derived by replay |
 | Learning Goals | `.springdrift/memory/learning_goals/YYYY-MM-DD-goals.jsonl` | `GoalEvent` | Meta-learning Phase C. Append-only Created/EvidenceAdded/StatusChanged events; `LearningGoal` derived by replay |
 
@@ -721,7 +755,7 @@ exposes this (and other system state) to the LLM.
 | Planner | none (XML output) | 5 | unlimited | Permanent | Pure reasoning: plan decomposition, steps, dependencies, risk identification |
 | Project Manager | planner (22 tools) | 8 | unlimited | Permanent | Full work management: tasks, endeavours, phases, sessions, blockers, forecaster |
 | Researcher | web + artifacts + builtin | 8 | 30 | Permanent | Gather information via search and extraction |
-| Coder | builtin | 10 | unlimited | Permanent | Write and modify code, fix errors |
+| Coder | planner Group A + project_status/read/grep + dispatch_coder/cancel_coder_session/list_coder_sessions + builtin | 20 | unlimited | Permanent | Frame the work via project_status/read/grep, delegate the actual edits via dispatch_coder (one OpenCode session per call, async-safe via the cog's worker pattern), verify on disk, land/escalate via complete_task_step/flag_risk/report_blocker. Only registered when `[coder]` is fully configured (image + project_root + model_id + ANTHROPIC_API_KEY). See the `coder-delegation` skill. |
 | Writer | knowledge (drafts) + artifacts + builtin | 5 | unlimited | Permanent | Draft structured reports; create/update/promote drafts via document library; render approved exports to PDF via `export_pdf` (pandoc + tectonic) |
 | Observer | diagnostic + CBR curation (18 tools) | 6 | 20 | Transient | Cycle forensics, pattern detection, CBR curation, fact tracing, D' feedback |
 | Comms | comms (4 tools) | 6 | 20 | Permanent | Send and receive email via AgentMail |
@@ -1380,6 +1414,7 @@ CLI flags override config files. `--skills-dir` is repeatable and appends to the
 ├── planner-patterns/     Planner + cognitive: task decomposition patterns
 ├── planner-management/   Planner + cognitive: forecaster introspection, feature tuning, endeavour lifecycle
 ├── code-review/          Coder: sandbox patterns and common failure modes
+├── coder-delegation/     Coder + cognitive: the engineering loop in real-coder mode (plan → dispatch → iterate → verify → land/escalate)
 ├── web-research/         Researcher + cognitive: web tool selection decision tree
 └── shell-sandbox/        Coder: Docker sandbox usage guide
 ```

@@ -50,6 +50,7 @@ import scheduler/types as scheduler_types
 import slog
 import tools/builtin
 import tools/captures as captures_tools
+import tools/coder_dispatch
 import tools/learning_goals as learning_goal_tools
 import tools/memory
 import tools/planner as planner_tools
@@ -83,6 +84,12 @@ pub fn start(
     True -> captures_tools.all()
     False -> []
   }
+  // Real-coder dispatch tools land on the cog loop only when the
+  // manager is wired; otherwise the LLM never sees them.
+  let coder_dispatch_tools = case cfg.coder_manager {
+    Some(_) -> coder_dispatch.all()
+    None -> []
+  }
   let tools =
     list.flatten([
       // The cog loop needs read_skill on itself, not just on
@@ -98,6 +105,7 @@ pub fn start(
       learning_goal_tools.all(),
       strategy_tools.all(),
       captures_tool_set,
+      coder_dispatch_tools,
       cfg.agent_tools,
       team_tools,
     ])
@@ -210,6 +218,8 @@ pub fn start(
           True -> Some(normative_drift.new(20))
           False -> None
         },
+        coder_manager: cfg.coder_manager,
+        coder_dispatch_defaults: cfg.coder_dispatch_defaults,
       )
     process.send(setup, self)
     cognitive_loop(state)
@@ -280,6 +290,7 @@ fn handle_message(
       ThinkError(..) -> "ThinkError"
       ThinkWorkerDown(..) -> "ThinkWorkerDown"
       AgentComplete(..) -> "AgentComplete"
+      types.CoderDispatchComplete(..) -> "CoderDispatchComplete"
       types.AgentQuestion(..) -> "AgentQuestion"
       types.HierarchyQuery(..) -> "HierarchyQuery"
       AgentEvent(..) -> "AgentEvent"
@@ -315,6 +326,13 @@ fn handle_message(
       cognitive_llm.handle_think_down(state, task_id, reason)
     AgentComplete(outcome) ->
       cognitive_agents.handle_agent_complete(state, outcome)
+    types.CoderDispatchComplete(task_id:, result:, clamps:) ->
+      cognitive_agents.handle_coder_dispatch_complete(
+        state,
+        task_id,
+        result,
+        clamps,
+      )
     types.AgentProgress(progress) ->
       cognitive_agents.handle_agent_progress(state, progress)
     types.AgentQuestion(question, agent, reply_to) ->

@@ -144,6 +144,42 @@ summary_schedule = "weekly"
 # max_turns = 10
 # max_errors = 3
 
+# ── Real-coder (OpenCode-backed coding agent — Phase 2) ─────────────────────
+# When configured, the coder agent dispatches real coding work into a
+# sandboxed OpenCode session running in the springdrift-coder image.
+# Build the image with scripts/build-coder-image.sh and verify with
+# scripts/smoke-coder-image.sh before relying on it.
+[coder]
+# image = "springdrift-coder:latest"            # Pinned image tag (default: latest)
+# project_root = "/Users/you/Repos/foo"         # Host path bind-mounted r/w into the container (REQUIRED). MUST NOT contain .springdrift/. /tmp does not work on macOS podman.
+# auth_config_path = "~/.config/opencode"       # Host path bind-mounted ro at /root/.config/opencode (default: ~/.config/opencode)
+# provider_id = "anthropic"                     # Provider OpenCode dispatches to (default: "anthropic")
+# model_id = "claude-haiku-4-5-20251001"        # Model OpenCode uses. Set to a model your API key has access to AND is in OpenCode's bundled catalog.
+
+# ── Pool ──
+# warm_pool_size = 1                            # Containers pre-warmed at boot (default: 1)
+# max_concurrent_sessions = 4                   # Hard cap on parallel dispatches (default: 4)
+# container_idle_ttl_ms = 3600000               # Janitor reaps idle containers older than this (default: 1h)
+# container_name_prefix = "springdrift-coder"   # Container name prefix (default: "springdrift-coder")
+# slot_id_base = 100                            # Slot id allocator base; counter increments monotonically (default: 100)
+
+# ── Container resource limits — kernel-enforced ──
+# container_memory_mb = 2048                    # Memory cap per container (default: 2048)
+# container_cpus = "2"                          # CPU quota per container (default: "2")
+# container_pids_limit = 256                    # Process count cap; fork-bomb safety (default: 256)
+
+# ── Budget — defaults applied when dispatcher doesn't specify; ceilings enforce a hard wall ──
+[coder.budget]
+# default_max_tokens_per_task = 200000          # Default per-task token cap (default: 200000)
+# default_max_cost_per_task_usd = 5.0           # Default per-task USD cap (default: 5.0)
+# default_max_minutes_per_task = 10             # Default per-task wall-clock cap (default: 10 min)
+# default_max_turns_per_task = 20               # Default per-task turn count cap (default: 20)
+# ceiling_max_tokens_per_task = 1000000         # Hard wall — agent can't request beyond this (default: 1000000)
+# ceiling_max_cost_per_task_usd = 50.0          # Hard wall (default: 50.0)
+# ceiling_max_minutes_per_task = 60             # Hard wall (default: 60 min)
+# ceiling_max_turns_per_task = 100              # Hard wall (default: 100)
+# max_cost_per_hour_usd = 100.0                 # Aggregate cap across all coder sessions per rolling hour (default: 100.0)
+
 [agents.writer]
 # max_tokens = 4096
 # max_turns = 5
