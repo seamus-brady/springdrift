@@ -1,5 +1,5 @@
 name = "springdrift"
-version = "0.10.0"
+version = "0.10.1"
 description = "A knowledge worker agent framework for the BEAM. Persistent memory, scheduled research, configurable safety."
 licences = ["AGPL-3.0-or-later"]
 repository = { type = "github", user = "seamus-brady", repo = "springdrift" }
