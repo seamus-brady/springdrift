@@ -824,10 +824,37 @@ model_id = "claude-sonnet-4-20250514"   # See "Model selection" below
 # ceiling_max_turns_per_task    = 200
 ```
 
-`project_root` must be a directory you own. `/tmp` does NOT work on
-macOS — podman bind-mounts it as `nobody:nogroup` and OpenCode's
-provider init silently fails. Use `/Users/you/Repos/<project>` or
-similar.
+`project_root` must be a directory you own. `/tmp` itself does NOT
+work on macOS — podman bind-mounts it as `nobody:nogroup` and
+OpenCode's provider init silently fails. Use
+`/Users/you/Repos/<project>` or similar.
+
+**Self-edit safety guard (v0.10.1).** Springdrift refuses any
+`project_root` that:
+
+- is empty or `"."` (would resolve to cwd)
+- contains a `.springdrift/` subdirectory anywhere inside
+- is itself a `.springdrift/` data directory
+
+These checks fire at startup before the OpenCode container is
+spawned. Their purpose is preventing the obvious footgun of pointing
+the coder agent at the running agent's own data dir or source
+checkout — the coder would happily edit Springdrift's memory,
+identity, cycle log, or source code. Refused paths produce a clear
+startup message naming the exact reason; the coder layer is disabled
+until you fix the config.
+
+If you don't set `[coder] project_root` explicitly, Springdrift
+defaults to `${TMPDIR:-/tmp}/springdrift-coder-workspace` —
+auto-created on first boot, structurally disjoint from cwd by
+construction, persistent across restarts of the same instance so the
+coder remembers prior commits inside the workspace. The default is
+fine for "just kicking the tyres"; for real projects of yours,
+override.
+
+The actual security boundary is the rootless-podman container
+itself (kept-id userns + no-new-privileges + memory / CPU / pid
+caps); the path check is just don't-shoot-yourself.
 
 #### Model selection
 

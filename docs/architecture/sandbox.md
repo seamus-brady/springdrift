@@ -52,6 +52,33 @@ Each container is started with:
 The manager runs health checks every 30 seconds and restarts failed containers.
 Container state is tracked per-slot in the `slots` dictionary.
 
+### Autonomous Image Recovery (v0.10.0)
+
+A corrupted local image (manifest unknown, blob unknown, layer
+corrupt — usually from an interrupted pull or a manifest mismatch)
+used to wedge every container spawn until an operator manually
+`podman rmi`'d the image and restarted Springdrift. On a VPS this
+meant a 3am page.
+
+When `sandbox_image_recovery_enabled = true` (default), the
+manager parses podman's stderr on container spawn for known
+image-corruption signatures. If matched:
+
+1. Force-remove the local image (`podman rmi -f <image>`)
+2. Re-pull (`podman pull <image>`) with timeout
+   `sandbox_image_pull_timeout_ms` (default 5 min — generous for
+   slow registries)
+3. Retry the spawn once
+
+If the second attempt fails the slot enters `Failed` state as it
+did before; recovery is single-shot to bound retry storms. The
+coder manager (`coder/manager.gleam`) implements the same recovery
+mirror under `[coder] image_recovery_enabled` /
+`coder_image_pull_timeout_ms`.
+
+Logged at `info` when recovery succeeds, `warn` on second-failure
+state. Operators see the rebuild attempt in startup output.
+
 ## 3. Execution Modes
 
 ### run_code (synchronous)

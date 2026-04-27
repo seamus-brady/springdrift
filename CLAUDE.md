@@ -16,10 +16,12 @@ Detailed architecture docs live in `docs/architecture/`:
 | [identity.md](docs/architecture/identity.md) | Persona, preamble templating, Curator, sensorium, character spec |
 | [scheduler.md](docs/architecture/scheduler.md) | Autonomous scheduling — job types, delivery, persistence, resource limits |
 | [comms.md](docs/architecture/comms.md) | Email via AgentMail — inbox polling, three-layer safety, message persistence |
-| [sandbox.md](docs/architecture/sandbox.md) | Podman code execution — container lifecycle, port forwarding, workspace isolation |
+| [sandbox.md](docs/architecture/sandbox.md) | Podman code execution — container lifecycle, port forwarding, workspace isolation, autonomous image recovery |
+| [coder.md](docs/architecture/coder.md) | Real-coder layer — OpenCode via ACP, container pool, manager actor, three-stage kill chain, CBR ingestion, project_root safety |
+| [message-history.md](docs/architecture/message-history.md) | Opaque MessageHistory state machine — chokepoint append, four invariants, sanitisation pipeline |
 | [llm.md](docs/architecture/llm.md) | Provider abstraction, adapters (Anthropic/OpenAI/Vertex/mock), retry, caching, thinking |
 | [xstructor.md](docs/architecture/xstructor.md) | XML-schema-validated structured LLM output — XSD validation, retry, extraction |
-| [interfaces.md](docs/architecture/interfaces.md) | TUI and Web GUI — tabs, WebSocket protocol, admin dashboard, authentication |
+| [interfaces.md](docs/architecture/interfaces.md) | TUI and Web GUI — tabs, WebSocket protocol with outbox + seq + ack + keepalive, admin dashboard, authentication |
 | [configuration.md](docs/architecture/configuration.md) | Three-layer config — TOML parsing, CLI flags, validation, team templates |
 | [logging.md](docs/architecture/logging.md) | System logs, cycle logs, DAG telemetry, pattern detection |
 | [meta-learning.md](docs/architecture/meta-learning.md) | Strategy Registry, Learning Goals, affect-performance correlation, study-cycle pipeline, metacognitive scheduler — what the agent uses to direct its own development |

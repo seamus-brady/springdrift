@@ -42,7 +42,7 @@ Built in [Gleam](https://gleam.run) on the Erlang/OTP runtime.
 
 ## Status
 
-Beta. In active development. Running in daily use. Tens of thousands of lines of Gleam across ~150 source files, with a comprehensive green test suite. Core systems (cognitive loop, multi-agent delegation, D' safety gates, normative calculus, CBR memory, narrative threading, sensorium, scheduler, comms, meta-learning, web GUI) are implemented and relatively stable. There are probably bugs though.
+Beta. A reference architecture. Tens of thousands of lines of Gleam across ~150 source files, with a comprehensive green test suite. Core systems (cognitive loop, multi-agent delegation, D' safety gates, normative calculus, CBR memory, narrative threading, sensorium, scheduler, comms, meta-learning, web GUI) are implemented and relatively stable. There are probably bugs though.
 
 See [docs/roadmap/](docs/roadmap/) for planned work including federation, learner ingestion, and metacognition reporting.
 
